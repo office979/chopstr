@@ -10,9 +10,10 @@ Keynotes) entstehen priorisierte Short-Form-Clips, die **sinntreu geschnitten**,
 Die KI erzeugt Vorschläge, Scores, Belege und Render-Pläne. Ein Mensch gibt frei. Ein deterministischer
 Renderer baut das Video.
 
-Stand: **Phase 0 (Fundament), Phase 1 (Deutsch hören), Phase 2 (Story-Engine und Review) und Phase 3
-(Copy, Reframing, Captions, Render, Provenienz)** sind gebaut. Offen sind Phase 4 (Organisationen, Rollen,
-Gast-Freigabe, Abrechnung, Lösch-Workflow) und Phase 5 (Sovereign, API, Publishing, Lernschleife).
+Stand: **Phase 0 bis 4 sind gebaut** (Fundament, Deutsch hören, Story-Engine und Review, Copy/Reframing/
+Captions/Render/Provenienz, Auth/Rollen/Gast-Freigabe/Abrechnung/AVV/Löschung/CI-Manager). **Phase 5**
+(API + MCP, Publishing, Lernschleife, Serien, Hook-A/B, Folien-Crop, Schweizerdeutsch-Beta, Sovereign) ist auf
+Worker-Seite und im MCP-Server fertig; die Web-Wellen 5a und 5b sind in Arbeit.
 
 ## Architektur
 
@@ -49,12 +50,13 @@ Verbindliche Entscheidungen (Kurzfassung, Details in `docs/ENTSCHEIDUNGEN.md`):
 ```
 chopstr/
 ├─ apps/web/                 Next.js App Router, TypeScript, Tailwind v4, Design „Lichtbruch“, Logo
-├─ workers/                  Python: Temporal-Worker, Pipeline (ASR, Diarisierung, dach_nlp, …), Eval, Tests
+├─ workers/                  Python: Temporal-Worker, Pipeline (ASR, Diarisierung, dach_nlp, Story-Engine, Render, Publishing, Lernschleife), Eval, Tests
 ├─ packages/
-│  ├─ schema/migrations/     Postgres-Schema mit RLS, Versionierung, Kostenlog, Audit-Log
+│  ├─ mcp-server/            MCP-Server für Claude, Claude Code und andere Agenten (15 Tools, Bestätigungspflicht)
+│  ├─ schema/migrations/     Postgres-Schema mit RLS, Versionierung, Kostenlog, Audit-Log, Auth, Abrechnung, Publishing
 │  ├─ prompts/               versionierte LLM-Prompts (name_vN.md)
 │  └─ design/                Lichtbruch-Tokens (CSS + JSON)
-├─ infra/                    docker-compose (Postgres, Redis, Temporal + UI, MinIO, tusd, LanguageTool, Worker, Web)
+├─ infra/                    docker-compose (Postgres, Redis, Temporal + UI, MinIO, tusd, LanguageTool, Worker, Web) + Sovereign-Overlay
 ├─ scripts/                  migrate.mjs
 └─ docs/brand/               Logo-Originale und Markenassets
 ```
@@ -160,5 +162,5 @@ das PyPI-Paket `imageio-ffmpeg` ein statisches ffmpeg mit libass (`pip install i
 | 1 | ASR, Diarisierung, dach_nlp, Transkript-Editor, Markenprofil, WER-Evaluation | < 5 % WER Studio-Audio |
 | 2 | Heatmap, LLM-Vorschlag, Rubrik, Story-Graph, Review-UI (gebaut; Blindtest offen) | Blindtest: Precision@10 > 0,5 |
 | 3 | Reframing, Caption-Presets, Copy-Engine + Linter, LinkedIn-Paket, C2PA (gebaut; YuNet und c2patool im Produktions-Image nachrüsten) | Ein Klick → postbares Paket |
-| 4 | Organisationen, Rollen, Freigaben, Gast-Links, Abrechnung nach Stunden, AVV, Lösch-Workflow | Pilot in der eigenen Agentur |
-| 5 | Sovereign-Tarif, API + MCP-Server, Publishing, Lernschleife, Schweizerdeutsch-Beta | Erste zahlende Kunden |
+| 4 | Organisationen, Rollen, Freigaben, Gast-Links, Abrechnung nach Stunden, AVV, Lösch-Workflow, CI-Manager (gebaut; Stripe Checkout ohne Konto ungetestet) | Pilot in der eigenen Agentur |
+| 5 | Sovereign-Tarif, API + MCP-Server, Publishing, Lernschleife, Serien, Hook-A/B, Folien-Crop, Schweizerdeutsch-Beta (Worker und MCP gebaut, Web in Arbeit; Plattform-APIs vor Release gegen Originaldoku prüfen) | Erste zahlende Kunden |

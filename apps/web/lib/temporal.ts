@@ -77,3 +77,33 @@ export async function signalApprove({ sourceId, candidateId, destination }: Appr
     return false;
   }
 }
+
+/* Lösch-Workflow (PHASE4.md, Abschnitt 7): DeletionWorkflow mit ID deletion-<job_id> auf der CPU-Queue,
+ * Argument { job_id } (Dataclass DeletionParams in workers/chopstr_worker/workflows/deletion.py).
+ * Liefert true, wenn der Start gelang; ohne Temporal (Demo oder keine Adresse) bleibt der Job `queued`
+ * und der tägliche RetentionWorkflow holt ihn ab. Fehler werden geloggt, nicht weitergereicht. */
+export async function startDeletionWorkflow(jobId: string): Promise<boolean> {
+  const workflowId = `deletion-${jobId}`;
+  const taskQueue = process.env.TEMPORAL_TASK_QUEUE_CPU ?? "chopstr-cpu";
+  const address = process.env.TEMPORAL_ADDRESS;
+
+  if (isDemoMode() || !address) {
+    console.info(`[temporal] Kein Temporal: DeletionWorkflow ${workflowId} nicht gestartet, Job bleibt queued (Retention-Lauf)`);
+    return false;
+  }
+
+  try {
+    const { Connection, Client } = await import("@temporalio/client");
+    const connection = await Connection.connect({ address });
+    try {
+      const client = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE ?? "default" });
+      await client.workflow.start("DeletionWorkflow", { taskQueue, workflowId, args: [{ job_id: jobId }] });
+      return true;
+    } finally {
+      await connection.close();
+    }
+  } catch (error) {
+    console.warn(`[temporal] DeletionWorkflow ${workflowId} konnte nicht gestartet werden:`, error instanceof Error ? error.message : error);
+    return false;
+  }
+}

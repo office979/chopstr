@@ -3,6 +3,11 @@ import { notFound } from "next/navigation";
 import { PageShell } from "@/components/layout/PageShell";
 import { ButtonLink } from "@/components/ui/Button";
 import { getRepo } from "@/lib/repo";
+import { requireSession } from "@/lib/session";
+import { can } from "@/lib/auth/permissions";
+import { getQuota } from "@/lib/billing/quota";
+import { previewFontFor } from "@/lib/brand/preview-font";
+import { latestByClip } from "@/lib/guest/approval";
 import { lintProfileFrom } from "@/lib/clips/render-demo";
 import { PLATFORM_LABELS } from "@/lib/clips/labels";
 import { HookStudio } from "./HookStudio";
@@ -19,16 +24,20 @@ export async function generateMetadata({ params }: Props) {
 
 export default async function HookStudioPage({ params }: Props) {
   const { id, clipId } = await params;
+  const session = await requireSession();
   const repo = getRepo();
   const [source, clip] = await Promise.all([repo.getSource(id), repo.getClip(clipId)]);
   if (!source || !clip || clip.source_id !== id) notFound();
-  const [candidate, versions, captions, brand, siblings] = await Promise.all([
+  const [candidate, versions, captions, brand, siblings, approvals, quota] = await Promise.all([
     clip.candidate_id ? repo.getCandidate(clip.candidate_id) : Promise.resolve(null),
     repo.listHookVersions(clipId),
     repo.getCurrentCaptions(clipId),
     source.brand_profile_id ? repo.getBrandProfile(source.brand_profile_id) : Promise.resolve(null),
     repo.listClips(id),
+    repo.listGuestApprovals(id),
+    getQuota(repo),
   ]);
+  const previewFont = await previewFontFor(repo, brand);
 
   return (
     <PageShell width="wide" backgroundWord="Hook" className="pt-24 sm:pt-28">
@@ -63,6 +72,11 @@ export default async function HookStudioPage({ params }: Props) {
         highlightColor={brand?.caption_style?.highlight_color}
         hookOverlayDefault={brand?.caption_style?.hook_overlay?.[clip.platform] ?? clip.platform !== "linkedin"}
         lowerThird={brand?.ci?.lower_third?.enabled ? { name: brand.ci.lower_third.name ?? "", role: brand.ci.lower_third.role ?? "" } : null}
+        guestApproval={latestByClip(approvals).get(clip.id) ?? null}
+        canRequestGuest={can(session.role, "guest_approval.request")}
+        planAllowsGuest={Boolean(quota.plan?.features?.guest_approval)}
+        planName={quota.plan?.name ?? "Starter"}
+        previewFont={previewFont}
       />
     </PageShell>
   );

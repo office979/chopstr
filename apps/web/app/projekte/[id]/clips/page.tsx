@@ -4,6 +4,10 @@ import { PageShell } from "@/components/layout/PageShell";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { ButtonLink } from "@/components/ui/Button";
 import { getRepo } from "@/lib/repo";
+import { requireSession } from "@/lib/session";
+import { can } from "@/lib/auth/permissions";
+import { getQuota } from "@/lib/billing/quota";
+import { previewFontFor } from "@/lib/brand/preview-font";
 import { ClipBoard } from "./ClipBoard";
 
 export const dynamic = "force-dynamic";
@@ -18,15 +22,19 @@ export async function generateMetadata({ params }: Props) {
 
 export default async function ClipsPage({ params }: Props) {
   const { id } = await params;
+  const session = await requireSession();
   const repo = getRepo();
   const source = await repo.getSource(id);
   if (!source) notFound();
-  const [clips, candidates, events, brand] = await Promise.all([
+  const [clips, candidates, events, brand, approvals, quota] = await Promise.all([
     repo.listClips(id),
     repo.listCandidates(id),
     repo.listPipelineEvents(id),
     source.brand_profile_id ? repo.getBrandProfile(source.brand_profile_id) : Promise.resolve(null),
+    repo.listGuestApprovals(id),
+    getQuota(repo),
   ]);
+  const previewFont = await previewFontFor(repo, brand);
 
   if (clips.length === 0) {
     return (
@@ -79,6 +87,12 @@ export default async function ClipsPage({ params }: Props) {
         demo={repo.kind === "demo"}
         highlightColor={brand?.caption_style?.highlight_color}
         lowerThird={brand?.ci?.lower_third?.enabled ? { name: brand.ci.lower_third.name ?? "", role: brand.ci.lower_third.role ?? "" } : null}
+        guestApprovals={approvals}
+        canRequestGuest={can(session.role, "guest_approval.request")}
+        planAllowsGuest={Boolean(quota.plan?.features?.guest_approval)}
+        planName={quota.plan?.name ?? "Starter"}
+        canDelete={can(session.role, "source.delete")}
+        previewFont={previewFont}
       />
     </PageShell>
   );

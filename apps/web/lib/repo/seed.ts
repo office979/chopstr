@@ -13,13 +13,15 @@ import type {
 import { classifyFiller, isNegation } from "@/lib/transcript/fillers";
 import { clipText, sentenceRange, sentencesFromWords } from "@/lib/transcript/sentences";
 import { allGatesPassed } from "@/lib/candidates/gates";
-import { DEV_ACTOR_ID, DEV_WORKSPACE_ID } from "@/lib/session";
+import { DEMO_USER_ID, DEMO_WORKSPACE_ID } from "@/lib/session";
 
 /* Realistische Seed-Daten für den Demo-Modus (ohne Datenbank) */
 
 export const DEMO_IDS = {
-  workspace: DEV_WORKSPACE_ID,
-  actor: DEV_ACTOR_ID,
+  workspace: DEMO_WORKSPACE_ID,
+  actor: DEMO_USER_ID,
+  editor: "22222222-2222-4222-8222-222222222223",
+  client: "22222222-2222-4222-8222-222222222224",
   brand: "33333333-3333-4333-8333-333333333333",
   podcast: "44444444-4444-4444-8444-444444444401",
   keynote: "44444444-4444-4444-8444-444444444402",
@@ -53,6 +55,8 @@ export const seedWorkspace: Workspace = {
   allow_us_subprocessors: false,
   training_opt_in: false,
   dpa_signed_at: null,
+  deletion_requested_at: null,
+  deletion_scheduled_for: null,
   created_at: iso(-days(40)),
 };
 
@@ -73,8 +77,9 @@ export const seedBrandProfile: BrandProfile = {
   caption_preset: "linkedin_static",
   ci: {
     colors: { primary: "#020cf5", secondary: "#0a0a13", accent: "#f4f5fe" },
-    fonts: { primary_key: null, secondary_key: null },
-    logo_key: null,
+    fonts: { primary_asset_id: null, secondary_asset_id: null, fallback: "Inter" },
+    logo_asset_id: null,
+    watermark: { enabled: false },
     lower_third: { enabled: true, name: "Ferdinand Platz", role: "Geschäftsführer PLACEMedia" },
   },
   caption_style: {

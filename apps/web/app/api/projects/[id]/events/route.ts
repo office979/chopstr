@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { getRepo } from "@/lib/repo";
+import { requireApiSession } from "@/lib/auth/guard";
 import { isTerminalStatus } from "@/lib/pipeline";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,8 @@ const MAX_LIFETIME_MS = 30 * 60 * 1000;
 
 /* Server-Sent Events: streamt neue pipeline_events per Polling (1,5 s) und schließt bei ready/failed. */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await requireApiSession();
+  if (auth instanceof Response) return auth;
   const { id } = await params;
   const repo = getRepo();
   const source = await repo.getSource(id);

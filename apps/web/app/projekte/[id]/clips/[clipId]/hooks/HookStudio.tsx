@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/Button";
 import { Input, Textarea } from "@/components/ui/Field";
 import { Toggle } from "@/components/ui/Toggle";
 import { cn } from "@/components/ui/cn";
-import { SilentPreview } from "@/components/clips/SilentPreview";
-import type { CaptionVersion, Clip, HookPattern, HookVersion, Platform, PostCaptions } from "@/lib/repo/types";
+import { SilentPreview, type PreviewFont } from "@/components/clips/SilentPreview";
+import { GuestApprovalDialog } from "@/components/clips/GuestApprovalDialog";
+import type { CaptionVersion, Clip, GuestApproval, HookPattern, HookVersion, Platform, PostCaptions } from "@/lib/repo/types";
 import { PLATFORMS, PLATFORM_LABELS, patternLabel } from "@/lib/clips/labels";
 import { PLATFORM_DEFAULT_PRESET } from "@/lib/clips/presets";
 import { compositionDuration } from "@/lib/clips/render-demo";
@@ -28,6 +29,11 @@ interface Props {
   highlightColor?: string;
   hookOverlayDefault: boolean;
   lowerThird: { name: string; role: string } | null;
+  guestApproval: GuestApproval | null;
+  canRequestGuest: boolean;
+  planAllowsGuest: boolean;
+  planName: string;
+  previewFont: PreviewFont | null;
 }
 
 interface ApiError {
@@ -63,8 +69,26 @@ function WordCount({ text, max }: { text: string; max: number }) {
 
 /* Hook-Studio: Varianten links, drei Spalten (gesprochen, On-Screen, Post-Caption), Versionen, stumme Vorschau.
  * Linter und Claim-Check laufen live gegen den Clip-Text; Speichern legt eine manuelle Version an. */
-export function HookStudio({ sourceId, clip, clipText, initialVersions, captions, lintProfile, siblingClips, highlightColor, hookOverlayDefault, lowerThird }: Props) {
+export function HookStudio({
+  sourceId,
+  clip,
+  clipText,
+  initialVersions,
+  captions,
+  lintProfile,
+  siblingClips,
+  highlightColor,
+  hookOverlayDefault,
+  lowerThird,
+  guestApproval,
+  canRequestGuest,
+  planAllowsGuest,
+  planName,
+  previewFont,
+}: Props) {
   const [versions, setVersions] = useState<HookVersion[]>(initialVersions);
+  const [approval, setApproval] = useState<GuestApproval | null>(guestApproval);
+  const [guestRequired, setGuestRequired] = useState(clip.guest_approval_required);
   const current = versions.length ? versions[versions.length - 1] : null;
   const variants = useMemo(() => [...versions].reverse().find((v) => v.variants.length > 0)?.variants ?? [], [versions]);
 
@@ -352,7 +376,26 @@ export function HookStudio({ sourceId, clip, clipText, initialVersions, captions
           titleCard={clip.title_card}
           highlightColor={highlightColor}
           lowerThird={lowerThird}
+          font={previewFont}
         />
+        <div className="border-t border-line pt-3">
+          <h3 className="mb-2 text-sm font-medium">Gast-Freigabe</h3>
+          <GuestApprovalDialog
+            sourceId={sourceId}
+            clipId={clip.id}
+            clipLabel={`${PLATFORM_LABELS[clip.platform]} ${clip.aspect}`}
+            guestApprovalRequired={guestRequired}
+            current={approval}
+            canRequest={canRequestGuest}
+            planAllows={planAllowsGuest}
+            planName={planName}
+            onRequested={(a) => {
+              setApproval(a);
+              setGuestRequired(true);
+            }}
+          />
+          {!guestRequired && !approval && <p className="mt-1 text-xs text-text-2">Für Personen im Clip, die nicht zum Team gehören (Persönlichkeitsrecht).</p>}
+        </div>
         {captions && captions.cps_warnings.length > 0 && (
           <ul className="flex flex-col gap-1 text-xs text-attention" aria-label="Lesetempo-Warnungen">
             {captions.cps_warnings.map((w, i) => (

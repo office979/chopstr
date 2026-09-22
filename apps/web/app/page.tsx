@@ -7,7 +7,10 @@ import { Timecode } from "@/components/ui/Timecode";
 import { Badge } from "@/components/ui/Badge";
 import { ButtonLink } from "@/components/ui/Button";
 import { getRepo } from "@/lib/repo";
+import { requireSession } from "@/lib/session";
+import { can } from "@/lib/auth/permissions";
 import { STATUS_LABELS } from "@/lib/pipeline";
+import { DeleteSourceButton } from "@/components/projects/DeleteSourceButton";
 import { formatDate } from "@/lib/format";
 import type { Source } from "@/lib/repo/types";
 
@@ -45,6 +48,8 @@ function progressOf(status: Source["status"]): number {
 }
 
 export default async function ProjectsPage() {
+  const session = await requireSession();
+  const canDelete = can(session.role, "source.delete");
   const repo = getRepo();
   const sources = await repo.listSources();
   const counts = new Map(
@@ -147,6 +152,7 @@ export default async function ProjectsPage() {
                           Details
                         </ButtonLink>
                       )}
+                      {canDelete && <DeleteSourceButton sourceId={s.id} title={s.title} />}
                     </div>
                   </div>
                   <div className="h-[3px] w-full bg-white/5" aria-hidden="true">

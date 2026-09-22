@@ -4,6 +4,7 @@ import { PageShell } from "@/components/layout/PageShell";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { ButtonLink } from "@/components/ui/Button";
 import { getRepo } from "@/lib/repo";
+import { requireSession } from "@/lib/session";
 import { sentencesFromWords } from "@/lib/transcript/sentences";
 import { ReviewBoard } from "./ReviewBoard";
 
@@ -19,6 +20,7 @@ export async function generateMetadata({ params }: Props) {
 
 export default async function ReviewPage({ params }: Props) {
   const { id } = await params;
+  await requireSession();
   const repo = getRepo();
   const source = await repo.getSource(id);
   if (!source) notFound();

@@ -8,14 +8,15 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { ColorField } from "@/components/ui/ColorField";
 import { Toggle } from "@/components/ui/Toggle";
-import type { BrandProfile, Platform } from "@/lib/repo/types";
+import type { BrandAsset, BrandProfile, Platform } from "@/lib/repo/types";
+import { AssetsCard } from "./AssetsCard";
 import { PLATFORMS, PLATFORM_LABELS } from "@/lib/clips/labels";
 import { useState } from "react";
 import { saveBrandProfileAction, type BrandFormState } from "./actions";
 
 const initialState: BrandFormState = { ok: false, message: "", errors: {} };
 
-export function BrandForm({ profile }: { profile: BrandProfile | null }) {
+export function BrandForm({ profile, assets, canUploadAssets }: { profile: BrandProfile | null; assets: BrandAsset[]; canUploadAssets: boolean }) {
   const [state, action, pending] = useActionState(saveBrandProfileAction, initialState);
   const ci = profile?.ci ?? {};
   const style = profile?.caption_style ?? {};
@@ -182,10 +183,9 @@ export function BrandForm({ profile }: { profile: BrandProfile | null }) {
           </div>
         </fieldset>
 
-        <p className="text-sm text-text-2">
-          Font-Upload (eigene Schrift für Captions und Bauchbinde) kommt in Phase 4. Bis dahin rendert der Worker mit Inter.
-        </p>
       </GlassCard>
+
+      <AssetsCard profileId={profile?.id ?? null} assets={assets} ci={ci} canUpload={canUploadAssets} />
 
       <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className={state.ok ? "text-sm text-text" : "text-sm text-attention"} role="status" aria-live="polite">

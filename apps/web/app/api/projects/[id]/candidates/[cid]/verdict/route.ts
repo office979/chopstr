@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { getRepo } from "@/lib/repo";
+import { requireApiRole } from "@/lib/auth/guard";
 import { signalApprove } from "@/lib/temporal";
 import type { Clip, Platform } from "@/lib/repo/types";
 import { PLATFORMS, isPlatform } from "@/lib/clips/labels";
@@ -18,6 +19,8 @@ interface VerdictBody {
  * approve(candidate_id, platform) je Clip an project-<source_id>; rejected -> Grund ist Pflicht (Lernsignal).
  * Jede Aktion schreibt audit_log. */
 export async function POST(request: NextRequest, { params }: Params) {
+  const auth = await requireApiRole("candidate.verdict");
+  if (auth instanceof Response) return auth;
   const { id, cid } = await params;
   const repo = getRepo();
   const source = await repo.getSource(id);

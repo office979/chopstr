@@ -3,7 +3,8 @@
 import { getRepo } from "@/lib/repo";
 import { isDemoMode } from "@/lib/env";
 import { startClipProjectWorkflow } from "@/lib/temporal";
-import { getSession } from "@/lib/session";
+import { requireRole } from "@/lib/session";
+import { isForbiddenError } from "@/lib/auth/permissions";
 import type { Platform, RightsStatus } from "@/lib/repo/types";
 
 export interface DemoUploadInput {
@@ -32,8 +33,15 @@ export async function createDemoProject(input: DemoUploadInput): Promise<{ id: s
   if (!input.rights_confirmed) return { error: "Die Rechte am Material müssen bestätigt werden." };
   if (!input.title.trim()) return { error: "Titel fehlt." };
 
+  let session;
+  try {
+    session = await requireRole("source.upload");
+  } catch (error) {
+    if (isForbiddenError(error)) return { error: error.message };
+    throw error;
+  }
+  const { workspaceId, userId: actorId } = session;
   const repo = getRepo();
-  const { workspaceId, actorId } = getSession();
   const id = globalThis.crypto.randomUUID();
   const source = await repo.createSource({
     id,

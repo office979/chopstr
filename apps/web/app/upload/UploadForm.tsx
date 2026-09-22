@@ -15,7 +15,6 @@ import { createDemoProject } from "./actions";
 
 interface Props {
   profiles: { id: string; name: string; platform: Platform }[];
-  workspaceId: string;
   maxBytes: number;
   tusEndpoint: string;
   demoUpload: boolean;
@@ -23,12 +22,14 @@ interface Props {
 
 type Phase = "form" | "uploading" | "finishing" | "done" | "error";
 
+class UploadTokenError extends Error {}
+
 const RIGHTS_TEXT =
   "Ich bestätige, dass ich die Rechte an diesem Material besitze oder eine Lizenz habe, es zu bearbeiten und zu veröffentlichen.";
 
 const ACCEPT = "video/mp4,video/quicktime,video/x-matroska,video/webm,audio/mpeg,audio/wav,audio/x-m4a,.mp4,.mov,.mkv,.webm,.mp3,.wav,.m4a";
 
-export function UploadForm({ profiles, workspaceId, maxBytes, tusEndpoint, demoUpload }: Props) {
+export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload }: Props) {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -125,11 +126,26 @@ export function UploadForm({ profiles, workspaceId, maxBytes, tusEndpoint, demoU
     if (!cancelled) await finishDemo(data);
   };
 
+  /* Upload-Token vom Server (prüft Rolle und Stundenkontingent); der tusd-Hook verifiziert die Signatur */
+  const fetchUploadToken = async (brandProfileId: string | null): Promise<string> => {
+    const res = await fetch("/api/uploads/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brand_profile_id: brandProfileId }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { upload_token?: string; error?: string };
+    if (!res.ok || !json.upload_token) {
+      throw new UploadTokenError(json.error ?? `Upload-Token konnte nicht geholt werden (${res.status}).`);
+    }
+    return json.upload_token;
+  };
+
   const realUpload = async (data: ReturnType<typeof collect>, clientRef: string) => {
     if (!file) return;
+    const uploadToken = await fetchUploadToken(data.brand_profile_id);
     const { Upload } = await import("tus-js-client");
     const metadata: Record<string, string> = {
-      workspace_id: workspaceId,
+      upload_token: uploadToken,
       brand_profile_id: data.brand_profile_id ?? "",
       title: data.title,
       filename: file.name,
@@ -187,9 +203,10 @@ export function UploadForm({ profiles, workspaceId, maxBytes, tusEndpoint, demoU
       setPhase("done");
       router.push(`/projekte/${clientRef}`);
     } catch (err) {
-      /* Endpoint nicht erreichbar: auf Simulation ausweichen, damit die App bedienbar bleibt */
+      /* Endpoint nicht erreichbar: auf Simulation ausweichen, damit die App bedienbar bleibt.
+       * Token-Fehler (403 Rolle, 402 Kontingent) werden angezeigt, nicht simuliert. */
       const message = err instanceof Error ? err.message : String(err);
-      const unreachable = /failed to fetch|network|ECONNREFUSED|Load failed|tus: failed to create upload/i.test(message);
+      const unreachable = !(err instanceof UploadTokenError) && /failed to fetch|network|ECONNREFUSED|Load failed|tus: failed to create upload/i.test(message);
       if (unreachable) {
         await simulateUpload(data);
       } else {

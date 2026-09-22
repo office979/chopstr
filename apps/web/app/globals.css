@@ -281,3 +281,39 @@ input[type="range"].timeline::-moz-range-thumb {
     animation: none;
   }
 }
+
+/* Druckansicht der Rechtstexte: weißes Papier, nur der Vertragstext */
+@media print {
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  header,
+  footer,
+  nav,
+  .print\:hidden,
+  [aria-hidden="true"] {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+  .legal-print {
+    background: #fff !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    color: #000 !important;
+  }
+  .legal-print * {
+    color: #000 !important;
+    border-color: #999 !important;
+  }
+  .legal-print [role="note"] {
+    background: #fff !important;
+    border: 1px solid #000 !important;
+  }
+}

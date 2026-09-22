@@ -6,7 +6,10 @@ import { Badge } from "@/components/ui/Badge";
 import { ButtonLink } from "@/components/ui/Button";
 import { Timecode } from "@/components/ui/Timecode";
 import { getRepo } from "@/lib/repo";
+import { requireSession } from "@/lib/session";
+import { can } from "@/lib/auth/permissions";
 import { STATUS_LABELS, isTerminalStatus } from "@/lib/pipeline";
+import { DeleteSourceButton } from "@/components/projects/DeleteSourceButton";
 import { formatBytes, formatDate, shortHash } from "@/lib/format";
 import { PipelineLive } from "./PipelineLive";
 
@@ -33,9 +36,11 @@ function Meta({ label, children }: { label: string; children: React.ReactNode })
 
 export default async function ProjectPage({ params }: Props) {
   const { id } = await params;
+  const session = await requireSession();
   const repo = getRepo();
   const source = await repo.getSource(id);
   if (!source) notFound();
+  const canDelete = can(session.role, "source.delete");
 
   const [events, transcript, brand, candidateCount, clipCount] = await Promise.all([
     repo.listPipelineEvents(id),
@@ -70,6 +75,7 @@ export default async function ProjectPage({ params }: Props) {
                 Clips
               </ButtonLink>
             )}
+            {canDelete && <DeleteSourceButton sourceId={source.id} title={source.title} size="md" redirectTo="/" />}
           </>
         }
       />

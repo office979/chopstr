@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { getRepo } from "@/lib/repo";
+import { requireRole } from "@/lib/session";
+import { isForbiddenError } from "@/lib/auth/permissions";
 import { normalizeHex } from "@/lib/color";
 import type {
   Address,
@@ -59,7 +61,21 @@ function flag(formData: FormData, name: string): boolean {
   return formData.get(name) === "true";
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/* Asset-Auswahl aus dem CI-Manager: UUID oder null */
+function assetId(formData: FormData, name: string): string | null {
+  const raw = String(formData.get(name) ?? "").trim();
+  return UUID_RE.test(raw) ? raw : null;
+}
+
 export async function saveBrandProfileAction(_prev: BrandFormState, formData: FormData): Promise<BrandFormState> {
+  try {
+    await requireRole("brand.edit");
+  } catch (error) {
+    if (isForbiddenError(error)) return { ok: false, message: error.message, errors: {} };
+    throw error;
+  }
   const errors: Record<string, string> = {};
   const name = String(formData.get("name") ?? "").trim();
   if (name.length < 2) errors.name = "Bitte einen Namen mit mindestens zwei Zeichen angeben.";
@@ -67,23 +83,29 @@ export async function saveBrandProfileAction(_prev: BrandFormState, formData: Fo
   const toneAdjectives = tags(formData, "tone_adjectives");
   if (toneAdjectives.length > 3) errors.tone_adjectives = "Höchstens drei Ton-Adjektive.";
 
+  const hookOverlay = Object.fromEntries(PLATFORM.map((p) => [p, flag(formData, `hook_overlay_${p}`)])) as CaptionStyle["hook_overlay"];
+  const logoAssetId = assetId(formData, "ci_logo");
   const ci: BrandCI = {
     colors: {
       primary: color(formData, "ci_primary", errors),
       secondary: color(formData, "ci_secondary", errors),
       accent: color(formData, "ci_accent", errors),
     },
-    fonts: { primary_key: null, secondary_key: null },
-    logo_key: null,
+    /* CI-Manager (Block B): Verweise auf brand_assets.id, der Worker liest primary_asset_id, logo_asset_id, watermark.enabled */
+    fonts: { primary_asset_id: assetId(formData, "ci_primary_font"), secondary_asset_id: assetId(formData, "ci_secondary_font"), fallback: "Inter" },
+    logo_asset_id: logoAssetId,
+    watermark: { enabled: Boolean(logoAssetId) && flag(formData, "ci_watermark_enabled") },
     lower_third: {
       enabled: flag(formData, "lower_third_enabled"),
       name: String(formData.get("lower_third_name") ?? "").trim().slice(0, 80),
       role: String(formData.get("lower_third_role") ?? "").trim().slice(0, 80),
+      position: "bottom_left",
     },
+    hook_overlay: hookOverlay,
   };
   const captionStyle: CaptionStyle = {
     highlight_color: color(formData, "caption_highlight", errors),
-    hook_overlay: Object.fromEntries(PLATFORM.map((p) => [p, flag(formData, `hook_overlay_${p}`)])) as CaptionStyle["hook_overlay"],
+    hook_overlay: hookOverlay,
   };
 
   if (Object.keys(errors).length > 0) {
@@ -109,12 +131,24 @@ export async function saveBrandProfileAction(_prev: BrandFormState, formData: Fo
   };
 
   const repo = getRepo();
+  /* Nur Assets dieses Profils dürfen referenziert werden */
+  if (input.id) {
+    const assets = await repo.listBrandAssets(input.id);
+    const ids = new Set(assets.map((a) => a.id));
+    const fonts = ci.fonts ?? {};
+    if (fonts.primary_asset_id && !ids.has(fonts.primary_asset_id)) fonts.primary_asset_id = null;
+    if (fonts.secondary_asset_id && !ids.has(fonts.secondary_asset_id)) fonts.secondary_asset_id = null;
+    if (ci.logo_asset_id && !ids.has(ci.logo_asset_id)) {
+      ci.logo_asset_id = null;
+      ci.watermark = { enabled: false };
+    }
+  }
   const saved = await repo.saveBrandProfile(input);
   await repo.audit({
     action: "brand_profile.saved",
     entity: "brand_profiles",
     entity_id: saved.id,
-    payload: { version: saved.version },
+    payload: { version: saved.version, fonts: ci.fonts, logo_asset_id: ci.logo_asset_id, watermark: ci.watermark?.enabled ?? false },
   });
   revalidatePath("/marke");
   revalidatePath("/upload");

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { getRepo } from "@/lib/repo";
+import { requireApiRole, requireApiSession } from "@/lib/auth/guard";
 import type { CorrectionInput, TranscriptWord } from "@/lib/repo/types";
 
 export const dynamic = "force-dynamic";
@@ -8,6 +9,8 @@ type Params = { params: Promise<{ id: string }> };
 
 /* GET: aktuelle Transkript-Version */
 export async function GET(_request: NextRequest, { params }: Params) {
+  const auth = await requireApiSession();
+  if (auth instanceof Response) return auth;
   const { id } = await params;
   const repo = getRepo();
   const source = await repo.getSource(id);
@@ -48,6 +51,8 @@ function isCorrection(c: unknown): c is CorrectionInput {
 
 /* POST: neue transcript_versions-Zeile (origin manual), transcript_corrections, optional Wörter ins Marken-Wörterbuch */
 export async function POST(request: NextRequest, { params }: Params) {
+  const auth = await requireApiRole("transcript.edit");
+  if (auth instanceof Response) return auth;
   const { id } = await params;
   const repo = getRepo();
   const source = await repo.getSource(id);

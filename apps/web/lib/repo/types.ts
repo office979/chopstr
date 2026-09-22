@@ -1,3 +1,6 @@
+import type { Role } from "@/lib/auth/permissions";
+export type { Role };
+
 /* Datentypen: Spiegel der Tabellen aus packages/schema/migrations/0001_init.sql */
 
 export type SourceStatus =
@@ -47,6 +50,9 @@ export interface Workspace {
   allow_us_subprocessors: boolean;
   training_opt_in: boolean;
   dpa_signed_at: string | null;
+  /* Workspace-Löschung (Phase 4, Block B): Anfrage und Ausführung nach 30 Tagen Karenz */
+  deletion_requested_at: string | null;
+  deletion_scheduled_for: string | null;
   created_at: string;
 }
 
@@ -73,11 +79,24 @@ export interface BrandProfile {
   updated_at: string;
 }
 
+/* CI (PHASE4.md, Abschnitt 8): Fonts, Logo und Wasserzeichen verweisen auf brand_assets.id; der Worker liest
+ * fonts.primary_asset_id, secondary_asset_id, logo_asset_id und watermark.enabled. */
 export interface BrandCI {
   colors?: { primary?: string; secondary?: string; accent?: string };
-  fonts?: { primary_key?: string | null; secondary_key?: string | null };
+  fonts?: {
+    primary_asset_id?: string | null;
+    secondary_asset_id?: string | null;
+    fallback?: string;
+    /* Phase 3 (veraltet, bleibt lesbar) */
+    primary_key?: string | null;
+    secondary_key?: string | null;
+  };
+  logo_asset_id?: string | null;
+  /* Phase 3 (veraltet) */
   logo_key?: string | null;
-  lower_third?: { enabled?: boolean; name?: string; role?: string };
+  watermark?: { enabled?: boolean };
+  lower_third?: { enabled?: boolean; name?: string; role?: string; position?: string };
+  hook_overlay?: Partial<Record<Platform, boolean>>;
 }
 
 export interface CaptionStyle {
@@ -318,7 +337,7 @@ export interface CandidateCount {
 
 
 /* Clips, Hook-Versionen, Caption-Versionen (Phase 3): Spiegel von packages/schema/CLIPS.md, Vertrag clips_v1 / render_plan_v1 */
-export type ClipStatus = "draft" | "approved" | "rendering" | "rendered" | "exported" | "failed";
+export type ClipStatus = "draft" | "approved" | "rendering" | "rendered" | "exported" | "failed" | "deleted";
 export type Aspect = "9:16" | "4:5" | "1:1" | "16:9";
 export type HookPattern = "identity_call" | "contrarian" | "open_loop" | "results_first" | "mistake_warning";
 export type ReframeStrategy = "talking_head" | "two_speakers" | "neutral";
@@ -412,6 +431,7 @@ export interface Clip {
   provenance: Provenance;
   render_error: string | null;
   rendered_at: string | null;
+  deleted_at: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -492,7 +512,7 @@ export interface AuditEntry {
 }
 
 /* Das Repository kapselt Datenzugriff; Postgres in Produktion, In-Memory im Demo-Modus. */
-export interface Repo {
+export interface Repo extends AuthRepo, WorkspaceAdminRepo, BlockBRepo {
   readonly kind: "postgres" | "demo";
   getWorkspace(): Promise<Workspace>;
   listBrandProfiles(): Promise<BrandProfile[]>;
@@ -527,4 +547,432 @@ export interface Repo {
   saveHook(clipId: string, input: SaveHookInput): Promise<HookVersion>;
   getCurrentCaptions(clipId: string): Promise<CaptionVersion | null>;
   audit(entry: AuditEntry): Promise<void>;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Phase 4, Block A: Nutzer, Sitzungen, Mitgliedschaften, Einladungen, Audit-Abfragen, Abrechnung (lesend)
+ * Spiegel von packages/schema/migrations/0003_auth_billing.sql
+ * ---------------------------------------------------------------------------------------------- */
+
+export interface User {
+  id: string;
+  email: string;
+  email_verified_at: string | null;
+  /* Argon2id (PHC-String); null = nur Magic-Link oder Einladung */
+  password_hash: string | null;
+  display_name: string | null;
+  locale: string;
+  last_login_at: string | null;
+  created_at: string;
+}
+
+export interface UserPatch {
+  email?: string;
+  email_verified_at?: string | null;
+  password_hash?: string | null;
+  display_name?: string | null;
+  locale?: string;
+  last_login_at?: string | null;
+}
+
+export interface SessionRow {
+  id: string;
+  user_id: string;
+  workspace_id: string | null;
+  expires_at: string;
+  ip: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+
+export type LoginTokenPurpose = "magic_link" | "password_reset" | "verify_email";
+
+export interface LoginToken {
+  token: string;
+  user_id: string;
+  purpose: LoginTokenPurpose;
+  expires_at: string;
+  used_at: string | null;
+}
+
+/* Mitgliedschaft eines Nutzers (für /workspaces und den Sitzungsaufbau) */
+export interface Membership {
+  workspace_id: string;
+  workspace_name: string;
+  workspace_slug: string;
+  role: Role;
+  brand_profile_id: string | null;
+  accepted_at: string | null;
+}
+
+/* Mitglied eines Workspaces (für /einstellungen/mitglieder) */
+export interface WorkspaceMember {
+  user_id: string;
+  email: string;
+  display_name: string | null;
+  role: Role;
+  brand_profile_id: string | null;
+  brand_profile_name: string | null;
+  invited_by: string | null;
+  accepted_at: string | null;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface WorkspaceInvite {
+  token: string;
+  workspace_id: string;
+  workspace_name: string;
+  email: string;
+  role: Exclude<Role, "owner">;
+  brand_profile_id: string | null;
+  brand_profile_name: string | null;
+  invited_by: string | null;
+  invited_by_name: string | null;
+  expires_at: string;
+  accepted_at: string | null;
+  created_at: string;
+}
+
+export interface WorkspacePatch {
+  name?: string;
+  data_region?: string;
+  retention_days?: number;
+  render_retention_days?: number;
+}
+
+export interface AuditRow {
+  id: number;
+  workspace_id: string | null;
+  actor_id: string | null;
+  actor_type: "user" | "system" | "guest";
+  actor_label: string | null;
+  action: string;
+  entity: string | null;
+  entity_id: string | null;
+  payload: Record<string, unknown> | null;
+  at: string;
+}
+
+export interface AuditFilter {
+  action?: string;
+  actor_id?: string;
+  from?: string; // ISO-Datum inklusive
+  to?: string; // ISO-Datum inklusive
+  limit: number;
+  offset: number;
+}
+
+export interface AuditPage {
+  rows: AuditRow[];
+  total: number;
+}
+
+export interface Plan {
+  code: string;
+  name: string;
+  monthly_eur: number;
+  included_hours: number;
+  overage_eur_per_hour: number;
+  max_brand_profiles: number | null;
+  max_members: number | null;
+  features: Record<string, unknown>;
+}
+
+export type SubscriptionStatus = "trialing" | "active" | "past_due" | "canceled" | "paused";
+
+export interface BillingAddress {
+  company?: string;
+  street?: string;
+  zip?: string;
+  city?: string;
+  country?: string;
+  vat_id?: string;
+}
+
+export interface Subscription {
+  id: string;
+  workspace_id: string;
+  plan_code: string;
+  provider: "manual" | "stripe" | "mollie";
+  provider_customer_id: string | null;
+  provider_subscription_id: string | null;
+  status: SubscriptionStatus;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  trial_ends_at: string | null;
+  cancel_at_period_end: boolean;
+  billing_email: string | null;
+  billing_address: BillingAddress | null;
+  updated_at: string | null;
+}
+
+export interface SubscriptionPatch {
+  plan_code?: string;
+  provider?: Subscription["provider"];
+  provider_customer_id?: string | null;
+  provider_subscription_id?: string | null;
+  status?: SubscriptionStatus;
+  current_period_start?: string | null;
+  current_period_end?: string | null;
+  trial_ends_at?: string | null;
+  cancel_at_period_end?: boolean;
+  billing_email?: string | null;
+  billing_address?: BillingAddress | null;
+}
+
+export interface UsagePeriod {
+  id: string;
+  workspace_id: string;
+  period_start: string;
+  period_end: string;
+  included_minutes: number;
+  used_source_minutes: number;
+  render_count: number;
+  overage_minutes: number;
+  overage_eur: number;
+  closed_at?: string | null;
+}
+
+export interface RegisterWorkspaceInput {
+  user_id: string;
+  email: string;
+  display_name: string;
+  company: string;
+}
+
+/* Auth-Methoden laufen ohne Sitzung (lib/db.ts withAuthContext, Rolle chopstr_auth). Sitzungsgebundene
+ * Methoden (Mitglieder, Einladungen, Audit, Abrechnung) laufen im Workspace-Kontext wie die Fachtabellen. */
+export interface AuthRepo {
+  /* Audit ohne Sitzung (Anmeldung, Magic-Link, Registrierung): Kontext explizit */
+  auditAs(ctx: { workspace_id: string | null; actor_id: string | null }, entry: AuditEntry): Promise<void>;
+  findUserByEmail(email: string): Promise<User | null>;
+  getUser(id: string): Promise<User | null>;
+  createUser(input: { email: string; password_hash: string | null; display_name: string | null; locale?: string }): Promise<User>;
+  updateUser(id: string, patch: UserPatch): Promise<User | null>;
+  createSession(row: Omit<SessionRow, "created_at">): Promise<void>;
+  getSessionRow(id: string): Promise<SessionRow | null>;
+  touchSession(id: string, expiresAt: string): Promise<void>;
+  setSessionWorkspace(id: string, workspaceId: string): Promise<void>;
+  deleteSession(id: string): Promise<void>;
+  /* Alle Sitzungen eines Nutzers löschen, optional eine behalten */
+  deleteUserSessions(userId: string, exceptId?: string): Promise<number>;
+  listUserSessions(userId: string): Promise<SessionRow[]>;
+  createLoginToken(row: Omit<LoginToken, "used_at">): Promise<void>;
+  /* Markiert das Token als benutzt und liefert es, wenn es gültig, unbenutzt und für diesen Zweck war */
+  consumeLoginToken(token: string, purpose: LoginTokenPurpose): Promise<LoginToken | null>;
+  listMemberships(userId: string): Promise<Membership[]>;
+  getMembership(userId: string, workspaceId: string): Promise<Membership | null>;
+  /* Registrierung: Workspace, owner-Mitgliedschaft, Standard-Markenprofil, Starter-Test (14 Tage), Nutzungsperiode */
+  createWorkspaceWithOwner(input: RegisterWorkspaceInput): Promise<Workspace>;
+  /* Einladung per Token lesen (ohne Sitzung, für /einladung/[token]) */
+  getInvite(token: string): Promise<WorkspaceInvite | null>;
+  /* Einladung annehmen: Mitgliedschaft mit Rolle und Marke, accepted_at. Liefert false, wenn abgelaufen oder benutzt. */
+  acceptInvite(token: string, userId: string): Promise<boolean>;
+}
+
+export interface WorkspaceAdminRepo {
+  updateWorkspace(patch: WorkspacePatch): Promise<Workspace>;
+  listMembers(): Promise<WorkspaceMember[]>;
+  updateMember(userId: string, patch: { role?: Role; brand_profile_id?: string | null }): Promise<WorkspaceMember | null>;
+  removeMember(userId: string): Promise<boolean>;
+  listInvites(): Promise<WorkspaceInvite[]>;
+  createInvite(input: { email: string; role: Exclude<Role, "owner">; brand_profile_id: string | null; expires_at: string }): Promise<WorkspaceInvite>;
+  revokeInvite(token: string): Promise<boolean>;
+  listAudit(filter: AuditFilter): Promise<AuditPage>;
+  listAuditActions(): Promise<string[]>;
+  listAuditActors(): Promise<{ id: string; label: string }[]>;
+  getSubscription(): Promise<Subscription | null>;
+  getPlan(code: string): Promise<Plan | null>;
+  /* Nutzungsperiode des laufenden Monats; wird angelegt, wenn sie fehlt */
+  getCurrentUsage(): Promise<UsagePeriod | null>;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Phase 4, Block B: Gast-Freigabe, Abrechnung (schreibend), AVV, Löschung, Export, CI-Assets, Historie
+ * ---------------------------------------------------------------------------------------------- */
+
+export type GuestDecision = "approved" | "rejected" | "changes";
+
+export interface GuestApproval {
+  id: string;
+  clip_id: string;
+  guest_name: string | null;
+  guest_email: string | null;
+  token: string;
+  message: string | null;
+  requested_by: string | null;
+  expires_at: string | null;
+  decision: GuestDecision | null;
+  comment: string | null;
+  decided_at: string | null;
+  viewed_at: string | null;
+  created_at: string;
+}
+
+export interface GuestApprovalInput {
+  guest_name: string;
+  guest_email: string | null;
+  message: string;
+  token: string;
+  expires_at: string;
+}
+
+/* Was die öffentliche Freigabeseite sieht: Freigabe plus Clip-Daten, ohne Workspace-Interna */
+export interface GuestApprovalView {
+  approval: GuestApproval;
+  workspace_id: string;
+  workspace_name: string;
+  source_title: string;
+  clip: {
+    id: string;
+    platform: Platform;
+    aspect: Aspect;
+    title_card: string | null;
+    duration_s: number | null;
+    file_key: string | null;
+    poster_key: string | null;
+    status: ClipStatus;
+  };
+  onscreen_hook: string | null;
+  spoken_hook: string | null;
+  post_caption: string | null;
+}
+
+export interface BillingEventInput {
+  provider: string;
+  provider_event_id: string | null;
+  type: string;
+  payload: Record<string, unknown> | null;
+  workspace_id: string | null;
+}
+
+export interface DpaAcceptance {
+  id: string;
+  workspace_id: string;
+  dpa_version: string;
+  accepted_by: string | null;
+  accepted_by_label?: string | null;
+  accepted_at: string;
+  ip: string | null;
+  company: string | null;
+  representative: string | null;
+}
+
+export type DeletionEntity = "source" | "clip" | "brand_profile" | "workspace";
+export type DeletionReason = "user_request" | "retention" | "workspace_deleted" | "gdpr_request";
+export type DeletionStatus = "queued" | "running" | "done" | "failed";
+
+export interface DeletionJob {
+  id: string;
+  workspace_id: string;
+  entity: DeletionEntity;
+  entity_id: string;
+  /* Titel der Quelle oder Plattform des Clips zum Zeitpunkt der Anfrage (nur Anzeige) */
+  entity_label: string | null;
+  reason: DeletionReason;
+  requested_by: string | null;
+  requested_by_label?: string | null;
+  status: DeletionStatus;
+  keys_deleted: { bucket?: string; key: string; deleted_at?: string; existed?: boolean }[];
+  rows_deleted: Record<string, number>;
+  error: string | null;
+  requested_at: string;
+  finished_at: string | null;
+}
+
+export type BrandAssetKind = "font" | "logo" | "lower_third_bg" | "watermark";
+
+export interface BrandAsset {
+  id: string;
+  workspace_id: string;
+  brand_profile_id: string;
+  kind: BrandAssetKind;
+  name: string;
+  storage_key: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  sha256: string | null;
+  font_family: string | null;
+  font_weight: number | null;
+  license_note: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+export type BrandAssetInput = Omit<BrandAsset, "id" | "workspace_id" | "uploaded_by" | "created_at">;
+
+export interface BrandProfileVersion {
+  id: string;
+  brand_profile_id: string;
+  version: number;
+  snapshot: BrandProfile;
+  changed_by: string | null;
+  changed_by_label?: string | null;
+  changed_at: string;
+}
+
+/* Datenexport (Art. 15/20): JSON je Tabelle des Workspace plus Medien-Keys */
+export interface WorkspaceExport {
+  workspace: Workspace;
+  brand_profiles: BrandProfile[];
+  brand_assets: BrandAsset[];
+  brand_profile_versions: BrandProfileVersion[];
+  sources: Source[];
+  transcript_versions: TranscriptVersion[];
+  candidates: Candidate[];
+  clips: Clip[];
+  hook_versions: HookVersion[];
+  caption_versions: CaptionVersion[];
+  guest_approvals: GuestApproval[];
+  audit_log: AuditRow[];
+  job_costs: Record<string, unknown>[];
+  usage_periods: UsagePeriod[];
+  subscription: Omit<Subscription, "provider_customer_id" | "provider_subscription_id"> | null;
+  dpa_acceptances: DpaAcceptance[];
+  deletion_jobs: DeletionJob[];
+  media_keys: { bucket: "sources" | "derived"; key: string; entity: string; entity_id: string }[];
+}
+
+export interface BlockBRepo {
+  /* Gast-Freigabe */
+  createGuestApproval(clipId: string, input: GuestApprovalInput): Promise<GuestApproval>;
+  /* Alle Freigaben der Clips einer Quelle, neueste zuerst (Clip-Karte zeigt die jüngste je Clip) */
+  listGuestApprovals(sourceId: string): Promise<GuestApproval[]>;
+  /* Öffentlich, ohne Sitzung: Freigabe samt Clip-Daten per Token */
+  getGuestApprovalByToken(token: string): Promise<GuestApprovalView | null>;
+  markGuestApprovalViewed(token: string): Promise<void>;
+  /* Entscheidung des Gastes (ohne Sitzung); null wenn Token unbekannt, abgelaufen oder schon entschieden */
+  decideGuestApproval(token: string, decision: GuestDecision, comment: string | null, ip: string | null): Promise<GuestApproval | null>;
+
+  /* Abrechnung */
+  listPlans(): Promise<Plan[]>;
+  updateSubscription(patch: SubscriptionPatch): Promise<Subscription>;
+  /* Vergangene Monate, neueste zuerst */
+  listUsageHistory(): Promise<UsagePeriod[]>;
+  /* Webhook (ohne Sitzung): true wenn das Ereignis neu war, false bei Duplikat (provider_event_id) */
+  recordBillingEvent(input: BillingEventInput): Promise<boolean>;
+  findWorkspaceIdByProvider(ref: { customer_id?: string | null; subscription_id?: string | null }): Promise<string | null>;
+  updateSubscriptionForWorkspace(workspaceId: string, patch: SubscriptionPatch): Promise<Subscription | null>;
+
+  /* AVV */
+  acceptDpa(input: { version: string; company: string; representative: string; ip: string | null }): Promise<DpaAcceptance>;
+  getDpaAcceptance(): Promise<DpaAcceptance | null>;
+
+  /* Löschung und Export */
+  requestSourceDeletion(sourceId: string): Promise<DeletionJob | null>;
+  requestClipDeletion(clipId: string): Promise<DeletionJob | null>;
+  listDeletionJobs(): Promise<DeletionJob[]>;
+  requestWorkspaceDeletion(scheduledFor: string): Promise<Workspace>;
+  cancelWorkspaceDeletion(): Promise<Workspace>;
+  exportWorkspace(): Promise<WorkspaceExport>;
+
+  /* CI-Assets und Historie */
+  listBrandAssets(profileId: string): Promise<BrandAsset[]>;
+  getBrandAsset(id: string): Promise<BrandAsset | null>;
+  createBrandAsset(input: BrandAssetInput): Promise<BrandAsset>;
+  deleteBrandAsset(id: string): Promise<BrandAsset | null>;
+  listBrandProfileVersions(profileId: string): Promise<BrandProfileVersion[]>;
+  /* Schreibt vorher einen Snapshot des aktuellen Stands, dann die Felder aus der Version */
+  restoreBrandProfileVersion(profileId: string, version: number): Promise<BrandProfile | null>;
 }

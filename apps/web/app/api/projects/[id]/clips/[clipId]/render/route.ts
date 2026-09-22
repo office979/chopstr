@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { getRepo } from "@/lib/repo";
+import { requireApiRole } from "@/lib/auth/guard";
 import { signalApprove } from "@/lib/temporal";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +10,8 @@ type Params = { params: Promise<{ id: string; clipId: string }> };
 /* POST: Render (erneut) anstoßen. Signal approve(candidate_id, platform) an project-<source_id>;
  * im Demo-Modus startet das Repository die Simulation. */
 export async function POST(_request: NextRequest, { params }: Params) {
+  const auth = await requireApiRole("clip.render");
+  if (auth instanceof Response) return auth;
   const { id, clipId } = await params;
   const repo = getRepo();
   const clip = await repo.getClip(clipId);

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { getRepo } from "@/lib/repo";
+import { requireApiRole } from "@/lib/auth/guard";
 import type { PostCaptions, SaveHookInput } from "@/lib/repo/types";
 import { PLATFORMS, isHookPattern } from "@/lib/clips/labels";
 
@@ -24,6 +25,8 @@ function text(v: unknown, max: number): string {
 
 /* POST: neue manuelle Hook-Version (origin manual) aus dem Hook-Studio. Linter und Claim-Check laufen im Repository. */
 export async function POST(request: NextRequest, { params }: Params) {
+  const auth = await requireApiRole("hook.edit");
+  if (auth instanceof Response) return auth;
   const { id, clipId } = await params;
   const repo = getRepo();
   const clip = await repo.getClip(clipId);

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { getRepo } from "@/lib/repo";
+import { requireApiRole } from "@/lib/auth/guard";
 import { TITLE_CARD_MAX_WORDS, titleCardWords } from "@/lib/candidates/revise";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,8 @@ interface ReviseBody {
 /* POST: Verlängern, Kürzen oder Titelkarte. Legt eine neue Kandidaten-Version an (version + 1),
  * die alte Zeile bekommt human_verdict = 'edited'. Gates werden deterministisch neu berechnet. */
 export async function POST(request: NextRequest, { params }: Params) {
+  const auth = await requireApiRole("candidate.edit");
+  if (auth instanceof Response) return auth;
   const { id, cid } = await params;
   const repo = getRepo();
   const source = await repo.getSource(id);

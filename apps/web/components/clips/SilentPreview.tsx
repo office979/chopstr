@@ -19,7 +19,21 @@ interface Props {
   titleCard: string | null;
   highlightColor?: string;
   lowerThird?: { name: string; role: string } | null;
+  /* Marken-Font aus dem CI-Manager (Block B): per @font-face aus der Medien-URL geladen */
+  font?: PreviewFont | null;
   className?: string;
+}
+
+export interface PreviewFont {
+  family: string;
+  url: string;
+  format: string;
+  weight?: number | null;
+}
+
+export function fontFaceCss(font: PreviewFont): string {
+  const family = font.family.replace(/["\\]/g, "");
+  return `@font-face{font-family:"${family}";src:url("${font.url}") format("${font.format}");font-weight:${font.weight ?? 400};font-display:swap;}`;
 }
 
 export const HOOK_OVERLAY_SECONDS = 3;
@@ -29,7 +43,7 @@ const LOWER_THIRD_SECONDS = 4;
 /* Stumme CSS-Vorschau des Ausgabeformats: Safe Zones als Haarlinien, Caption-Karten im Preset-Stil an der
  * Baseline, On-Screen-Hook und Titelkarte oben. Maße kommen aus lib/clips/presets (Spiegel des Workers),
  * alle Größen skalieren über Container-Query-Einheiten mit dem Rahmen. Ersetzt keinen Render. */
-export function SilentPreview({ aspect, preset: presetName, durationS, cards, hookText, titleCard, highlightColor, lowerThird, className }: Props) {
+export function SilentPreview({ aspect, preset: presetName, durationS, cards, hookText, titleCard, highlightColor, lowerThird, font, className }: Props) {
   const preset = presetFor(presetName);
   const layout = layoutFor(preset, aspect);
   const [t, setT] = useState(0);
@@ -112,11 +126,14 @@ export function SilentPreview({ aspect, preset: presetName, durationS, cards, ho
     });
   };
 
+  const fontFamily = font ? `"${font.family.replace(/["\\]/g, "")}", Inter, sans-serif` : undefined;
+
   return (
     <div className={cn("flex flex-col gap-3", className)}>
+      {font && <style>{fontFaceCss(font)}</style>}
       <div
         className="relative mx-auto w-full max-w-[300px] overflow-hidden rounded-inner border border-line-strong bg-black"
-        style={{ aspectRatio: `${layout.width} / ${layout.height}`, containerType: "inline-size" }}
+        style={{ aspectRatio: `${layout.width} / ${layout.height}`, containerType: "inline-size", fontFamily }}
         role="img"
         aria-label={`Stumme Vorschau ${aspect}, Sekunde ${t.toFixed(1)} von ${duration.toFixed(1)}`}
       >
@@ -240,7 +257,9 @@ export function SilentPreview({ aspect, preset: presetName, durationS, cards, ho
           {formatTimecode(t)} / {formatTimecode(duration)}
         </span>
       </div>
-      <p className="text-center text-xs text-text-3">Stumme Vorschau ersetzt keinen Render.</p>
+      <p className="text-center text-xs text-text-3">
+        Stumme Vorschau ersetzt keinen Render.{font ? ` Font: ${font.family}.` : ""}
+      </p>
     </div>
   );
 }

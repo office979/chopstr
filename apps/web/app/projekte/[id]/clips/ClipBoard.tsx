@@ -7,8 +7,11 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { StatusCheck, type StatusCheckState } from "@/components/ui/StatusCheck";
 import { cn } from "@/components/ui/cn";
-import { SilentPreview } from "@/components/clips/SilentPreview";
-import type { Candidate, CaptionVersion, Clip, HookVersion, PipelineEvent } from "@/lib/repo/types";
+import { SilentPreview, type PreviewFont } from "@/components/clips/SilentPreview";
+import { GuestApprovalDialog } from "@/components/clips/GuestApprovalDialog";
+import { Modal } from "@/components/ui/Modal";
+import type { Candidate, CaptionVersion, Clip, GuestApproval, HookVersion, PipelineEvent } from "@/lib/repo/types";
+import { EXPORT_BLOCKED_MESSAGE, exportBlocked, latestByClip } from "@/lib/guest/approval";
 import { structureLabel } from "@/lib/candidates/labels";
 import {
   CLIP_STATUS_LABELS,
@@ -32,6 +35,13 @@ interface Props {
   demo: boolean;
   highlightColor?: string;
   lowerThird: { name: string; role: string } | null;
+  /* Gast-Freigabe (Block B) */
+  guestApprovals: GuestApproval[];
+  canRequestGuest: boolean;
+  planAllowsGuest: boolean;
+  planName: string;
+  canDelete: boolean;
+  previewFont: PreviewFont | null;
 }
 
 interface ApiError {
@@ -41,6 +51,7 @@ interface ApiError {
 interface ClipDetail {
   hook: HookVersion | null;
   captions: CaptionVersion | null;
+  guest_approval?: GuestApproval | null;
 }
 
 function isSettled(c: Clip): boolean {
@@ -85,8 +96,26 @@ function snippet(text: string, max = 120): string {
 
 /* Clip-Übersicht: Pakete je Kandidat, Karten je Clip, Fortschritt live über SSE (step = 'render').
  * Spektrum-Glitch auf der Gruppenkarte, wenn alle Clips eines Pakets fertig werden (nur beim Übergang). */
-export function ClipBoard({ sourceId, initialClips, candidates, initialEvents, mediaBase, demo, highlightColor, lowerThird }: Props) {
+export function ClipBoard({
+  sourceId,
+  initialClips,
+  candidates,
+  initialEvents,
+  mediaBase,
+  demo,
+  highlightColor,
+  lowerThird,
+  guestApprovals,
+  canRequestGuest,
+  planAllowsGuest,
+  planName,
+  canDelete,
+  previewFont,
+}: Props) {
   const [clips, setClips] = useState<Clip[]>(initialClips);
+  const [approvals, setApprovals] = useState<Map<string, GuestApproval>>(() => latestByClip(guestApprovals));
+  const [deleteTarget, setDeleteTarget] = useState<Clip | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [events, setEvents] = useState<PipelineEvent[]>(initialEvents);
   const [connection, setConnection] = useState<"idle" | "live" | "closed" | "error">("idle");
   const [streamKey, setStreamKey] = useState(0);
@@ -206,6 +235,10 @@ export function ClipBoard({ sourceId, initialClips, candidates, initialEvents, m
         const data = (await res.json()) as ApiError & ClipDetail;
         if (!res.ok) throw new Error(data.error ?? "Clip konnte nicht geladen werden");
         setDetails((prev) => ({ ...prev, [clip.id]: { hook: data.hook ?? null, captions: data.captions ?? null } }));
+        if (data.guest_approval) {
+          const fresh = data.guest_approval;
+          setApprovals((prev) => new Map(prev).set(clip.id, fresh));
+        }
       } catch (err) {
         setMessage({ tone: "error", text: err instanceof Error ? err.message : "Clip konnte nicht geladen werden" });
       }
@@ -213,8 +246,59 @@ export function ClipBoard({ sourceId, initialClips, candidates, initialEvents, m
     [sourceId, previewId, details],
   );
 
+  const onRequested = useCallback((approval: GuestApproval) => {
+    setApprovals((prev) => new Map(prev).set(approval.clip_id, approval));
+    applyClips(clipsRef.current.map((c) => (c.id === approval.clip_id ? { ...c, guest_approval_required: true } : c)));
+  }, [applyClips]);
+
+  const refreshApproval = useCallback(
+    async (clip: Clip) => {
+      try {
+        const res = await fetch(`/api/projects/${sourceId}/clips/${clip.id}`);
+        const data = (await res.json()) as ApiError & ClipDetail;
+        if (!res.ok) throw new Error(data.error ?? "Status konnte nicht geladen werden");
+        if (data.guest_approval) {
+          const fresh = data.guest_approval;
+          setApprovals((prev) => new Map(prev).set(clip.id, fresh));
+        }
+        setMessage({ tone: "ok", text: "Freigabestatus aktualisiert." });
+      } catch (err) {
+        setMessage({ tone: "error", text: err instanceof Error ? err.message : "Status konnte nicht geladen werden" });
+      }
+    },
+    [sourceId],
+  );
+
+  const deleteClip = useCallback(async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/projects/${sourceId}/clips/${deleteTarget.id}`, { method: "DELETE" });
+      const data = (await res.json()) as ApiError & { message?: string };
+      if (!res.ok) throw new Error(data.error ?? "Löschen fehlgeschlagen");
+      applyClips(clipsRef.current.filter((c) => c.id !== deleteTarget.id));
+      setMessage({ tone: "ok", text: data.message ?? "Löschung eingeplant, Nachweis folgt." });
+      setDeleteTarget(null);
+    } catch (err) {
+      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Löschen fehlgeschlagen" });
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleteTarget, sourceId, applyClips]);
+
   return (
     <div className="flex flex-col gap-5">
+      <Modal open={deleteTarget != null} onClose={() => !deleting && setDeleteTarget(null)} title="Clip löschen" description="Video, Captions, Poster und Hook-Versionen dieses Clips werden gelöscht. Der Löschnachweis bleibt im Audit-Log.">
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+            Abbrechen
+          </Button>
+          <Button variant="danger" className="border border-danger/50" onClick={() => void deleteClip()} disabled={deleting}>
+            {deleting ? "Wird gelöscht" : `${deleteTarget ? PLATFORM_LABELS[deleteTarget.platform] : "Clip"} löschen`}
+          </Button>
+        </div>
+      </Modal>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-text-2">
           Paket: {groups.length} {groups.length === 1 ? "Kandidat" : "Kandidaten"}, {clips.filter(isDone).length} von {clips.length} Clips gerendert.
@@ -267,9 +351,12 @@ export function ClipBoard({ sourceId, initialClips, candidates, initialEvents, m
               const state = checkState(clip);
               const progress = clip.status === "rendering" ? (ev?.progress ?? 0) : isDone(clip) ? 1 : 0;
               const stage = ev?.payload && typeof ev.payload.stage === "string" ? ev.payload.stage : null;
-              const mp4 = mediaUrl(mediaBase, clip.file_key);
-              const srt = mediaUrl(mediaBase, clip.srt_key);
-              const vtt = mediaUrl(mediaBase, clip.vtt_key);
+              const approval = approvals.get(clip.id);
+              const blocked = exportBlocked(clip, approval);
+              const dl = (kind: "mp4" | "srt" | "vtt", key: string | null) => (key && mediaBase ? `/api/projects/${sourceId}/clips/${clip.id}/download?kind=${kind}` : null);
+              const mp4 = dl("mp4", clip.file_key);
+              const srt = dl("srt", clip.srt_key);
+              const vtt = dl("vtt", clip.vtt_key);
               const poster = mediaUrl(mediaBase, clip.poster_key);
               const neutral = clip.render_plan?.reframe.strategy === "neutral";
               const duration = clip.duration_s ?? compositionDuration(clip);
@@ -382,6 +469,31 @@ export function ClipBoard({ sourceId, initialClips, candidates, initialEvents, m
                     </ul>
                   )}
 
+                  <div className="border-t border-line pt-3">
+                    <GuestApprovalDialog
+                      sourceId={sourceId}
+                      clipId={clip.id}
+                      clipLabel={`${PLATFORM_LABELS[clip.platform]} ${clip.aspect}`}
+                      guestApprovalRequired={clip.guest_approval_required}
+                      current={approval ?? null}
+                      canRequest={canRequestGuest}
+                      planAllows={planAllowsGuest}
+                      planName={planName}
+                      onRequested={onRequested}
+                    />
+                    {clip.guest_approval_required && !approval?.decision && (
+                      <button type="button" onClick={() => refreshApproval(clip)} className="mt-1 text-xs text-text-2 underline-offset-4 hover:text-text hover:underline">
+                        Status aktualisieren
+                      </button>
+                    )}
+                  </div>
+
+                  {blocked && (
+                    <p className="rounded-[12px] border border-attention/50 bg-attention/10 px-3 py-2 text-xs text-text">
+                      <span className="font-medium text-attention">{EXPORT_BLOCKED_MESSAGE}</span> MP4, SRT und VTT werden freigeschaltet, sobald der Gast zustimmt.
+                    </p>
+                  )}
+
                   <div className="mt-auto flex flex-wrap gap-1.5 border-t border-line pt-3">
                     {(
                       [
@@ -390,7 +502,7 @@ export function ClipBoard({ sourceId, initialClips, candidates, initialEvents, m
                         ["VTT", vtt],
                       ] as const
                     ).map(([label, href]) =>
-                      href ? (
+                      href && !blocked ? (
                         <a
                           key={label}
                           href={href}
@@ -403,8 +515,8 @@ export function ClipBoard({ sourceId, initialClips, candidates, initialEvents, m
                         <span
                           key={label}
                           aria-disabled="true"
-                          title={demo ? "Im Demo-Modus gibt es keine Dateien" : isDone(clip) ? "Datei noch nicht verfügbar" : "Erst nach dem Render"}
-                          className="inline-flex h-8 cursor-not-allowed items-center rounded-pill border border-line px-3 font-mono text-xs text-text-3"
+                          title={blocked ? EXPORT_BLOCKED_MESSAGE : demo ? "Im Demo-Modus gibt es keine Dateien" : isDone(clip) ? "Datei noch nicht verfügbar" : "Erst nach dem Render"}
+                          className={cn("inline-flex h-8 cursor-not-allowed items-center rounded-pill border px-3 font-mono text-xs", blocked ? "border-attention/40 text-attention/70" : "border-line text-text-3")}
                         >
                           {label}
                         </span>
@@ -424,6 +536,11 @@ export function ClipBoard({ sourceId, initialClips, candidates, initialEvents, m
                     <Button size="sm" variant="ghost" onClick={() => togglePreview(clip)} aria-expanded={open}>
                       {open ? "Vorschau schließen" : "Ton-aus-Vorschau"}
                     </Button>
+                    {canDelete && (
+                      <Button size="sm" variant="danger" onClick={() => setDeleteTarget(clip)} disabled={clip.status === "rendering"}>
+                        Löschen
+                      </Button>
+                    )}
                   </div>
 
                   {open && (
@@ -438,6 +555,7 @@ export function ClipBoard({ sourceId, initialClips, candidates, initialEvents, m
                           titleCard={clip.title_card}
                           highlightColor={highlightColor}
                           lowerThird={lowerThird}
+                          font={previewFont}
                         />
                       ) : (
                         <p className="text-sm text-text-2" role="status">

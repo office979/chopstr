@@ -1,16 +1,32 @@
 import type {
   AuditEntry,
+  AuditRow,
+  BrandAsset,
   BrandProfile,
+  BrandProfileVersion,
   Candidate,
   CaptionVersion,
   Clip,
+  DeletionJob,
+  DpaAcceptance,
+  GuestApproval,
+  GuestApprovalView,
   HookVersion,
+  LoginToken,
+  Membership,
   PipelineEvent,
+  Plan,
   RenderStage,
   Repo,
+  SessionRow,
   Source,
+  Subscription,
   TranscriptVersion,
+  UsagePeriod,
+  User,
   Workspace,
+  WorkspaceInvite,
+  WorkspaceMember,
 } from "@/lib/repo/types";
 import {
   DEMO_IDS,
@@ -22,7 +38,7 @@ import {
   seedSources,
   seedWorkspace,
 } from "@/lib/repo/seed";
-import { getSession } from "@/lib/session";
+import { currentSession } from "@/lib/session";
 import { sentencesFromWords } from "@/lib/transcript/sentences";
 import { buildRevision, isRevisionError } from "@/lib/candidates/revise";
 import { PLATFORM_ASPECT } from "@/lib/clips/presets";
@@ -49,13 +65,38 @@ interface DemoState {
   clips: Clip[];
   hooks: HookVersion[];
   captions: CaptionVersion[];
-  audit: (AuditEntry & { at: string; workspace_id: string; actor_id: string })[];
+  audit: (AuditEntry & { id: number; at: string; workspace_id: string; actor_id: string })[];
+  nextAuditId: number;
+  users: User[];
+  sessions: SessionRow[];
+  loginTokens: LoginToken[];
+  members: MemberRow[];
+  invites: WorkspaceInvite[];
+  subscription: Subscription;
+  usage: UsagePeriod;
+  usageHistory: UsagePeriod[];
+  guestApprovals: GuestApproval[];
+  billingEventIds: Set<string>;
+  dpaAcceptances: DpaAcceptance[];
+  deletionJobs: DeletionJob[];
+  brandAssets: BrandAsset[];
+  brandVersions: BrandProfileVersion[];
   nextEventId: number;
   bootedAt: number;
   /* Simulationen laufender Pipelines: sourceId -> Startzeit */
   simulations: Map<string, number>;
   /* Simulierte Renders: clipId -> Zustand */
   renders: Map<string, RenderSim>;
+}
+
+interface MemberRow {
+  workspace_id: string;
+  user_id: string;
+  role: WorkspaceMember["role"];
+  brand_profile_id: string | null;
+  invited_by: string | null;
+  accepted_at: string | null;
+  created_at: string;
 }
 
 interface RenderSim {
@@ -69,6 +110,59 @@ interface RenderSim {
 
 declare global {
   var __chopstrDemoState: DemoState | undefined;
+}
+
+/* Demo-Seed: drei Mitglieder (owner, editor, client mit Markenbindung) */
+function seedUsers(): User[] {
+  const created = new Date(Date.now() - 40 * 86_400_000).toISOString();
+  return [
+    { id: DEMO_IDS.actor, email: "demo@chopstr.local", email_verified_at: created, password_hash: null, display_name: "Demo", locale: "de-AT", last_login_at: new Date().toISOString(), created_at: created },
+    { id: DEMO_IDS.editor, email: "mara@placemedia.test", email_verified_at: created, password_hash: null, display_name: "Mara Huber", locale: "de-AT", last_login_at: null, created_at: created },
+    { id: DEMO_IDS.client, email: "kunde@kleinecke.test", email_verified_at: null, password_hash: null, display_name: "Kleinecke GmbH", locale: "de-DE", last_login_at: null, created_at: created },
+  ];
+}
+
+function seedMembers(): MemberRow[] {
+  const created = new Date(Date.now() - 40 * 86_400_000).toISOString();
+  return [
+    { workspace_id: DEMO_IDS.workspace, user_id: DEMO_IDS.actor, role: "owner", brand_profile_id: null, invited_by: null, accepted_at: created, created_at: created },
+    { workspace_id: DEMO_IDS.workspace, user_id: DEMO_IDS.editor, role: "editor", brand_profile_id: null, invited_by: DEMO_IDS.actor, accepted_at: created, created_at: created },
+    { workspace_id: DEMO_IDS.workspace, user_id: DEMO_IDS.client, role: "client", brand_profile_id: DEMO_IDS.brand, invited_by: DEMO_IDS.actor, accepted_at: null, created_at: created },
+  ];
+}
+
+const DEMO_PLANS: Plan[] = [
+  { code: "starter", name: "Starter", monthly_eur: 29, included_hours: 4, overage_eur_per_hour: 9, max_brand_profiles: 1, max_members: 2, features: { guest_approval: false, sovereign: false } },
+  { code: "pro", name: "Pro", monthly_eur: 79, included_hours: 12, overage_eur_per_hour: 7.5, max_brand_profiles: 3, max_members: 5, features: { guest_approval: true, sovereign: false } },
+  { code: "agency", name: "Agentur", monthly_eur: 199, included_hours: 40, overage_eur_per_hour: 6, max_brand_profiles: null, max_members: null, features: { guest_approval: true, sovereign: false, white_label: true } },
+  { code: "sovereign", name: "Sovereign", monthly_eur: 399, included_hours: 40, overage_eur_per_hour: 6, max_brand_profiles: null, max_members: null, features: { guest_approval: true, sovereign: true, white_label: true } },
+];
+
+/* Zwei vergangene Monate mit Verbrauch (Demo-Verlauf auf der Abrechnungsseite) */
+function seedUsageHistory(now: number): UsagePeriod[] {
+  const d = new Date(now);
+  const out: UsagePeriod[] = [];
+  for (const [back, used, renders] of [
+    [1, 262, 14],
+    [2, 118, 6],
+  ] as const) {
+    const start = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - back, 1));
+    const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - back + 1, 0));
+    const overage = Math.max(0, used - 240);
+    out.push({
+      id: `77777777-7777-4777-8777-7777777777${10 + back}`,
+      workspace_id: DEMO_IDS.workspace,
+      period_start: start.toISOString().slice(0, 10),
+      period_end: end.toISOString().slice(0, 10),
+      included_minutes: 240,
+      used_source_minutes: used,
+      render_count: renders,
+      overage_minutes: overage,
+      overage_eur: Math.ceil(overage / 60) * 9,
+      closed_at: end.toISOString(),
+    });
+  }
+  return out;
 }
 
 function createState(): DemoState {
@@ -89,6 +183,46 @@ function createState(): DemoState {
     hooks: [],
     captions: [],
     audit: [],
+    nextAuditId: 1,
+    users: seedUsers(),
+    sessions: [],
+    loginTokens: [],
+    members: seedMembers(),
+    invites: [],
+    subscription: {
+      id: "77777777-7777-4777-8777-777777777701",
+      workspace_id: DEMO_IDS.workspace,
+      plan_code: "starter",
+      provider: "manual",
+      provider_customer_id: null,
+      provider_subscription_id: null,
+      status: "trialing",
+      current_period_start: new Date(now).toISOString(),
+      current_period_end: new Date(now + 14 * 86_400_000).toISOString(),
+      trial_ends_at: new Date(now + 14 * 86_400_000).toISOString(),
+      cancel_at_period_end: false,
+      billing_email: "demo@chopstr.local",
+      billing_address: { company: "PLACEMedia", street: "Beispielgasse 1", zip: "1010", city: "Wien", country: "AT", vat_id: "ATU12345678" },
+      updated_at: new Date(now).toISOString(),
+    },
+    usage: {
+      id: "77777777-7777-4777-8777-777777777702",
+      workspace_id: DEMO_IDS.workspace,
+      period_start: new Date(now).toISOString().slice(0, 8) + "01",
+      period_end: new Date(Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth() + 1, 0)).toISOString().slice(0, 10),
+      included_minutes: 240,
+      used_source_minutes: 103,
+      render_count: 0,
+      overage_minutes: 0,
+      overage_eur: 0,
+    },
+    usageHistory: seedUsageHistory(now),
+    guestApprovals: [],
+    billingEventIds: new Set(),
+    dpaAcceptances: [],
+    deletionJobs: [],
+    brandAssets: [],
+    brandVersions: [],
     nextEventId: id,
     bootedAt: now,
     simulations: new Map([[DEMO_IDS.keynote, now - 60_000]]),
@@ -227,7 +361,7 @@ function finishRenderSimulation(s: DemoState, clip: Clip) {
   const brand = source.brand_profile_id ? s.brandProfiles.find((b) => b.id === source.brand_profile_id) ?? null : null;
   const transcripts = s.transcripts.filter((t) => t.source_id === source.id);
   const transcript = transcripts.length ? transcripts.reduce((a, b) => (a.version >= b.version ? a : b)) : null;
-  const { actorId } = getSession();
+  const actorId = DEMO_IDS.actor;
 
   let hook = currentHookOf(clip.id);
   if (!hook) {
@@ -331,6 +465,7 @@ export const demoRepo: Repo = {
     const s = state();
     const existing = input.id ? s.brandProfiles.find((b) => b.id === input.id) : undefined;
     if (existing) {
+      await snapshotBrand(existing);
       Object.assign(existing, input, { version: existing.version + 1, updated_at: nowIso() });
       return existing;
     }
@@ -355,22 +490,27 @@ export const demoRepo: Repo = {
     b.updated_at = nowIso();
   },
 
+  /* client sieht nur Quellen seiner Marke */
   async listSources() {
     const s = state();
+    const { brandScope } = await currentSession();
     for (const id of s.simulations.keys()) advanceSimulation(id);
     return [...s.sources]
-      .filter((x) => x.status !== "deleted")
+      .filter((x) => x.status !== "deleted" && (!brandScope || x.brand_profile_id === brandScope))
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
   },
 
   async getSource(id) {
     advanceSimulation(id);
-    return state().sources.find((x) => x.id === id) ?? null;
+    const { brandScope } = await currentSession();
+    const src = state().sources.find((x) => x.id === id && x.status !== "deleted") ?? null;
+    if (src && brandScope && src.brand_profile_id !== brandScope) return null;
+    return src;
   },
 
   async createSource(input) {
     const s = state();
-    const { actorId } = getSession();
+    const { userId: actorId } = await currentSession();
     const now = nowIso();
     const source: Source = {
       id: input.id ?? uuid(),
@@ -429,7 +569,7 @@ export const demoRepo: Repo = {
 
   async saveTranscript(sourceId, input) {
     const s = state();
-    const { actorId } = getSession();
+    const { userId: actorId } = await currentSession();
     const current = await this.getCurrentTranscript(sourceId);
     const words = input.words;
     const lowConf = words.filter((w) => w.prob < 0.9).length;
@@ -470,7 +610,7 @@ export const demoRepo: Repo = {
   async setCandidateVerdict(id, verdict, reason) {
     const c = state().candidates.find((x) => x.id === id);
     if (!c) return null;
-    const { actorId } = getSession();
+    const { userId: actorId } = await currentSession();
     c.human_verdict = verdict;
     c.verdict_reason = reason?.trim() || null;
     c.verdict_by = actorId;
@@ -486,7 +626,7 @@ export const demoRepo: Repo = {
     if (!transcript) throw new Error("Kein Transkript vorhanden");
     const revision = buildRevision(prev, sentencesFromWords(transcript.words), input);
     if (isRevisionError(revision)) throw new Error(revision.error);
-    const { actorId } = getSession();
+    const { userId: actorId } = await currentSession();
     const created: Candidate = { ...revision, id: uuid(), created_at: nowIso() };
     prev.human_verdict = "edited";
     prev.verdict_by = actorId;
@@ -513,7 +653,7 @@ export const demoRepo: Repo = {
     const source = s.sources.find((x) => x.id === candidate.source_id);
     if (!source) throw new Error("Projekt nicht gefunden");
     const brand = source.brand_profile_id ? s.brandProfiles.find((b) => b.id === source.brand_profile_id) ?? null : null;
-    const { actorId } = getSession();
+    const { userId: actorId } = await currentSession();
     const out: Clip[] = [];
     platforms.forEach((platform, i) => {
       const existing = s.clips.find((c) => c.candidate_id === candidateId && c.platform === platform);
@@ -553,6 +693,7 @@ export const demoRepo: Repo = {
         provenance: {},
         render_error: null,
         rendered_at: null,
+        deleted_at: null,
         created_by: actorId,
         created_at: now,
         updated_at: now,
@@ -568,13 +709,13 @@ export const demoRepo: Repo = {
   async listClips(sourceId) {
     advanceRenderSimulations(sourceId);
     return state()
-      .clips.filter((c) => c.source_id === sourceId)
+      .clips.filter((c) => c.source_id === sourceId && c.status !== "deleted")
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
       .map((c) => ({ ...c }));
   },
 
   async getClip(id) {
-    const c = state().clips.find((x) => x.id === id);
+    const c = state().clips.find((x) => x.id === id && x.status !== "deleted");
     if (!c) return null;
     advanceRenderSimulations(c.source_id);
     return { ...c };
@@ -600,7 +741,7 @@ export const demoRepo: Repo = {
 
   async countClips(sourceId) {
     advanceRenderSimulations(sourceId);
-    const list = state().clips.filter((c) => c.source_id === sourceId);
+    const list = state().clips.filter((c) => c.source_id === sourceId && c.status !== "deleted");
     return {
       total: list.length,
       rendered: list.filter((c) => c.status === "rendered" || c.status === "exported").length,
@@ -630,7 +771,7 @@ export const demoRepo: Repo = {
     const brand = source?.brand_profile_id ? s.brandProfiles.find((b) => b.id === source.brand_profile_id) ?? null : null;
     const prev = currentHookOf(clipId);
     const fields = prepareManualHook(input, { clipText: candidate?.rubric.text ?? "", profile: lintProfileFrom(brand) }, prev);
-    const { actorId } = getSession();
+    const { userId: actorId } = await currentSession();
     const version: HookVersion = { ...fields, id: uuid(), clip_id: clipId, version: (prev?.version ?? 0) + 1, created_by: actorId, created_at: nowIso() };
     s.hooks.push(version);
     return { ...version };
@@ -642,7 +783,671 @@ export const demoRepo: Repo = {
   },
 
   async audit(entry) {
-    const { workspaceId, actorId } = getSession();
-    state().audit.push({ ...entry, at: nowIso(), workspace_id: workspaceId, actor_id: actorId });
+    const { workspaceId, userId } = await currentSession();
+    const s = state();
+    s.audit.push({ ...entry, id: s.nextAuditId++, at: nowIso(), workspace_id: workspaceId, actor_id: userId });
+  },
+
+  /* ------------------------------------------------------------------------------------------
+   * Auth und Verwaltung (Demo: In-Memory, ein Workspace, drei Mitglieder als Seed)
+   * ---------------------------------------------------------------------------------------- */
+
+  async auditAs(ctx, entry) {
+    const s = state();
+    s.audit.push({ ...entry, id: s.nextAuditId++, at: nowIso(), workspace_id: ctx.workspace_id ?? s.workspace.id, actor_id: ctx.actor_id ?? "" });
+  },
+
+  async findUserByEmail(email) {
+    return state().users.find((u) => u.email.toLowerCase() === email.toLowerCase()) ?? null;
+  },
+
+  async getUser(id) {
+    return state().users.find((u) => u.id === id) ?? null;
+  },
+
+  async createUser(input) {
+    const user: User = {
+      id: uuid(),
+      email: input.email.toLowerCase(),
+      email_verified_at: null,
+      password_hash: input.password_hash,
+      display_name: input.display_name,
+      locale: input.locale ?? "de-AT",
+      last_login_at: null,
+      created_at: nowIso(),
+    };
+    state().users.push(user);
+    return user;
+  },
+
+  async updateUser(id, patch) {
+    const u = state().users.find((x) => x.id === id);
+    if (!u) return null;
+    Object.assign(u, patch, patch.email ? { email: patch.email.toLowerCase() } : {});
+    return { ...u };
+  },
+
+  async createSession(row) {
+    state().sessions.push({ ...row, created_at: nowIso() });
+  },
+
+  async getSessionRow(id) {
+    return state().sessions.find((x) => x.id === id) ?? null;
+  },
+
+  async touchSession(id, expiresAt) {
+    const row = state().sessions.find((x) => x.id === id);
+    if (row) row.expires_at = expiresAt;
+  },
+
+  async setSessionWorkspace(id, workspaceId) {
+    const row = state().sessions.find((x) => x.id === id);
+    if (row) row.workspace_id = workspaceId;
+  },
+
+  async deleteSession(id) {
+    const s = state();
+    s.sessions = s.sessions.filter((x) => x.id !== id);
+  },
+
+  async deleteUserSessions(userId, exceptId) {
+    const s = state();
+    const before = s.sessions.length;
+    s.sessions = s.sessions.filter((x) => x.user_id !== userId || x.id === exceptId);
+    return before - s.sessions.length;
+  },
+
+  async listUserSessions(userId) {
+    return state().sessions.filter((x) => x.user_id === userId && Date.parse(x.expires_at) > Date.now());
+  },
+
+  async createLoginToken(row) {
+    state().loginTokens.push({ ...row, used_at: null });
+  },
+
+  async consumeLoginToken(token, purpose) {
+    const t = state().loginTokens.find((x) => x.token === token && x.purpose === purpose);
+    if (!t || t.used_at || Date.parse(t.expires_at) <= Date.now()) return null;
+    t.used_at = nowIso();
+    return { ...t };
+  },
+
+  async listMemberships(userId) {
+    const s = state();
+    return s.members
+      .filter((m) => m.user_id === userId)
+      .map<Membership>((m) => ({
+        workspace_id: m.workspace_id,
+        workspace_name: s.workspace.name,
+        workspace_slug: s.workspace.slug,
+        role: m.role,
+        brand_profile_id: m.brand_profile_id,
+        accepted_at: m.accepted_at,
+      }));
+  },
+
+  async getMembership(userId, workspaceId) {
+    const all = await this.listMemberships(userId);
+    return all.find((m) => m.workspace_id === workspaceId) ?? null;
+  },
+
+  async createWorkspaceWithOwner(input) {
+    /* Demo: genau ein Workspace; der neue Nutzer wird owner des bestehenden */
+    const s = state();
+    s.members.push({ workspace_id: s.workspace.id, user_id: input.user_id, role: "owner", brand_profile_id: null, invited_by: null, accepted_at: nowIso(), created_at: nowIso() });
+    return s.workspace;
+  },
+
+  async getInvite(token) {
+    const i = state().invites.find((x) => x.token === token);
+    return i ? { ...i } : null;
+  },
+
+  async acceptInvite(token, userId) {
+    const s = state();
+    const i = s.invites.find((x) => x.token === token);
+    if (!i || i.accepted_at || Date.parse(i.expires_at) <= Date.now()) return false;
+    i.accepted_at = nowIso();
+    const existing = s.members.find((m) => m.user_id === userId && m.workspace_id === i.workspace_id);
+    if (existing) {
+      Object.assign(existing, { role: i.role, brand_profile_id: i.brand_profile_id, accepted_at: nowIso() });
+    } else {
+      s.members.push({ workspace_id: i.workspace_id, user_id: userId, role: i.role, brand_profile_id: i.brand_profile_id, invited_by: i.invited_by, accepted_at: nowIso(), created_at: nowIso() });
+    }
+    return true;
+  },
+
+  async updateWorkspace(patch) {
+    const s = state();
+    for (const key of ["name", "data_region", "retention_days", "render_retention_days"] as const) {
+      if (patch[key] !== undefined) Object.assign(s.workspace, { [key]: patch[key] });
+    }
+    return { ...s.workspace };
+  },
+
+  async listMembers() {
+    const s = state();
+    return s.members.map<WorkspaceMember>((m) => {
+      const u = s.users.find((x) => x.id === m.user_id);
+      const b = m.brand_profile_id ? s.brandProfiles.find((x) => x.id === m.brand_profile_id) : undefined;
+      return {
+        user_id: m.user_id,
+        email: u?.email ?? "",
+        display_name: u?.display_name ?? null,
+        role: m.role,
+        brand_profile_id: m.brand_profile_id,
+        brand_profile_name: b?.name ?? null,
+        invited_by: m.invited_by,
+        accepted_at: m.accepted_at,
+        created_at: m.created_at,
+        last_login_at: u?.last_login_at ?? null,
+      };
+    });
+  },
+
+  async updateMember(userId, patch) {
+    const m = state().members.find((x) => x.user_id === userId);
+    if (!m) return null;
+    if (patch.role !== undefined) m.role = patch.role;
+    if (patch.brand_profile_id !== undefined) m.brand_profile_id = patch.brand_profile_id;
+    return (await this.listMembers()).find((x) => x.user_id === userId) ?? null;
+  },
+
+  async removeMember(userId) {
+    const s = state();
+    const before = s.members.length;
+    s.members = s.members.filter((m) => m.user_id !== userId || m.role === "owner");
+    return s.members.length < before;
+  },
+
+  async listInvites() {
+    return state().invites.filter((i) => !i.accepted_at && Date.parse(i.expires_at) > Date.now());
+  },
+
+  async createInvite(input) {
+    const s = state();
+    const { userId, displayName } = await currentSession();
+    const b = input.brand_profile_id ? s.brandProfiles.find((x) => x.id === input.brand_profile_id) : undefined;
+    const invite: WorkspaceInvite = {
+      token: uuid().replace(/-/g, "") + uuid().replace(/-/g, ""),
+      workspace_id: s.workspace.id,
+      workspace_name: s.workspace.name,
+      email: input.email.toLowerCase(),
+      role: input.role,
+      brand_profile_id: input.brand_profile_id,
+      brand_profile_name: b?.name ?? null,
+      invited_by: userId,
+      invited_by_name: displayName,
+      expires_at: input.expires_at,
+      accepted_at: null,
+      created_at: nowIso(),
+    };
+    s.invites.push(invite);
+    return { ...invite };
+  },
+
+  async revokeInvite(token) {
+    const s = state();
+    const before = s.invites.length;
+    s.invites = s.invites.filter((i) => i.token !== token);
+    return s.invites.length < before;
+  },
+
+  async listAudit(filter) {
+    const s = state();
+    const label = (id: string | null) => {
+      const u = id ? s.users.find((x) => x.id === id) : undefined;
+      return u ? u.display_name ?? u.email : null;
+    };
+    const rows = [...s.audit]
+      .filter((a) => !filter.action || a.action === filter.action)
+      .filter((a) => !filter.actor_id || a.actor_id === filter.actor_id)
+      .filter((a) => !filter.from || a.at >= filter.from)
+      .filter((a) => !filter.to || a.at < `${filter.to}T23:59:59.999Z`)
+      .sort((a, b) => b.at.localeCompare(a.at) || b.id - a.id)
+      .map<AuditRow>((a) => ({
+        id: a.id,
+        workspace_id: a.workspace_id,
+        actor_id: a.actor_id,
+        actor_type: a.actor_type ?? "user",
+        actor_label: label(a.actor_id),
+        action: a.action,
+        entity: a.entity,
+        entity_id: a.entity_id,
+        payload: a.payload ?? null,
+        at: a.at,
+      }));
+    return { rows: rows.slice(filter.offset, filter.offset + filter.limit), total: rows.length };
+  },
+
+  async listAuditActions() {
+    return [...new Set(state().audit.map((a) => a.action))].sort();
+  },
+
+  async listAuditActors() {
+    const s = state();
+    const ids = [...new Set(s.audit.map((a) => a.actor_id))];
+    return ids.map((id) => {
+      const u = s.users.find((x) => x.id === id);
+      return { id, label: u ? u.display_name ?? u.email : id };
+    });
+  },
+
+  async getSubscription() {
+    return { ...state().subscription };
+  },
+
+  async getPlan(code) {
+    return DEMO_PLANS.find((p) => p.code === code) ?? null;
+  },
+
+  async getCurrentUsage() {
+    return { ...state().usage };
+  },
+
+  /* ------------------------------------------------------------------------------------------
+   * Block B: Gast-Freigabe (vollständig simuliert)
+   * ---------------------------------------------------------------------------------------- */
+
+  async createGuestApproval(clipId, input) {
+    const s = state();
+    const clip = s.clips.find((c) => c.id === clipId);
+    if (!clip) throw new Error("Clip nicht gefunden");
+    const { userId } = await currentSession();
+    const approval: GuestApproval = {
+      id: uuid(),
+      clip_id: clipId,
+      guest_name: input.guest_name,
+      guest_email: input.guest_email,
+      token: input.token,
+      message: input.message,
+      requested_by: userId,
+      expires_at: input.expires_at,
+      decision: null,
+      comment: null,
+      decided_at: null,
+      viewed_at: null,
+      created_at: nowIso(),
+    };
+    s.guestApprovals.push(approval);
+    clip.guest_approval_required = true;
+    clip.updated_at = nowIso();
+    return { ...approval };
+  },
+
+  async listGuestApprovals(sourceId) {
+    const s = state();
+    const clipIds = new Set(s.clips.filter((c) => c.source_id === sourceId).map((c) => c.id));
+    return s.guestApprovals
+      .filter((g) => clipIds.has(g.clip_id))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((g) => ({ ...g }));
+  },
+
+  async getGuestApprovalByToken(token) {
+    const s = state();
+    const approval = s.guestApprovals.find((g) => g.token === token);
+    if (!approval) return null;
+    const clip = s.clips.find((c) => c.id === approval.clip_id);
+    if (!clip) return null;
+    const source = s.sources.find((x) => x.id === clip.source_id);
+    const hook = currentHookOf(clip.id);
+    const view: GuestApprovalView = {
+      approval: { ...approval },
+      workspace_id: s.workspace.id,
+      workspace_name: s.workspace.name,
+      source_title: source?.title ?? "",
+      clip: {
+        id: clip.id,
+        platform: clip.platform,
+        aspect: clip.aspect,
+        title_card: clip.title_card,
+        duration_s: clip.duration_s,
+        file_key: clip.file_key,
+        poster_key: clip.poster_key,
+        status: clip.status,
+      },
+      onscreen_hook: hook?.onscreen_hook ?? null,
+      spoken_hook: hook?.spoken_hook ?? null,
+      post_caption: hook?.post_captions[clip.platform] ?? Object.values(hook?.post_captions ?? {})[0] ?? null,
+    };
+    return view;
+  },
+
+  async markGuestApprovalViewed(token) {
+    const g = state().guestApprovals.find((x) => x.token === token);
+    if (g && !g.viewed_at) g.viewed_at = nowIso();
+  },
+
+  async decideGuestApproval(token, decision, comment, ip) {
+    const s = state();
+    const g = s.guestApprovals.find((x) => x.token === token);
+    if (!g || g.decision || (g.expires_at && Date.parse(g.expires_at) <= Date.now())) return null;
+    g.decision = decision;
+    g.comment = comment;
+    g.decided_at = nowIso();
+    g.viewed_at ??= g.decided_at;
+    s.audit.push({
+      id: s.nextAuditId++,
+      at: nowIso(),
+      workspace_id: s.workspace.id,
+      actor_id: "",
+      actor_type: "guest",
+      action: "guest_approval.decided",
+      entity: "guest_approvals",
+      entity_id: g.id,
+      payload: { clip_id: g.clip_id, decision, comment, guest_name: g.guest_name, ip },
+    });
+    return { ...g };
+  },
+
+  /* ------------------------------------------------------------------------------------------
+   * Block B: Abrechnung (manual, im Speicher)
+   * ---------------------------------------------------------------------------------------- */
+
+  async listPlans() {
+    return DEMO_PLANS.map((p) => ({ ...p }));
+  },
+
+  async updateSubscription(patch) {
+    const s = state();
+    Object.assign(s.subscription, patch, { updated_at: nowIso() });
+    if (patch.plan_code) {
+      s.workspace.plan = patch.plan_code;
+      const plan = DEMO_PLANS.find((p) => p.code === patch.plan_code);
+      if (plan) s.usage.included_minutes = plan.included_hours * 60;
+    }
+    return { ...s.subscription };
+  },
+
+  async listUsageHistory() {
+    return state().usageHistory.map((u) => ({ ...u }));
+  },
+
+  async recordBillingEvent(input) {
+    const s = state();
+    if (input.provider_event_id) {
+      if (s.billingEventIds.has(input.provider_event_id)) return false;
+      s.billingEventIds.add(input.provider_event_id);
+    }
+    return true;
+  },
+
+  async findWorkspaceIdByProvider(ref) {
+    const sub = state().subscription;
+    if (ref.subscription_id && sub.provider_subscription_id === ref.subscription_id) return sub.workspace_id;
+    if (ref.customer_id && sub.provider_customer_id === ref.customer_id) return sub.workspace_id;
+    return null;
+  },
+
+  async updateSubscriptionForWorkspace(workspaceId, patch) {
+    const s = state();
+    if (workspaceId !== s.workspace.id) return null;
+    Object.assign(s.subscription, patch, { updated_at: nowIso() });
+    if (patch.plan_code) s.workspace.plan = patch.plan_code;
+    return { ...s.subscription };
+  },
+
+  /* ------------------------------------------------------------------------------------------
+   * Block B: AVV
+   * ---------------------------------------------------------------------------------------- */
+
+  async acceptDpa(input) {
+    const s = state();
+    const { userId, displayName } = await currentSession();
+    const row: DpaAcceptance = {
+      id: uuid(),
+      workspace_id: s.workspace.id,
+      dpa_version: input.version,
+      accepted_by: userId,
+      accepted_by_label: displayName,
+      accepted_at: nowIso(),
+      ip: input.ip,
+      company: input.company,
+      representative: input.representative,
+    };
+    s.dpaAcceptances.push(row);
+    s.workspace.dpa_signed_at = row.accepted_at;
+    return { ...row };
+  },
+
+  async getDpaAcceptance() {
+    const list = state().dpaAcceptances;
+    return list.length ? { ...list[list.length - 1] } : null;
+  },
+
+  /* ------------------------------------------------------------------------------------------
+   * Block B: Löschung (Simulation: nach 5 Sekunden „done“ mit Nachweis) und Export
+   * ---------------------------------------------------------------------------------------- */
+
+  async requestSourceDeletion(sourceId) {
+    const s = state();
+    const src = s.sources.find((x) => x.id === sourceId && x.status !== "deleted");
+    if (!src) return null;
+    const { userId, displayName } = await currentSession();
+    src.status = "deleted";
+    src.updated_at = nowIso();
+    s.simulations.delete(sourceId);
+    const clipKeys = s.clips.filter((c) => c.source_id === sourceId).flatMap((c) => [c.file_key, c.srt_key, c.vtt_key, c.poster_key]).filter((k): k is string => Boolean(k));
+    const job = newDeletionJob(s, "source", sourceId, src.title, userId, displayName, [src.storage_key, ...clipKeys], {
+      transcript_versions: s.transcripts.filter((t) => t.source_id === sourceId).length,
+      candidates: s.candidates.filter((c) => c.source_id === sourceId).length,
+      clips: s.clips.filter((c) => c.source_id === sourceId).length,
+      hook_versions: s.hooks.filter((h) => s.clips.some((c) => c.id === h.clip_id && c.source_id === sourceId)).length,
+      caption_versions: s.captions.filter((h) => s.clips.some((c) => c.id === h.clip_id && c.source_id === sourceId)).length,
+      pipeline_events: s.events.filter((e) => e.source_id === sourceId).length,
+      guest_approvals: s.guestApprovals.filter((g) => s.clips.some((c) => c.id === g.clip_id && c.source_id === sourceId)).length,
+    });
+    return { ...job };
+  },
+
+  async requestClipDeletion(clipId) {
+    const s = state();
+    const clip = s.clips.find((c) => c.id === clipId && c.status !== "deleted");
+    if (!clip) return null;
+    const { userId, displayName } = await currentSession();
+    clip.status = "deleted";
+    clip.deleted_at = nowIso();
+    clip.updated_at = clip.deleted_at;
+    s.renders.delete(clipId);
+    const keys = [clip.file_key, clip.srt_key, clip.vtt_key, clip.poster_key].filter((k): k is string => Boolean(k));
+    const job = newDeletionJob(s, "clip", clipId, PLATFORM_LABELS[clip.platform], userId, displayName, keys, {
+      clips: 1,
+      hook_versions: s.hooks.filter((h) => h.clip_id === clipId).length,
+      caption_versions: s.captions.filter((c) => c.clip_id === clipId).length,
+      guest_approvals: s.guestApprovals.filter((g) => g.clip_id === clipId).length,
+    });
+    return { ...job };
+  },
+
+  async listDeletionJobs() {
+    advanceDeletionJobs();
+    return [...state().deletionJobs].sort((a, b) => b.requested_at.localeCompare(a.requested_at)).map((j) => ({ ...j }));
+  },
+
+  async requestWorkspaceDeletion(scheduledFor) {
+    const s = state();
+    s.workspace.deletion_requested_at = nowIso();
+    s.workspace.deletion_scheduled_for = scheduledFor;
+    return { ...s.workspace };
+  },
+
+  async cancelWorkspaceDeletion() {
+    const s = state();
+    s.workspace.deletion_requested_at = null;
+    s.workspace.deletion_scheduled_for = null;
+    return { ...s.workspace };
+  },
+
+  async exportWorkspace() {
+    const s = state();
+    advanceDeletionJobs();
+    const audit = await this.listAudit({ limit: 10_000, offset: 0 });
+    const mediaKeys: { bucket: "sources" | "derived"; key: string; entity: string; entity_id: string }[] = [];
+    for (const src of s.sources) {
+      mediaKeys.push({ bucket: "sources", key: src.storage_key, entity: "sources", entity_id: src.id });
+      if (src.proxy_key) mediaKeys.push({ bucket: "derived", key: src.proxy_key, entity: "sources", entity_id: src.id });
+    }
+    for (const clip of s.clips) {
+      for (const k of [clip.file_key, clip.srt_key, clip.vtt_key, clip.poster_key]) {
+        if (k) mediaKeys.push({ bucket: "derived", key: k, entity: "clips", entity_id: clip.id });
+      }
+    }
+    for (const a of s.brandAssets) mediaKeys.push({ bucket: "derived", key: a.storage_key, entity: "brand_assets", entity_id: a.id });
+    const subscription = { ...s.subscription, provider_customer_id: undefined, provider_subscription_id: undefined };
+    return {
+      workspace: { ...s.workspace },
+      brand_profiles: s.brandProfiles.map((b) => ({ ...b })),
+      brand_assets: s.brandAssets.map((a) => ({ ...a })),
+      brand_profile_versions: s.brandVersions.map((v) => ({ ...v })),
+      sources: s.sources.map((x) => ({ ...x })),
+      transcript_versions: s.transcripts.map((t) => ({ ...t })),
+      candidates: s.candidates.map((c) => ({ ...c })),
+      clips: s.clips.map((c) => ({ ...c })),
+      hook_versions: s.hooks.map((h) => ({ ...h })),
+      caption_versions: s.captions.map((c) => ({ ...c })),
+      guest_approvals: s.guestApprovals.map((g) => ({ ...g })),
+      audit_log: audit.rows,
+      job_costs: [],
+      usage_periods: [...s.usageHistory, s.usage].map((u) => ({ ...u })),
+      subscription,
+      dpa_acceptances: s.dpaAcceptances.map((d) => ({ ...d })),
+      deletion_jobs: s.deletionJobs.map((j) => ({ ...j })),
+      media_keys: mediaKeys,
+    };
+  },
+
+  /* ------------------------------------------------------------------------------------------
+   * Block B: CI-Assets und Historie
+   * ---------------------------------------------------------------------------------------- */
+
+  async listBrandAssets(profileId) {
+    return state()
+      .brandAssets.filter((a) => a.brand_profile_id === profileId)
+      .map((a) => ({ ...a }));
+  },
+
+  async getBrandAsset(id) {
+    const a = state().brandAssets.find((x) => x.id === id);
+    return a ? { ...a } : null;
+  },
+
+  async createBrandAsset(input) {
+    const s = state();
+    const { userId } = await currentSession();
+    const asset: BrandAsset = { ...input, id: uuid(), workspace_id: s.workspace.id, uploaded_by: userId, created_at: nowIso() };
+    s.brandAssets.push(asset);
+    return { ...asset };
+  },
+
+  async deleteBrandAsset(id) {
+    const s = state();
+    const a = s.brandAssets.find((x) => x.id === id);
+    if (!a) return null;
+    s.brandAssets = s.brandAssets.filter((x) => x.id !== id);
+    return { ...a };
+  },
+
+  async listBrandProfileVersions(profileId) {
+    return state()
+      .brandVersions.filter((v) => v.brand_profile_id === profileId)
+      .sort((a, b) => b.version - a.version)
+      .map((v) => ({ ...v, snapshot: { ...v.snapshot } }));
+  },
+
+  async restoreBrandProfileVersion(profileId, version) {
+    const s = state();
+    const profile = s.brandProfiles.find((b) => b.id === profileId);
+    const snap = s.brandVersions.find((v) => v.brand_profile_id === profileId && v.version === version);
+    if (!profile || !snap) return null;
+    await snapshotBrand(profile);
+    const fields = structuredClone(snap.snapshot) as Partial<BrandProfile>;
+    delete fields.id;
+    delete fields.workspace_id;
+    delete fields.version;
+    delete fields.created_at;
+    delete fields.updated_at;
+    Object.assign(profile, fields, { version: profile.version + 1, updated_at: nowIso() });
+    return { ...profile };
   },
 };
+
+/* Snapshot vor jeder Änderung am Markenprofil (version = max + 1) */
+async function snapshotBrand(profile: BrandProfile): Promise<void> {
+  const s = state();
+  const { userId, displayName } = await currentSession();
+  const max = s.brandVersions.filter((v) => v.brand_profile_id === profile.id).reduce((m, v) => Math.max(m, v.version), 0);
+  s.brandVersions.push({
+    id: uuid(),
+    brand_profile_id: profile.id,
+    version: max + 1,
+    snapshot: structuredClone(profile),
+    changed_by: userId,
+    changed_by_label: displayName,
+    changed_at: nowIso(),
+  });
+}
+
+function newDeletionJob(
+  s: DemoState,
+  entity: DeletionJob["entity"],
+  entityId: string,
+  label: string,
+  userId: string,
+  userLabel: string,
+  keys: string[],
+  rows: Record<string, number>,
+): DeletionJob {
+  const job: DeletionJob & { _keys?: string[]; _rows?: Record<string, number> } = {
+    id: uuid(),
+    workspace_id: s.workspace.id,
+    entity,
+    entity_id: entityId,
+    entity_label: label,
+    reason: "user_request",
+    requested_by: userId,
+    requested_by_label: userLabel,
+    status: "queued",
+    keys_deleted: [],
+    rows_deleted: {},
+    error: null,
+    requested_at: nowIso(),
+    finished_at: null,
+  };
+  job._keys = keys;
+  job._rows = rows;
+  s.deletionJobs.push(job);
+  return job;
+}
+
+/* Simulation: queued → running nach 1,5 s → done nach 5 s mit Nachweis (Keys mit Zeitstempel, Zeilenzähler) */
+function advanceDeletionJobs() {
+  const s = state();
+  for (const job of s.deletionJobs as (DeletionJob & { _keys?: string[]; _rows?: Record<string, number> })[]) {
+    if (job.status === "done" || job.status === "failed") continue;
+    const elapsed = Date.now() - Date.parse(job.requested_at);
+    if (elapsed >= 5000) {
+      job.status = "done";
+      job.finished_at = nowIso();
+      job.keys_deleted = (job._keys ?? []).map((key, i) => ({ bucket: i === 0 && job.entity === "source" ? "sources" : "derived", key, deleted_at: job.finished_at ?? nowIso(), existed: true }));
+      job.rows_deleted = { ...(job._rows ?? {}) };
+      s.audit.push({
+        id: s.nextAuditId++,
+        at: job.finished_at,
+        workspace_id: s.workspace.id,
+        actor_id: "",
+        actor_type: "system",
+        action: `${job.entity}.deleted`,
+        entity: job.entity,
+        entity_id: job.entity_id,
+        payload: { job_id: job.id, keys: job.keys_deleted.length, rows: job.rows_deleted },
+      });
+      if (job.entity === "source") {
+        const src = s.sources.find((x) => x.id === job.entity_id);
+        if (src) Object.assign(src, { title: "gelöscht", storage_key: "", proxy_key: null, sha256: null });
+      }
+    } else if (elapsed >= 1500) {
+      job.status = "running";
+    }
+  }
+}

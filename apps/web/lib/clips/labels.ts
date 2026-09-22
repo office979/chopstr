@@ -25,6 +25,7 @@ export const CLIP_STATUS_LABELS: Record<ClipStatus, string> = {
   rendered: "Gerendert",
   exported: "Exportiert",
   failed: "Fehlgeschlagen",
+  deleted: "Gelöscht",
 };
 
 export const PATTERN_ORDER: HookPattern[] = ["identity_call", "contrarian", "open_loop", "results_first", "mistake_warning"];

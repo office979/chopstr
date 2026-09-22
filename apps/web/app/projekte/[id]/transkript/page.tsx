@@ -4,6 +4,7 @@ import { PageShell } from "@/components/layout/PageShell";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { ButtonLink } from "@/components/ui/Button";
 import { getRepo } from "@/lib/repo";
+import { requireSession } from "@/lib/session";
 import { TranscriptEditor } from "./TranscriptEditor";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,7 @@ export async function generateMetadata({ params }: Props) {
 
 export default async function TranscriptPage({ params }: Props) {
   const { id } = await params;
+  await requireSession();
   const repo = getRepo();
   const source = await repo.getSource(id);
   if (!source) notFound();

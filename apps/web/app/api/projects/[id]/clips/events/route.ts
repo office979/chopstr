@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { getRepo } from "@/lib/repo";
+import { requireApiSession } from "@/lib/auth/guard";
 import type { Clip } from "@/lib/repo/types";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,8 @@ function signature(clips: Clip[]): string {
 /* Server-Sent Events für Renders: pollt pipeline_events mit step = 'render' alle 1,5 s und sendet bei
  * Änderungen den Clip-Stand. Schließt, wenn alle Clips gerendert, exportiert oder fehlgeschlagen sind. */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await requireApiSession();
+  if (auth instanceof Response) return auth;
   const { id } = await params;
   const repo = getRepo();
   const source = await repo.getSource(id);

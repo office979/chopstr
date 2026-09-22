@@ -1,0 +1,147 @@
+# chopstr · Sovereign-Overlay (Phase 5c)
+#
+# Betrieb ohne US-Anbieter in der Verarbeitungskette: Postgres, MinIO, Temporal, Redis und LanguageTool aus
+# der Basisdatei (lokal auf Hetzner), Sprachmodell self-hosted über vLLM (OpenAI-kompatible API im Stack),
+# ASR-Fallback nur über einen EU-Endpunkt (GLADIA_BASE_URL, leer = kein Fallback), kein Bedrock.
+# Abrechnung: BILLING_PROVIDER=manual als Platzhalter, bis Mollie umgesetzt ist (docs/SOVEREIGN.md).
+#
+# Start:   docker compose --env-file ../.env -f infra/docker-compose.yml -f infra/docker-compose.sovereign.yml up -d
+# Pflicht: SELFHOST_LLM_MODEL (Hugging-Face-ID oder lokaler Pfad eines offenen Modells; die Lizenz des gewählten
+#          Modells gilt für den Betreiber, siehe Kommentar am Service vllm). Keine Modell-ID ist hier hartcodiert.
+#
+# Residency: alle Hosts in dieser Datei sind Compose-Servicenamen; der Residency-Guard erlaubt vllm über
+# SELFHOST_LLM_BASE_URL (tests/test_sovereign_overlay.py prüft, dass keine US-Hosts vorkommen).
+
+name: chopstr
+
+# Spiegelt x-common-env aus docker-compose.yml (Anker gelten nur innerhalb einer Datei); für worker-gpu nötig.
+x-common-env: &common-env
+  DATABASE_URL: postgres://chopstr:chopstr@postgres:5432/chopstr
+  REDIS_URL: redis://redis:6379
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_NAMESPACE: default
+  TEMPORAL_TASK_QUEUE_CPU: chopstr-cpu
+  TEMPORAL_TASK_QUEUE_GPU: chopstr-gpu
+  S3_ENDPOINT: http://minio:9000
+  S3_REGION: eu-central-1
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-chopstr}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-chopstr-secret}
+  S3_BUCKET_SOURCES: chopstr-sources
+  S3_BUCKET_DERIVED: chopstr-derived
+  S3_FORCE_PATH_STYLE: "true"
+  LANGUAGETOOL_URL: http://languagetool:8010/v2
+  TUS_HOOK_SECRET: ${TUS_HOOK_SECRET:-dev-hook-secret}
+  UPLOAD_MAX_BYTES: "5368709120"
+  APP_ENV: ${APP_ENV:-production}
+
+# Sprachmodell und Fallbacks für Sovereign-Worker: selfhost-eu (vLLM im Stack) oder mistral-eu (EU-Anbieter).
+x-sovereign-env: &sovereign-env
+  LLM_PROVIDER: ${LLM_PROVIDER:-selfhost-eu}
+  SELFHOST_LLM_BASE_URL: http://vllm:8000/v1
+  SELFHOST_LLM_MODEL: ${SELFHOST_LLM_MODEL:-}
+  SELFHOST_LLM_API_KEY: ${SELFHOST_LLM_API_KEY:-}
+  MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+  MISTRAL_MODEL: ${MISTRAL_MODEL:-}
+  BEDROCK_MODEL_ID: ""
+  GLADIA_BASE_URL: ${GLADIA_BASE_URL:-}
+  GLADIA_API_KEY: ${GLADIA_API_KEY:-}
+  ASR_MODEL_DE: ${ASR_MODEL_DE:-primeline/whisper-large-v3-turbo-german}
+  ASR_MODEL_CH: ${ASR_MODEL_CH:-models/swissgerman-ct2}
+  HF_TOKEN: ${HF_TOKEN:-}
+  EGRESS_ALLOWLIST: ${EGRESS_ALLOWLIST:-}
+  YUNET_MODEL_PATH: /app/workers/models/face_detection_yunet_2023mar.onnx
+  INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-change-me-internal}
+  APP_INTERNAL_URL: http://web:3000
+
+services:
+  # CPU-Worker: Ingest, NLP, Story-Engine, Render, Outbox, Publishing-Zeitplanung. Nur Queue cpu.
+  worker:
+    command: python -m chopstr_worker.worker --queues cpu --ensure-schedules
+    depends_on:
+      vllm:
+        condition: service_started
+    environment:
+      <<: *sovereign-env
+      ASR_DEVICE: cpu
+
+  # GPU-Worker: Transkription und Sprechererkennung (Queue gpu) auf dem Hetzner-GPU-Host.
+  # Auf einem Host ohne GPU diesen Service weglassen: docker compose ... up -d --scale worker-gpu=0
+  worker-gpu:
+    build:
+      context: ..
+      dockerfile: workers/Dockerfile.gpu
+    command: --queues gpu
+    depends_on:
+      temporal:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: [*common-env, *sovereign-env]
+      ASR_DEVICE: cuda
+      ASR_COMPUTE: int8_float16
+    volumes:
+      - ../workers/models:/app/workers/models
+      - hf-cache:/home/worker/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Self-hosted Sprachmodell mit OpenAI-kompatibler API (vLLM). Das Modell kommt ausschließlich aus
+  # SELFHOST_LLM_MODEL; keine ID ist hier vorgegeben. Lizenz: der Betreiber prüft die Lizenz des gewählten
+  # offenen Modells (z. B. Apache-2.0 oder eine Community-Lizenz mit Nutzungsgrenzen) und die Eignung für
+  # deutschsprachige Texte; Ergebnisse der Blindtests (docs/BLINDTEST.md) entscheiden über die Freigabe.
+  # Gewichte werden beim ersten Start in das Volume vllm-cache geladen (HF_TOKEN nur für gated Repos nötig).
+  vllm:
+    image: vllm/vllm-openai:latest
+    command:
+      - --model
+      - ${SELFHOST_LLM_MODEL:?SELFHOST_LLM_MODEL setzen (offenes Modell, Hugging-Face-ID oder lokaler Pfad)}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --max-model-len
+      - ${VLLM_MAX_MODEL_LEN:-16384}
+      - --gpu-memory-utilization
+      - ${VLLM_GPU_MEMORY_UTILIZATION:-0.90}
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
+      VLLM_API_KEY: ${SELFHOST_LLM_API_KEY:-}
+    volumes:
+      - vllm-cache:/root/.cache/huggingface
+      - ${SELFHOST_LLM_MODEL_DIR:-./models-llm}:/models:ro
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 40
+      start_period: 300s
+
+  web:
+    environment:
+      BILLING_PROVIDER: manual
+      DEFAULT_TIER: sovereign
+      STRIPE_SECRET_KEY: ""
+      STRIPE_WEBHOOK_SECRET: ""
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      APP_INTERNAL_URL: http://web:3000
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-change-me-internal}
+
+volumes:
+  vllm-cache:

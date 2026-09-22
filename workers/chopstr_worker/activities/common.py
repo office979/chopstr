@@ -27,7 +27,7 @@ class Context:
     work_dir: Path
 
     def source_dir(self, source_id: str) -> Path:
-        p = self.work_dir / source_id
+        p = self.work_dir / str(source_id)  # psycopg liefert UUID-Objekte, kein str
         p.mkdir(parents=True, exist_ok=True)
         return p
 
@@ -84,6 +84,21 @@ def ensure_local_audio(ctx: Context, source_id: str, audio_key: str) -> Path:
     return local
 
 
+def load_transcript(ctx: Context, source_id: str) -> tuple[str, int, list[dict]]:
+    """Höchste Transkriptversion einer Quelle: (id, version, words). Fehlt sie, klare Meldung."""
+    row = db.fetch_one(
+        ctx.conn,
+        "select id, version, words from transcript_versions where source_id = %s order by version desc limit 1",
+        (source_id,),
+    )
+    if row is None:
+        raise RuntimeError("Kein Transkript vorhanden. Wurde fuse_and_nlp ausgeführt?")
+    tv_id, version, words = row
+    if isinstance(words, str):
+        words = json.loads(words)
+    return str(tv_id), int(version), list(words or [])
+
+
 def require(source: dict, key: str, what: str) -> Any:
     val = source.get(key)
     if not val:
@@ -96,6 +111,7 @@ __all__ = [
     "audio_key_for",
     "ensure_local_audio",
     "heartbeat",
+    "load_transcript",
     "open_context",
     "proxy_key_for",
     "require",

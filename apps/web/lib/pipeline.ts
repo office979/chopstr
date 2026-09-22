@@ -5,7 +5,7 @@ export interface PipelineStepDef {
   key: PipelineStep;
   label: string;
   description: string;
-  phase: 1 | 2;
+  phase: 1 | 2 | 3;
 }
 
 export const PIPELINE_STEPS: PipelineStepDef[] = [
@@ -40,6 +40,14 @@ export const PIPELINE_STEPS: PipelineStepDef[] = [
     phase: 2,
   },
 ];
+
+/* Render-Schritt (Phase 3): erscheint nur auf der Clip-Seite, nicht in der Quellen-Pipeline */
+export const RENDER_STEP: PipelineStepDef = {
+  key: "render",
+  label: "Render",
+  description: "Copy, Reframe, Captions, Encode, Provenienz",
+  phase: 3,
+};
 
 export const STATUS_LABELS: Record<SourceStatus, string> = {
   uploading: "Wird hochgeladen",

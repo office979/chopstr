@@ -2,11 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { getRepo } from "@/lib/repo";
+import { normalizeHex } from "@/lib/color";
 import type {
   Address,
   AsrVariant,
+  BrandCI,
   BrandProfileInput,
   CaptionPreset,
+  CaptionStyle,
   Country,
   GenderMode,
   Platform,
@@ -40,6 +43,22 @@ function tags(formData: FormData, name: string, max?: number): string[] {
   return max ? unique.slice(0, max) : unique;
 }
 
+/* Hex-Farbe aus dem Formular: leer erlaubt, sonst gültiger Hex-Wert */
+function color(formData: FormData, name: string, errors: Record<string, string>): string | undefined {
+  const raw = String(formData.get(name) ?? "").trim();
+  if (!raw) return undefined;
+  const hex = normalizeHex(raw);
+  if (!hex) {
+    errors[name] = "Bitte einen Hex-Wert wie #020cf5 angeben.";
+    return undefined;
+  }
+  return hex;
+}
+
+function flag(formData: FormData, name: string): boolean {
+  return formData.get(name) === "true";
+}
+
 export async function saveBrandProfileAction(_prev: BrandFormState, formData: FormData): Promise<BrandFormState> {
   const errors: Record<string, string> = {};
   const name = String(formData.get("name") ?? "").trim();
@@ -47,6 +66,25 @@ export async function saveBrandProfileAction(_prev: BrandFormState, formData: Fo
 
   const toneAdjectives = tags(formData, "tone_adjectives");
   if (toneAdjectives.length > 3) errors.tone_adjectives = "Höchstens drei Ton-Adjektive.";
+
+  const ci: BrandCI = {
+    colors: {
+      primary: color(formData, "ci_primary", errors),
+      secondary: color(formData, "ci_secondary", errors),
+      accent: color(formData, "ci_accent", errors),
+    },
+    fonts: { primary_key: null, secondary_key: null },
+    logo_key: null,
+    lower_third: {
+      enabled: flag(formData, "lower_third_enabled"),
+      name: String(formData.get("lower_third_name") ?? "").trim().slice(0, 80),
+      role: String(formData.get("lower_third_role") ?? "").trim().slice(0, 80),
+    },
+  };
+  const captionStyle: CaptionStyle = {
+    highlight_color: color(formData, "caption_highlight", errors),
+    hook_overlay: Object.fromEntries(PLATFORM.map((p) => [p, flag(formData, `hook_overlay_${p}`)])) as CaptionStyle["hook_overlay"],
+  };
 
   if (Object.keys(errors).length > 0) {
     return { ok: false, message: "Bitte die markierten Felder prüfen.", errors };
@@ -66,6 +104,8 @@ export async function saveBrandProfileAction(_prev: BrandFormState, formData: Fo
     brand_vocab: tags(formData, "brand_vocab"),
     protected_terms: tags(formData, "protected_terms"),
     banned_phrases: tags(formData, "banned_phrases"),
+    ci,
+    caption_style: captionStyle,
   };
 
   const repo = getRepo();

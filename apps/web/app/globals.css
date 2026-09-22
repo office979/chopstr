@@ -257,3 +257,27 @@ input[type="range"].timeline::-moz-range-thumb {
   background: var(--text);
   border: 1px solid rgba(0, 0, 0, 0.4);
 }
+
+/* Stumme Vorschau: Karten-Einblendung und Keyword-Pop nur bei animierten Presets (tiktok_bold, reels_clean, shorts_clean) */
+@keyframes silent-card-in {
+  from { opacity: 0; transform: translate3d(0, -100%, 0) scale(0.94); }
+  to { opacity: 1; transform: translate3d(0, -100%, 0) scale(1); }
+}
+.silent-card-in {
+  animation: silent-card-in 180ms var(--ease) 1 both;
+}
+@keyframes silent-caption-pop {
+  0% { transform: scale(0.9); }
+  60% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+.silent-caption-pop {
+  display: inline-block;
+  animation: silent-caption-pop 260ms var(--ease) 1 both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .silent-card-in,
+  .silent-caption-pop {
+    animation: none;
+  }
+}

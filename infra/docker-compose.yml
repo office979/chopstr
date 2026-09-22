@@ -98,7 +98,8 @@ services:
       timeout: 3s
       retries: 20
 
-  # Buckets + Lifecycle: Rohdaten 30 Tage, Renders/Ableitungen 90 Tage (Löschnachweis zusätzlich im Audit-Log)
+  # Buckets + Lifecycle: Rohdaten 30 Tage, Renders/Ableitungen 90 Tage (Löschnachweis zusätzlich im Audit-Log).
+  # derived ist nur in der lokalen Entwicklung anonym lesbar (Poster/MP4 in der UI); Produktion: signierte URLs (Phase 4).
   minio-init:
     image: minio/mc:RELEASE.2025-01-17T23-25-50Z
     depends_on:
@@ -111,6 +112,7 @@ services:
       mc mb --ignore-existing local/chopstr-derived &&
       mc ilm rule add --expire-days 30 local/chopstr-sources || true &&
       mc ilm rule add --expire-days 90 local/chopstr-derived || true &&
+      mc anonymous set download local/chopstr-derived &&
       echo 'buckets ready'"
 
   # Resumable Upload (TUS) direkt in den Objektspeicher; Hooks gehen an die Web-App
@@ -147,8 +149,8 @@ services:
   # Produktion: separater GPU-Worker (Dockerfile.gpu) nur für die Queue chopstr-gpu.
   worker:
     build:
-      context: ../workers
-      dockerfile: Dockerfile
+      context: ..                    # Monorepo-Root: das Dockerfile kopiert packages/prompts mit
+      dockerfile: workers/Dockerfile
     depends_on:
       temporal:
         condition: service_healthy
@@ -171,9 +173,10 @@ services:
       ASR_COMPUTE: int8
       HF_TOKEN: ${HF_TOKEN:-}
       EGRESS_ALLOWLIST: ${EGRESS_ALLOWLIST:-}
+      YUNET_MODEL_PATH: /app/workers/models/face_detection_yunet_2023mar.onnx
     volumes:
-      - ../workers/models:/app/models
-      - hf-cache:/root/.cache/huggingface
+      - ../workers/models:/app/workers/models
+      - hf-cache:/home/worker/.cache        # Dockerfile läuft als Nutzer worker
 
   web:
     build:
@@ -188,6 +191,7 @@ services:
       <<: *common-env
       APP_BASE_URL: http://localhost:3000
       NEXT_PUBLIC_TUS_ENDPOINT: http://localhost:1080/files/
+      NEXT_PUBLIC_MEDIA_BASE_URL: http://localhost:9000/chopstr-derived
     ports: ["3000:3000"]
 
 volumes:

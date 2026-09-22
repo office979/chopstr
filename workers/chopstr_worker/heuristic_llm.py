@@ -1,4 +1,4 @@
-"""Heuristik-Provider ``local-heuristic``: bedient die drei Tool-Schemata der Story-Engine ohne Netz.
+"""Heuristik-Provider ``local-heuristic``: bedient die Tool-Schemata der Story-Engine und der Copy ohne Netz.
 
 Das ist KEIN Ersatz für ein Sprachmodell. Der Provider existiert, damit Entwicklung, Tests und Demos
 ohne LLM-Zugang durch die ganze Kette laufen (Kandidaten entstehen, die UI hat Daten). Die Auswahl
@@ -221,10 +221,123 @@ def confirm_qualification(user: str) -> dict:
     }
 
 
+# -- Phase 3: Copy (Hooks, Post-Captions) ------------------------------------------------------------
+_ADDRESS = re.compile(r"Anrede:\s*(DU|SIE|du|sie|Du|Sie)\b")
+_PLATFORM = re.compile(r"für\s+(tiktok|reels|shorts|linkedin)\b", re.IGNORECASE)
+_HOOK_ONSCREEN = re.compile(r"nicht wörtlich:\s*(.*)")
+_NUMBER_PHRASE = re.compile(r"\d[\d.,]*(?:\s?(?:%|€|Prozent|Euro|Franken|Jahre|Jahren|Tage|Stunden|Minuten|Kunden|Mitarbeiter|Leute|Mal))?")
+_SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+SPOKEN_MAX_WORDS = 12
+ONSCREEN_MAX_WORDS = 9
+HOOK_PATTERNS = ("identity_call", "contrarian", "open_loop", "results_first", "mistake_warning")
+
+
+def clip_text_of(user: str) -> str:
+    """Text nach der letzten Zeile ``CLIP:`` im gerenderten Prompt."""
+    marker = "CLIP:"
+    idx = user.rfind(marker)
+    return user[idx + len(marker) :].strip() if idx >= 0 else user.strip()
+
+
+def address_of(user: str) -> str:
+    """Anrede aus dem Prompt (``du`` | ``sie``), Default ``du``."""
+    m = _ADDRESS.search(user)
+    return m.group(1).lower() if m else "du"
+
+
+def sentences_of(text: str) -> list[str]:
+    return [x.strip() for x in _SENT_SPLIT.split(" ".join(text.split())) if x.strip()]
+
+
+def _core(sentence: str, max_words: int) -> str:
+    """Satzanfang ohne Schlusszeichen, maximal ``max_words`` Wörter (nur Wörter aus dem Clip)."""
+    toks = sentence.split()
+    cut = toks[:max_words]
+    out = " ".join(cut).rstrip(".,;:!?")
+    return out[:1].upper() + out[1:] if out else out
+
+
+def _fit(prefix: str, sentence: str, limit: int, suffix: str = "") -> str:
+    """``prefix`` plus Satzanfang, so gekürzt, dass die Wortzahl ``limit`` nicht überschreitet."""
+    used = len(prefix.split()) + len(suffix.split())
+    core = _core(sentence, max(1, limit - used))
+    text = f"{prefix} {core}".strip()
+    return f"{text}{suffix}" if suffix else text
+
+
+def write_hooks(user: str) -> dict:
+    """Fünf Hook-Varianten aus Satzanfängen, erster Zahl und Kontrastmarker des Clips. Keine neuen Zahlen."""
+    clip = clip_text_of(user)
+    address = address_of(user)
+    sents = sentences_of(clip) or [clip or "-"]
+    first = sents[0]
+    number = _NUMBER_PHRASE.search(clip)
+    number_sent = next((x for x in sents if _NUMBER.search(x)), first)
+    contrast_sent = next((x for x in sents if CONTRAST_WORDS.search(x.lower())), None)
+    du = address == "du"
+    variants = [
+        {
+            "pattern": "identity_call",
+            "spoken": _fit("Du kennst das sicher:" if du else "Sie kennen das sicher:", first, SPOKEN_MAX_WORDS),
+            "onscreen": _fit("Kennst du das:" if du else "Kennen Sie das:", first, ONSCREEN_MAX_WORDS),
+        },
+        {
+            "pattern": "contrarian",
+            "spoken": _fit("Das Gegenteil stimmt:", contrast_sent or first, SPOKEN_MAX_WORDS),
+            "onscreen": _fit("Das Gegenteil:", contrast_sent or first, ONSCREEN_MAX_WORDS),
+        },
+        {
+            "pattern": "open_loop",
+            "spoken": _fit("Was dahinter steckt:", first, SPOKEN_MAX_WORDS),
+            "onscreen": _fit("Was dahinter steckt:", first, ONSCREEN_MAX_WORDS),
+        },
+        {
+            "pattern": "results_first",
+            "spoken": _fit(f"{number.group(0).strip()}:" if number else "Das Ergebnis:", number_sent, SPOKEN_MAX_WORDS),
+            "onscreen": _fit(f"{number.group(0).strip()}:" if number else "Das Ergebnis:", number_sent, ONSCREEN_MAX_WORDS),
+        },
+        {
+            "pattern": "mistake_warning",
+            "spoken": _fit("Dieser Fehler kostet dich viel:" if du else "Dieser Fehler kostet Sie viel:", first, SPOKEN_MAX_WORDS),
+            "onscreen": _fit("Dieser Fehler kostet:", first, ONSCREEN_MAX_WORDS),
+        },
+    ]
+    return {"variants": variants}
+
+
+def write_post_caption(user: str) -> dict:
+    """Post-Text pro Plattform nur aus Sätzen des Clips; CTA in der Anrede des Profils."""
+    clip = clip_text_of(user)
+    address = address_of(user)
+    m = _PLATFORM.search(user.split("CLIP:", 1)[0])
+    platform = m.group(1).lower() if m else "linkedin"
+    hook = (_HOOK_ONSCREEN.search(user.split("CLIP:", 1)[0]) or [None, ""])[1]
+    hook = hook.strip() if isinstance(hook, str) else ""
+    sents = [x for x in sentences_of(clip) if x != hook] or [clip or "-"]
+    du = address == "du"
+    if platform in ("tiktok", "reels"):
+        text = "\n".join(sents[:2])
+        cta = "Was ist deine Erfahrung damit?" if du else "Was ist Ihre Erfahrung damit?"
+    elif platform == "shorts":
+        title = _core(sents[0], 8)
+        if len(title) > 60:
+            title = title[:57].rstrip() + "..."
+        text = f"{title}\n{sents[1] if len(sents) > 1 else sents[0]}"
+        cta = "Mehr dazu im ganzen Gespräch."
+    else:
+        statement = _core(sents[0], 8)
+        paragraphs = [statement, *sents[1:4]]
+        text = "\n\n".join(paragraphs)
+        cta = "Wie siehst du das?" if du else "Wie sehen Sie das?"
+    return {"text": text, "cta": cta}
+
+
 HANDLERS = {
     "propose_moments": propose_moments,
     "score_clip": score_clip,
     "confirm_qualification": confirm_qualification,
+    "write_hooks": write_hooks,
+    "write_post_caption": write_post_caption,
 }
 
 
@@ -238,12 +351,20 @@ def answer(tool_name: str, user: str, schema: dict | None = None) -> dict:
 
 __all__ = [
     "HANDLERS",
+    "HOOK_PATTERNS",
     "MODEL_ID",
+    "ONSCREEN_MAX_WORDS",
+    "SPOKEN_MAX_WORDS",
     "WORDS_PER_SECOND",
+    "address_of",
     "answer",
+    "clip_text_of",
     "confirm_qualification",
     "estimate_seconds",
     "parse_numbered",
     "propose_moments",
     "score_clip",
+    "sentences_of",
+    "write_hooks",
+    "write_post_caption",
 ]

@@ -5,9 +5,9 @@ DACH-NLP, Signal-Heatmap. Orchestriert über Temporal, Dateien im S3-kompatiblen
 Postgres (Schema: `packages/schema/migrations/0001_init.sql`). Alle Verarbeitung bleibt in der EU; der
 Residency-Guard (`chopstr_worker/residency.py`) blockiert jeden anderen Aufruf, bevor er das Netz erreicht.
 
-Phase 0 (Fundament), Phase 1 („Deutsch hören") und Phase 2 („Story-Engine": Kandidaten mit Begründung,
-Gates, Story-Graph) sind umgesetzt und im Workflow verdrahtet. Die Module der Phase 3 (Render) liegen unter
-`pipeline/`, hängen aber noch nicht in der Kette (siehe unten).
+Phase 0 (Fundament), Phase 1 („Deutsch hören"), Phase 2 („Story-Engine": Kandidaten mit Begründung,
+Gates, Story-Graph) und Phase 3 („Render": Copy, Reframe, Captions, ffmpeg, Provenienz) sind umgesetzt und im
+Workflow verdrahtet. Vertrag für Phase 3: `packages/schema/CLIPS.md` (`clips_v1`, `render_plan_v1`).
 
 ## Struktur
 
@@ -25,9 +25,10 @@ workers/
     heuristic_llm.py   Heuristik-Provider ohne Netz (Entwicklung, Demo; kein Ersatz für ein Sprachmodell)
     ingest.py          ffprobe, sha256, 16-kHz-WAV, 720p-Proxy (ffmpeg per subprocess)
     pipeline/          reine Funktionen (transcribe, dach_nlp, segment, signals, story_score, story_graph,
-                       story_engine, fidelity, ...)
+                       story_engine, fidelity, copy_engine, render_plan, reframe, captions_de, render, compliance)
     activities/        Temporal-Activities (probe_and_extract, transcribe_de, diarize, heatmap,
                        fuse_and_nlp, detect_candidates, render_pack, notify)
+  fonts/               Inter-Bold (OFL) für drawtext und libass, siehe fonts/README.md
     workflows/         ClipProjectWorkflow
     worker.py          python -m chopstr_worker.worker --queues cpu,gpu
   eval/                wer_eval.py, eval_harness.py, export_predictions.py, README.md
@@ -88,12 +89,13 @@ Quelle: `.env.example` im Monorepo-Root. Der Worker liest zusätzlich die mit �
 | `ASR_WINDOW_S`, `ASR_OVERLAP_S` (Worker) | Fensterlänge und Überlappung (Default 600 s / 20 s) |
 | `HF_TOKEN`, `DIARIZER_MODEL` (Worker) | pyannote-Zugang, Modell-ID (Default siehe TODO in `pipeline/transcribe.py`) |
 | `GLADIA_API_KEY`, `GLADIA_BASE_URL` | ASR-Fallback, nur mit gesetzter Basis-URL und erlaubtem Host |
-| `LANGUAGETOOL_URL` | Grammatikprüfung (Phase 3) |
+| `LANGUAGETOOL_URL` | Grammatikprüfung der Copy (nur wenn gesetzt; Fehler dort sind Hinweise, nie fatal) |
 | `EGRESS_ALLOWLIST` | zusätzliche erlaubte Hosts, kommagetrennt |
 | `GPU_EUR_PER_HOUR`, `CPU_EUR_PER_HOUR`, `STORAGE_EUR_PER_GB_MONTH`, `LLM_EUR_PER_1M_INPUT`, `LLM_EUR_PER_1M_OUTPUT`, `GLADIA_EUR_PER_HOUR` (Worker) | Preistabelle für `job_costs.estimated_eur` |
 | `PROMPTS_DIR` (Worker) | überschreibt den Prompt-Ordner (Default `packages/prompts` im Monorepo) |
-| `YUNET_MODEL_PATH` (Worker) | YuNet-ONNX für Reframing (Phase 3) |
-| `C2PA_SIGN_CERT`, `C2PA_PRIVATE_KEY` | c2patool-Signatur (Phase 3) |
+| `YUNET_MODEL_PATH` (Worker) | YuNet-ONNX für Reframing; fehlt die Datei oder OpenCV, läuft Reframe `neutral` |
+| `RENDER_X264_PRESET`, `RENDER_FONTS_DIR` (Worker) | x264-Preset (Default `medium`, Tests `ultrafast`), Fontordner (Default `workers/fonts`) |
+| `C2PA_SIGN_CERT`, `C2PA_PRIVATE_KEY` | c2patool-Signatur; ohne c2patool ist `provenance.c2pa = "skipped"` |
 
 Modell-IDs haben bewusst keine Defaults im Code. Fehlt `ASR_MODEL_DE`, schlägt `transcribe_de` mit einer
 klaren Meldung fehl („Kein ASR-Modell für Variante de konfiguriert (ASR_MODEL_DE setzen)").
@@ -123,7 +125,7 @@ Ablauf `ClipProjectWorkflow`:
 ```
 probe_and_extract -> gather(transcribe_de, diarize, heatmap) -> fuse_and_nlp -> detect_candidates
   -> notify(candidates_ready) -> Freigabe-Signale approve(candidate_id, destination) / finish_review
-  (bis 14 Tage) -> render_pack (Phase 3, Stub) -> notify(renders_ready)
+  (bis 14 Tage) -> render_pack (Phase 3) -> notify(renders_ready)
 ```
 
 Start über den Client (Beispiel):
@@ -185,6 +187,41 @@ und `risk_flags` enthält `heuristic_only`; `prompt_version` bleibt gesetzt, wei
 wurden. Das ist kein Ersatz für ein Sprachmodell und nur für Entwicklung, Tests und Demos gedacht.
 Produktion braucht einen echten EU-Provider (`bedrock-eu`, `mistral-eu`, `selfhost-eu`).
 
+## Phase 3: Render (`activities/render.py`, Activity `render_pack`)
+
+`render_pack(candidate_id, destination)` findet die `clips`-Zeile `(candidate_id, platform = destination)` oder legt
+sie an, setzt `rendering` und läuft in fünf Schritten mit `progress`-Events (`payload.phase`):
+
+| Schritt | Modul | Was passiert |
+|---|---|---|
+| copy | `pipeline/copy_engine.py` | Ohne `hook_versions`-Zeile: `hooks_v1` (fünf Varianten, `copy_de.lint`, Wortlimits 12/9, `fidelity.hook_claim_check`), `post_caption_v1` je Plattform, optional LanguageTool (nur mit `LANGUAGETOOL_URL`, über den Residency-Hook). Auswahl: erste Variante ohne Claim-Issues, sonst Variante 1. Existiert eine Version (auch manuell aus dem Hook-Studio), nimmt der Render die höchste. |
+| reframe | `pipeline/reframe.py` | `talking_head` (eine Position, Gesichtsmitte bei 37 % der Ausgabehöhe), `two_speakers` (Schnitt auf den aktiven Sprecher, min. 1,2 s, `speaker_positions`), `neutral` (mittig). YuNet nur mit `YUNET_MODEL_PATH` plus OpenCV, sonst `detector = "none"` und Hinweis im Event. |
+| captions | `pipeline/captions_de.py` | Wortzeiten über `compose.remap_words` auf die Ausgabe-Timeline, Preset je Plattform (auf der Standardplattform des Profils dessen `caption_preset`), für 4:5/1:1/16:9 proportional skaliert (`scaled_preset`), ASS/SRT/VTT, `cps_warnings`, `fidelity.check_cut` in `fidelity_warnings`. |
+| encode | `pipeline/render.py` | Ein ffmpeg-Durchgang: pro Shot ein per `-ss/-t` gesuchter Input, crop/scale, concat; Audio pro Segment mit 20-ms-Micro-Fades; `subtitles` (libass, `fontsdir`), Titelkarte 2,5 s und Hook-Overlay 3 s per `drawtext`; Loudness zweistufig (Pass 1 `loudnorm=print_format=json`, Pass 2 linear mit Messwerten, bei LRA über 7 LU `acompressor` davor); H.264 High, yuv420p, `+faststart`, AAC 192k, fps aus dem Plan. Danach `ebur128`-Messung, Poster bei 1,0 s, `regression_checks` (Dauer ±0,3 s, Auflösung, `blackdetect`, Audiospur). |
+| provenance | `pipeline/compliance.py` | C2PA nur mit c2patool (`signed`/`failed` mit Grund), sonst `skipped` mit „c2patool nicht installiert"; `ai_label_required`, `source_credit` bei `third_party`, `ad_label`. Upload nach `derived` (`renders/<clip_id>/<hash>.mp4|srt|vtt|jpg|ass`). |
+
+Der Plan (`clips.render_plan`, `render_plan_v1`, `pipeline/render_plan.py`) ist deterministisch und enthält keine
+Umgebungswerte. Idempotenz: `hash = sha256(plan + hook_version + transcript_version)[:16]`; ist die MP4 unter
+diesem Hash vorhanden und am Clip eingetragen, meldet der Schritt `skipped`. Eine neue Hook-Version ergibt einen
+neuen Hash und damit einen neuen Render. Am Ende: `caption_versions` Version n+1 (`origin = 'auto'`), `clips`
+mit `file_key`, `duration_s`, `width`, `height`, `fps`, `loudness`, `provenance`, `status = 'rendered'`;
+bei Fehlern `failed` plus `render_error`. Kostenlog `job_type = 'render'` (CPU-Sekunden, Clip-Minuten,
+Dateigröße, Token der Copy).
+
+Ehrlich gegenüber der Umgebung: was fehlt, steht als Hinweis im `finished`-Payload (`notes`) und im
+Render-Ergebnis, ohne den Render zu stoppen:
+
+- ffmpeg ohne libass (`subtitles`) oder libfreetype (`drawtext`): Untertitel bzw. Overlays werden nicht
+  eingebrannt, SRT/VTT liegen trotzdem bei. Der Homebrew-Build auf macOS hat beides oft nicht; das
+  Docker-Image (Debian ffmpeg) hat beides. `render.capabilities()` zeigt, was der Build kann.
+- Font `Inter-Bold` fehlt: Overlays entfallen (siehe `fonts/README.md`, `RENDER_FONTS_DIR`).
+- YuNet-Modell oder OpenCV fehlt: `reframe.strategy = "neutral"`, `detector = "none"`.
+- c2patool fehlt: `provenance.c2pa = "skipped"`.
+
+Heuristik-Provider für die Copy (`LLM_PROVIDER=local-heuristic`): `write_hooks` baut fünf Varianten aus
+Satzanfängen, erster Zahl und Kontrastmarker des Clips (Anrede aus dem Prompt, keine erfundenen Zahlen),
+`write_post_caption` nur aus Sätzen des Clips. Kein Ersatz für ein Sprachmodell.
+
 ## Lokal gegen Temporal und MinIO
 
 ```bash
@@ -209,6 +246,7 @@ Bucket-Unterordner an. Ohne GPU laufen `transcribe_de` und `diarize` auf der CPU
 
 ```bash
 .venv/bin/python -m pytest -q                       # alle Tests (Workflow-Test lädt einmalig ein Temporal-Testbinary)
+.venv/bin/python -m pytest -q tests/test_render_media.py tests/test_render_activity.py   # Render mit echtem ffmpeg (12-s-Testvideo, Lautheit, Regressionschecks)
 .venv/bin/python -m pytest -q -m "not network"      # ohne Netz
 .venv/bin/ruff check .
 .venv/bin/python -m eval.wer_eval gold/ hyp/ --lexicon names.txt
@@ -238,21 +276,23 @@ docker run --env-file .env chopstr-worker-cpu
 docker run --gpus all --env-file .env chopstr-worker-gpu --queues gpu
 ```
 
-## Phase 2 und 3: Status der Module
+## Status der Module
 
 | Modul | Zweck | Status |
 |---|---|---|
 | `pipeline/story_engine.py` | vier Stufen bis zur `candidates`-Zeile (Vertrag `candidates_v1`) | verdrahtet in `detect_candidates` |
 | `pipeline/story_score.py` | LLM-Vorschläge und Rubrik (Prompts `propose_moments_v1`, `score_clip_v1`) | verdrahtet |
 | `pipeline/story_graph.py` | spätere Relativierungen (Kontrastmarker, `story_graph_confirm_v1`) | verdrahtet |
-| `pipeline/fidelity.py` | Sinntreue-Wächter nach Schnitten | Gate `fidelity` in Phase 2, UI-Anbindung für Trims fehlt |
-| `pipeline/compose.py` | Multi-Segment-Clips, Teaser-Regeln, Timeline-Remapping | fertig |
-| `pipeline/copy_de.py` | Hooks (`hooks_v1`), Linter, Werbekennzeichnung | fertig |
-| `pipeline/captions_de.py` | ASS/SRT mit Presets und Safe Zones | fertig |
-| `pipeline/reframe.py` | YuNet-Gesichtsdetektion, Shot-Plan (braucht OpenCV und Modell) | fertig, untestbar ohne Modell |
-| `pipeline/render.py` | ffmpeg-Render, Loudness `master` (-16 LUFS / -1,5 dBTP) oder `legacy_social` (-14 / -1) | fertig |
-| `pipeline/compliance.py` | C2PA via c2patool, AI-Act-Label, Quellenangabe | fertig, braucht c2patool |
-| `activities/analyze.render_pack` | compose, reframe, captions, render, C2PA | Stub (NotImplementedError) |
+| `pipeline/fidelity.py` | Sinntreue-Wächter nach Schnitten | Gate `fidelity` in Phase 2, `fidelity_warnings` am Clip in Phase 3 |
+| `pipeline/compose.py` | Multi-Segment-Clips, Teaser-Regeln, Timeline-Remapping | verdrahtet |
+| `pipeline/copy_de.py` | Linter, Werbekennzeichnung, Markenprofil | verdrahtet über `copy_engine` |
+| `pipeline/copy_engine.py` | `hooks_v1` und `post_caption_v1`, Claim-Check, LanguageTool, Auswahl | verdrahtet in `render_pack` |
+| `pipeline/captions_de.py` | ASS/SRT/VTT mit Presets, Safe Zones, Skalierung auf andere Formate | verdrahtet |
+| `pipeline/reframe.py` | Strategien `talking_head`, `two_speakers`, `neutral`; YuNet optional | verdrahtet, Detektor optional |
+| `pipeline/render_plan.py` | `render_plan_v1` deterministisch, Hash für Idempotenz | verdrahtet |
+| `pipeline/render.py` | ffmpeg-Render aus dem Plan, Loudness zweistufig, Messung, Poster, Regressionschecks | verdrahtet, libass/drawtext optional |
+| `pipeline/compliance.py` | C2PA via c2patool, AI-Act-Label, Quellenangabe | verdrahtet, c2patool optional |
+| `activities/render.py` | `render_pack`: Copy, Reframe, Captions, Encode, Provenienz, Upload, DB | verdrahtet |
 
 ## Regeln
 

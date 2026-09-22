@@ -89,6 +89,44 @@ def preset_for(name_or_platform: str) -> CaptionPreset:
     return PRESETS[PLATFORM_DEFAULT_PRESET.get(name_or_platform, "linkedin_static")]
 
 
+def scaled_preset(preset: str | CaptionPreset, out_w: int, out_h: int) -> CaptionPreset:
+    """Preset (definiert für 1080x1920) proportional auf eine andere Ausgabegröße umrechnen.
+
+    Vertikale Werte (Safe Zone oben/unten, Schriftgröße, Abstand zur Unterkante, Kontur) skalieren mit
+    der Höhe, horizontale (links/rechts) mit der Breite. Für 9:16 kommt das Preset unverändert zurück."""
+    p = preset if isinstance(preset, CaptionPreset) else preset_for(preset)
+    if (out_w, out_h) == (W, H):
+        return p
+    fy, fx = out_h / H, out_w / W
+    safe = SafeZone(
+        top=int(round(p.safe.top * fy)),
+        bottom=int(round(p.safe.bottom * fy)),
+        left=int(round(p.safe.left * fx)),
+        right=int(round(p.safe.right * fx)),
+    )
+    return CaptionPreset(
+        name=p.name,
+        safe=safe,
+        font=p.font,
+        font_px=max(12, int(round(p.font_px * fy))),
+        bold=p.bold,
+        max_lines=p.max_lines,
+        base_color=p.base_color,
+        highlight_color=p.highlight_color,
+        outline_px=int(round(p.outline_px * fy)),
+        box=p.box,
+        bottom_margin_px=int(round(p.bottom_margin_px * fy)),
+        highlight_words=p.highlight_words,
+        all_caps=p.all_caps,
+        extra=dict(p.extra),
+    )
+
+
+def safe_zone_margins(p: CaptionPreset, out_w: int = W, out_h: int = H) -> dict[str, int]:
+    """Safe Zone als Abstände zu den vier Rändern (so steht sie im Render-Plan und in der Web-Vorschau)."""
+    return {"top": p.safe.top, "bottom": out_h - p.safe.bottom, "left": p.safe.left, "right": out_w - p.safe.right}
+
+
 def max_chars(font_px: int, safe_width: int = W - 180) -> int:
     """Zeichen pro Zeile aus Schriftgröße (18 bei 78 px auf 900 px Breite)."""
     return max(8, int(safe_width / (max(font_px, 1) * AVG_CHAR_EM)))
@@ -221,18 +259,26 @@ def card_lines(card: list[dict], preset: CaptionPreset) -> list[list[tuple[dict,
     return lines
 
 
-def to_ass(words: list[dict], clip_start: float = 0.0, preset: str | CaptionPreset = "tiktok_bold") -> str:
-    """ASS mit Wort-Highlight: pro Wort ein Event, aktives Wort eingefärbt (bei ``highlight_words``)."""
+def to_ass(
+    words: list[dict],
+    clip_start: float = 0.0,
+    preset: str | CaptionPreset = "tiktok_bold",
+    play_res: tuple[int, int] = (W, H),
+) -> str:
+    """ASS mit Wort-Highlight: pro Wort ein Event, aktives Wort eingefärbt (bei ``highlight_words``).
+
+    ``play_res`` ist die Ausgabegröße; das Preset muss dazu passen (siehe ``scaled_preset``)."""
     p = preset if isinstance(preset, CaptionPreset) else preset_for(preset)
-    margin_v = H - p.baseline_y
+    play_w, play_h = play_res
+    margin_v = play_h - p.baseline_y
     border_style = 3 if p.box else 1
     back = "&H80000000" if p.box else "&H64000000"
     head = (
-        "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\n\n"
+        f"[Script Info]\nScriptType: v4.00+\nPlayResX: {play_w}\nPlayResY: {play_h}\nWrapStyle: 2\n\n"
         "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, "
         "Alignment, MarginL, MarginR, MarginV, Outline, Shadow, BorderStyle\n"
         f"Style: Cap,{p.font},{p.font_px},{p.base_color},&H00000000,{back},{-1 if p.bold else 0},2,"
-        f"{p.safe.left},{W - p.safe.right},{margin_v},{p.outline_px},0,{border_style}\n\n"
+        f"{p.safe.left},{play_w - p.safe.right},{margin_v},{p.outline_px},0,{border_style}\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Text\n"
     )
     events = []
@@ -270,6 +316,36 @@ def _srt_t(t: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
+def _vtt_t(t: float) -> str:
+    return _srt_t(t).replace(",", ".")
+
+
+def to_vtt(words: list[dict], clip_start: float = 0.0, limit: int | None = None) -> str:
+    """WebVTT mit denselben Karten wie ``to_srt`` (Punkt statt Komma in den Zeiten, Kopfzeile WEBVTT)."""
+    out = ["WEBVTT", ""]
+    for i, card in enumerate(build_cards(words, limit), start=1):
+        s, e = float(card[0]["start"]) - clip_start, float(card[-1]["end"]) - clip_start
+        text = "\n".join(wrap_lines([str(w["text"]) for w in card], limit or PRESETS["tiktok_bold"].max_chars))
+        out.append(f"{i}\n{_vtt_t(s)} --> {_vtt_t(e)}\n{text}\n")
+    return "\n".join(out)
+
+
+def cards_for(words: list[dict], preset: str | CaptionPreset = "tiktok_bold", clip_start: float = 0.0) -> list[dict]:
+    """Karten als JSON für ``caption_versions.cards``: ``{start, end, lines}`` auf der Ausgabe-Timeline."""
+    p = preset if isinstance(preset, CaptionPreset) else preset_for(preset)
+    out = []
+    for card in build_cards(words, p.max_chars, p.max_lines):
+        lines = [" ".join(piece for _, piece in ln) for ln in card_lines(card, p)]
+        out.append(
+            {
+                "start": round(float(card[0]["start"]) - clip_start, 3),
+                "end": round(float(card[-1]["end"]) - clip_start, 3),
+                "lines": lines,
+            }
+        )
+    return out
+
+
 __all__ = [
     "AVG_CHAR_EM",
     "BREAK_WORDS",
@@ -280,11 +356,15 @@ __all__ = [
     "SafeZone",
     "build_cards",
     "card_lines",
+    "cards_for",
     "cps_warnings",
     "hyphenate",
     "max_chars",
     "preset_for",
+    "safe_zone_margins",
+    "scaled_preset",
     "to_ass",
     "to_srt",
+    "to_vtt",
     "wrap_lines",
 ]

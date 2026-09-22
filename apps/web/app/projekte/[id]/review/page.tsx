@@ -22,7 +22,12 @@ export default async function ReviewPage({ params }: Props) {
   const repo = getRepo();
   const source = await repo.getSource(id);
   if (!source) notFound();
-  const [transcript, candidates] = await Promise.all([repo.getCurrentTranscript(id), repo.listCandidates(id)]);
+  const [transcript, candidates, clips, brand] = await Promise.all([
+    repo.getCurrentTranscript(id),
+    repo.listCandidates(id),
+    repo.listClips(id),
+    source.brand_profile_id ? repo.getBrandProfile(source.brand_profile_id) : Promise.resolve(null),
+  ]);
 
   if (candidates.length === 0 || !transcript) {
     const running = source.status !== "ready" && source.status !== "failed";
@@ -71,9 +76,16 @@ export default async function ReviewPage({ params }: Props) {
             {candidates.length} Kandidaten, {passed} erfüllen alle Pflichtkriterien. Du entscheidest, was ein Clip wird.
           </p>
         </div>
-        <ButtonLink href={`/projekte/${source.id}/transkript`} variant="ghost" size="sm">
-          Transkript
-        </ButtonLink>
+        <div className="flex flex-wrap gap-2">
+          {clips.length > 0 && (
+            <ButtonLink href={`/projekte/${source.id}/clips`} variant="ghost" size="sm">
+              Clips ({clips.length})
+            </ButtonLink>
+          )}
+          <ButtonLink href={`/projekte/${source.id}/transkript`} variant="ghost" size="sm">
+            Transkript
+          </ButtonLink>
+        </div>
       </div>
       <ReviewBoard
         sourceId={source.id}
@@ -81,6 +93,8 @@ export default async function ReviewPage({ params }: Props) {
         durationS={source.duration_s ?? transcript.words.at(-1)?.end ?? 0}
         videoSrc={videoSrc}
         initialCandidates={candidates}
+        initialClips={clips}
+        defaultPlatform={brand?.default_platform ?? source.brief.platform ?? "linkedin"}
         sentences={sentences}
         speakerNames={transcript.stats.speaker_names ?? {}}
       />

@@ -111,7 +111,7 @@ def test_engine_with_heuristic_marks_results(no_network):
 
 def test_unknown_tool_raises_and_parse_ignores_noise():
     with pytest.raises(RuntimeError, match="kennt das Tool"):
-        heuristic_llm.answer("write_hooks", "x")
+        heuristic_llm.answer("unknown_tool", "x")
     parsed = heuristic_llm.parse_numbered("Zielgruppe: x\n[3] (SPEAKER_01) Hallo Welt.\nkein Satz\n[4] (?) Noch einer?")
     assert parsed == [{"idx": 3, "speaker": "SPEAKER_01", "text": "Hallo Welt."}, {"idx": 4, "speaker": "?", "text": "Noch einer?"}]
     assert heuristic_llm.propose_moments("nur Text ohne Sätze") == {"moments": []}

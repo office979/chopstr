@@ -71,6 +71,16 @@ export const seedBrandProfile: BrandProfile = {
   tone_adjectives: ["ruhig", "konkret", "belegt"],
   default_platform: "linkedin",
   caption_preset: "linkedin_static",
+  ci: {
+    colors: { primary: "#020cf5", secondary: "#0a0a13", accent: "#f4f5fe" },
+    fonts: { primary_key: null, secondary_key: null },
+    logo_key: null,
+    lower_third: { enabled: true, name: "Ferdinand Platz", role: "Geschäftsführer PLACEMedia" },
+  },
+  caption_style: {
+    highlight_color: "#ffd700",
+    hook_overlay: { tiktok: true, reels: true, shorts: true, linkedin: false },
+  },
   created_at: iso(-days(38)),
   updated_at: iso(-days(3)),
 };

@@ -70,6 +70,9 @@ class FakeDB:
         self.job_costs: list[dict] = []
         self.transcript_versions: list[dict] = []
         self.candidates: list[dict] = []
+        self.clips: dict[str, dict] = {}
+        self.hook_versions: list[dict] = []
+        self.caption_versions: list[dict] = []
         self.status_history: list[tuple[str, str]] = []
         self.statements: list[tuple[str, tuple]] = []
         self.closed = False
@@ -112,6 +115,51 @@ class FakeDB:
         row.update(fields)
         self.transcript_versions.append(row)
         return row["id"]
+
+    def add_candidate(self, source_id: str, segments: list[dict], **fields) -> str:
+        row = {
+            "id": str(uuid.uuid4()), "source_id": source_id, "version": 1, "segments": segments,
+            "start_s": min(float(x["start"]) for x in segments), "end_s": max(float(x["end"]) for x in segments),
+            "rubric": {"suggested_title_card": ""}, "risk_flags": [], "human_verdict": None,
+        }  # fmt: skip
+        row.update(fields)
+        self.candidates.append(row)
+        return row["id"]
+
+    def add_clip(self, source_id: str, candidate_id: str, platform: str, segments: list[dict], **fields) -> str:
+        row = {
+            "id": str(uuid.uuid4()), "source_id": source_id, "candidate_id": candidate_id, "platform": platform,
+            "destination": platform, "aspect": "4:5" if platform == "linkedin" else "9:16", "composition": segments,
+            "title_card": None, "ad_label": None, "ai_features": [], "speaker_positions": None, "status": "draft",
+            "file_key": None, "render_plan": None, "created_at": len(self.clips),
+        }  # fmt: skip
+        row.update(fields)
+        self.clips[row["id"]] = row
+        return row["id"]
+
+    def add_hook_version(self, clip_id: str, **fields) -> str:
+        vs = [r["version"] for r in self.hook_versions if r["clip_id"] == clip_id]
+        row = {
+            "id": str(uuid.uuid4()), "clip_id": clip_id, "version": (max(vs) if vs else 0) + 1, "origin": "manual",
+            "spoken_hook": "", "onscreen_hook": "", "pattern": None, "post_captions": {}, "cta": None,
+        }  # fmt: skip
+        row.update(fields)
+        self.hook_versions.append(row)
+        return row["id"]
+
+    @staticmethod
+    def _insert_row(sql: str, params: tuple) -> dict:
+        cols = sql.split("(", 1)[1].split(")", 1)[0].replace("\n", " ").split(",")
+        row = {c.strip(): _unwrap(v) for c, v in zip(cols, params)}
+        row["id"] = str(uuid.uuid4())
+        return row
+
+    @staticmethod
+    def _apply_update(sql: str, params: tuple, row: dict) -> None:
+        set_part = sql.split("set", 1)[1].split("where", 1)[0]
+        cols = [c.split("=")[0].strip() for c in set_part.split(",")]
+        for c, v in zip(cols, params[: len(cols)]):
+            row[c] = _unwrap(v)
 
     # -- psycopg-ähnliche API ------------------------------------------------------------------
     def execute(self, sql: str, params=None):
@@ -158,6 +206,52 @@ class FakeDB:
                     if c == "status":
                         self.status_history.append((sid, _unwrap(v)))
             return FakeCursor([])
+        if q.startswith("select id, source_id, segments, rubric, risk_flags, start_s, end_s from candidates"):
+            c = next((c for c in self.candidates if c["id"] == params[0]), None)
+            if c is None:
+                return FakeCursor([])
+            return FakeCursor([(c["id"], c["source_id"], c["segments"], c.get("rubric"), c.get("risk_flags"), c.get("start_s"), c.get("end_s"))])
+        if q.startswith("select p.gender_mode"):
+            src = self.sources.get(params[0])
+            if src is None:
+                return FakeCursor([])
+            p = self.brand_profiles.get(src.get("brand_profile_id")) or {}
+            return FakeCursor([(
+                p.get("gender_mode"), p.get("banned_phrases"), p.get("tone_adjectives"), p.get("default_platform"),
+                p.get("caption_preset"), p.get("caption_style"), src.get("rights_status"), src.get("source_owner"),
+                src.get("source_title"), src.get("source_url"),
+            )])  # fmt: skip
+        if q.startswith("select id, status, aspect, composition, title_card, ad_label, ai_features, speaker_positions, file_key from clips"):
+            rows = sorted((c for c in self.clips.values() if c["candidate_id"] == params[0] and c["platform"] == params[1]), key=lambda c: -c["created_at"])
+            return FakeCursor([(c["id"], c["status"], c["aspect"], c["composition"], c["title_card"], c["ad_label"], c["ai_features"], c["speaker_positions"], c["file_key"]) for c in rows[:1]])
+        if q.startswith("insert into clips"):
+            row = self._insert_row(sql, params)
+            row.setdefault("ai_features", [])
+            row.setdefault("speaker_positions", None)
+            row.setdefault("file_key", None)
+            row.setdefault("status", "draft")
+            row["created_at"] = len(self.clips)
+            self.clips[row["id"]] = row
+            return FakeCursor([(row["id"],)])
+        if q.startswith("update clips set"):
+            cid = params[-1]
+            if cid in self.clips:
+                self._apply_update(sql, params, self.clips[cid])
+            return FakeCursor([])
+        if q.startswith("select id, version, origin, spoken_hook, onscreen_hook, pattern, post_captions, cta from hook_versions"):
+            rows = sorted((r for r in self.hook_versions if r["clip_id"] == params[0]), key=lambda r: -r["version"])
+            return FakeCursor([(r["id"], r["version"], r["origin"], r["spoken_hook"], r["onscreen_hook"], r["pattern"], r["post_captions"], r["cta"]) for r in rows[:1]])
+        if q.startswith("insert into hook_versions"):
+            row = self._insert_row(sql, params)
+            self.hook_versions.append(row)
+            return FakeCursor([(row["id"],)])
+        if q.startswith("select coalesce(max(version), 0) from caption_versions"):
+            vs = [r["version"] for r in self.caption_versions if r["clip_id"] == params[0]]
+            return FakeCursor([(max(vs) if vs else 0,)])
+        if q.startswith("insert into caption_versions"):
+            row = self._insert_row(sql, params)
+            self.caption_versions.append(row)
+            return FakeCursor([(row["id"],)])
         if q.startswith("select s.id, s.workspace_id"):
             sid = params[0]
             s = self.sources.get(sid)

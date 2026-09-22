@@ -37,11 +37,12 @@ export default async function ProjectPage({ params }: Props) {
   const source = await repo.getSource(id);
   if (!source) notFound();
 
-  const [events, transcript, brand, candidateCount] = await Promise.all([
+  const [events, transcript, brand, candidateCount, clipCount] = await Promise.all([
     repo.listPipelineEvents(id),
     repo.getCurrentTranscript(id),
     source.brand_profile_id ? repo.getBrandProfile(source.brand_profile_id) : Promise.resolve(null),
     repo.countCandidates(id),
+    repo.countClips(id),
   ]);
 
   const live = !isTerminalStatus(source.status);
@@ -64,6 +65,11 @@ export default async function ProjectPage({ params }: Props) {
               </ButtonLink>
             )}
             {hasCandidates && <ButtonLink href={`/projekte/${source.id}/review`}>Kandidaten prüfen</ButtonLink>}
+            {clipCount.total > 0 && (
+              <ButtonLink href={`/projekte/${source.id}/clips`} variant="ghost">
+                Clips
+              </ButtonLink>
+            )}
           </>
         }
       />
@@ -79,6 +85,27 @@ export default async function ProjectPage({ params }: Props) {
         />
 
         <div className="flex flex-col gap-5">
+          {clipCount.total > 0 && (
+            <GlassCard padding="lg" selected={clipCount.rendering > 0}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-medium">Clips</h2>
+                  <p className="mt-1 text-sm text-text-2">
+                    {clipCount.rendered} von {clipCount.total} gerendert
+                    {clipCount.rendering > 0 ? `, ${clipCount.rendering} in Arbeit` : ""}
+                    {clipCount.failed > 0 ? `, ${clipCount.failed} fehlgeschlagen` : ""}.
+                  </p>
+                </div>
+                <p className="text-4xl font-light leading-none tabular-nums tracking-[var(--tracking-display)]">{clipCount.total}</p>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <ButtonLink href={`/projekte/${source.id}/clips`} size="sm">
+                  Clips öffnen
+                </ButtonLink>
+                {clipCount.failed > 0 && <Badge tone="attention">{clipCount.failed} fehlgeschlagen</Badge>}
+              </div>
+            </GlassCard>
+          )}
           <GlassCard padding="lg">
             <h2 className="mb-5 text-lg font-medium">Metadaten</h2>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-5">

@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { getRepo } from "@/lib/repo";
 import { signalApprove } from "@/lib/temporal";
-import type { Platform } from "@/lib/repo/types";
+import type { Clip, Platform } from "@/lib/repo/types";
+import { PLATFORMS, isPlatform } from "@/lib/clips/labels";
 
 export const dynamic = "force-dynamic";
 
@@ -10,10 +11,12 @@ type Params = { params: Promise<{ id: string; cid: string }> };
 interface VerdictBody {
   verdict?: unknown;
   reason?: unknown;
+  platforms?: unknown;
 }
 
-/* POST: menschliches Urteil. accepted -> Signal approve(candidate_id, destination) an project-<source_id>;
- * rejected -> Grund ist Pflicht (Lernsignal). Jede Aktion schreibt audit_log. */
+/* POST: menschliches Urteil. accepted -> Clips je Zielplattform anlegen (packages/schema/CLIPS.md), Signal
+ * approve(candidate_id, platform) je Clip an project-<source_id>; rejected -> Grund ist Pflicht (Lernsignal).
+ * Jede Aktion schreibt audit_log. */
 export async function POST(request: NextRequest, { params }: Params) {
   const { id, cid } = await params;
   const repo = getRepo();
@@ -42,15 +45,42 @@ export async function POST(request: NextRequest, { params }: Params) {
     return Response.json({ error: "Dieser Kandidat wurde durch eine neue Version ersetzt" }, { status: 409 });
   }
 
+  /* Ziele: Standard alle vier; die Standard-Plattform des Markenprofils ist immer dabei */
+  const brand = source.brand_profile_id ? await repo.getBrandProfile(source.brand_profile_id) : null;
+  const defaultPlatform: Platform = brand?.default_platform ?? source.brief.platform ?? "linkedin";
+  let platforms: Platform[] = PLATFORMS;
+  if (Array.isArray(body.platforms)) {
+    const requested = body.platforms.filter(isPlatform);
+    if (requested.length === 0) {
+      return Response.json({ error: "Mindestens ein Ziel wählen" }, { status: 400 });
+    }
+    platforms = PLATFORMS.filter((p) => requested.includes(p) || p === defaultPlatform);
+  }
+
+  let clips: Clip[] = [];
+  if (verdict === "accepted") {
+    try {
+      clips = await repo.createClips(cid, platforms);
+    } catch (error) {
+      return Response.json({ error: error instanceof Error ? error.message : "Clips konnten nicht angelegt werden" }, { status: 500 });
+    }
+  }
+
   const candidate = await repo.setCandidateVerdict(cid, verdict, reason || undefined);
   if (!candidate) return Response.json({ error: "Kandidat nicht gefunden" }, { status: 404 });
 
-  let signaled = false;
-  let destination: Platform | null = null;
+  const signaled: Platform[] = [];
   if (verdict === "accepted") {
-    const brand = source.brand_profile_id ? await repo.getBrandProfile(source.brand_profile_id) : null;
-    destination = source.brief.platform ?? brand?.default_platform ?? "linkedin";
-    signaled = await signalApprove({ sourceId: id, candidateId: cid, destination });
+    for (const clip of clips) {
+      await repo.audit({
+        action: "clip.created",
+        entity: "clips",
+        entity_id: clip.id,
+        payload: { source_id: id, candidate_id: cid, platform: clip.platform, aspect: clip.aspect, ad_label: clip.ad_label },
+      });
+      const ok = await signalApprove({ sourceId: id, candidateId: cid, destination: clip.platform });
+      if (ok) signaled.push(clip.platform);
+    }
   }
 
   await repo.audit({
@@ -63,10 +93,18 @@ export async function POST(request: NextRequest, { params }: Params) {
       total: candidate.total,
       gate_passed: candidate.gate_passed,
       reason: reason || null,
-      destination,
+      platforms: verdict === "accepted" ? clips.map((c) => c.platform) : null,
+      clip_ids: clips.map((c) => c.id),
       signaled,
     },
   });
 
-  return Response.json({ ok: true, candidate, signaled, destination });
+  return Response.json({
+    ok: true,
+    candidate,
+    clips,
+    platforms: clips.map((c) => c.platform),
+    signaled,
+    demo: repo.kind === "demo",
+  });
 }

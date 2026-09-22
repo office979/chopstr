@@ -1,4 +1,5 @@
-"""Activities ``heatmap``, ``detect_candidates`` (Phase 2: Story-Engine), ``render_pack`` (Stub), ``notify``.
+"""Activities ``heatmap``, ``detect_candidates`` (Phase 2: Story-Engine), ``notify``; ``render_pack`` (Phase 3)
+kommt aus ``activities.render`` und wird hier nur re-exportiert.
 
 ``heatmap`` läuft parallel zur Transkription und nutzt deshalb primär das Audio-Signal. Liegt das
 ASR-Ergebnis bereits im Storage (Re-Run), fließt auch der Text-Anteil ein (``signals.combined``).
@@ -8,7 +9,6 @@ laufen und schreibt ``candidates`` nach ``packages/schema/CANDIDATES.md``.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 
@@ -19,13 +19,13 @@ from ..pipeline import signals, story_engine
 from ..providers_llm import LLM
 from ..residency import Tenant
 from . import common
+from .render import STEP_RENDER, render_pack
 from .transcribe import asr_key_for
 
 log = logging.getLogger("chopstr.activities.analyze")
 
 STEP_HEATMAP = "heatmap"
 STEP_CANDIDATES = "detect_candidates"
-STEP_RENDER = "render"
 SIGNALS_VERSION = "signals_v1"
 
 
@@ -69,20 +69,6 @@ def run_heatmap(ctx: common.Context, source_id: str) -> str:
         )
         st.finish(f"{payload['n_bins']} Sekunden analysiert, {len(payload['seeds'])} Seeds", key=key, seeds=len(payload["seeds"]))
     return key
-
-
-def _load_transcript(ctx: common.Context, source_id: str) -> tuple[str, int, list[dict]]:
-    row = db.fetch_one(
-        ctx.conn,
-        "select id, version, words from transcript_versions where source_id = %s order by version desc limit 1",
-        (source_id,),
-    )
-    if row is None:
-        raise RuntimeError("Kein Transkript vorhanden. Wurde fuse_and_nlp ausgeführt?")
-    tv_id, version, words = row
-    if isinstance(words, str):
-        words = json.loads(words)
-    return str(tv_id), int(version), list(words or [])
 
 
 def _load_heat(ctx: common.Context, src: dict) -> dict | None:
@@ -154,7 +140,7 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
     t0 = time.monotonic()
     with events.step(ctx.conn, source_id, STEP_CANDIDATES, "Kandidaten werden gesucht") as st:
         events.set_source_status(ctx.conn, source_id, "scoring", None)
-        tv_id, tv_version, words = _load_transcript(ctx, source_id)
+        tv_id, tv_version, words = common.load_transcript(ctx, source_id)
         heat = _load_heat(ctx, src)
         brief = dict(src.get("brief") or {})
         brand = {"country": src.get("country"), "address": src.get("address"), "learned_weights": src.get("learned_weights")}
@@ -235,12 +221,6 @@ def detect_candidates(source_id: str) -> list[str]:
         return run_detect_candidates(ctx, source_id)
     finally:
         ctx.close()
-
-
-@activity.defn(name="render_pack")
-def render_pack(candidate_id: str, destination: str) -> str:
-    """Phase 3: compose, reframe, captions, render, C2PA. Aktuell Stub."""
-    raise NotImplementedError("Rendern kommt in Phase 3")
 
 
 @activity.defn(name="notify")

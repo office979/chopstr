@@ -3,6 +3,9 @@ import { getSession } from "@/lib/session";
 import type {
   BrandProfile,
   Candidate,
+  CaptionVersion,
+  Clip,
+  HookVersion,
   PipelineEvent,
   Repo,
   Source,
@@ -11,6 +14,9 @@ import type {
 } from "@/lib/repo/types";
 import { sentencesFromWords } from "@/lib/transcript/sentences";
 import { buildRevision, isRevisionError } from "@/lib/candidates/revise";
+import { PLATFORM_ASPECT } from "@/lib/clips/presets";
+import { adLabelFor, lintProfileFrom } from "@/lib/clips/render-demo";
+import { prepareManualHook } from "@/lib/copy/hooks";
 
 /* Postgres-Repository. Alle Zugriffe laufen in einer Transaktion mit RLS-Kontext (lib/db.ts). */
 
@@ -77,6 +83,8 @@ function toBrand(r: Row): BrandProfile {
     tone_adjectives: (r.tone_adjectives as string[]) ?? [],
     default_platform: r.default_platform as BrandProfile["default_platform"],
     caption_preset: r.caption_preset as BrandProfile["caption_preset"],
+    ci: jsonValue<BrandProfile["ci"]>(r.ci, {}),
+    caption_style: jsonValue<BrandProfile["caption_style"]>(r.caption_style, {}),
     created_at: isoOrNull(r.created_at) ?? "",
     updated_at: isoOrNull(r.updated_at) ?? "",
   };
@@ -153,6 +161,86 @@ function toCandidate(r: Row): Candidate {
   };
 }
 
+function toClip(r: Row): Clip {
+  return {
+    id: r.id as string,
+    source_id: r.source_id as string,
+    candidate_id: (r.candidate_id as string | null) ?? null,
+    version: num(r.version) ?? 1,
+    platform: r.platform as Clip["platform"],
+    destination: (r.destination as Clip["destination"]) ?? null,
+    aspect: r.aspect as Clip["aspect"],
+    composition: jsonValue<Clip["composition"]>(r.composition, []),
+    kept_ranges: jsonValue<unknown>(r.kept_ranges, null),
+    fidelity_warnings: jsonValue<unknown[]>(r.fidelity_warnings, []),
+    speaker_positions: jsonValue<Clip["speaker_positions"]>(r.speaker_positions, null),
+    render_plan: jsonValue<Clip["render_plan"]>(r.render_plan, null),
+    title_card: (r.title_card as string | null) ?? null,
+    ad_label: (r.ad_label as string | null) ?? null,
+    ai_features: (r.ai_features as string[]) ?? [],
+    guest_approval_required: Boolean(r.guest_approval_required),
+    status: r.status as Clip["status"],
+    file_key: (r.file_key as string | null) ?? null,
+    srt_key: (r.srt_key as string | null) ?? null,
+    vtt_key: (r.vtt_key as string | null) ?? null,
+    poster_key: (r.poster_key as string | null) ?? null,
+    cps_warnings: jsonValue<string[]>(r.cps_warnings, []),
+    duration_s: num(r.duration_s),
+    width: num(r.width),
+    height: num(r.height),
+    fps: num(r.fps),
+    loudness: jsonValue<Clip["loudness"]>(r.loudness, null),
+    provenance: jsonValue<Clip["provenance"]>(r.provenance, {}),
+    render_error: (r.render_error as string | null) ?? null,
+    rendered_at: isoOrNull(r.rendered_at),
+    created_by: (r.created_by as string | null) ?? null,
+    created_at: isoOrNull(r.created_at) ?? "",
+    updated_at: isoOrNull(r.updated_at) ?? "",
+  };
+}
+
+function toHook(r: Row): HookVersion {
+  return {
+    id: r.id as string,
+    clip_id: r.clip_id as string,
+    version: num(r.version) ?? 1,
+    spoken_hook: (r.spoken_hook as string | null) ?? null,
+    onscreen_hook: (r.onscreen_hook as string | null) ?? null,
+    pattern: (r.pattern as HookVersion["pattern"]) ?? null,
+    variants: jsonValue<HookVersion["variants"]>(r.variants, []),
+    post_captions: jsonValue<HookVersion["post_captions"]>(r.post_captions, {}),
+    cta: (r.cta as string | null) ?? null,
+    lint_notes: jsonValue<string[]>(r.lint_notes, []),
+    claim_issues: jsonValue<string[]>(r.claim_issues, []),
+    origin: r.origin as HookVersion["origin"],
+    model_id: (r.model_id as string | null) ?? null,
+    prompt_version: (r.prompt_version as string | null) ?? null,
+    created_by: (r.created_by as string | null) ?? null,
+    created_at: isoOrNull(r.created_at) ?? "",
+  };
+}
+
+function toCaptions(r: Row): CaptionVersion {
+  return {
+    id: r.id as string,
+    clip_id: r.clip_id as string,
+    version: num(r.version) ?? 1,
+    preset: r.preset as CaptionVersion["preset"],
+    cards: jsonValue<CaptionVersion["cards"]>(r.cards, []),
+    ass_key: (r.ass_key as string | null) ?? null,
+    srt_key: (r.srt_key as string | null) ?? null,
+    cps_warnings: jsonValue<string[]>(r.cps_warnings, []),
+    origin: r.origin as CaptionVersion["origin"],
+    created_by: (r.created_by as string | null) ?? null,
+    created_at: isoOrNull(r.created_at) ?? "",
+  };
+}
+
+async function currentHookRow(tx: Tx, clipId: string): Promise<HookVersion | null> {
+  const rows = await tx`select * from hook_versions where clip_id = ${clipId} order by version desc limit 1`;
+  return rows.length ? toHook(rows[0] as Row) : null;
+}
+
 async function ensureWorkspace(tx: Tx, workspaceId: string): Promise<Workspace> {
   const rows = await tx`select * from workspaces where id = ${workspaceId}`;
   if (rows.length > 0) return rows[0] as unknown as Workspace;
@@ -213,6 +301,8 @@ export const postgresRepo: Repo = {
             tone_adjectives = ${input.tone_adjectives},
             default_platform = ${input.default_platform},
             caption_preset = ${input.caption_preset},
+            ci = ${tx.json((input.ci ?? {}) as never)},
+            caption_style = ${tx.json((input.caption_style ?? {}) as never)},
             version = version + 1
           where id = ${input.id}
           returning *`;
@@ -221,11 +311,12 @@ export const postgresRepo: Repo = {
       const rows = await tx`
         insert into brand_profiles (
           workspace_id, name, address, country, gender_mode, asr_variant, brand_vocab,
-          protected_terms, banned_phrases, tone_adjectives, default_platform, caption_preset
+          protected_terms, banned_phrases, tone_adjectives, default_platform, caption_preset, ci, caption_style
         ) values (
           ${session.workspaceId}, ${input.name}, ${input.address}, ${input.country}, ${input.gender_mode},
           ${input.asr_variant}, ${input.brand_vocab}, ${input.protected_terms}, ${input.banned_phrases},
-          ${input.tone_adjectives}, ${input.default_platform}, ${input.caption_preset}
+          ${input.tone_adjectives}, ${input.default_platform}, ${input.caption_preset},
+          ${tx.json((input.ci ?? {}) as never)}, ${tx.json((input.caption_style ?? {}) as never)}
         ) returning *`;
       return toBrand(rows[0] as Row);
     });
@@ -420,6 +511,141 @@ export const postgresRepo: Repo = {
         accepted: num(r.accepted) ?? 0,
         rejected: num(r.rejected) ?? 0,
       };
+    });
+  },
+
+  async createClips(candidateId, platforms) {
+    const session = getSession();
+    return withContext(session, async (tx) => {
+      const candRows = await tx`select * from candidates where id = ${candidateId}`;
+      if (!candRows.length) throw new Error("Kandidat nicht gefunden");
+      const candidate = toCandidate(candRows[0] as Row);
+      const srcRows = await tx`select * from sources where id = ${candidate.source_id}`;
+      if (!srcRows.length) throw new Error("Projekt nicht gefunden");
+      const source = toSource(srcRows[0] as Row);
+      const brandRows = source.brand_profile_id ? await tx`select * from brand_profiles where id = ${source.brand_profile_id}` : [];
+      const brand = brandRows.length ? toBrand(brandRows[0] as Row) : null;
+      const out: Clip[] = [];
+      for (const platform of platforms) {
+        const existing = await tx`
+          select * from clips where candidate_id = ${candidateId} and platform = ${platform} order by created_at desc limit 1`;
+        if (existing.length) {
+          out.push(toClip(existing[0] as Row));
+          continue;
+        }
+        const rows = await tx`
+          insert into clips (
+            source_id, candidate_id, platform, destination, aspect, composition, title_card, ad_label, status, created_by
+          ) values (
+            ${source.id}, ${candidate.id}, ${platform}, ${platform}, ${PLATFORM_ASPECT[platform]},
+            ${tx.json(candidate.segments as never)}, ${candidate.rubric.suggested_title_card?.trim() || null},
+            ${adLabelFor(source, brand)}, 'draft', ${session.actorId}
+          ) returning *`;
+        out.push(toClip(rows[0] as Row));
+      }
+      return out;
+    });
+  },
+
+  async listClips(sourceId) {
+    return withContext(getSession(), async (tx) => {
+      const rows = await tx`select * from clips where source_id = ${sourceId} order by created_at asc`;
+      return rows.map((r) => toClip(r as Row));
+    });
+  },
+
+  async getClip(id) {
+    return withContext(getSession(), async (tx) => {
+      const rows = await tx`select * from clips where id = ${id}`;
+      return rows.length ? toClip(rows[0] as Row) : null;
+    });
+  },
+
+  async updateClip(id, patch) {
+    return withContext(getSession(), async (tx) => {
+      const scalar: (keyof Clip)[] = ["status", "title_card", "ad_label", "render_error", "destination"];
+      const json: (keyof Clip)[] = ["speaker_positions", "composition"];
+      const data: Record<string, unknown> = {};
+      for (const key of scalar) {
+        if (key in patch) data[key] = patch[key];
+      }
+      for (const key of json) {
+        if (key in patch) data[key] = tx.json(patch[key] as never);
+      }
+      if (Object.keys(data).length === 0) {
+        const rows = await tx`select * from clips where id = ${id}`;
+        return rows.length ? toClip(rows[0] as Row) : null;
+      }
+      const rows = await tx`update clips set ${tx(data)} where id = ${id} returning *`;
+      return rows.length ? toClip(rows[0] as Row) : null;
+    });
+  },
+
+  /* Der Worker setzt status = 'rendering' nach dem Signal; hier nur der Fehlertext zurücksetzen */
+  async requestClipRender(id) {
+    return withContext(getSession(), async (tx) => {
+      const rows = await tx`update clips set render_error = null where id = ${id} returning *`;
+      return rows.length ? toClip(rows[0] as Row) : null;
+    });
+  },
+
+  async countClips(sourceId) {
+    return withContext(getSession(), async (tx) => {
+      const rows = await tx`
+        select
+          count(*)::int as total,
+          count(*) filter (where status in ('rendered', 'exported'))::int as rendered,
+          count(*) filter (where status = 'rendering')::int as rendering,
+          count(*) filter (where status = 'failed')::int as failed
+        from clips where source_id = ${sourceId}`;
+      const r = (rows[0] ?? {}) as Row;
+      return { total: num(r.total) ?? 0, rendered: num(r.rendered) ?? 0, rendering: num(r.rendering) ?? 0, failed: num(r.failed) ?? 0 };
+    });
+  },
+
+  async getCurrentHook(clipId) {
+    return withContext(getSession(), async (tx) => currentHookRow(tx, clipId));
+  },
+
+  async listHookVersions(clipId) {
+    return withContext(getSession(), async (tx) => {
+      const rows = await tx`select * from hook_versions where clip_id = ${clipId} order by version asc`;
+      return rows.map((r) => toHook(r as Row));
+    });
+  },
+
+  async saveHook(clipId, input) {
+    const session = getSession();
+    return withContext(session, async (tx) => {
+      const clipRows = await tx`select * from clips where id = ${clipId}`;
+      if (!clipRows.length) throw new Error("Clip nicht gefunden");
+      const clip = toClip(clipRows[0] as Row);
+      const candRows = clip.candidate_id ? await tx`select rubric from candidates where id = ${clip.candidate_id}` : [];
+      const rubric = candRows.length ? jsonValue<Candidate["rubric"]>((candRows[0] as Row).rubric, {} as Candidate["rubric"]) : null;
+      const srcRows = await tx`select brand_profile_id from sources where id = ${clip.source_id}`;
+      const brandId = srcRows.length ? ((srcRows[0] as Row).brand_profile_id as string | null) : null;
+      const brandRows = brandId ? await tx`select * from brand_profiles where id = ${brandId}` : [];
+      const brand = brandRows.length ? toBrand(brandRows[0] as Row) : null;
+      const prev = await currentHookRow(tx, clipId);
+      const f = prepareManualHook(input, { clipText: rubric?.text ?? "", profile: lintProfileFrom(brand) }, prev);
+      const rows = await tx`
+        insert into hook_versions (
+          clip_id, version, spoken_hook, onscreen_hook, pattern, variants, post_captions, cta, lint_notes,
+          claim_issues, origin, model_id, prompt_version, created_by
+        ) values (
+          ${clipId}, ${(prev?.version ?? 0) + 1}, ${f.spoken_hook}, ${f.onscreen_hook}, ${f.pattern},
+          ${tx.json(f.variants as never)}, ${tx.json(f.post_captions as never)}, ${f.cta},
+          ${tx.json(f.lint_notes as never)}, ${tx.json(f.claim_issues as never)}, 'manual', ${f.model_id},
+          ${f.prompt_version}, ${session.actorId}
+        ) returning *`;
+      return toHook(rows[0] as Row);
+    });
+  },
+
+  async getCurrentCaptions(clipId) {
+    return withContext(getSession(), async (tx) => {
+      const rows = await tx`select * from caption_versions where clip_id = ${clipId} order by version desc limit 1`;
+      return rows.length ? toCaptions(rows[0] as Row) : null;
     });
   },
 

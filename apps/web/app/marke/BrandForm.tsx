@@ -6,13 +6,26 @@ import { Field, Input, Select } from "@/components/ui/Field";
 import { TagInput } from "@/components/ui/TagInput";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import type { BrandProfile } from "@/lib/repo/types";
+import { ColorField } from "@/components/ui/ColorField";
+import { Toggle } from "@/components/ui/Toggle";
+import type { BrandProfile, Platform } from "@/lib/repo/types";
+import { PLATFORMS, PLATFORM_LABELS } from "@/lib/clips/labels";
+import { useState } from "react";
 import { saveBrandProfileAction, type BrandFormState } from "./actions";
 
 const initialState: BrandFormState = { ok: false, message: "", errors: {} };
 
 export function BrandForm({ profile }: { profile: BrandProfile | null }) {
   const [state, action, pending] = useActionState(saveBrandProfileAction, initialState);
+  const ci = profile?.ci ?? {};
+  const style = profile?.caption_style ?? {};
+  const [lowerThird, setLowerThird] = useState(ci.lower_third?.enabled ?? false);
+  const [hookOverlay, setHookOverlay] = useState<Record<Platform, boolean>>({
+    tiktok: style.hook_overlay?.tiktok ?? true,
+    reels: style.hook_overlay?.reels ?? true,
+    shorts: style.hook_overlay?.shorts ?? true,
+    linkedin: style.hook_overlay?.linkedin ?? false,
+  });
 
   return (
     <form action={action} className="flex flex-col gap-5" noValidate>
@@ -112,6 +125,66 @@ export function BrandForm({ profile }: { profile: BrandProfile | null }) {
         <Field label="Gesperrte Phrasen" htmlFor="banned_phrases" hint="Tauchen weder in Hooks noch in Captions auf.">
           <TagInput id="banned_phrases" name="banned_phrases" defaultValue={profile?.banned_phrases ?? []} placeholder="z. B. Game Changer" />
         </Field>
+      </GlassCard>
+
+      <GlassCard padding="lg" className="flex flex-col gap-5">
+        <div>
+          <h2 className="text-lg font-medium">CI</h2>
+          <p className="mt-1 text-sm text-text-2">
+            Farben und Bauchbinde für die Kunden-Clips. Das Design der App bleibt davon unberührt.
+          </p>
+        </div>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <ColorField id="ci_primary" name="ci_primary" label="Primärfarbe" defaultValue={ci.colors?.primary ?? ""} error={state.errors.ci_primary} />
+          <ColorField id="ci_secondary" name="ci_secondary" label="Sekundärfarbe" defaultValue={ci.colors?.secondary ?? ""} error={state.errors.ci_secondary} />
+          <ColorField id="ci_accent" name="ci_accent" label="Akzentfarbe" defaultValue={ci.colors?.accent ?? ""} error={state.errors.ci_accent} />
+          <ColorField
+            id="caption_highlight"
+            name="caption_highlight"
+            label="Caption-Highlight"
+            defaultValue={style.highlight_color ?? ""}
+            hint="Farbe des betonten Worts bei tiktok_bold, reels_clean und shorts_clean."
+            error={state.errors.caption_highlight}
+          />
+        </div>
+
+        <div className="flex flex-col gap-4 rounded-inner border border-line p-4">
+          <Toggle
+            checked={lowerThird}
+            onChange={setLowerThird}
+            name="lower_third_enabled"
+            label="Bauchbinde anzeigen"
+            description="Name und Funktion in den ersten Sekunden, Preset corporate_third."
+          />
+          <div className="grid gap-5 sm:grid-cols-2">
+            <Field label="Name" htmlFor="lower_third_name">
+              <Input id="lower_third_name" name="lower_third_name" defaultValue={ci.lower_third?.name ?? ""} placeholder="z. B. Ferdinand Platz" disabled={!lowerThird} />
+            </Field>
+            <Field label="Funktion" htmlFor="lower_third_role">
+              <Input id="lower_third_role" name="lower_third_role" defaultValue={ci.lower_third?.role ?? ""} placeholder="z. B. Geschäftsführer" disabled={!lowerThird} />
+            </Field>
+          </div>
+        </div>
+
+        <fieldset className="flex flex-col gap-3">
+          <legend className="text-sm font-medium text-text">Hook-Overlay als Standard</legend>
+          <p className="text-sm text-text-2">On-Screen-Hook in den ersten 3 Sekunden. Je Plattform an oder aus, im Hook-Studio änderbar.</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {PLATFORMS.map((p) => (
+              <Toggle
+                key={p}
+                checked={hookOverlay[p]}
+                onChange={(next) => setHookOverlay((cur) => ({ ...cur, [p]: next }))}
+                name={`hook_overlay_${p}`}
+                label={PLATFORM_LABELS[p]}
+              />
+            ))}
+          </div>
+        </fieldset>
+
+        <p className="text-sm text-text-2">
+          Font-Upload (eigene Schrift für Captions und Bauchbinde) kommt in Phase 4. Bis dahin rendert der Worker mit Inter.
+        </p>
       </GlassCard>
 
       <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">

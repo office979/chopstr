@@ -26,6 +26,9 @@ v2.0, Knowledge Base `decisions_log` und `research_conflicts`.
 | P3 | Füllwörter: äh/ähm hart raus, quasi/sozusagen als Vorschlag mit Undo, Modalpartikeln (halt, eigentlich, mal, ja, doch, eben, schon, wohl) bleiben (CON-005). | Modalpartikeln tragen Ton und Bedeutung. | Nutzerfeedback |
 | P4 | Heuristik-Provider `local-heuristic` für Entwicklung und Demo: deterministisch, ohne Netz, Ergebnisse als `heuristic_only` markiert. Produktion braucht Bedrock EU, Mistral EU oder self-hosted. | Pipeline muss ohne Schlüssel und GPU durchlaufen, damit UI und Datenfluss testbar sind. | Nie als Produktionsprovider |
 | P5 | Satzgrenzen-Regel (`dach_nlp.is_sentence_end`) ist in Python und TypeScript identisch implementiert; der Web-Fallback greift nur ohne `sentence_idx`. | Kandidaten referenzieren Satzindizes, beide Seiten müssen gleich segmentieren. | Änderung der Regel auf einer Seite |
+| P6 | Render bleibt ehrlich: fehlt YuNet, steht `reframe.strategy = neutral` und `detector = none` im Render-Plan und die UI zeigt den Hinweis in Orange; fehlt c2patool, steht `provenance.c2pa = skipped` mit Grund. Nichts wird stillschweigend weggelassen. | Vertrauensversprechen: jede Auslassung ist für den Menschen sichtbar. | Wenn YuNet und c2patool im Produktions-Image Pflicht sind |
+| P7 | On-Screen-Hook als Overlay in den ersten 3 s: Default an für TikTok, Reels, Shorts, aus für LinkedIn (ruhig, belegt). Titelkarte 2,5 s nur bei Kontext-Reparatur. | Plattform-Matrix des Whitepapers, LinkedIn misst Kompetenz an Ruhe. | Performance-Daten je Plattform |
+| P8 | Ein Klick erzeugt ein Paket: je Zielplattform eine `clips`-Zeile und ein eigener Render (9:16 für TikTok/Reels/Shorts, 4:5 für LinkedIn), gleiche Komposition, eigene Captions und Post-Texte. | Derselbe Moment wird pro Plattform anders geschnitten, betitelt und untertitelt. | Wenn 1:1 für LinkedIn nachgefragt wird |
 
 ## Bewusst nicht in v1
 

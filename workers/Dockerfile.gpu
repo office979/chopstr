@@ -13,6 +13,7 @@ COPY packages/prompts /app/packages/prompts
 COPY workers/pyproject.toml workers/README.md /app/workers/
 COPY workers/chopstr_worker /app/workers/chopstr_worker
 COPY workers/eval /app/workers/eval
+COPY workers/fonts /app/workers/fonts
 
 # torch mit CUDA-Wheels; Version an das Basis-Image anpassen
 RUN python3 -m pip install --no-cache-dir --upgrade pip \

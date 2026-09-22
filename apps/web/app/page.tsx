@@ -52,6 +52,9 @@ export default async function ProjectsPage() {
       sources.filter((s) => s.status === "ready").map(async (s) => [s.id, await repo.countCandidates(s.id)] as const),
     ),
   );
+  const clipCounts = new Map(
+    await Promise.all(sources.filter((s) => s.status === "ready").map(async (s) => [s.id, await repo.countClips(s.id)] as const)),
+  );
 
   return (
     <PageShell backgroundWord="Clips">
@@ -82,6 +85,7 @@ export default async function ProjectsPage() {
             const progress = progressOf(s.status);
             const count = counts.get(s.id);
             const hasCandidates = (count?.total ?? 0) > 0;
+            const clipCount = clipCounts.get(s.id);
             return (
               <li key={s.id} className="min-w-0">
                 <GlassCard padding="none" className="min-w-0 overflow-hidden">
@@ -112,6 +116,18 @@ export default async function ProjectsPage() {
                         <Badge tone="ok">
                           {count.total} {count.total === 1 ? "Kandidat" : "Kandidaten"}
                         </Badge>
+                      )}
+                      {clipCount && clipCount.total > 0 && (
+                        <Badge tone={clipCount.rendering > 0 ? "ai" : "ok"}>
+                          {clipCount.rendered > 0
+                            ? `${clipCount.rendered} ${clipCount.rendered === 1 ? "Clip" : "Clips"} gerendert`
+                            : `${clipCount.total} ${clipCount.total === 1 ? "Clip" : "Clips"} in Arbeit`}
+                        </Badge>
+                      )}
+                      {clipCount && clipCount.total > 0 && (
+                        <ButtonLink href={`/projekte/${s.id}/clips`} size="sm" variant="ghost">
+                          Clips
+                        </ButtonLink>
                       )}
                       {s.status === "ready" && hasCandidates ? (
                         <>

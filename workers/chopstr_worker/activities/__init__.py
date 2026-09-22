@@ -7,9 +7,10 @@ vorhandene Outputs übersprungen.
 
 from __future__ import annotations
 
-from .analyze import detect_candidates, heatmap, notify, render_pack
+from .analyze import detect_candidates, heatmap, notify
 from .ingest import probe_and_extract
 from .nlp import fuse_and_nlp
+from .render import render_pack
 from .transcribe import diarize, transcribe_de
 
 CPU_ACTIVITIES = [probe_and_extract, heatmap, fuse_and_nlp, detect_candidates, render_pack, notify]

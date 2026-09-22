@@ -65,8 +65,24 @@ export interface BrandProfile {
   tone_adjectives: string[];
   default_platform: Platform;
   caption_preset: CaptionPreset;
+  /* CI (jsonb): Farben, Fonts, Logo, Bauchbinde */
+  ci: BrandCI;
+  /* Caption-Stil (jsonb): Highlight-Farbe, Hook-Overlay je Plattform */
+  caption_style: CaptionStyle;
   created_at: string;
   updated_at: string;
+}
+
+export interface BrandCI {
+  colors?: { primary?: string; secondary?: string; accent?: string };
+  fonts?: { primary_key?: string | null; secondary_key?: string | null };
+  logo_key?: string | null;
+  lower_third?: { enabled?: boolean; name?: string; role?: string };
+}
+
+export interface CaptionStyle {
+  highlight_color?: string;
+  hook_overlay?: Partial<Record<Platform, boolean>>;
 }
 
 export type BrandProfileInput = Omit<
@@ -79,6 +95,8 @@ export interface Brief {
   wanted?: string;
   exclude?: string;
   platform?: Platform;
+  /* Bezahlte Partnerschaft oder Markennennung: Clips bekommen ein Werbelabel (DE „Anzeige“, AT/CH „Werbung“) */
+  is_ad?: boolean;
 }
 
 export interface Source {
@@ -298,6 +316,173 @@ export interface CandidateCount {
   rejected: number;
 }
 
+
+/* Clips, Hook-Versionen, Caption-Versionen (Phase 3): Spiegel von packages/schema/CLIPS.md, Vertrag clips_v1 / render_plan_v1 */
+export type ClipStatus = "draft" | "approved" | "rendering" | "rendered" | "exported" | "failed";
+export type Aspect = "9:16" | "4:5" | "1:1" | "16:9";
+export type HookPattern = "identity_call" | "contrarian" | "open_loop" | "results_first" | "mistake_warning";
+export type ReframeStrategy = "talking_head" | "two_speakers" | "neutral";
+export type RenderStage = "copy" | "reframe" | "captions" | "encode" | "provenance";
+
+export interface Loudness {
+  integrated_lufs: number;
+  true_peak_dbtp: number;
+  preset: "master" | "legacy_social";
+}
+
+export interface Provenance {
+  c2pa?: "signed" | "skipped" | "failed";
+  reason?: string | null;
+  ai_label_required?: boolean;
+  ai_features?: string[];
+  source_credit?: string | null;
+  ad_label?: string | null;
+}
+
+export interface RenderShot {
+  start: number;
+  end: number;
+  crop_x: number;
+  crop_y: number;
+  crop_w: number;
+  crop_h: number;
+  layout: "single" | "split";
+}
+
+export interface RenderPlan {
+  contract: "render_plan_v1";
+  platform: Platform;
+  aspect: Aspect;
+  output: { width: number; height: number; fps: number };
+  segments: CandidateSegment[];
+  filler_cuts: boolean;
+  reframe: {
+    strategy: ReframeStrategy;
+    detector: "yunet" | "none";
+    faces_detected: boolean;
+    positions: number[];
+    min_shot_s: number;
+  };
+  shots: RenderShot[];
+  captions: {
+    preset: CaptionPreset;
+    font: string;
+    font_px: number;
+    max_chars: number;
+    baseline_y: number;
+    safe_zone: { top: number; bottom: number; left: number; right: number };
+    cards: number;
+    highlight: boolean;
+  };
+  title_card: { text: string; seconds: number } | null;
+  hook_overlay: { text: string; seconds: number } | null;
+  audio: { preset: "master" | "legacy_social"; lufs: number; true_peak: number; micro_fade_ms: number };
+  sources: { storage_key: string; transcript_version: number; hook_version: number; candidate_id: string };
+  versions: { captions_de: string; render: string; reframe: string };
+}
+
+export interface Clip {
+  id: string;
+  source_id: string;
+  candidate_id: string | null;
+  version: number;
+  platform: Platform;
+  destination: Platform | null;
+  aspect: Aspect;
+  composition: CandidateSegment[];
+  kept_ranges: unknown | null;
+  fidelity_warnings: unknown[];
+  speaker_positions: Record<string, number> | null;
+  render_plan: RenderPlan | null;
+  title_card: string | null;
+  ad_label: string | null;
+  ai_features: string[];
+  guest_approval_required: boolean;
+  status: ClipStatus;
+  file_key: string | null;
+  srt_key: string | null;
+  vtt_key: string | null;
+  poster_key: string | null;
+  cps_warnings: string[];
+  duration_s: number | null;
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+  loudness: Loudness | null;
+  provenance: Provenance;
+  render_error: string | null;
+  rendered_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HookVariant {
+  pattern: HookPattern;
+  spoken: string;
+  onscreen: string;
+  lint_notes: string[];
+  claim_issues: string[];
+}
+
+export type PostCaptions = Partial<Record<Platform, string>>;
+
+export interface HookVersion {
+  id: string;
+  clip_id: string;
+  version: number;
+  spoken_hook: string | null;
+  onscreen_hook: string | null;
+  pattern: HookPattern | null;
+  variants: HookVariant[];
+  post_captions: PostCaptions;
+  cta: string | null;
+  lint_notes: string[];
+  claim_issues: string[];
+  origin: "llm" | "manual";
+  model_id: string | null;
+  prompt_version: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface SaveHookInput {
+  spoken_hook: string;
+  onscreen_hook: string;
+  pattern: HookPattern | null;
+  post_captions: PostCaptions;
+  cta: string;
+}
+
+export interface CaptionCard {
+  start: number;
+  end: number;
+  lines: string[];
+  /* Wort mit Gewichtswechsel (linkedin_static) oder Highlight (tiktok_bold) */
+  keyword?: string;
+}
+
+export interface CaptionVersion {
+  id: string;
+  clip_id: string;
+  version: number;
+  preset: CaptionPreset;
+  cards: CaptionCard[];
+  ass_key: string | null;
+  srt_key: string | null;
+  cps_warnings: string[];
+  origin: "auto" | "manual";
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface ClipCount {
+  total: number;
+  rendered: number;
+  rendering: number;
+  failed: number;
+}
+
 export interface AuditEntry {
   action: string;
   entity: string;
@@ -328,5 +513,18 @@ export interface Repo {
   /* Neue Zeile version + 1 mit neu berechneten Grenzen und Gates; alte Zeile bekommt human_verdict = 'edited' */
   reviseCandidate(id: string, input: ReviseCandidateInput): Promise<Candidate | null>;
   countCandidates(sourceId: string): Promise<CandidateCount>;
+  /* Clips (Phase 3): eine Zeile je Zielplattform; bestehende Zeilen (candidate_id, platform) werden wiederverwendet */
+  createClips(candidateId: string, platforms: Platform[]): Promise<Clip[]>;
+  listClips(sourceId: string): Promise<Clip[]>;
+  getClip(id: string): Promise<Clip | null>;
+  updateClip(id: string, patch: Partial<Clip>): Promise<Clip | null>;
+  /* Demo: startet die Render-Simulation erneut; Postgres: keine Änderung, der Worker übernimmt nach dem Signal */
+  requestClipRender(id: string): Promise<Clip | null>;
+  countClips(sourceId: string): Promise<ClipCount>;
+  getCurrentHook(clipId: string): Promise<HookVersion | null>;
+  listHookVersions(clipId: string): Promise<HookVersion[]>;
+  /* Neue manuelle Version mit Lint-Hinweisen (lib/copy/lint.ts) und Claim-Issues (lib/copy/claims.ts) */
+  saveHook(clipId: string, input: SaveHookInput): Promise<HookVersion>;
+  getCurrentCaptions(clipId: string): Promise<CaptionVersion | null>;
   audit(entry: AuditEntry): Promise<void>;
 }

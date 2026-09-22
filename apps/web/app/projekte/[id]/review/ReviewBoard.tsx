@@ -1,10 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
-import type { Candidate, ReviseCandidateInput } from "@/lib/repo/types";
+import type { Candidate, Clip, Platform, ReviseCandidateInput } from "@/lib/repo/types";
+import { PLATFORM_LABELS } from "@/lib/clips/labels";
 import type { Sentence } from "@/lib/transcript/sentences";
 import { warningsOf } from "@/lib/candidates/labels";
 import { usePlayer } from "../transkript/usePlayer";
@@ -19,6 +21,8 @@ interface Props {
   durationS: number;
   videoSrc: string | null;
   initialCandidates: Candidate[];
+  initialClips: Clip[];
+  defaultPlatform: Platform;
   sentences: Sentence[];
   speakerNames: Record<string, string>;
 }
@@ -61,7 +65,7 @@ interface ApiError {
 }
 
 /* Kandidaten-Review: Player links, Liste rechts, Detail mit Aktionen. Urteile werden optimistisch gesetzt. */
-export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandidates, sentences, speakerNames }: Props) {
+export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandidates, initialClips, defaultPlatform, sentences, speakerNames }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const player = usePlayer(videoRef, durationS);
   const { currentTime, playing, seek, play, pause } = player;
@@ -71,8 +75,10 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
   const [selectedId, setSelectedId] = useState<string | null>(initialCandidates[0]?.id ?? null);
   const [glitchId, setGlitchId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string; href?: string; hrefLabel?: string } | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [acceptOpen, setAcceptOpen] = useState(false);
+  const [clips, setClips] = useState<Clip[]>(initialClips);
   /* Ende der 8-Sekunden-Vorschau (Sekunden im Original); null = keine Vorschau aktiv */
   const [previewEnd, setPreviewEnd] = useState<number | null>(null);
 
@@ -118,6 +124,7 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
       if (!c) return;
       setSelectedId(id);
       setRejectOpen(false);
+      setAcceptOpen(false);
       setPreviewEnd(null);
       pause();
       seek(c.start_s);
@@ -156,7 +163,7 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
     setCandidates((prev) => prev.map((c) => (c.id === id ? next : c)));
 
   const setVerdict = useCallback(
-    async (c: Candidate, verdict: "accepted" | "rejected", reason?: string) => {
+    async (c: Candidate, verdict: "accepted" | "rejected", reason?: string, platforms?: Platform[]) => {
       const before = c;
       const optimistic: Candidate = {
         ...c,
@@ -167,6 +174,7 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
       replace(c.id, optimistic);
       setMessage(null);
       if (verdict === "accepted") {
+        setAcceptOpen(false);
         setGlitchId(c.id);
         window.setTimeout(() => setGlitchId((g) => (g === c.id ? null : g)), 1000);
       } else {
@@ -176,20 +184,33 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
         const res = await fetch(`/api/projects/${sourceId}/candidates/${c.id}/verdict`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ verdict, reason }),
+          body: JSON.stringify({ verdict, reason, platforms }),
         });
-        const data = (await res.json()) as ApiError & { candidate?: Candidate; signaled?: boolean; destination?: string | null };
+        const data = (await res.json()) as ApiError & { candidate?: Candidate; clips?: Clip[]; signaled?: Platform[]; demo?: boolean };
         if (!res.ok || !data.candidate) throw new Error(data.error ?? "Urteil konnte nicht gespeichert werden");
         replace(c.id, data.candidate);
-        setMessage({
-          tone: "ok",
-          text:
-            verdict === "accepted"
-              ? data.signaled
-                ? `Angenommen. Render für ${data.destination} ist angestoßen.`
-                : `Angenommen für ${data.destination ?? "die Plattform des Briefings"}. Render folgt in Phase 3.`
-              : "Abgelehnt. Der Grund fließt als Lernsignal ein.",
-        });
+        const created = data.clips ?? [];
+        if (created.length > 0) {
+          setClips((prev) => [...prev.filter((k) => !created.some((n) => n.id === k.id)), ...created]);
+        }
+        const names = created.map((k) => PLATFORM_LABELS[k.platform]).join(", ");
+        setMessage(
+          verdict === "accepted"
+            ? {
+                tone: "ok",
+                text:
+                  created.length === 0
+                    ? "Angenommen."
+                    : (data.signaled?.length ?? 0) > 0
+                      ? `Angenommen. ${created.length} Clips angelegt (${names}), Render angestoßen.`
+                      : data.demo
+                        ? `Angenommen. ${created.length} Clips angelegt (${names}), Demo-Render läuft.`
+                        : `Angenommen. ${created.length} Clips angelegt (${names}). Render startet, sobald der Worker erreichbar ist.`,
+                href: `/projekte/${sourceId}/clips`,
+                hrefLabel: "Clips ansehen",
+              }
+            : { tone: "ok", text: "Abgelehnt. Der Grund fließt als Lernsignal ein." },
+        );
       } catch (err) {
         replace(c.id, before);
         setMessage({ tone: "error", text: err instanceof Error ? err.message : "Urteil konnte nicht gespeichert werden" });
@@ -245,7 +266,8 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
       } else if (key === "a") {
         if (selected && selected.human_verdict !== "accepted" && busyId == null) {
           e.preventDefault();
-          void setVerdict(selected, "accepted");
+          setRejectOpen(false);
+          setAcceptOpen(true);
         }
       } else if (key === "r") {
         if (selected && selected.human_verdict !== "rejected") {
@@ -284,7 +306,7 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
           title={title}
           player={player}
           activeSpeaker={null}
-          hint="J/K: nächster, voriger Kandidat · A: annehmen · R: ablehnen · Leertaste: 8 s Vorschau"
+          hint="J/K: nächster, voriger Kandidat · A: annehmen (Ziele wählen) · R: ablehnen · Leertaste: 8 s Vorschau"
         />
         {selected && (
           <ClipText
@@ -335,6 +357,14 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
             className={cn("rounded-inner border px-4 py-3 text-sm", message.tone === "ok" ? "border-line text-text" : "border-attention/50 bg-attention/10 text-text")}
           >
             {message.text}
+            {message.href && (
+              <>
+                {" "}
+                <Link href={message.href} className="font-medium text-text underline-offset-4 hover:underline">
+                  {message.hrefLabel ?? "Öffnen"}
+                </Link>
+              </>
+            )}
           </p>
         )}
 
@@ -370,11 +400,22 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
           <CandidateDetail
             key={selected.id}
             candidate={selected}
+            sourceId={sourceId}
             maxSentence={maxSentence}
             busy={busyId === selected.id}
             rejectOpen={rejectOpen}
-            onRejectOpen={setRejectOpen}
-            onAccept={() => setVerdict(selected, "accepted")}
+            onRejectOpen={(open) => {
+              setRejectOpen(open);
+              if (open) setAcceptOpen(false);
+            }}
+            acceptOpen={acceptOpen}
+            onAcceptOpen={(open) => {
+              setAcceptOpen(open);
+              if (open) setRejectOpen(false);
+            }}
+            defaultPlatform={defaultPlatform}
+            clips={clips.filter((k) => k.candidate_id === selected.id)}
+            onAccept={(platforms) => setVerdict(selected, "accepted", undefined, platforms)}
             onReject={(reason) => setVerdict(selected, "rejected", reason)}
             onRevise={(input) => revise(selected, input)}
           />

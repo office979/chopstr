@@ -10,14 +10,14 @@ Keynotes) entstehen priorisierte Short-Form-Clips, die **sinntreu geschnitten**,
 Die KI erzeugt Vorschläge, Scores, Belege und Render-Pläne. Ein Mensch gibt frei. Ein deterministischer
 Renderer baut das Video.
 
-Stand: **Phase 0 (Fundament), Phase 1 (Deutsch hören) und Phase 2 (Story-Engine und Review)** sind
-gebaut. Reframing, Captions, Copy und Rendering (Phase 3) liegen als Module im Worker, hängen aber noch
-nicht in der Workflow-Kette.
+Stand: **Phase 0 (Fundament), Phase 1 (Deutsch hören), Phase 2 (Story-Engine und Review) und Phase 3
+(Copy, Reframing, Captions, Render, Provenienz)** sind gebaut. Offen sind Phase 4 (Organisationen, Rollen,
+Gast-Freigabe, Abrechnung, Lösch-Workflow) und Phase 5 (Sovereign, API, Publishing, Lernschleife).
 
 ## Architektur
 
 ```
-apps/web (Next.js, Lichtbruch-Design)           Upload (TUS) · Projektstatus (SSE) · Transkript-Editor · Kandidaten-Review · Markenprofil
+apps/web (Next.js, Lichtbruch-Design)           Upload · Projektstatus · Transkript-Editor · Kandidaten-Review · Clips + Hook-Studio · Markenprofil
         │
 Postgres (RLS, Supabase eu-central-1 │ Hetzner)  +  S3-kompatibler Objektspeicher (EU, Lifecycle)  +  Redis
         │
@@ -25,7 +25,7 @@ Temporal (self-hosted, EU) ── ClipProjectWorkflow
    ├─ GPU-Queue  chopstr-gpu : transcribe_de ∥ diarize
    ├─ CPU-Queue  chopstr-cpu : probe_and_extract → heatmap → fuse_and_nlp → detect_candidates (Story-Engine)
    ├─ ⏸  menschliche Freigabe (Signal, bis 14 Tage)
-   └─ render_pack (Phase 3)
+   └─ render_pack : Copy (hooks_v1, post_caption_v1, Linter) → Reframe → Captions → ffmpeg → C2PA → Clip-Paket
         │
 LLM über providers_llm (Residency-Guard, Cache, Kostenlog): Bedrock EU │ Mistral EU │ self-hosted
 ```
@@ -107,7 +107,7 @@ Alle Variablen mit Erklärung stehen in [`.env.example`](.env.example). Die wich
 | `docker compose up` startet alles; Upload erscheint als Workflow in der Temporal-UI | Compose-Datei vorhanden. Auf dieser Entwicklungsmaschine ist kein Docker installiert, deshalb noch nicht als Ganzes gestartet. |
 | 60-Min-Podcast wird transkribiert und diarisiert, Ergebnis im Editor korrigierbar | Pipeline und Editor gebaut. Echtlauf braucht GPU-Worker und Modelle (siehe `workers/README.md`). |
 | WER auf Referenz-Set (Ziel Studio-Audio < 5 %) | `workers/eval/wer_eval.py` vorhanden; Referenzdaten fehlen noch. |
-| Unit-Tests für Phase-0/1-Module grün | 124 Tests grün (inkl. Phase 2), `ruff` sauber (`workers/tests`, 22.09.2026). |
+| Unit-Tests für Phase-0/1-Module grün | 161 Tests grün (inkl. Phase 2 und 3, Medien-Regression mit ffmpeg), `ruff` sauber (22.09.2026). |
 | Kein Aufruf außerhalb der EU (Test grün) | `workers/tests/test_residency.py` grün: Sovereign blockt Bedrock, Nicht-EU-Hosts werden vor dem Verbindungsaufbau abgewiesen. |
 | UI erfüllt WCAG AA, Fallback ohne `backdrop-filter` | Umgesetzt in `apps/web/app/globals.css` und Komponenten. |
 | README mit Setup, Env-Variablen, Architektur | Diese Datei. |
@@ -127,6 +127,23 @@ bietet Annehmen, Ablehnen mit Grund, Verlängern, Kürzen und Titelkarte (Tastat
 gegen Postgres geprüft: Engine mit Heuristik-Provider → 2 Kandidaten → Urteil und Revision über die API →
 Audit-Log. Blindtest-Protokoll: `docs/BLINDTEST.md`.
 
+**Phase 3 (Paket rendern)**: Annehmen im Review legt pro Zielplattform einen Clip an und sendet das
+Freigabe-Signal; `render_pack` schreibt Hook-Version 1 (fünf Varianten, Linter, Claim-Check, Post-Texte
+je Plattform), plant Reframe und Captions (Preset je Plattform, Safe Zones, Lesetempo), rendert mit ffmpeg
+(Titelkarte, Hook-Overlay, eingebrannte Captions, zweistufiges Loudnorm -16 LUFS / -1,5 dBTP, Micro-Fades)
+und schreibt Provenienz, Lautheit, Poster, SRT/VTT und den deterministischen `render_plan_v1`
+(`packages/schema/CLIPS.md`). Web: Clip-Übersicht mit Export, Hook-Studio mit stummer Vorschau, CI im
+Markenprofil. End-to-end gegen Postgres geprüft: Kandidat mit TikTok und LinkedIn angenommen, beide Clips
+gerendert (1080×1920 und 1080×1350, je 17,6 s, -16,0 LUFS), manuelle Hook-Version 2 im Studio gespeichert,
+Re-Render übernimmt sie. Frames zeigen Titelkarte, Overlay und Captions. Dabei behoben: Render-Geometrie kommt
+jetzt immer aus ffprobe der echten Datei, nicht aus DB-Metadaten.
+
+**ffmpeg-Hinweis**: Einbrennen von Captions, Titelkarte und Hook braucht ffmpeg mit `libass` und
+`libfreetype`. Das Homebrew-ffmpeg auf der Entwicklungsmaschine hat beides nicht; der Worker erkennt das,
+rendert ohne Overlays und meldet es im Event (`captions_burned = false`). Für Tests und lokale Renders liefert
+das PyPI-Paket `imageio-ffmpeg` ein statisches ffmpeg mit libass (`pip install imageio-ffmpeg`, Binary in den
+`PATH` verlinken). Das Docker-Image (`python:3.12-slim` + Debian-ffmpeg) bringt libass mit.
+
 ## Arbeitsregeln
 
 - Kleine, überprüfbare Schritte. Nach jedem Schritt: was gebaut, wie getestet, was offen.
@@ -142,6 +159,6 @@ Audit-Log. Blindtest-Protokoll: `docs/BLINDTEST.md`.
 | 0 | Monorepo, Schema, Upload, Ingest, Temporal, Residency-Guard, Design-System | Workflow sichtbar |
 | 1 | ASR, Diarisierung, dach_nlp, Transkript-Editor, Markenprofil, WER-Evaluation | < 5 % WER Studio-Audio |
 | 2 | Heatmap, LLM-Vorschlag, Rubrik, Story-Graph, Review-UI (gebaut; Blindtest offen) | Blindtest: Precision@10 > 0,5 |
-| 3 | Reframing, Caption-Presets, Copy-Engine + Linter, LinkedIn-Paket, C2PA | Ein Klick → postbares Paket |
+| 3 | Reframing, Caption-Presets, Copy-Engine + Linter, LinkedIn-Paket, C2PA (gebaut; YuNet und c2patool im Produktions-Image nachrüsten) | Ein Klick → postbares Paket |
 | 4 | Organisationen, Rollen, Freigaben, Gast-Links, Abrechnung nach Stunden, AVV, Lösch-Workflow | Pilot in der eigenen Agentur |
 | 5 | Sovereign-Tarif, API + MCP-Server, Publishing, Lernschleife, Schweizerdeutsch-Beta | Erste zahlende Kunden |

@@ -7,20 +7,30 @@ import { Badge } from "@/components/ui/Badge";
 import { StatusCheck } from "@/components/ui/StatusCheck";
 import { Input, Textarea } from "@/components/ui/Field";
 import { cn } from "@/components/ui/cn";
-import type { Candidate, ReviseCandidateInput } from "@/lib/repo/types";
+import type { Candidate, Clip, Platform, ReviseCandidateInput } from "@/lib/repo/types";
+import { PLATFORMS, PLATFORM_LABELS } from "@/lib/clips/labels";
+import { PLATFORM_ASPECT } from "@/lib/clips/presets";
 import { GATE_LABELS, GATE_ORDER } from "@/lib/candidates/gates";
 import { RUBRIC_LABELS, RUBRIC_ORDER, VERDICT_LABELS, formatSeconds, structureLabel } from "@/lib/candidates/labels";
 import { TITLE_CARD_MAX_WORDS, titleCardWords } from "@/lib/candidates/revise";
 import { formatTimecode } from "@/lib/format";
 import { StoryGraph } from "./StoryGraph";
+import Link from "next/link";
 
 interface Props {
   candidate: Candidate;
+  sourceId: string;
   maxSentence: number;
   busy: boolean;
   rejectOpen: boolean;
   onRejectOpen: (open: boolean) => void;
-  onAccept: () => void;
+  acceptOpen: boolean;
+  onAcceptOpen: (open: boolean) => void;
+  /* Standard-Plattform des Markenprofils: vorausgewählt, hervorgehoben, immer dabei */
+  defaultPlatform: Platform;
+  /* Clips dieses Kandidaten (nach dem Annehmen) */
+  clips: Clip[];
+  onAccept: (platforms: Platform[]) => void;
   onReject: (reason: string) => void;
   onRevise: (input: ReviseCandidateInput) => void;
 }
@@ -32,12 +42,38 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 /* Detail: Begründung, Rubrik, Pflichtkriterien, Story-Graph, Aktionen */
-export function CandidateDetail({ candidate: c, maxSentence, busy, rejectOpen, onRejectOpen, onAccept, onReject, onRevise }: Props) {
+export function CandidateDetail({
+  candidate: c,
+  sourceId,
+  maxSentence,
+  busy,
+  rejectOpen,
+  onRejectOpen,
+  acceptOpen,
+  onAcceptOpen,
+  defaultPlatform,
+  clips,
+  onAccept,
+  onReject,
+  onRevise,
+}: Props) {
   const [reason, setReason] = useState("");
   const [panel, setPanel] = useState<Panel>(null);
   const [titleCard, setTitleCard] = useState(c.rubric.suggested_title_card ?? "");
+  const [targets, setTargets] = useState<Platform[]>(PLATFORMS);
   const reasonId = useId();
   const titleId = useId();
+  const targetsId = useId();
+  const firstClip = clips[0] ?? null;
+
+  const toggleTarget = (p: Platform) => {
+    if (p === defaultPlatform) return;
+    setTargets((cur) => (cur.includes(p) ? cur.filter((x) => x !== p) : PLATFORMS.filter((x) => x === p || cur.includes(x))));
+  };
+  const submitAccept = () => {
+    const chosen = PLATFORMS.filter((p) => targets.includes(p) || p === defaultPlatform);
+    onAccept(chosen);
+  };
 
   const first = c.first_sent ?? 0;
   const last = c.last_sent ?? 0;
@@ -192,7 +228,7 @@ export function CandidateDetail({ candidate: c, maxSentence, busy, rejectOpen, o
 
       <section className="border-t border-line pt-6">
         <div className="flex flex-wrap gap-2">
-          <Button onClick={onAccept} disabled={busy || c.human_verdict === "accepted"}>
+          <Button onClick={() => onAcceptOpen(!acceptOpen)} disabled={busy || c.human_verdict === "accepted"} aria-expanded={acceptOpen} aria-controls={targetsId}>
             Annehmen
           </Button>
           <Button variant="ghost" onClick={() => onRejectOpen(!rejectOpen)} disabled={busy || c.human_verdict === "rejected"} aria-expanded={rejectOpen}>
@@ -207,13 +243,72 @@ export function CandidateDetail({ candidate: c, maxSentence, busy, rejectOpen, o
           <Button variant="ghost" onClick={() => togglePanel("title")} disabled={busy} aria-expanded={panel === "title"}>
             Kontext ergänzen
           </Button>
-          <span className="inline-flex items-center gap-2">
-            <Button variant="ghost" disabled title="Hook-Studio kommt in Phase 3">
+          {firstClip ? (
+            <Link
+              href={`/projekte/${sourceId}/clips/${firstClip.id}/hooks`}
+              className="transition-soft inline-flex h-11 items-center justify-center rounded-pill border border-line-strong px-6 text-[15px] font-medium text-text hover:border-white/40 hover:bg-white/5"
+            >
               Umschreiben
-            </Button>
-            <span className="text-xs text-text-3">Hook-Studio kommt in Phase 3</span>
-          </span>
+            </Link>
+          ) : (
+            <span className="inline-flex items-center gap-2">
+              <Button variant="ghost" disabled title="Hook-Studio: erst annehmen, dann umschreiben">
+                Umschreiben
+              </Button>
+              <span className="text-xs text-text-3">Hook-Studio nach dem Annehmen</span>
+            </span>
+          )}
         </div>
+
+        {clips.length > 0 && (
+          <p className="mt-3 text-sm text-text-2">
+            {clips.length} {clips.length === 1 ? "Clip" : "Clips"} angelegt ({clips.map((k) => PLATFORM_LABELS[k.platform]).join(", ")}).{" "}
+            <Link href={`/projekte/${sourceId}/clips`} className="text-text underline-offset-4 hover:underline">
+              Zur Clip-Übersicht
+            </Link>
+          </p>
+        )}
+
+        {acceptOpen && c.human_verdict !== "accepted" && (
+          <div id={targetsId} className="mt-4 flex flex-col gap-3 rounded-inner border border-line p-4" role="group" aria-label="Ziele wählen">
+            <p className="text-sm font-medium text-text">
+              Wohin soll der Clip? <span className="text-text-2">(je Ziel ein Render)</span>
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {PLATFORMS.map((p) => {
+                const active = targets.includes(p) || p === defaultPlatform;
+                const isDefault = p === defaultPlatform;
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => toggleTarget(p)}
+                    aria-pressed={active}
+                    aria-disabled={isDefault || undefined}
+                    title={isDefault ? "Standard-Plattform des Markenprofils, immer dabei" : undefined}
+                    className={cn(
+                      "transition-soft inline-flex h-9 items-center gap-2 rounded-pill border px-3.5 text-sm",
+                      active ? "border-white/40 bg-white/10 text-text" : "border-line text-text-2 hover:border-line-strong hover:text-text",
+                      isDefault && "glass-selected",
+                    )}
+                  >
+                    {PLATFORM_LABELS[p]}
+                    <span className="font-mono text-[11px] text-text-3">{PLATFORM_ASPECT[p]}</span>
+                    {isDefault && <span className="text-[11px] uppercase tracking-wide text-ai-soft">Standard</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" onClick={submitAccept} disabled={busy}>
+                Annehmen für {PLATFORMS.filter((p) => targets.includes(p) || p === defaultPlatform).length} Ziele
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => onAcceptOpen(false)}>
+                Abbrechen
+              </Button>
+            </div>
+          </div>
+        )}
 
         {busy && (
           <p className="mt-3 text-sm text-text-2" role="status" aria-live="polite">

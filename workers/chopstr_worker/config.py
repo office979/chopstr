@@ -97,6 +97,11 @@ class Settings:
 
     work_dir: str = ""
 
+    # Render (Phase 3): x264-Preset (Tests setzen ultrafast), Font-Verzeichnis, YuNet-Modell
+    render_x264_preset: str = "medium"
+    render_fonts_dir: str = ""
+    yunet_model_path: str = ""
+
     # Kostenmodell (EUR); alle Werte per ENV überschreibbar, siehe costlog.py
     gpu_eur_per_hour: float = 1.20
     cpu_eur_per_hour: float = 0.05
@@ -155,6 +160,9 @@ def load_settings() -> Settings:
         languagetool_url=_env("LANGUAGETOOL_URL"),
         egress_allowlist=_env_list("EGRESS_ALLOWLIST"),
         work_dir=_env("WORKER_WORK_DIR"),
+        render_x264_preset=_env("RENDER_X264_PRESET", "medium"),
+        render_fonts_dir=_env("RENDER_FONTS_DIR"),
+        yunet_model_path=_env("YUNET_MODEL_PATH"),
         gpu_eur_per_hour=_env_float("GPU_EUR_PER_HOUR", 1.20),
         cpu_eur_per_hour=_env_float("CPU_EUR_PER_HOUR", 0.05),
         storage_eur_per_gb_month=_env_float("STORAGE_EUR_PER_GB_MONTH", 0.02),

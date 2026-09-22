@@ -104,8 +104,8 @@ class StepContext:
         self.message: str | None = None
         self.payload: dict[str, Any] = {}
 
-    def progress(self, fraction: float, message: str | None = None) -> None:
-        emit(self.conn, self.source_id, self.name, "progress", message, progress=fraction)
+    def progress(self, fraction: float, message: str | None = None, **payload: Any) -> None:
+        emit(self.conn, self.source_id, self.name, "progress", message, progress=fraction, payload=payload or None)
 
     def finish(self, message: str | None = None, **payload: Any) -> None:
         self.message = message

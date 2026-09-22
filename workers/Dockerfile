@@ -15,6 +15,7 @@ COPY packages/prompts /app/packages/prompts
 COPY workers/pyproject.toml workers/README.md /app/workers/
 COPY workers/chopstr_worker /app/workers/chopstr_worker
 COPY workers/eval /app/workers/eval
+COPY workers/fonts /app/workers/fonts
 
 RUN pip install --no-cache-dir "/app/workers[nlp]"
 

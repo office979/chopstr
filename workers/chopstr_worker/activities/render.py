@@ -1,0 +1,527 @@
+"""Activity ``render_pack`` (Phase 3): aus einem angenommenen Kandidaten ein postbares Paket rendern.
+
+Ablauf nach ``packages/schema/CLIPS.md``: Clip-Zeile finden oder anlegen, ``rendering``, Copy (Hook-Version 1
+per ``copy_engine``, falls keine existiert; sonst die höchste Version, auch manuelle), Reframe, Captions auf der
+Ausgabe-Timeline, ffmpeg-Encode, Provenienz (C2PA nur mit c2patool, sonst ``skipped`` mit Grund), Upload nach
+``derived`` (``renders/<clip_id>/<hash>.*``), ``caption_versions``, Spalten in ``clips``, ``rendered``.
+Fehler: ``failed`` plus ``render_error`` (deutsch). Events ``step = 'render'`` mit ``progress`` je Schritt
+(copy, reframe, captions, encode, provenance). Idempotent über den Hash aus Plan, Hook-Version und
+Transkriptversion: existiert die MP4 unter diesem Hash und ist sie am Clip eingetragen, wird nicht neu gerendert.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from temporalio import activity
+
+from .. import costlog, db, events, ingest
+from ..pipeline import (
+    captions_de,
+    compliance,
+    compose,
+    copy_de,
+    copy_engine,
+    fidelity,
+    reframe,
+    render,
+    render_plan,
+)
+from ..providers_llm import LLM
+from ..residency import Tenant
+from . import common
+
+log = logging.getLogger("chopstr.activities.render")
+
+STEP_RENDER = "render"
+PLATFORMS = copy_engine.PLATFORMS
+RENDER_PREFIX = "renders"
+CONTENT_TYPES = {"mp4": "video/mp4", "srt": "application/x-subrip", "vtt": "text/vtt", "jpg": "image/jpeg", "ass": "text/plain"}
+
+SQL_CANDIDATE = "select id, source_id, segments, rubric, risk_flags, start_s, end_s from candidates where id = %s"
+SQL_BRAND_EXTRA = (
+    "select p.gender_mode, p.banned_phrases, p.tone_adjectives, p.default_platform, p.caption_preset, p.caption_style, "
+    "s.rights_status, s.source_owner, s.source_title, s.source_url "
+    "from sources s left join brand_profiles p on p.id = s.brand_profile_id where s.id = %s"
+)
+SQL_CLIP = (
+    "select id, status, aspect, composition, title_card, ad_label, ai_features, speaker_positions, file_key "
+    "from clips where candidate_id = %s and platform = %s order by created_at desc limit 1"
+)
+SQL_HOOK = (
+    "select id, version, origin, spoken_hook, onscreen_hook, pattern, post_captions, cta "
+    "from hook_versions where clip_id = %s order by version desc limit 1"
+)
+SQL_CAPTION_MAX = "select coalesce(max(version), 0) from caption_versions where clip_id = %s"
+
+
+def _json(value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return default
+    return value
+
+
+def _load_candidate(ctx: common.Context, candidate_id: str) -> dict[str, Any]:
+    row = db.fetch_one(ctx.conn, SQL_CANDIDATE, (candidate_id,))
+    if row is None:
+        raise LookupError(f"Kandidat {candidate_id} nicht gefunden")
+    cid, source_id, segments, rubric, risk_flags, start_s, end_s = row
+    return {
+        "id": str(cid),
+        "source_id": str(source_id),
+        "segments": list(_json(segments, [])),
+        "rubric": dict(_json(rubric, {}) or {}),
+        "risk_flags": list(_json(risk_flags, []) or []),
+        "start_s": float(start_s) if start_s is not None else None,
+        "end_s": float(end_s) if end_s is not None else None,
+    }
+
+
+def _load_brand_extra(ctx: common.Context, source_id: str) -> dict[str, Any]:
+    row = db.fetch_one(ctx.conn, SQL_BRAND_EXTRA, (source_id,))
+    keys = [
+        "gender_mode", "banned_phrases", "tone_adjectives", "default_platform", "caption_preset", "caption_style",
+        "rights_status", "source_owner", "source_title", "source_url",
+    ]  # fmt: skip
+    out = dict(zip(keys, row)) if row else {}
+    out["gender_mode"] = out.get("gender_mode") or "neutral"
+    out["banned_phrases"] = list(out.get("banned_phrases") or [])
+    out["tone_adjectives"] = list(out.get("tone_adjectives") or [])
+    out["default_platform"] = out.get("default_platform") or "linkedin"
+    out["caption_preset"] = out.get("caption_preset") or "linkedin_static"
+    out["caption_style"] = dict(_json(out.get("caption_style"), {}) or {})
+    out["rights_status"] = out.get("rights_status") or "own"
+    return out
+
+
+def ad_label_for(brief: dict, country: str) -> str | None:
+    if brief.get("is_ad"):
+        return copy_de.AD_LABELS.get((country or "AT").upper(), "Werbung")
+    return None
+
+
+def _find_or_create_clip(ctx: common.Context, cand: dict, src: dict, destination: str) -> dict[str, Any]:
+    row = db.fetch_one(ctx.conn, SQL_CLIP, (cand["id"], destination))
+    if row is not None:
+        cid, status, aspect, composition, title_card, ad_label, ai_features, speaker_positions, file_key = row
+        if status not in ("draft", "failed", "rendered", "approved"):
+            log.warning("render clip=%s status=%s wird trotzdem gerendert", cid, status)
+        return {
+            "id": str(cid),
+            "status": status,
+            "aspect": aspect or render_plan.aspect_for_platform(destination),
+            "composition": list(_json(composition, []) or []) or list(cand["segments"]),
+            "title_card": title_card,
+            "ad_label": ad_label,
+            "ai_features": list(ai_features or []),
+            "speaker_positions": _json(speaker_positions, None),
+            "file_key": file_key,
+            "created": False,
+        }
+    aspect = render_plan.aspect_for_platform(destination)
+    title_card = (cand["rubric"].get("suggested_title_card") or "").strip() or None
+    ad_label = ad_label_for(dict(src.get("brief") or {}), src.get("country") or "AT")
+    inserted = db.insert(
+        ctx.conn,
+        "clips",
+        returning="id",
+        source_id=cand["source_id"],
+        candidate_id=cand["id"],
+        platform=destination,
+        destination=destination,
+        aspect=aspect,
+        composition=db.jsonb(cand["segments"]),
+        title_card=title_card,
+        ad_label=ad_label,
+        status="draft",
+    )
+    return {
+        "id": str(inserted[0]),
+        "status": "draft",
+        "aspect": aspect,
+        "composition": list(cand["segments"]),
+        "title_card": title_card,
+        "ad_label": ad_label,
+        "ai_features": [],
+        "speaker_positions": None,
+        "file_key": None,
+        "created": True,
+    }
+
+
+def _load_hook(ctx: common.Context, clip_id: str) -> dict[str, Any] | None:
+    row = db.fetch_one(ctx.conn, SQL_HOOK, (clip_id,))
+    if row is None:
+        return None
+    hid, version, origin, spoken, onscreen, pattern, post_captions, cta = row
+    return {
+        "id": str(hid),
+        "version": int(version),
+        "origin": origin,
+        "spoken_hook": spoken or "",
+        "onscreen_hook": onscreen or "",
+        "pattern": pattern or "",
+        "post_captions": dict(_json(post_captions, {}) or {}),
+        "cta": cta or "",
+    }
+
+
+def _write_hook_version(ctx: common.Context, clip_id: str, copy: copy_engine.CopyResult) -> dict[str, Any]:
+    row = copy.to_row()
+    inserted = db.insert(
+        ctx.conn,
+        "hook_versions",
+        returning="id",
+        clip_id=clip_id,
+        version=1,
+        spoken_hook=row["spoken_hook"],
+        onscreen_hook=row["onscreen_hook"],
+        pattern=row["pattern"],
+        variants=db.jsonb(row["variants"]),
+        post_captions=db.jsonb(row["post_captions"]),
+        cta=row["cta"],
+        lint_notes=db.jsonb(row["lint_notes"]),
+        claim_issues=db.jsonb(row["claim_issues"]),
+        origin="llm",
+        model_id=row["model_id"],
+        prompt_version=row["prompt_version"],
+    )
+    return {
+        "id": str(inserted[0]) if inserted else "",
+        "version": 1,
+        "origin": "llm",
+        "spoken_hook": row["spoken_hook"],
+        "onscreen_hook": row["onscreen_hook"],
+        "pattern": row["pattern"],
+        "post_captions": row["post_captions"],
+        "cta": row["cta"],
+    }
+
+
+def clip_words(words: list[dict], segments: list[dict]) -> list[dict]:
+    """Wörter innerhalb der Segmente, in Abspielreihenfolge (Teaser doppelt, wie im Clip zu hören)."""
+    out = []
+    for seg in segments:
+        s0, s1 = float(seg["start"]), float(seg["end"])
+        out.extend(w for w in words if s0 <= float(w["start"]) and float(w["end"]) <= s1)
+    return out
+
+
+def fidelity_warnings(words: list[dict], segments: list[dict], cand_start: float | None, cand_end: float | None) -> list[dict]:
+    """``fidelity.check_cut`` über den Kandidatenbereich: was die Komposition weglässt, wird geprüft."""
+    body = sorted((s for s in segments if s.get("role", "body") != "teaser"), key=lambda s: float(s["start"]))
+    if not body:
+        return []
+    c0 = cand_start if cand_start is not None else float(body[0]["start"])
+    c1 = cand_end if cand_end is not None else float(body[-1]["end"])
+    cand = [w for w in words if c0 <= float(w["start"]) and float(w["end"]) <= c1]
+    if not cand:
+        return []
+    kept: list[tuple[int, int]] = []
+    for seg in body:
+        idx = [i for i, w in enumerate(cand) if float(seg["start"]) <= float(w["start"]) and float(w["end"]) <= float(seg["end"])]
+        if idx:
+            kept.append((idx[0], idx[-1]))
+    return fidelity.check_cut(cand, kept) if kept else []
+
+
+def caption_preset_for(destination: str, extra: dict) -> str:
+    """Plattform-Default; auf der Standardplattform des Markenprofils gilt dessen Caption-Preset."""
+    if destination == extra.get("default_platform") and extra.get("caption_preset") in captions_de.PRESETS:
+        return str(extra["caption_preset"])
+    return captions_de.PLATFORM_DEFAULT_PRESET.get(destination, "linkedin_static")
+
+
+def _ensure_local_source(ctx: common.Context, src: dict) -> Path:
+    key = common.require(src, "storage_key", "Original")
+    ext = Path(key).suffix or ".mp4"
+    local = ctx.source_dir(src["id"]) / f"original{ext}"
+    if not local.is_file():
+        ctx.store.download_to("sources", key, local)
+    return local
+
+
+def _provenance(ctx: common.Context, mp4: Path, title: str, clip: dict, extra: dict) -> tuple[dict[str, Any], Path]:
+    ai_features = list(clip.get("ai_features") or [])
+    prov: dict[str, Any] = {
+        "c2pa": "skipped",
+        "reason": None,
+        "ai_label_required": compliance.needs_visible_ai_label(ai_features),
+        "ai_features": ai_features,
+        "source_credit": None,
+        "ad_label": clip.get("ad_label"),
+    }
+    if extra.get("rights_status") == "third_party":
+        prov["source_credit"] = compliance.source_credit(extra.get("source_owner"), extra.get("source_title"), extra.get("source_url"))
+    final = mp4
+    if compliance.c2patool_available():
+        signed = mp4.with_name(mp4.stem + ".signed.mp4")
+        try:
+            compliance.sign_mp4(str(mp4), str(signed), title, ai_features)
+            prov["c2pa"] = "signed"
+            final = signed
+        except Exception as exc:
+            prov["c2pa"] = "failed"
+            prov["reason"] = f"Signatur fehlgeschlagen: {str(exc)[:200]}"
+    else:
+        prov["reason"] = "c2patool nicht installiert"
+    return prov, final
+
+
+def run_render_pack(ctx: common.Context, candidate_id: str, destination: str) -> str:
+    """Rendert das Paket für ``(candidate_id, destination)`` und gibt die ``clips``-ID zurück."""
+    if destination not in PLATFORMS:
+        raise ValueError(f"Unbekanntes Ziel {destination!r} (erlaubt: {', '.join(PLATFORMS)})")
+    t0 = time.monotonic()
+    cand = _load_candidate(ctx, candidate_id)
+    source_id = cand["source_id"]
+    src = db.load_source(ctx.conn, source_id)
+    extra = _load_brand_extra(ctx, source_id)
+    clip = _find_or_create_clip(ctx, cand, src, destination)
+    clip_id = clip["id"]
+    db.update(ctx.conn, "clips", {"id": clip_id}, status="rendering", destination=destination, render_error=None)
+
+    with events.step(ctx.conn, source_id, STEP_RENDER, f"Render für {destination} gestartet", fail_status=None) as st:
+        try:
+            _render(ctx, st, cand, src, extra, clip, destination, t0)
+        except BaseException as exc:
+            msg = events.failure_message(STEP_RENDER, exc)
+            db.update(ctx.conn, "clips", {"id": clip_id}, status="failed", render_error=msg)
+            raise
+    return clip_id
+
+
+def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, extra: dict, clip: dict, destination: str, t0: float) -> None:
+    s = ctx.settings
+    conn = ctx.conn
+    clip_id = clip["id"]
+    source_id = src["id"]
+    brand = copy_de.BrandProfile(
+        address=src.get("address") or "du",
+        country=src.get("country") or "AT",
+        gender_mode=extra["gender_mode"],
+        banned_phrases=extra["banned_phrases"],
+        protected_terms=list(src.get("protected_terms") or []),
+        tone_adjectives=extra["tone_adjectives"],
+        platform=destination,
+    )
+    segments = render_plan.normalize_segments(clip["composition"])
+    comp = compose.Composition.from_json(segments)
+    aspect = clip["aspect"]
+    out_w, out_h = render_plan.output_size(aspect)
+
+    # 1) Copy
+    st.progress(0.05, "Copy: Hooks und Post-Texte", clip_id=clip_id, phase="copy")
+    common.heartbeat("render", "copy")
+    tv_id, tv_version, words = common.load_transcript(ctx, source_id)
+    text = " ".join(str(w["text"]) for w in clip_words(words, segments))
+    hook = _load_hook(ctx, clip_id)
+    llm_usage: list[dict] = []
+    llm_provider = None
+    if hook is None:
+        tenant = Tenant(id=src["workspace_id"], tier=src["tier"], allow_us_subprocessors=bool(src.get("allow_us_subprocessors")))
+        llm = LLM(tenant, cost_sink=llm_usage.append, s=s)
+        if not llm.model():
+            raise RuntimeError(
+                f"Kein Sprachmodell für Provider {llm.provider} konfiguriert "
+                "(BEDROCK_MODEL_ID, MISTRAL_MODEL oder SELFHOST_LLM_MODEL setzen, für Entwicklung LLM_PROVIDER=local-heuristic)"
+            )
+        llm_provider = llm.provider
+        copy = copy_engine.write_copy(llm, text, brand, PLATFORMS, s)
+        hook = _write_hook_version(ctx, clip_id, copy)
+
+    # 2) Reframe
+    st.progress(0.2, "Reframe: Sprecherpositionen und Shots", clip_id=clip_id, phase="reframe")
+    common.heartbeat("render", "reframe")
+    local_src = _ensure_local_source(ctx, src)
+    # Geometrie immer aus der echten Datei, nie aus DB-Metadaten (die können veraltet oder falsch sein)
+    src_probe = ingest.probe(str(local_src))
+    if (src.get("width"), src.get("height")) != (src_probe.width, src_probe.height):
+        log.warning(
+            "source geometry differs from db source=%s db=%sx%s file=%sx%s",
+            src["id"], src.get("width"), src.get("height"), src_probe.width, src_probe.height,
+        )
+    src = {**src, "width": src_probe.width, "height": src_probe.height, "fps": src_probe.fps or src.get("fps")}
+    rf = reframe.plan_reframe(
+        str(local_src), segments, words, clip.get("speaker_positions"), aspect,
+        src_w=src_probe.width, src_h=src_probe.height, out_size=(out_w, out_h),
+    )  # fmt: skip
+    speaker_positions = clip.get("speaker_positions") or (rf.speaker_positions or None)
+
+    # 3) Captions auf der Ausgabe-Timeline
+    st.progress(0.35, "Captions auf der Ausgabe-Timeline", clip_id=clip_id, phase="captions")
+    common.heartbeat("render", "captions")
+    out_words = compose.remap_words(words, comp)
+    preset_name = caption_preset_for(destination, extra)
+    preset = captions_de.scaled_preset(preset_name, out_w, out_h)
+    cards = captions_de.cards_for(out_words, preset)
+    cps = captions_de.cps_warnings(captions_de.build_cards(out_words, preset.max_chars, preset.max_lines))
+    fid = fidelity_warnings(words, segments, cand.get("start_s"), cand.get("end_s"))
+    style = extra.get("caption_style") or {}
+    hook_override = style.get("hook_overlay") if isinstance(style.get("hook_overlay"), bool) else None
+    audio_preset = style.get("audio_preset") if style.get("audio_preset") in render_plan.AUDIO_PRESETS else "master"
+    plan = render_plan.build_plan(
+        platform=destination,
+        aspect=aspect,
+        segments=segments,
+        reframe_result=rf,
+        caption_preset=preset_name,
+        caption_cards=len(cards),
+        sources={"storage_key": src["storage_key"], "transcript_version": tv_version, "hook_version": hook["version"], "candidate_id": cand["id"]},
+        src_fps=src.get("fps"),
+        title_card=clip.get("title_card"),
+        onscreen_hook=hook["onscreen_hook"],
+        hook_overlay=hook_override,
+        audio_preset=audio_preset,
+    )
+    h = render_plan.plan_hash(plan, hook["version"], tv_version)
+    keys = {ext: f"{RENDER_PREFIX}/{clip_id}/{h}.{ext}" for ext in ("mp4", "srt", "vtt", "jpg", "ass")}
+    duration = render_plan.plan_duration(plan)
+
+    if clip.get("file_key") == keys["mp4"] and ctx.store.exists("derived", keys["mp4"]):
+        db.update(conn, "clips", {"id": clip_id}, status="rendered", render_error=None, destination=destination)
+        st.finish("Render bereits vorhanden, Schritt übersprungen", skipped=True, clip_id=clip_id, file_key=keys["mp4"], hash=h)
+        return
+
+    # 4) Encode
+    st.progress(0.5, "Encode: Schnitt, Reframe, Untertitel, Lautheit", clip_id=clip_id, phase="encode")
+    common.heartbeat("render", "encode")
+    work = ctx.source_dir(source_id) / RENDER_PREFIX / clip_id
+    work.mkdir(parents=True, exist_ok=True)
+    paths = render.write_captions(out_words, preset, (out_w, out_h), work, h)
+    mp4 = work / f"{h}.mp4"
+    fonts_dir = s.render_fonts_dir or None
+    result = render.render_from_plan(plan, local_src, paths["ass"], mp4, fonts_dir=fonts_dir, x264_preset=s.render_x264_preset)
+    notes = [*rf.notes, *result.notes]
+    loud = render.measure_loudness(mp4)
+    loudness = {"integrated_lufs": loud["integrated_lufs"], "true_peak_dbtp": loud["true_peak_dbtp"], "preset": plan["audio"]["preset"]}
+    checks = render.regression_checks(mp4, duration, out_w, out_h)
+    notes.extend(f"Regressionstest: {c}" for c in checks)
+    poster = work / f"{h}.jpg"
+    render.make_poster(mp4, poster, 1.0)
+
+    probe = ingest.probe(mp4)
+
+    # 5) Provenienz
+    st.progress(0.85, "Provenienz und Upload", clip_id=clip_id, phase="provenance")
+    common.heartbeat("render", "provenance")
+    prov, final_mp4 = _provenance(ctx, mp4, str(src.get("title") or "Clip"), clip, extra)
+
+    ctx.store.put_file("derived", keys["mp4"], final_mp4, CONTENT_TYPES["mp4"])
+    ctx.store.put_file("derived", keys["srt"], paths["srt"], CONTENT_TYPES["srt"])
+    ctx.store.put_file("derived", keys["vtt"], paths["vtt"], CONTENT_TYPES["vtt"])
+    ctx.store.put_file("derived", keys["jpg"], poster, CONTENT_TYPES["jpg"])
+    ctx.store.put_file("derived", keys["ass"], paths["ass"], CONTENT_TYPES["ass"])
+
+    db.update(
+        conn,
+        "clips",
+        {"id": clip_id},
+        file_key=keys["mp4"],
+        srt_key=keys["srt"],
+        vtt_key=keys["vtt"],
+        poster_key=keys["jpg"],
+        duration_s=probe.duration_s,
+        width=probe.width,
+        height=probe.height,
+        fps=probe.fps,
+        loudness=db.jsonb(loudness),
+        provenance=db.jsonb(prov),
+        render_plan=db.jsonb(plan),
+        cps_warnings=db.jsonb(cps),
+        fidelity_warnings=db.jsonb(fid),
+        speaker_positions=db.jsonb(speaker_positions) if speaker_positions else None,
+        destination=destination,
+        status="rendered",
+        rendered_at=datetime.now(UTC),
+        render_error=None,
+    )
+    row = db.fetch_one(conn, SQL_CAPTION_MAX, (clip_id,))
+    next_version = int(row[0] if row else 0) + 1
+    db.insert(
+        conn,
+        "caption_versions",
+        returning="id",
+        clip_id=clip_id,
+        version=next_version,
+        preset=preset.name,
+        cards=db.jsonb(cards),
+        ass_key=keys["ass"],
+        srt_key=keys["srt"],
+        cps_warnings=db.jsonb(cps),
+        origin="auto",
+    )
+    costlog.record(
+        conn,
+        costlog.Cost(
+            workspace_id=src["workspace_id"],
+            source_id=source_id,
+            clip_id=clip_id,
+            job_type="render",
+            provider="selfhost-eu",
+            model_id=None,
+            source_minutes=duration / 60.0,
+            cpu_seconds=time.monotonic() - t0,
+            storage_bytes=Path(final_mp4).stat().st_size,
+            llm_input_tokens=sum(int(u.get("in", 0)) for u in llm_usage),
+            llm_output_tokens=sum(int(u.get("out", 0)) for u in llm_usage),
+        ),
+        s,
+    )
+    st.finish(
+        f"Clip für {destination} gerendert ({duration:.1f} s, {loudness['integrated_lufs']:.1f} LUFS)",
+        clip_id=clip_id,
+        file_key=keys["mp4"],
+        hash=h,
+        duration_s=probe.duration_s,
+        width=probe.width,
+        height=probe.height,
+        fps=probe.fps,
+        loudness=loudness,
+        c2pa=prov["c2pa"],
+        hook_version=hook["version"],
+        hook_origin=hook["origin"],
+        transcript_version=tv_version,
+        reframe=plan["reframe"],
+        captions_burned=result.captions_burned,
+        overlays_drawn=result.title_card_drawn or result.hook_overlay_drawn,
+        compressor=result.compressor,
+        cps_warnings=len(cps),
+        fidelity_warnings=len(fid),
+        regression_warnings=checks,
+        notes=notes,
+        llm_provider=llm_provider,
+        cached=False,
+    )
+
+
+@activity.defn(name="render_pack")
+def render_pack(candidate_id: str, destination: str) -> str:
+    ctx = common.open_context()
+    try:
+        return run_render_pack(ctx, candidate_id, destination)
+    finally:
+        ctx.close()
+
+
+__all__ = [
+    "PLATFORMS",
+    "RENDER_PREFIX",
+    "STEP_RENDER",
+    "ad_label_for",
+    "caption_preset_for",
+    "clip_words",
+    "fidelity_warnings",
+    "render_pack",
+    "run_render_pack",
+]

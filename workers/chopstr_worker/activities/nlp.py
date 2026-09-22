@@ -2,8 +2,8 @@
 
 Ablauf: ASR-JSON + Diarisierungs-JSON aus dem Storage laden, ``assign_speakers`` (Mehrheit über
 Wortdauer), DANACH ``normalize_numbers`` (Zahlen erst nach dem Alignment), ``dach_nlp.annotate``
-(filler, negation, sentence_idx), Statistik, ``transcript_versions`` (version = max+1, origin 'asr'),
-``sources.status = 'ready'``. Phase 1 endet hier.
+(filler, negation, sentence_idx), Statistik, ``transcript_versions`` (version = max+1, origin 'asr').
+Der Status bleibt ``analyzing``; Phase 2 (``detect_candidates``) setzt ``scoring`` und am Ende ``ready``.
 """
 
 from __future__ import annotations
@@ -77,7 +77,6 @@ def run(ctx: common.Context, source_id: str, asr_key: str | None = None, diar_ke
             stats=db.jsonb(stats),
         )
         tv_id = str(inserted[0]) if inserted else f"{source_id}:{version}"
-        events.set_source_status(ctx.conn, source_id, "ready", None)
         costlog.record(
             ctx.conn,
             costlog.Cost(

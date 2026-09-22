@@ -1,6 +1,6 @@
 import type { PipelineStep, SourceStatus } from "@/lib/repo/types";
 
-/* Pipeline-Schritte in Anzeige-Reihenfolge. Phase 2 (Kandidaten) ist nur angekündigt. */
+/* Pipeline-Schritte in Anzeige-Reihenfolge. Phase 2 (Kandidaten) ist seit dem Review aktiv. */
 export interface PipelineStepDef {
   key: PipelineStep;
   label: string;
@@ -36,7 +36,7 @@ export const PIPELINE_STEPS: PipelineStepDef[] = [
   {
     key: "detect_candidates",
     label: "Kandidaten",
-    description: "Kommt in Phase 2: sinntreue Clip-Kandidaten mit Begründung",
+    description: "Story-Engine: Vorschlag, Rubrik, Story-Graph",
     phase: 2,
   },
 ];

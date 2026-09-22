@@ -37,13 +37,15 @@ export default async function ProjectPage({ params }: Props) {
   const source = await repo.getSource(id);
   if (!source) notFound();
 
-  const [events, transcript, brand] = await Promise.all([
+  const [events, transcript, brand, candidateCount] = await Promise.all([
     repo.listPipelineEvents(id),
     repo.getCurrentTranscript(id),
     source.brand_profile_id ? repo.getBrandProfile(source.brand_profile_id) : Promise.resolve(null),
+    repo.countCandidates(id),
   ]);
 
   const live = !isTerminalStatus(source.status);
+  const hasCandidates = source.status === "ready" && candidateCount.total > 0;
 
   return (
     <PageShell backgroundWord="Projekt" lightTone={live ? "ai" : "brand"}>
@@ -56,7 +58,12 @@ export default async function ProjectPage({ params }: Props) {
             <ButtonLink href="/" variant="ghost">
               Alle Projekte
             </ButtonLink>
-            {transcript && <ButtonLink href={`/projekte/${source.id}/transkript`}>Transkript öffnen</ButtonLink>}
+            {transcript && (
+              <ButtonLink href={`/projekte/${source.id}/transkript`} variant={hasCandidates ? "ghost" : "primary"}>
+                Transkript öffnen
+              </ButtonLink>
+            )}
+            {hasCandidates && <ButtonLink href={`/projekte/${source.id}/review`}>Kandidaten prüfen</ButtonLink>}
           </>
         }
       />
@@ -68,6 +75,7 @@ export default async function ProjectPage({ params }: Props) {
           initialStatusMessage={source.status_message}
           initialEvents={events}
           hasTranscript={Boolean(transcript)}
+          candidateCount={candidateCount}
         />
 
         <div className="flex flex-col gap-5">

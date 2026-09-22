@@ -1,6 +1,7 @@
 import type {
   AuditEntry,
   BrandProfile,
+  Candidate,
   PipelineEvent,
   Repo,
   Source,
@@ -9,6 +10,7 @@ import type {
 } from "@/lib/repo/types";
 import {
   DEMO_IDS,
+  buildSeedCandidates,
   buildSeedTranscript,
   seedBrandProfile,
   seedKeynoteEvents,
@@ -17,6 +19,8 @@ import {
   seedWorkspace,
 } from "@/lib/repo/seed";
 import { getSession } from "@/lib/session";
+import { sentencesFromWords } from "@/lib/transcript/sentences";
+import { buildRevision, isRevisionError } from "@/lib/candidates/revise";
 
 /* In-Memory-Repository für den Demo-Modus. Überlebt Hot Reloads über globalThis. */
 
@@ -26,6 +30,7 @@ interface DemoState {
   sources: Source[];
   events: PipelineEvent[];
   transcripts: TranscriptVersion[];
+  candidates: Candidate[];
   audit: (AuditEntry & { at: string; workspace_id: string; actor_id: string })[];
   nextEventId: number;
   bootedAt: number;
@@ -50,6 +55,7 @@ function createState(): DemoState {
     sources: seedSources.map((s) => ({ ...s })),
     events,
     transcripts: [buildSeedTranscript()],
+    candidates: buildSeedCandidates(),
     audit: [],
     nextEventId: id,
     bootedAt: now,
@@ -81,6 +87,7 @@ const SIM_PHASES: SimPhase[] = [
   { step: "transcribe_de", status: "transcribing", duration: 70, startMessage: "whisper-large-v3-turbo-german", endMessage: "Transkription abgeschlossen" },
   { step: "diarize", status: "analyzing", duration: 25, startMessage: "Sprecher werden getrennt", endMessage: "Sprecher erkannt" },
   { step: "fuse_and_nlp", status: "analyzing", duration: 18, startMessage: "dach_nlp", endMessage: "Sätze, Füllwörter und Verneinungen markiert" },
+  { step: "detect_candidates", status: "scoring", duration: 20, startMessage: "Story-Engine: Vorschlag, Rubrik, Story-Graph", endMessage: "Keine Kandidaten (Demo ohne Transkript)" },
 ];
 
 function pushEvent(s: DemoState, e: Omit<PipelineEvent, "id" | "at">, at = nowIso()) {
@@ -139,13 +146,22 @@ function advanceSimulation(sourceId: string) {
       }
     }
   }
-  if (!has("detect_candidates", "skipped")) {
-    pushEvent(s, { source_id: sourceId, step: "detect_candidates", status: "skipped", progress: null, message: "Kommt in Phase 2", payload: null });
+  if (source.status !== "ready") {
     source.status = "ready";
     source.status_message = "Ohne Transkript (Demo)";
     source.updated_at = nowIso();
     s.simulations.delete(sourceId);
   }
+}
+
+/* Aktuelle Kandidaten-Versionen: Zeilen mit human_verdict = 'edited' sind durch eine neue Version ersetzt */
+function currentCandidates(sourceId: string): Candidate[] {
+  return state()
+    .candidates.filter((c) => c.source_id === sourceId && c.human_verdict !== "edited")
+    .sort((a, b) => {
+      if (a.gate_passed !== b.gate_passed) return a.gate_passed ? -1 : 1;
+      return (b.total ?? -1) - (a.total ?? -1) || a.created_at.localeCompare(b.created_at);
+    });
 }
 
 export const demoRepo: Repo = {
@@ -291,6 +307,53 @@ export const demoRepo: Repo = {
     };
     s.transcripts.push(version);
     return version;
+  },
+
+  async listCandidates(sourceId) {
+    return currentCandidates(sourceId).map((c) => ({ ...c }));
+  },
+
+  async getCandidate(id) {
+    const c = state().candidates.find((x) => x.id === id);
+    return c ? { ...c } : null;
+  },
+
+  async setCandidateVerdict(id, verdict, reason) {
+    const c = state().candidates.find((x) => x.id === id);
+    if (!c) return null;
+    const { actorId } = getSession();
+    c.human_verdict = verdict;
+    c.verdict_reason = reason?.trim() || null;
+    c.verdict_by = actorId;
+    c.verdict_at = nowIso();
+    return { ...c };
+  },
+
+  async reviseCandidate(id, input) {
+    const s = state();
+    const prev = s.candidates.find((x) => x.id === id);
+    if (!prev) return null;
+    const transcript = await this.getCurrentTranscript(prev.source_id);
+    if (!transcript) throw new Error("Kein Transkript vorhanden");
+    const revision = buildRevision(prev, sentencesFromWords(transcript.words), input);
+    if (isRevisionError(revision)) throw new Error(revision.error);
+    const { actorId } = getSession();
+    const created: Candidate = { ...revision, id: uuid(), created_at: nowIso() };
+    prev.human_verdict = "edited";
+    prev.verdict_by = actorId;
+    prev.verdict_at = created.created_at;
+    s.candidates.push(created);
+    return { ...created };
+  },
+
+  async countCandidates(sourceId) {
+    const list = currentCandidates(sourceId);
+    return {
+      total: list.length,
+      gate_passed: list.filter((c) => c.gate_passed).length,
+      accepted: list.filter((c) => c.human_verdict === "accepted").length,
+      rejected: list.filter((c) => c.human_verdict === "rejected").length,
+    };
   },
 
   async audit(entry) {

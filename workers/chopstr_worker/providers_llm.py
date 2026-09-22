@@ -3,6 +3,8 @@
   STANDARD   -> Claude über AWS Bedrock, EU-Inference-Profil (bedrock-eu)
   SOVEREIGN  -> Mistral über EU-Endpoint (mistral-eu) oder selbst gehostetes Open-Weight-Modell
                 mit OpenAI-kompatiblem Endpoint (selfhost-eu). Kein US-Anbieter in der Kette.
+  ENTWICKLUNG -> ``local-heuristic``: deterministische Heuristik ohne Netz (``heuristic_llm``),
+                Modell-ID ``heuristic-v1``. Kein Ersatz für ein Sprachmodell, nur für Entwicklung und Demo.
 
 - ``residency.assert_allowed`` prüft den Provider gegen den Tenant.
 - ``residency.assert_eu_host`` prüft VOR JEDEM Aufruf den Zielhost; HTTP läuft über ``guarded_client``.
@@ -25,6 +27,8 @@ from .residency import EU_OK, NON_US_CHAIN, ResidencyError, Tenant, assert_allow
 log = logging.getLogger("chopstr.llm")
 
 CACHE_TTL_S = 60 * 60 * 24 * 30
+HEURISTIC_PROVIDER = "local-heuristic"
+HEURISTIC_MODEL_ID = "heuristic-v1"
 
 
 class SchemaError(RuntimeError):
@@ -73,7 +77,14 @@ class LLM:
             return self.s.mistral_model
         if self.provider == "selfhost-eu":
             return self.s.selfhost_llm_model
+        if self.provider == HEURISTIC_PROVIDER:
+            return HEURISTIC_MODEL_ID
         return ""
+
+    @property
+    def is_heuristic(self) -> bool:
+        """True für den Heuristik-Provider (Ergebnisse tragen ``heuristic_only``)."""
+        return self.provider == HEURISTIC_PROVIDER
 
     def structured(
         self,
@@ -95,9 +106,12 @@ class LLM:
             hit = self.redis.get(key)
             if hit:
                 return json.loads(hit)
-        caller = {"bedrock-eu": self._bedrock, "mistral-eu": self._openai_compat, "selfhost-eu": self._openai_compat}[
-            self.provider
-        ]
+        caller = {
+            "bedrock-eu": self._bedrock,
+            "mistral-eu": self._openai_compat,
+            "selfhost-eu": self._openai_compat,
+            HEURISTIC_PROVIDER: self._heuristic,
+        }[self.provider]
         out, usage = caller(system, user, schema, tool_name, model)
         self._validate(out, schema)
         if self.redis is not None:
@@ -173,6 +187,12 @@ class LLM:
         u = data.get("usage", {})
         return out, {"in": u.get("prompt_tokens", 0), "out": u.get("completion_tokens", 0)}
 
+    def _heuristic(self, system, user, schema, tool_name, model):
+        """Kein Netz, kein Residency-Hook nötig: die Antwort entsteht lokal aus dem gerenderten Prompt."""
+        from . import heuristic_llm
+
+        return heuristic_llm.answer(tool_name, user, schema), {"in": 0, "out": 0}
+
     # -- Validierung ---------------------------------------------------------------------------
     @staticmethod
     def _validate(out: Any, schema: dict) -> None:
@@ -186,6 +206,8 @@ class LLM:
 
 __all__ = [
     "EU_OK",
+    "HEURISTIC_MODEL_ID",
+    "HEURISTIC_PROVIDER",
     "LLM",
     "NON_US_CHAIN",
     "ResidencyError",

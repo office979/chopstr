@@ -75,7 +75,7 @@ def load_source(conn: Connection, source_id: str) -> dict[str, Any]:
         select s.id, s.workspace_id, s.storage_key, s.audio_key, s.proxy_key, s.sha256, s.duration_s,
                s.width, s.height, s.fps, s.expected_speakers, s.brief, s.status, s.title,
                s.original_filename, s.mime_type, s.size_bytes,
-               p.asr_variant, p.brand_vocab, p.protected_terms, p.country, p.address,
+               p.asr_variant, p.brand_vocab, p.protected_terms, p.country, p.address, p.learned_weights,
                w.tier, w.allow_us_subprocessors
         from sources s
         left join brand_profiles p on p.id = s.brand_profile_id
@@ -90,10 +90,11 @@ def load_source(conn: Connection, source_id: str) -> dict[str, Any]:
         "id", "workspace_id", "storage_key", "audio_key", "proxy_key", "sha256", "duration_s",
         "width", "height", "fps", "expected_speakers", "brief", "status", "title",
         "original_filename", "mime_type", "size_bytes",
-        "asr_variant", "brand_vocab", "protected_terms", "country", "address",
+        "asr_variant", "brand_vocab", "protected_terms", "country", "address", "learned_weights",
         "tier", "allow_us_subprocessors",
     ]  # fmt: skip
     out = dict(zip(keys, row))
+    out["brief"] = dict(out.get("brief") or {})
     out["asr_variant"] = out.get("asr_variant") or "de"
     out["brand_vocab"] = list(out.get("brand_vocab") or [])
     out["protected_terms"] = list(out.get("protected_terms") or [])

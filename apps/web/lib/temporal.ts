@@ -39,3 +39,41 @@ export async function startClipProjectWorkflow({
     await connection.close();
   }
 }
+
+export interface ApproveSignalArgs {
+  sourceId: string;
+  candidateId: string;
+  destination: string;
+}
+
+/* Freigabe-Signal an den laufenden ClipProjectWorkflow (Signal `approve(candidate_id, destination)`).
+ * Liefert true, wenn das Signal zugestellt wurde; Fehler werden geloggt und nicht weitergereicht,
+ * damit das menschliche Urteil unabhängig von Temporal gespeichert bleibt. */
+export async function signalApprove({ sourceId, candidateId, destination }: ApproveSignalArgs): Promise<boolean> {
+  const workflowId = `project-${sourceId}`;
+  const address = process.env.TEMPORAL_ADDRESS;
+
+  if (isDemoMode() || !address) {
+    console.info(`[temporal] Demo-Modus: Signal approve(${candidateId}, ${destination}) an ${workflowId} nur geloggt`);
+    return false;
+  }
+
+  try {
+    const { Connection, Client } = await import("@temporalio/client");
+    const connection = await Connection.connect({ address });
+    try {
+      const client = new Client({
+        connection,
+        namespace: process.env.TEMPORAL_NAMESPACE ?? "default",
+      });
+      const handle = client.workflow.getHandle(workflowId);
+      await handle.signal("approve", candidateId, destination);
+      return true;
+    } finally {
+      await connection.close();
+    }
+  } catch (error) {
+    console.warn(`[temporal] Signal approve an ${workflowId} fehlgeschlagen:`, error instanceof Error ? error.message : error);
+    return false;
+  }
+}

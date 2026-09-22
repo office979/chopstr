@@ -47,6 +47,11 @@ function progressOf(status: Source["status"]): number {
 export default async function ProjectsPage() {
   const repo = getRepo();
   const sources = await repo.listSources();
+  const counts = new Map(
+    await Promise.all(
+      sources.filter((s) => s.status === "ready").map(async (s) => [s.id, await repo.countCandidates(s.id)] as const),
+    ),
+  );
 
   return (
     <PageShell backgroundWord="Clips">
@@ -75,6 +80,8 @@ export default async function ProjectsPage() {
           {sources.map((s) => {
             const state = checkState(s.status);
             const progress = progressOf(s.status);
+            const count = counts.get(s.id);
+            const hasCandidates = (count?.total ?? 0) > 0;
             return (
               <li key={s.id} className="min-w-0">
                 <GlassCard padding="none" className="min-w-0 overflow-hidden">
@@ -101,7 +108,21 @@ export default async function ProjectsPage() {
                       <Badge tone={state === "error" ? "attention" : state === "active" ? "ai" : "neutral"}>
                         {STATUS_LABELS[s.status]}
                       </Badge>
-                      {s.status === "ready" ? (
+                      {hasCandidates && count && (
+                        <Badge tone="ok">
+                          {count.total} {count.total === 1 ? "Kandidat" : "Kandidaten"}
+                        </Badge>
+                      )}
+                      {s.status === "ready" && hasCandidates ? (
+                        <>
+                          <ButtonLink href={`/projekte/${s.id}/transkript`} size="sm" variant="ghost">
+                            Transkript
+                          </ButtonLink>
+                          <ButtonLink href={`/projekte/${s.id}/review`} size="sm">
+                            Review öffnen
+                          </ButtonLink>
+                        </>
+                      ) : s.status === "ready" ? (
                         <ButtonLink href={`/projekte/${s.id}/transkript`} size="sm">
                           Transkript öffnen
                         </ButtonLink>

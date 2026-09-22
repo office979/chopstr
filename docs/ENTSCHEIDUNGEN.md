@@ -24,6 +24,8 @@ v2.0, Knowledge Base `decisions_log` und `research_conflicts`.
 | P1 | Gemäß Knowledge Base: Export vor Autopublishing, Agenturen zuerst, Nordstern-Metrik = menschliche Reviewminuten pro freigegebenem Clip. | `decisions_log`. | Pilotdaten |
 | P2 | Dialektausgabe: Original und normalisierte Ausgabe getrennt speichern, Nutzer entscheidet (CON-001). Regionale Wörter nie ins Standarddeutsch umschreiben. | Konflikt in den Quellen. | Dialekt-Evaluation |
 | P3 | Füllwörter: äh/ähm hart raus, quasi/sozusagen als Vorschlag mit Undo, Modalpartikeln (halt, eigentlich, mal, ja, doch, eben, schon, wohl) bleiben (CON-005). | Modalpartikeln tragen Ton und Bedeutung. | Nutzerfeedback |
+| P4 | Heuristik-Provider `local-heuristic` für Entwicklung und Demo: deterministisch, ohne Netz, Ergebnisse als `heuristic_only` markiert. Produktion braucht Bedrock EU, Mistral EU oder self-hosted. | Pipeline muss ohne Schlüssel und GPU durchlaufen, damit UI und Datenfluss testbar sind. | Nie als Produktionsprovider |
+| P5 | Satzgrenzen-Regel (`dach_nlp.is_sentence_end`) ist in Python und TypeScript identisch implementiert; der Web-Fallback greift nur ohne `sentence_idx`. | Kandidaten referenzieren Satzindizes, beide Seiten müssen gleich segmentieren. | Änderung der Regel auf einer Seite |
 
 ## Bewusst nicht in v1
 

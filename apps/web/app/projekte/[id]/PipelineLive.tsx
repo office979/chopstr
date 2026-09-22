@@ -7,7 +7,7 @@ import { StatusCheck, type StatusCheckState } from "@/components/ui/StatusCheck"
 import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/components/ui/cn";
 import { PIPELINE_STEPS, STATUS_LABELS, isTerminalStatus } from "@/lib/pipeline";
-import type { PipelineEvent, PipelineStep, SourceStatus } from "@/lib/repo/types";
+import type { CandidateCount, PipelineEvent, PipelineStep, SourceStatus } from "@/lib/repo/types";
 
 interface Props {
   sourceId: string;
@@ -15,6 +15,7 @@ interface Props {
   initialStatusMessage: string | null;
   initialEvents: PipelineEvent[];
   hasTranscript: boolean;
+  candidateCount: CandidateCount;
 }
 
 interface StepView {
@@ -52,7 +53,7 @@ function timeOf(iso: string | null): string {
 }
 
 /* Pipeline-Schritte als Live-Ansicht über Server-Sent Events */
-export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, initialEvents, hasTranscript }: Props) {
+export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, initialEvents, hasTranscript, candidateCount }: Props) {
   const [events, setEvents] = useState<PipelineEvent[]>(initialEvents);
   const [status, setStatus] = useState<SourceStatus>(initialStatus);
   const [statusMessage, setStatusMessage] = useState<string | null>(initialStatusMessage);
@@ -87,6 +88,7 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
 
   const steps = useMemo(() => deriveSteps(events), [events]);
   const failed = status === "failed";
+  const hasCandidates = status === "ready" && candidateCount.total > 0;
 
   return (
     <GlassCard padding="lg" selected={connection === "live"}>
@@ -107,11 +109,11 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
       <ol className="flex flex-col">
         {PIPELINE_STEPS.map((def, i) => {
           const v = steps[def.key];
-          const phase2 = def.phase === 2;
+          const skipped = v.state === "skipped";
           const state: StatusCheckState = v.state === "skipped" ? "idle" : v.state;
           const isLast = i === PIPELINE_STEPS.length - 1;
           return (
-            <li key={def.key} className={cn("relative flex gap-4", phase2 && "opacity-50")}>
+            <li key={def.key} className={cn("relative flex gap-4", skipped && "opacity-50")}>
               <div className="flex flex-col items-center">
                 <StatusCheck state={state} size={32} label={`${def.label}: ${v.state === "skipped" ? "übersprungen" : state}`} />
                 {!isLast && <span className="my-1 w-px flex-1 bg-line" aria-hidden="true" />}
@@ -121,7 +123,7 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
                   <p className={cn("font-medium", v.state === "error" ? "text-attention" : "text-text")}>
                     {def.label}
                   </p>
-                  {v.at && !phase2 && <span className="font-mono text-xs text-text-3">{timeOf(v.at)}</span>}
+                  {v.at && !skipped && <span className="font-mono text-xs text-text-3">{timeOf(v.at)}</span>}
                 </div>
                 <p className={cn("mt-0.5 text-sm", v.state === "error" ? "text-attention" : "text-text-2")}>
                   {v.message ?? def.description}
@@ -156,16 +158,37 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
       {status === "ready" && (
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
           <p className="text-sm text-text-2">
-            {hasTranscript ? "Transkript liegt vor. Prüfe unsichere Wörter und Sprechernamen." : statusMessage ?? "Verarbeitung abgeschlossen."}
+            {hasCandidates
+              ? `${candidateCount.gate_passed} von ${candidateCount.total} erfüllen alle Pflichtkriterien.${
+                  candidateCount.accepted > 0 ? ` ${candidateCount.accepted} angenommen.` : ""
+                }`
+              : hasTranscript
+                ? "Transkript liegt vor. Prüfe unsichere Wörter und Sprechernamen."
+                : (statusMessage ?? "Verarbeitung abgeschlossen.")}
           </p>
-          {hasTranscript && (
-            <Link
-              href={`/projekte/${sourceId}/transkript`}
-              className="transition-soft inline-flex h-10 items-center rounded-pill bg-text px-5 text-sm font-medium text-black hover:bg-white"
-            >
-              Transkript öffnen
-            </Link>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {hasTranscript && (
+              <Link
+                href={`/projekte/${sourceId}/transkript`}
+                className={cn(
+                  "transition-soft inline-flex h-10 items-center rounded-pill px-5 text-sm font-medium",
+                  hasCandidates
+                    ? "border border-line-strong text-text hover:border-white/40 hover:bg-white/5"
+                    : "bg-text text-black hover:bg-white",
+                )}
+              >
+                Transkript öffnen
+              </Link>
+            )}
+            {hasCandidates && (
+              <Link
+                href={`/projekte/${sourceId}/review`}
+                className="transition-soft inline-flex h-10 items-center rounded-pill bg-text px-5 text-sm font-medium text-black hover:bg-white"
+              >
+                Kandidaten prüfen
+              </Link>
+            )}
+          </div>
         </div>
       )}
     </GlassCard>

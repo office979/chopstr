@@ -2,12 +2,15 @@ import { withContext, type Tx } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import type {
   BrandProfile,
+  Candidate,
   PipelineEvent,
   Repo,
   Source,
   TranscriptVersion,
   Workspace,
 } from "@/lib/repo/types";
+import { sentencesFromWords } from "@/lib/transcript/sentences";
+import { buildRevision, isRevisionError } from "@/lib/candidates/revise";
 
 /* Postgres-Repository. Alle Zugriffe laufen in einer Transaktion mit RLS-Kontext (lib/db.ts). */
 
@@ -118,6 +121,34 @@ function toTranscript(r: Row): TranscriptVersion {
     words: jsonValue<TranscriptVersion["words"]>(r.words, []),
     stats: jsonValue<TranscriptVersion["stats"]>(r.stats, {} as TranscriptVersion["stats"]),
     created_by: (r.created_by as string | null) ?? null,
+    created_at: isoOrNull(r.created_at) ?? "",
+  };
+}
+
+function toCandidate(r: Row): Candidate {
+  return {
+    id: r.id as string,
+    source_id: r.source_id as string,
+    version: num(r.version) ?? 1,
+    segments: jsonValue<Candidate["segments"]>(r.segments, []),
+    start_s: num(r.start_s) ?? 0,
+    end_s: num(r.end_s) ?? 0,
+    first_sent: num(r.first_sent),
+    last_sent: num(r.last_sent),
+    structure: (r.structure as Candidate["structure"]) ?? null,
+    rubric: jsonValue<Candidate["rubric"]>(r.rubric, {} as Candidate["rubric"]),
+    gates: jsonValue<Candidate["gates"]>(r.gates, {} as Candidate["gates"]),
+    story_graph_flags: jsonValue<Candidate["story_graph_flags"]>(r.story_graph_flags, []),
+    risk_flags: jsonValue<Candidate["risk_flags"]>(r.risk_flags, []),
+    total: num(r.total),
+    gate_passed: Boolean(r.gate_passed),
+    why: (r.why as string | null) ?? null,
+    model_id: (r.model_id as string | null) ?? null,
+    prompt_version: (r.prompt_version as string | null) ?? null,
+    human_verdict: (r.human_verdict as Candidate["human_verdict"]) ?? null,
+    verdict_reason: (r.verdict_reason as string | null) ?? null,
+    verdict_by: (r.verdict_by as string | null) ?? null,
+    verdict_at: isoOrNull(r.verdict_at),
     created_at: isoOrNull(r.created_at) ?? "",
   };
 }
@@ -308,6 +339,87 @@ export const postgresRepo: Repo = {
           values (${sourceId}, ${prev?.version ?? 0}, ${c.word_index}, ${c.old_text}, ${c.new_text}, ${c.add_to_vocab}, ${session.actorId})`;
       }
       return toTranscript(rows[0] as Row);
+    });
+  },
+
+  async listCandidates(sourceId) {
+    return withContext(getSession(), async (tx) => {
+      const rows = await tx`
+        select * from candidates
+        where source_id = ${sourceId} and human_verdict is distinct from 'edited'
+        order by gate_passed desc, total desc nulls last, created_at asc`;
+      return rows.map((r) => toCandidate(r as Row));
+    });
+  },
+
+  async getCandidate(id) {
+    return withContext(getSession(), async (tx) => {
+      const rows = await tx`select * from candidates where id = ${id}`;
+      return rows.length ? toCandidate(rows[0] as Row) : null;
+    });
+  },
+
+  async setCandidateVerdict(id, verdict, reason) {
+    const session = getSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`
+        update candidates set
+          human_verdict = ${verdict},
+          verdict_reason = ${reason?.trim() || null},
+          verdict_by = ${session.actorId},
+          verdict_at = now()
+        where id = ${id}
+        returning *`;
+      return rows.length ? toCandidate(rows[0] as Row) : null;
+    });
+  },
+
+  async reviseCandidate(id, input) {
+    const session = getSession();
+    return withContext(session, async (tx) => {
+      const prevRows = await tx`select * from candidates where id = ${id}`;
+      if (!prevRows.length) return null;
+      const prev = toCandidate(prevRows[0] as Row);
+      const tr = await tx`select words from transcripts_current where source_id = ${prev.source_id}`;
+      if (!tr.length) throw new Error("Kein Transkript vorhanden");
+      const words = jsonValue<TranscriptVersion["words"]>((tr[0] as Row).words, []);
+      const revision = buildRevision(prev, sentencesFromWords(words), input);
+      if (isRevisionError(revision)) throw new Error(revision.error);
+      const rows = await tx`
+        insert into candidates (
+          source_id, version, segments, start_s, end_s, first_sent, last_sent, structure, rubric, gates,
+          story_graph_flags, risk_flags, total, gate_passed, why, model_id, prompt_version
+        ) values (
+          ${revision.source_id}, ${revision.version}, ${tx.json(revision.segments as never)}, ${revision.start_s},
+          ${revision.end_s}, ${revision.first_sent}, ${revision.last_sent}, ${revision.structure},
+          ${tx.json(revision.rubric as never)}, ${tx.json(revision.gates as never)},
+          ${tx.json(revision.story_graph_flags as never)}, ${tx.json(revision.risk_flags as never)},
+          ${revision.total}, ${revision.gate_passed}, ${revision.why}, ${revision.model_id}, ${revision.prompt_version}
+        ) returning *`;
+      await tx`
+        update candidates set human_verdict = 'edited', verdict_by = ${session.actorId}, verdict_at = now()
+        where id = ${id}`;
+      return toCandidate(rows[0] as Row);
+    });
+  },
+
+  async countCandidates(sourceId) {
+    return withContext(getSession(), async (tx) => {
+      const rows = await tx`
+        select
+          count(*)::int as total,
+          count(*) filter (where gate_passed)::int as gate_passed,
+          count(*) filter (where human_verdict = 'accepted')::int as accepted,
+          count(*) filter (where human_verdict = 'rejected')::int as rejected
+        from candidates
+        where source_id = ${sourceId} and human_verdict is distinct from 'edited'`;
+      const r = (rows[0] ?? {}) as Row;
+      return {
+        total: num(r.total) ?? 0,
+        gate_passed: num(r.gate_passed) ?? 0,
+        accepted: num(r.accepted) ?? 0,
+        rejected: num(r.rejected) ?? 0,
+      };
     });
   },
 

@@ -13,7 +13,9 @@ from typing import Any
 
 from . import config, db
 
-JOB_TYPES = ("ingest", "asr", "diarize", "nlp", "heatmap", "llm_propose", "llm_score", "llm_copy", "render")
+JOB_TYPES = (
+    "ingest", "asr", "diarize", "nlp", "heatmap", "llm_propose", "llm_score", "llm_candidates", "llm_copy", "render",
+)  # fmt: skip
 
 
 @dataclass

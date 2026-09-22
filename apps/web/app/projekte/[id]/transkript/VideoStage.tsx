@@ -14,10 +14,12 @@ interface Props {
   title: string;
   player: PlayerControls;
   activeSpeaker: string | null;
+  /* Tastaturhinweis unter der Zeitachse (Standard: Transkript-Editor) */
+  hint?: string;
 }
 
 /* Video als Held. Ohne Datei: Glas-Platzhalter mit Poster und funktionierender Zeitachse. */
-export function VideoStage({ videoRef, videoSrc, title, player, activeSpeaker }: Props) {
+export function VideoStage({ videoRef, videoSrc, title, player, activeSpeaker, hint }: Props) {
   const { currentTime, duration, playing } = player;
   const pct = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -109,7 +111,9 @@ export function VideoStage({ videoRef, videoSrc, title, player, activeSpeaker }:
             <Timecode seconds={duration} />
           </div>
         </div>
-        <p className="text-xs text-text-3">Leertaste: Play/Pause · Pfeiltasten: 5 Sekunden · Enter oder Doppelklick auf ein Wort: bearbeiten</p>
+        <p className="text-xs text-text-3">
+          {hint ?? "Leertaste: Play/Pause · Pfeiltasten: 5 Sekunden · Enter oder Doppelklick auf ein Wort: bearbeiten"}
+        </p>
       </div>
     </GlassCard>
   );

@@ -19,8 +19,9 @@ from urllib.parse import urlsplit
 
 from . import config
 
-EU_OK = {"bedrock-eu", "mistral-eu", "selfhost-eu", "gladia-eu"}
-NON_US_CHAIN = {"mistral-eu", "selfhost-eu", "gladia-eu"}  # für Sovereign-Tenants
+# ``local-heuristic`` ist der Heuristik-Provider ohne Netz (Entwicklung, Demo); er verlässt die Maschine nie.
+EU_OK = {"bedrock-eu", "mistral-eu", "selfhost-eu", "gladia-eu", "local-heuristic"}
+NON_US_CHAIN = {"mistral-eu", "selfhost-eu", "gladia-eu", "local-heuristic"}  # für Sovereign-Tenants
 
 # Immer erlaubt: lokale Entwicklung
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal"}

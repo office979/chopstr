@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from eval import eval_harness, wer_eval
+from eval import eval_harness, export_predictions, wer_eval
 
 
 def test_normalize_and_align():
@@ -49,3 +49,26 @@ def test_eval_harness_metrics():
     assert r["recall"] == 1.0
     assert r["boundary_err_s"] == 1.5
     assert eval_harness.iou({"start": 0, "end": 10}, {"start": 5, "end": 15}) == 1 / 3
+
+
+def test_export_predictions_from_engine_json(tmp_path):
+    rows = [
+        {"start_s": 10.0, "end_s": 40.0, "total": 7.5, "gate_passed": True},
+        {"start_s": 100.0, "end_s": 130.0, "total": 8.2, "gate_passed": False},
+        {"start_s": 200.0, "end_s": 230.0, "total": 9.0, "gate_passed": True, "human_verdict": "rejected"},
+    ]
+    pred = export_predictions.to_prediction("ep01.mp4", rows)
+    assert pred["episode"] == "ep01.mp4"
+    assert [c["start"] for c in pred["clips"]] == [100.0, 10.0]  # nach total sortiert, abgelehnte fehlen
+    assert export_predictions.to_prediction("e", rows, only_gate_passed=True)["clips"] == [{"start": 10.0, "end": 40.0, "total": 7.5}]
+    assert len(export_predictions.to_prediction("e", rows, include_rejected=True)["clips"]) == 3
+
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"contract": "candidates_v1", "candidates": rows}), encoding="utf-8")
+    out = tmp_path / "preds" / "ep01.json"
+    export_predictions.main(["--json", str(report), "--episode", "ep01.mp4", "--out", str(out)])
+    written = json.loads(out.read_text(encoding="utf-8"))
+    assert written["clips"][0] == {"start": 100.0, "end": 130.0, "total": 8.2}
+    # und die Datei läuft direkt durch den Harness
+    gold = {"dialect": "AT", "clips": [{"start": 12.0, "end": 41.0, "rating": 3}]}
+    assert eval_harness.evaluate(gold, written, k=10)["recall"] == 1.0

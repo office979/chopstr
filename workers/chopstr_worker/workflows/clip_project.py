@@ -3,7 +3,7 @@
   probe_and_extract (cpu)
     -> gather(transcribe_de (gpu), diarize (gpu), heatmap (cpu))
     -> fuse_and_nlp (cpu)
-    -> detect_candidates (cpu, Phase 1: skipped)
+    -> detect_candidates (cpu, Story-Engine mit LLM, bis 60 Minuten, Heartbeat-Timeout 15 Minuten, Heartbeat pro Kapitel)
     -> notify(candidates_ready)
     -> Warten auf Freigabe-Signale (approve / finish_review), bis zu 14 Tage
     -> render_pack (cpu, Phase 3, Stub)
@@ -96,7 +96,12 @@ class ClipProjectWorkflow:
 
         self.state.stage = "scoring"
         await workflow.execute_activity(
-            "detect_candidates", sid, task_queue=params.cpu_queue, start_to_close_timeout=timedelta(minutes=30), retry_policy=LLM_RETRY
+            "detect_candidates",
+            sid,
+            task_queue=params.cpu_queue,
+            start_to_close_timeout=timedelta(minutes=60),
+            heartbeat_timeout=timedelta(minutes=15),  # ein Heartbeat pro Kapitel
+            retry_policy=LLM_RETRY,
         )
         await workflow.execute_activity("notify", args=[sid, "candidates_ready"], start_to_close_timeout=timedelta(minutes=5), **cpu)
 

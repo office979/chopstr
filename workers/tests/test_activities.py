@@ -108,16 +108,22 @@ def test_heatmap_fuse_and_nlp_end_to_end(fake_db, fake_context, source, monkeypa
     assert w[6]["sentence_idx"] == 0 and w[7]["sentence_idx"] == 1
     assert tv["stats"]["speakers"] == ["SPEAKER_00", "SPEAKER_01"]
     assert tv["stats"]["sentence_count"] == 2
-    assert fake_db.sources[source]["status"] == "ready"
+    assert fake_db.sources[source]["status"] == "analyzing"  # 'ready' setzt erst detect_candidates
     assert fake_db.job_costs[-1]["job_type"] == "nlp"
 
     # zweite Version zählt hoch
     act_nlp.run(fake_context, source)
     assert fake_db.transcript_versions[-1]["version"] == 2
 
+    # Phase 2 mit Heuristik-Provider: zwei Sätze von drei Sekunden ergeben keinen Kandidaten, aber 'ready'
+    monkeypatch.setenv("LLM_PROVIDER", "local-heuristic")
+    config.reload()
+    fake_context.settings = config.settings()
     assert analyze.run_detect_candidates(fake_context, source) == []
     ev = fake_db.events_for("detect_candidates")[-1]
-    assert ev["status"] == "skipped" and ev["message"] == "Kandidaten kommen in Phase 2"
+    assert ev["status"] == "finished" and ev["payload"]["candidates"] == 0
+    assert fake_db.sources[source]["status"] == "ready"
+    assert fake_db.job_costs[-1]["job_type"] == "llm_candidates"
 
 
 def test_fuse_without_asr_output_fails_clearly(fake_db, fake_context):

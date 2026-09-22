@@ -44,6 +44,17 @@ Ausgabe: Tabelle pro Dialekt (WER, Eigennamen-Fehlerrate) und optional JSON mit 
 Vorhersage: `{"episode": "ep01.mp4", "clips": [{"start": ..., "end": ..., "total": ...}]}`.
 Treffer = IoU >= 0,5. Boundary-Error misst, wie weit Anfang/Ende vom Redaktionsschnitt abweichen.
 
+Die Vorhersage-Datei erzeugt `export_predictions.py` aus den Kandidaten einer Quelle (Phase 2):
+
+```bash
+python -m eval.export_predictions --source-id <uuid> --episode ep01.mp4 --out preds/ep01.json      # aus Postgres
+python -m eval.export_predictions --json <ergebnis.json> --episode ep01.mp4 --out preds/ep01.json   # aus dem Storage-JSON
+```
+
+Standard: alle Kandidaten außer abgelehnte, sortiert nach `total`; `--only-gate-passed` und
+`--include-rejected` ändern die Auswahl. Der Blindtest läuft mit `LLM_PROVIDER=local-heuristic` nur
+als Rauchtest; belastbare Werte brauchen einen echten Provider.
+
 ## Zielwerte
 
 | Metrik | Ziel | Hinweis |

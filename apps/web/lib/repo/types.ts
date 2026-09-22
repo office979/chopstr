@@ -192,6 +192,112 @@ export interface SaveTranscriptInput {
   speaker_names: Record<string, string>;
 }
 
+/* Kandidaten (Phase 2): Spiegel von packages/schema/CANDIDATES.md, Vertragsversion candidates_v1 */
+export type CandidateStructure =
+  | "payoff_first"
+  | "tension_first"
+  | "hook_build_payoff"
+  | "decision_story"
+  | "how_to_list"
+  | "loop";
+
+export type RiskFlag = "humor" | "sensitive_topic" | "claim" | "ad" | "heuristic_only";
+export type HumanVerdict = "accepted" | "rejected" | "edited";
+export type RubricKey = "hook" | "payoff" | "specificity" | "tension" | "audience_fit";
+export type GateKey = "standalone" | "fidelity" | "sentence_boundaries" | "verb_bracket" | "no_open_loop";
+
+export interface CandidateSegment {
+  start: number;
+  end: number;
+  role: "body" | "teaser";
+}
+
+export interface RubricScore {
+  value: number;
+  weight: number;
+  evidence: string;
+}
+
+export interface CandidateRubric {
+  contract: "candidates_v1";
+  text: string;
+  speakers: string[];
+  duration_s: number;
+  scores: Record<RubricKey, RubricScore>;
+  unresolved_references: string[];
+  needs_earlier_context: boolean;
+  ends_before_answer: boolean;
+  is_humor: boolean;
+  sensitive_topic: boolean;
+  suggested_title_card: string;
+  repair: { rounds: number; expanded_front: number; expanded_back: number; failed: boolean };
+  proposal_why: string;
+  parent_id: string | null;
+  /* Nach Verlängern/Kürzen im Review: Scores stammen vom ursprünglichen Ausschnitt */
+  scores_stale?: boolean;
+}
+
+export interface GateResult {
+  passed: boolean;
+  detail: string;
+  /* nur verb_bracket: false, wenn spaCy fehlt (dann passed = true mit Hinweis) */
+  available?: boolean;
+}
+
+export type CandidateGates = Record<GateKey, GateResult>;
+
+export interface StoryGraphFlag {
+  sentence_idx: number;
+  seconds_after: number;
+  marker: string;
+  text: string;
+  overlap: number;
+  /* true nur nach LLM-Bestätigung, null = Heuristik-Treffer (Mensch prüft) */
+  confirmed: boolean | null;
+  reason: string;
+  repair: "extend" | "overlay";
+  suggestion: string;
+}
+
+export interface Candidate {
+  id: string;
+  source_id: string;
+  version: number;
+  segments: CandidateSegment[];
+  start_s: number;
+  end_s: number;
+  first_sent: number | null;
+  last_sent: number | null;
+  structure: CandidateStructure | null;
+  rubric: CandidateRubric;
+  gates: CandidateGates;
+  story_graph_flags: StoryGraphFlag[];
+  risk_flags: RiskFlag[];
+  total: number | null;
+  gate_passed: boolean;
+  why: string | null;
+  model_id: string | null;
+  prompt_version: string | null;
+  human_verdict: HumanVerdict | null;
+  verdict_reason: string | null;
+  verdict_by: string | null;
+  verdict_at: string | null;
+  created_at: string;
+}
+
+export interface ReviseCandidateInput {
+  first_sent: number;
+  last_sent: number;
+  title_card?: string;
+}
+
+export interface CandidateCount {
+  total: number;
+  gate_passed: number;
+  accepted: number;
+  rejected: number;
+}
+
 export interface AuditEntry {
   action: string;
   entity: string;
@@ -215,5 +321,12 @@ export interface Repo {
   listPipelineEvents(sourceId: string, afterId?: number): Promise<PipelineEvent[]>;
   getCurrentTranscript(sourceId: string): Promise<TranscriptVersion | null>;
   saveTranscript(sourceId: string, input: SaveTranscriptInput): Promise<TranscriptVersion>;
+  /* Kandidaten: nur aktuelle Versionen (ohne human_verdict = 'edited'), Pflichtkriterien erfüllt zuerst, dann total absteigend */
+  listCandidates(sourceId: string): Promise<Candidate[]>;
+  getCandidate(id: string): Promise<Candidate | null>;
+  setCandidateVerdict(id: string, verdict: "accepted" | "rejected", reason?: string): Promise<Candidate | null>;
+  /* Neue Zeile version + 1 mit neu berechneten Grenzen und Gates; alte Zeile bekommt human_verdict = 'edited' */
+  reviseCandidate(id: string, input: ReviseCandidateInput): Promise<Candidate | null>;
+  countCandidates(sourceId: string): Promise<CandidateCount>;
   audit(entry: AuditEntry): Promise<void>;
 }

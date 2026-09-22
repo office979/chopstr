@@ -23,6 +23,9 @@ interface Props {
   initialCandidates: Candidate[];
   initialClips: Clip[];
   defaultPlatform: Platform;
+  /* Maße der Quelle für den Hochformat-Schalter */
+  sourceWidth: number | null;
+  sourceHeight: number | null;
   sentences: Sentence[];
   speakerNames: Record<string, string>;
 }
@@ -65,7 +68,7 @@ interface ApiError {
 }
 
 /* Kandidaten-Review: Player links, Liste rechts, Detail mit Aktionen. Urteile werden optimistisch gesetzt. */
-export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandidates, initialClips, defaultPlatform, sentences, speakerNames }: Props) {
+export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandidates, initialClips, defaultPlatform, sourceWidth, sourceHeight, sentences, speakerNames }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const player = usePlayer(videoRef, durationS);
   const { currentTime, playing, seek, play, pause } = player;
@@ -163,7 +166,7 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
     setCandidates((prev) => prev.map((c) => (c.id === id ? next : c)));
 
   const setVerdict = useCallback(
-    async (c: Candidate, verdict: "accepted" | "rejected", reason?: string, platforms?: Platform[]) => {
+    async (c: Candidate, verdict: "accepted" | "rejected", reason?: string, platforms?: Platform[], keepSourceAspect = false) => {
       const before = c;
       const optimistic: Candidate = {
         ...c,
@@ -184,7 +187,7 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
         const res = await fetch(`/api/projects/${sourceId}/candidates/${c.id}/verdict`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ verdict, reason, platforms }),
+          body: JSON.stringify({ verdict, reason, platforms, keep_source_aspect: keepSourceAspect }),
         });
         const data = (await res.json()) as ApiError & { candidate?: Candidate; clips?: Clip[]; signaled?: Platform[]; demo?: boolean };
         if (!res.ok || !data.candidate) throw new Error(data.error ?? "Urteil konnte nicht gespeichert werden");
@@ -415,7 +418,9 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
             }}
             defaultPlatform={defaultPlatform}
             clips={clips.filter((k) => k.candidate_id === selected.id)}
-            onAccept={(platforms) => setVerdict(selected, "accepted", undefined, platforms)}
+            sourceWidth={sourceWidth}
+            sourceHeight={sourceHeight}
+            onAccept={(platforms, keepSourceAspect) => setVerdict(selected, "accepted", undefined, platforms, keepSourceAspect)}
             onReject={(reason) => setVerdict(selected, "rejected", reason)}
             onRevise={(input) => revise(selected, input)}
           />

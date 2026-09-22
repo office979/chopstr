@@ -42,7 +42,7 @@ import {
 import { currentSession } from "@/lib/session";
 import { sentencesFromWords } from "@/lib/transcript/sentences";
 import { buildRevision, isRevisionError } from "@/lib/candidates/revise";
-import { PLATFORM_ASPECT } from "@/lib/clips/presets";
+import { aspectFor } from "@/lib/clips/presets";
 import { PLATFORM_LABELS, RENDER_STAGE_LABELS } from "@/lib/clips/labels";
 import {
   adLabelFor,
@@ -670,7 +670,7 @@ export const demoRepo: Repo = {
   },
 
 
-  async createClips(candidateId, platforms) {
+  async createClips(candidateId, platforms, opts) {
     const s = state();
     const candidate = s.candidates.find((c) => c.id === candidateId);
     if (!candidate) throw new Error("Kandidat nicht gefunden");
@@ -693,7 +693,7 @@ export const demoRepo: Repo = {
         version: 1,
         platform,
         destination: platform,
-        aspect: PLATFORM_ASPECT[platform],
+        aspect: aspectFor(platform, source, opts?.keepSourceAspect),
         composition: candidate.segments.map((seg) => ({ ...seg })),
         kept_ranges: null,
         fidelity_warnings: [],

@@ -14,6 +14,8 @@ interface VerdictBody {
   verdict?: unknown;
   reason?: unknown;
   platforms?: unknown;
+  /* Hochformat-Schalter aus der Oberfläche. Fehlt er, gilt der Standard: Hochformat an. */
+  keep_source_aspect?: unknown;
 }
 
 /* POST: menschliches Urteil. accepted -> Clips je Zielplattform anlegen (packages/schema/CLIPS.md), Signal
@@ -61,10 +63,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     platforms = PLATFORMS.filter((p) => requested.includes(p) || p === defaultPlatform);
   }
 
+  const keepSourceAspect = body.keep_source_aspect === true;
+
   let clips: Clip[] = [];
   if (verdict === "accepted") {
     try {
-      clips = await repo.createClips(cid, platforms);
+      clips = await repo.createClips(cid, platforms, { keepSourceAspect });
     } catch (error) {
       return Response.json({ error: error instanceof Error ? error.message : "Clips konnten nicht angelegt werden" }, { status: 500 });
     }

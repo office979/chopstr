@@ -113,6 +113,33 @@ export const PLATFORM_ASPECT: Record<Platform, Aspect> = {
   linkedin: "4:5",
 };
 
+/* Hochformat-Schalter (Standard an): ist er aus, behält der Clip das Format der Quelle.
+ * Gewählt wird das nächstgelegene der vier unterstützten Seitenverhältnisse, damit Renderer,
+ * Safe Zones und Caption-Presets weiterhin definierte Größen bekommen. */
+const ASPECT_RATIOS: { aspect: Aspect; ratio: number }[] = [
+  { aspect: "9:16", ratio: 9 / 16 },
+  { aspect: "4:5", ratio: 4 / 5 },
+  { aspect: "1:1", ratio: 1 },
+  { aspect: "16:9", ratio: 16 / 9 },
+];
+
+export function aspectForSource(width: number | null | undefined, height: number | null | undefined): Aspect | null {
+  if (!width || !height || width <= 0 || height <= 0) return null;
+  const ratio = width / height;
+  return ASPECT_RATIOS.reduce((best, c) => (Math.abs(c.ratio - ratio) < Math.abs(best.ratio - ratio) ? c : best)).aspect;
+}
+
+/* Zielformat eines Clips: Plattform-Standard, oder das Format der Quelle, wenn der Schalter aus ist.
+ * Fehlen die Maße der Quelle (noch nicht geprüft), bleibt es beim Plattform-Standard. */
+export function aspectFor(
+  platform: Platform,
+  source: { width?: number | null; height?: number | null } | null,
+  keepSourceAspect = false,
+): Aspect {
+  if (!keepSourceAspect) return PLATFORM_ASPECT[platform];
+  return aspectForSource(source?.width, source?.height) ?? PLATFORM_ASPECT[platform];
+}
+
 export const ASPECT_SIZE: Record<Aspect, { width: number; height: number }> = {
   "9:16": { width: 1080, height: 1920 },
   "4:5": { width: 1080, height: 1350 },

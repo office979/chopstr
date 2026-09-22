@@ -97,6 +97,8 @@ export default async function ReviewPage({ params }: Props) {
         initialCandidates={candidates}
         initialClips={clips}
         defaultPlatform={brand?.default_platform ?? source.brief.platform ?? "linkedin"}
+        sourceWidth={source.width}
+        sourceHeight={source.height}
         sentences={sentences}
         speakerNames={transcript.stats.speaker_names ?? {}}
       />

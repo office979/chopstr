@@ -534,8 +534,9 @@ export interface Repo extends AuthRepo, WorkspaceAdminRepo, BlockBRepo {
   /* Neue Zeile version + 1 mit neu berechneten Grenzen und Gates; alte Zeile bekommt human_verdict = 'edited' */
   reviseCandidate(id: string, input: ReviseCandidateInput): Promise<Candidate | null>;
   countCandidates(sourceId: string): Promise<CandidateCount>;
-  /* Clips (Phase 3): eine Zeile je Zielplattform; bestehende Zeilen (candidate_id, platform) werden wiederverwendet */
-  createClips(candidateId: string, platforms: Platform[]): Promise<Clip[]>;
+  /* Clips (Phase 3): eine Zeile je Zielplattform; bestehende Zeilen (candidate_id, platform) werden wiederverwendet.
+   * opts.keepSourceAspect: Hochformat-Schalter aus, der Clip behält das Format der Quelle. */
+  createClips(candidateId: string, platforms: Platform[], opts?: { keepSourceAspect?: boolean }): Promise<Clip[]>;
   listClips(sourceId: string): Promise<Clip[]>;
   getClip(id: string): Promise<Clip | null>;
   updateClip(id: string, patch: Partial<Clip>): Promise<Clip | null>;

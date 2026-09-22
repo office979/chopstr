@@ -32,7 +32,7 @@ import type {
 } from "@/lib/repo/types";
 import { sentencesFromWords } from "@/lib/transcript/sentences";
 import { buildRevision, isRevisionError } from "@/lib/candidates/revise";
-import { PLATFORM_ASPECT } from "@/lib/clips/presets";
+import { aspectFor } from "@/lib/clips/presets";
 import { adLabelFor, lintProfileFrom } from "@/lib/clips/render-demo";
 import { prepareManualHook } from "@/lib/copy/hooks";
 
@@ -835,7 +835,7 @@ export const postgresRepo: Repo = {
     });
   },
 
-  async createClips(candidateId, platforms) {
+  async createClips(candidateId, platforms, opts) {
     const session = await currentSession();
     return withContext(session, async (tx) => {
       const candRows = await tx`select * from candidates where id = ${candidateId}`;
@@ -858,7 +858,7 @@ export const postgresRepo: Repo = {
           insert into clips (
             source_id, candidate_id, platform, destination, aspect, composition, title_card, ad_label, status, created_by
           ) values (
-            ${source.id}, ${candidate.id}, ${platform}, ${platform}, ${PLATFORM_ASPECT[platform]},
+            ${source.id}, ${candidate.id}, ${platform}, ${platform}, ${aspectFor(platform, source, opts?.keepSourceAspect)},
             ${tx.json(candidate.segments as never)}, ${candidate.rubric.suggested_title_card?.trim() || null},
             ${adLabelFor(source, brand)}, 'draft', ${session.userId}
           ) returning *`;

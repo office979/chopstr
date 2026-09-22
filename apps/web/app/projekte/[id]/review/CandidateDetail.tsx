@@ -8,8 +8,9 @@ import { StatusCheck } from "@/components/ui/StatusCheck";
 import { Input, Textarea } from "@/components/ui/Field";
 import { cn } from "@/components/ui/cn";
 import type { Candidate, Clip, Platform, ReviseCandidateInput } from "@/lib/repo/types";
-import { PLATFORMS, PLATFORM_LABELS } from "@/lib/clips/labels";
-import { PLATFORM_ASPECT } from "@/lib/clips/presets";
+import { ASPECT_LABELS, PLATFORMS, PLATFORM_LABELS } from "@/lib/clips/labels";
+import { PLATFORM_ASPECT, aspectForSource } from "@/lib/clips/presets";
+import { Toggle } from "@/components/ui/Toggle";
 import { GATE_LABELS, GATE_ORDER } from "@/lib/candidates/gates";
 import { RUBRIC_LABELS, RUBRIC_ORDER, VERDICT_LABELS, formatSeconds, structureLabel } from "@/lib/candidates/labels";
 import { TITLE_CARD_MAX_WORDS, titleCardWords } from "@/lib/candidates/revise";
@@ -30,7 +31,10 @@ interface Props {
   defaultPlatform: Platform;
   /* Clips dieses Kandidaten (nach dem Annehmen) */
   clips: Clip[];
-  onAccept: (platforms: Platform[]) => void;
+  /* Maße der Quelle: bestimmen das Format, wenn der Hochformat-Schalter aus ist */
+  sourceWidth: number | null;
+  sourceHeight: number | null;
+  onAccept: (platforms: Platform[], keepSourceAspect: boolean) => void;
   onReject: (reason: string) => void;
   onRevise: (input: ReviseCandidateInput) => void;
 }
@@ -53,6 +57,8 @@ export function CandidateDetail({
   onAcceptOpen,
   defaultPlatform,
   clips,
+  sourceWidth,
+  sourceHeight,
   onAccept,
   onReject,
   onRevise,
@@ -61,6 +67,10 @@ export function CandidateDetail({
   const [panel, setPanel] = useState<Panel>(null);
   const [titleCard, setTitleCard] = useState(c.rubric.suggested_title_card ?? "");
   const [targets, setTargets] = useState<Platform[]>(PLATFORMS);
+  /* Hochformat ist der Standard: aus einem Querformat-Video entsteht ein Hochkant-Clip.
+   * Ausgeschaltet behält der Clip das Format der Quelle. */
+  const [portrait, setPortrait] = useState(true);
+  const sourceAspect = aspectForSource(sourceWidth, sourceHeight);
   const reasonId = useId();
   const titleId = useId();
   const targetsId = useId();
@@ -72,7 +82,7 @@ export function CandidateDetail({
   };
   const submitAccept = () => {
     const chosen = PLATFORMS.filter((p) => targets.includes(p) || p === defaultPlatform);
-    onAccept(chosen);
+    onAccept(chosen, !portrait);
   };
 
   const first = c.first_sent ?? 0;
@@ -293,12 +303,30 @@ export function CandidateDetail({
                     )}
                   >
                     {PLATFORM_LABELS[p]}
-                    <span className="font-mono text-[11px] text-text-3">{PLATFORM_ASPECT[p]}</span>
+                    <span className="text-[11px] text-text-3">
+                      {ASPECT_LABELS[portrait || !sourceAspect ? PLATFORM_ASPECT[p] : sourceAspect]}
+                    </span>
                     {isDefault && <span className="text-[11px] uppercase tracking-wide text-ai-soft">Standard</span>}
                   </button>
                 );
               })}
             </div>
+
+            <div className="border-t border-line pt-3">
+              <Toggle
+                checked={portrait}
+                onChange={setPortrait}
+                label="Hochformat"
+                description={
+                  portrait
+                    ? "Der Clip wird hochkant zugeschnitten, passend für Handys."
+                    : sourceAspect
+                      ? `Der Clip behält das Format deines Videos (${ASPECT_LABELS[sourceAspect]}). Nichts wird abgeschnitten.`
+                      : "Der Clip behält das Format deines Videos. Nichts wird abgeschnitten."
+                }
+              />
+            </div>
+
             <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" onClick={submitAccept} disabled={busy}>
                 Annehmen für {PLATFORMS.filter((p) => targets.includes(p) || p === defaultPlatform).length} Ziele

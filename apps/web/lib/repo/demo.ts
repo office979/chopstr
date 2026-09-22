@@ -32,6 +32,7 @@ import {
   DEMO_IDS,
   buildSeedCandidates,
   buildSeedTranscript,
+  buildSeedWords,
   seedBrandProfile,
   seedKeynoteEvents,
   seedPodcastEvents,
@@ -254,8 +255,29 @@ const SIM_PHASES: SimPhase[] = [
   { step: "transcribe_de", status: "transcribing", duration: 70, startMessage: "whisper-large-v3-turbo-german", endMessage: "Transkription abgeschlossen" },
   { step: "diarize", status: "analyzing", duration: 25, startMessage: "Sprecher werden getrennt", endMessage: "Sprecher erkannt" },
   { step: "fuse_and_nlp", status: "analyzing", duration: 18, startMessage: "dach_nlp", endMessage: "Sätze, Füllwörter und Verneinungen markiert" },
-  { step: "detect_candidates", status: "scoring", duration: 20, startMessage: "Story-Engine: Vorschlag, Rubrik, Story-Graph", endMessage: "Keine Kandidaten (Demo ohne Transkript)" },
+  { step: "detect_candidates", status: "scoring", duration: 20, startMessage: "Gute Stellen werden gesucht", endMessage: "Momente gefunden" },
 ];
+
+/* Demo: am Ende der Simulation bekommt ein hochgeladenes Video dieselbe Textgrundlage wie das
+ * Beispielprojekt. Ohne das endete der Weg nach der Analyse im Nichts: Status „Fertig“, aber kein
+ * Transkript und keine Momente, also nichts zum Auswählen und nichts zum Rendern.
+ * Echte Transkription und echte Dateien liefert nur der lokale Stack (README, „Lokaler Testmodus“). */
+function attachDemoAnalysis(s: DemoState, source: Source) {
+  if (s.transcripts.some((t) => t.source_id === source.id)) return;
+  const words = buildSeedWords();
+  s.transcripts.push({
+    ...buildSeedTranscript(),
+    id: uuid(),
+    source_id: source.id,
+    created_at: nowIso(),
+  });
+  for (const c of buildSeedCandidates(words)) {
+    s.candidates.push({ ...c, id: uuid(), source_id: source.id, created_at: nowIso() });
+  }
+  /* Dauer an den Text angleichen, sonst zeigt der Player eine Länge, zu der es keine Wörter gibt */
+  const end = words.at(-1)?.end;
+  if (end) source.duration_s = Math.ceil(end);
+}
 
 function pushEvent(s: DemoState, e: Omit<PipelineEvent, "id" | "at">, at = nowIso()) {
   s.events.push({ ...e, id: s.nextEventId++, at });
@@ -314,8 +336,10 @@ function advanceSimulation(sourceId: string) {
     }
   }
   if (source.status !== "ready") {
+    attachDemoAnalysis(s, source);
+    const found = s.candidates.filter((c) => c.source_id === sourceId).length;
     source.status = "ready";
-    source.status_message = "Ohne Transkript (Demo)";
+    source.status_message = found === 1 ? "Ein Moment gefunden" : `${found} Momente gefunden`;
     source.updated_at = nowIso();
     s.simulations.delete(sourceId);
   }

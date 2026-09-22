@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { PageShell } from "@/components/layout/PageShell";
-import { Wordmark } from "@/components/brand/Wordmark";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { StatusCheck, type StatusCheckState } from "@/components/ui/StatusCheck";
 import { Timecode } from "@/components/ui/Timecode";
@@ -61,16 +60,35 @@ export default async function ProjectsPage() {
     await Promise.all(sources.filter((s) => s.status === "ready").map(async (s) => [s.id, await repo.countClips(s.id)] as const)),
   );
 
+  const readyCount = sources.filter((s) => s.status === "ready").length;
+  const failedCount = sources.filter((s) => s.status === "failed").length;
+  const activeCount = sources.filter((s) => checkState(s.status) === "active").length;
+  const openCandidates = [...counts.values()].reduce((n, c) => n + Math.max(0, c.total - c.accepted - c.rejected), 0);
+  const renderedClips = [...clipCounts.values()].reduce((n, c) => n + c.rendered, 0);
+
   return (
-    <PageShell backgroundWord="Clips">
-      <div className="mb-10 flex flex-col gap-6 sm:mb-14">
-        <Wordmark width={168} className="opacity-95" />
-        <div className="max-w-2xl">
-          <h1 className="text-3xl font-semibold tracking-[var(--tracking-display)] sm:text-5xl">Meine Videos</h1>
-          <p className="mt-3 text-base text-text-2 sm:text-lg">
-            Langes Video rein, kurze Clips raus. Der Computer sucht die besten Stellen, du wählst aus.
-          </p>
+    <PageShell width="wide">
+      <section className="relative mb-8 overflow-hidden rounded-card border border-white/10 bg-[linear-gradient(135deg,rgba(2,12,245,0.42)_0%,rgba(20,34,255,0.22)_45%,rgba(27,26,98,0.35)_100%)] p-6 sm:p-8">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-brand/25 blur-3xl" />
+        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-[var(--tracking-display)] text-white sm:text-4xl">Meine Videos</h1>
+            <p className="mt-2 text-[15px] text-white/75">
+              Hallo {session.displayName.split(/\s+/)[0]}. Langes Video rein, kurze Clips raus.
+            </p>
+          </div>
         </div>
+        <dl className="relative mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Stat label="Videos" value={sources.length} hint={`${readyCount} fertig analysiert`} />
+          <Stat label="Gerade in Arbeit" value={activeCount} hint={activeCount > 0 ? "der Computer rechnet" : "nichts in der Warteschlange"} />
+          <Stat label="Momente zu prüfen" value={openCandidates} hint="warten auf deine Entscheidung" />
+          <Stat label="Fertige Clips" value={renderedClips} hint={failedCount > 0 ? `bei ${failedCount} Video(s) ging etwas schief` : "bereit zum Posten"} />
+        </dl>
+      </section>
+
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-medium">Alle Videos</h2>
+        <span className="text-sm text-text-3">{sources.length} {sources.length === 1 ? "Video" : "Videos"}</span>
       </div>
 
       {sources.length === 0 ? (
@@ -93,13 +111,13 @@ export default async function ProjectsPage() {
             const clipCount = clipCounts.get(s.id);
             return (
               <li key={s.id} className="min-w-0">
-                <GlassCard padding="none" className="min-w-0 overflow-hidden">
+                <GlassCard padding="none" className="group min-w-0 overflow-hidden hover:border-brand/60 hover:bg-white/[0.07]">
                   <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:gap-6 sm:p-6">
                     <StatusCheck state={state} size={40} label={STATUS_LABELS[s.status]} />
                     <div className="min-w-0 flex-1">
                       <Link
                         href={`/projekte/${s.id}`}
-                        className="block truncate text-lg font-medium text-text hover:underline"
+                        className="block truncate text-lg font-medium text-text after:absolute after:inset-0 after:content-[''] group-hover:text-white"
                       >
                         {s.title}
                       </Link>
@@ -113,7 +131,7 @@ export default async function ProjectsPage() {
                         )}
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                    <div className="relative z-10 flex flex-wrap items-center gap-2 sm:justify-end">
                       <Badge tone={state === "error" ? "attention" : state === "active" ? "ai" : "neutral"}>
                         {STATUS_LABELS[s.status]}
                       </Badge>
@@ -168,5 +186,15 @@ export default async function ProjectsPage() {
         </ul>
       )}
     </PageShell>
+  );
+}
+
+function Stat({ label, value, hint }: { label: string; value: number; hint: string }) {
+  return (
+    <div className="rounded-inner bg-black/45 p-4 backdrop-blur-sm sm:p-5">
+      <dt className="text-sm text-text-2">{label}</dt>
+      <dd className="mt-2 font-mono text-3xl font-medium tabular-nums text-text">{String(value).padStart(2, "0")}</dd>
+      <dd className="mt-1 text-xs text-text-3">{hint}</dd>
+    </div>
   );
 }

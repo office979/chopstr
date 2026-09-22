@@ -3,24 +3,23 @@ import { cn } from "./cn";
 
 type Tone = "neutral" | "ai" | "attention" | "danger" | "ok";
 
-const tones: Record<Tone, string> = {
-  neutral: "border-line text-text-2",
-  ai: "border-ai-soft/50 text-ai-soft",
-  attention: "border-attention/60 text-attention",
-  danger: "border-danger/60 text-danger",
-  ok: "border-line-strong text-text",
+/* Status-Label, kein Button: eckiger Radius, kein Rand, Punkt davor. So verwechselt niemand es mit einer Aktion. */
+const tones: Record<Tone, { box: string; dot: string }> = {
+  neutral: { box: "bg-white/[0.06] text-text-2", dot: "bg-text-3" },
+  ai: { box: "bg-ai/15 text-ai-soft", dot: "bg-ai-soft" },
+  attention: { box: "bg-attention/15 text-attention", dot: "bg-attention" },
+  danger: { box: "bg-danger/15 text-danger", dot: "bg-danger" },
+  ok: { box: "bg-white/10 text-text", dot: "bg-text" },
 };
 
 export function Badge({ tone = "neutral", className, title, children }: { tone?: Tone; className?: string; title?: string; children: ReactNode }) {
+  const t = tones[tone];
   return (
     <span
       title={title}
-      className={cn(
-        "inline-flex h-7 items-center rounded-pill border px-3 text-xs font-medium tracking-wide",
-        tones[tone],
-        className,
-      )}
+      className={cn("inline-flex h-6 cursor-default select-none items-center gap-1.5 rounded-md px-2 text-xs font-medium", t.box, className)}
     >
+      <span aria-hidden="true" className={cn("h-1.5 w-1.5 shrink-0 rounded-full", t.dot)} />
       {children}
     </span>
   );

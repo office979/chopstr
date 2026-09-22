@@ -219,7 +219,7 @@ def verify(secret: str, body: bytes, header: str, tolerance_s: int = 300) -> boo
           </div>
           <p className="flex flex-wrap gap-1.5">
             {WEBHOOK_EVENTS.map((e) => (
-              <code key={e} className="rounded-pill border border-line px-2 py-0.5 font-mono text-[11px] text-text-2">
+              <code key={e} className="rounded-md bg-white/[0.06] px-2 py-0.5 font-mono text-[11px] text-text-2">
                 {e}
               </code>
             ))}

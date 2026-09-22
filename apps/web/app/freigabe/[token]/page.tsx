@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { Wordmark } from "@/components/brand/Wordmark";
-import { LightCone } from "@/components/ui/LightCone";
-import { BackgroundWord } from "@/components/ui/BackgroundWord";
+import { BlueBubbles } from "@/components/ui/BlueBubbles";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { getRepo } from "@/lib/repo";
 import { isTokenShape } from "@/lib/auth/tokens";
@@ -24,8 +23,7 @@ export default async function GuestApprovalPage({ params }: { params: Promise<{ 
 
   return (
     <div className="relative min-h-dvh overflow-x-clip">
-      <LightCone tone="brand" />
-      <BackgroundWord word="Freigabe" />
+      <BlueBubbles />
       <main className="relative z-10 mx-auto flex w-full max-w-[960px] flex-col px-4 pb-16 pt-10 sm:px-6 sm:pt-16">
         <div className="mb-8 flex items-center justify-between gap-4">
           <Link href="/" aria-label="chopstr" className="inline-flex">

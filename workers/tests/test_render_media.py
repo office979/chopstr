@@ -120,12 +120,13 @@ def test_filter_graph_structure_without_ffmpeg(tmp_path):
     caps = {"subtitles": True, "drawtext": True, "loudnorm": True, "ebur128": True}
     font = render.font_file()
     assert font is not None and font.name in render.FONT_CANDIDATES
-    v, notes, burned, title, hook = render.video_chain(plan, paths["ass"], font, caps, font.parent)
+    v, notes, burned, title, hook, watermark = render.video_chain(plan, paths["ass"], font, caps, font.parent)
+    assert watermark is False
     assert burned and title and hook and notes == []
     assert v.count("crop=") == n_shots and f"concat=n={n_shots}:v=1:a=0[vc]" in v
     assert "subtitles='" in v and ":fontsdir='" in v and v.count("drawtext=") >= 2 and "expansion=none" in v
     assert "enable='lt(t,2.50)'" in v and "enable='lt(t,3.00)'" in v and v.endswith("[vout]")
-    v2, notes2, burned2, t2, h2 = render.video_chain(plan, paths["ass"], None, {"subtitles": False, "drawtext": False}, None)
+    v2, notes2, burned2, t2, h2, _wm2 = render.video_chain(plan, paths["ass"], None, {"subtitles": False, "drawtext": False}, None)
     assert not burned2 and not t2 and not h2 and len(notes2) == 2 and v2.endswith("[vc]null[vout]")
     assert render.needs_compressor(7.1) and not render.needs_compressor(7.0) and not render.needs_compressor(None)
     assert render.loudnorm_pass2(render.Loudness(-16, -1.5), {"input_i": -21.79, "input_tp": -14.46, "input_lra": 0.1, "input_thresh": -31.79, "target_offset": -0.03}).endswith(

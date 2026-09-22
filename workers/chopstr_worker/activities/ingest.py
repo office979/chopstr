@@ -1,8 +1,9 @@
 """Activity ``probe_and_extract``: Original laden, ffprobe, sha256, 16-kHz-WAV, 720p-Proxy.
 
 Schreibt ``sources`` (sha256, duration_s, width, height, fps, audio_key, proxy_key, size_bytes),
-Status ``ingesting`` zu ``transcribing``, Events und ``job_costs`` (ingest).
-Idempotent: vorhandene Ableitungen im Storage werden übersprungen.
+Status ``ingesting`` zu ``transcribing``, Events und ``job_costs`` (ingest). Verbrauch: die Dauer der Quelle
+wird beim ersten Ingest (Zeile ohne ``duration_s``) als Quellminuten auf ``usage_periods`` gebucht.
+Idempotent: vorhandene Ableitungen im Storage werden übersprungen, die Buchung passiert nur einmal.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import time
 
 from temporalio import activity
 
-from .. import costlog, db, events, ingest
+from .. import costlog, db, events, ingest, usage
 from . import common
 
 STEP = "probe_and_extract"
@@ -77,6 +78,11 @@ def run(ctx: common.Context, source_id: str) -> dict:
         )
         events.set_source_status(ctx.conn, source_id, "transcribing", None)
 
+        booked = None
+        if src.get("duration_s") is None:
+            booked = usage.book_source_minutes(ctx.conn, src["workspace_id"], info.duration_s / 60.0)
+        common.heartbeat("usage")
+
         cpu_s = time.monotonic() - t0
         storage_bytes = ctx.store.size("derived", audio_key) + (ctx.store.size("derived", proxy_key) if proxy_key else 0)
         costlog.record(
@@ -100,6 +106,8 @@ def run(ctx: common.Context, source_id: str) -> dict:
             fps=info.fps,
             audio_skipped=audio_skipped,
             proxy_skipped=proxy_skipped,
+            booked_minutes=round(info.duration_s / 60.0, 2) if booked else 0.0,
+            overage_minutes=booked["overage_minutes"] if booked else None,
         )
     return {
         "source_id": source_id,

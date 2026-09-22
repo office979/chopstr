@@ -14,7 +14,7 @@ import time
 
 from temporalio import activity
 
-from .. import costlog, db, events, storage
+from .. import costlog, db, events, storage, usage
 from ..pipeline import signals, story_engine
 from ..providers_llm import LLM
 from ..residency import Tenant
@@ -147,8 +147,9 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
         weights = story_engine.resolve_weights(brand["learned_weights"])
         tenant = Tenant(id=src["workspace_id"], tier=src["tier"], allow_us_subprocessors=bool(src.get("allow_us_subprocessors")))
 
-        usage: list[dict] = []
-        llm = LLM(tenant, cost_sink=usage.append, s=s)  # ResidencyError bei nicht erlaubtem Provider
+        llm_usage: list[dict] = []
+        # ResidencyError bei nicht erlaubtem Provider; der Sink sammelt für job_costs und bucht Token auf usage_periods
+        llm = LLM(tenant, cost_sink=usage.llm_sink(ctx.conn, src["workspace_id"], llm_usage), s=s)
         model = llm.model()
         if not model:
             raise RuntimeError(
@@ -183,8 +184,8 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
                 model_id=model,
                 source_minutes=float(src.get("duration_s") or 0.0) / 60.0,
                 cpu_seconds=time.monotonic() - t0,
-                llm_input_tokens=sum(int(u.get("in", 0)) for u in usage),
-                llm_output_tokens=sum(int(u.get("out", 0)) for u in usage),
+                llm_input_tokens=sum(int(u.get("in", 0)) for u in llm_usage),
+                llm_output_tokens=sum(int(u.get("out", 0)) for u in llm_usage),
             ),
             s,
         )

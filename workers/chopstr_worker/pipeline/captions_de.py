@@ -264,11 +264,14 @@ def to_ass(
     clip_start: float = 0.0,
     preset: str | CaptionPreset = "tiktok_bold",
     play_res: tuple[int, int] = (W, H),
+    font_family: str | None = None,
 ) -> str:
     """ASS mit Wort-Highlight: pro Wort ein Event, aktives Wort eingefärbt (bei ``highlight_words``).
 
-    ``play_res`` ist die Ausgabegröße; das Preset muss dazu passen (siehe ``scaled_preset``)."""
+    ``play_res`` ist die Ausgabegröße; das Preset muss dazu passen (siehe ``scaled_preset``).
+    ``font_family`` überschreibt den ``Fontname`` des Presets (Marken-Font aus ``brand_assets``)."""
     p = preset if isinstance(preset, CaptionPreset) else preset_for(preset)
+    font = (font_family or "").strip() or p.font
     play_w, play_h = play_res
     margin_v = play_h - p.baseline_y
     border_style = 3 if p.box else 1
@@ -277,7 +280,7 @@ def to_ass(
         f"[Script Info]\nScriptType: v4.00+\nPlayResX: {play_w}\nPlayResY: {play_h}\nWrapStyle: 2\n\n"
         "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, "
         "Alignment, MarginL, MarginR, MarginV, Outline, Shadow, BorderStyle\n"
-        f"Style: Cap,{p.font},{p.font_px},{p.base_color},&H00000000,{back},{-1 if p.bold else 0},2,"
+        f"Style: Cap,{font},{p.font_px},{p.base_color},&H00000000,{back},{-1 if p.bold else 0},2,"
         f"{p.safe.left},{play_w - p.safe.right},{margin_v},{p.outline_px},0,{border_style}\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Text\n"
     )

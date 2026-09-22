@@ -12,7 +12,7 @@ SEGMENTS = [{"start": 812.4, "end": 830.1, "role": "body"}, {"start": 840.0, "en
 SOURCES = {"storage_key": "uploads/abc", "transcript_version": 3, "hook_version": 1, "candidate_id": "cand-1"}
 CONTRACT_KEYS = {
     "contract", "platform", "aspect", "output", "segments", "filler_cuts", "reframe", "shots", "captions",
-    "title_card", "hook_overlay", "audio", "sources", "versions",
+    "title_card", "hook_overlay", "audio", "brand", "sources", "versions",
 }  # fmt: skip
 
 

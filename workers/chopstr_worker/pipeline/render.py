@@ -10,6 +10,10 @@ yuv420p, ``+faststart``, AAC 192k, Bildrate aus dem Plan.
 Ehrlichkeit gegenüber der Umgebung: fehlt der ffmpeg-Build ``subtitles`` (libass) oder ``drawtext``
 (libfreetype), wird der betroffene Schritt übersprungen und als Hinweis in ``RenderResult.notes``
 gemeldet; der Render selbst läuft durch. Dasselbe gilt für eine fehlende Font-Datei.
+
+Marke (Phase 4): ``font_path`` ersetzt Inter in ``drawtext`` (der ``Fontname`` in der ASS kommt aus
+``write_captions(font_family=...)``, libass findet die Datei über ``fontsdir``). ``logo_path`` (PNG) wird bei
+``plan.brand.watermark.enabled`` als Wasserzeichen unten rechts innerhalb der Safe Zone per ``overlay`` gelegt.
 """
 
 from __future__ import annotations
@@ -65,6 +69,7 @@ class RenderResult:
     captions_burned: bool = False
     title_card_drawn: bool = False
     hook_overlay_drawn: bool = False
+    watermark_drawn: bool = False
     filter_graph: str = ""
 
 
@@ -96,7 +101,10 @@ def ffmpeg_filters() -> frozenset[str]:
 
 def capabilities() -> dict[str, bool]:
     f = ffmpeg_filters()
-    return {"subtitles": "subtitles" in f, "drawtext": "drawtext" in f, "loudnorm": "loudnorm" in f, "ebur128": "ebur128" in f}
+    return {
+        "subtitles": "subtitles" in f, "drawtext": "drawtext" in f, "loudnorm": "loudnorm" in f, "ebur128": "ebur128" in f,
+        "overlay": "overlay" in f,
+    }  # fmt: skip
 
 
 def default_fonts_dir() -> Path:
@@ -217,8 +225,29 @@ def audio_chain(plan: dict, first_input: int, loud_filter: str, compressor: bool
     return chain + f"[ac]{tail}[aout]"
 
 
-def video_chain(plan: dict, ass_path: str | None, font: Path | None, caps: dict[str, bool], fonts_dir: Path | None) -> tuple[str, list[str], bool, bool, bool]:
-    """Video: Shots croppen und skalieren, concat, Untertitel, Overlays. Endet in ``[vout]``."""
+def watermark_filter(plan: dict, logo_index: int) -> str:
+    """Logo als Wasserzeichen unten rechts innerhalb der Safe Zone: ``[vt]`` plus Logo-Input zu ``[vout]``."""
+    out_w = int(plan["output"]["width"])
+    wm = dict(plan.get("brand", {}).get("watermark") or {})
+    safe = plan["captions"]["safe_zone"]
+    width = max(64, int(round(out_w * float(wm.get("width_ratio", 0.18)))))
+    opacity = min(1.0, max(0.0, float(wm.get("opacity", 0.85))))
+    right, bottom = int(safe["right"]), int(safe["bottom"])
+    return (
+        f"[{logo_index}:v]scale={width}:-1:flags=lanczos,format=rgba,colorchannelmixer=aa={opacity:.2f}[wm];"
+        f"[vt][wm]overlay=x=W-w-{right}:y=H-h-{bottom}[vout]"
+    )
+
+
+def video_chain(
+    plan: dict,
+    ass_path: str | None,
+    font: Path | None,
+    caps: dict[str, bool],
+    fonts_dir: Path | None,
+    logo_index: int | None = None,
+) -> tuple[str, list[str], bool, bool, bool, bool]:
+    """Video: Shots croppen und skalieren, concat, Untertitel, Overlays, Wasserzeichen. Endet in ``[vout]``."""
     shots, _ = _inputs(plan)
     out_w, out_h = int(plan["output"]["width"]), int(plan["output"]["height"])
     parts, labels = [], []
@@ -244,8 +273,16 @@ def video_chain(plan: dict, ass_path: str | None, font: Path | None, caps: dict[
     ov, ov_notes, title_drawn, hook_drawn = overlay_filters(plan, font, caps)
     filters += ov
     notes += ov_notes
-    chain += "[vc]" + (",".join(filters) if filters else "null") + "[vout]"
-    return chain, notes, burned, title_drawn, hook_drawn
+    watermark = False
+    if logo_index is not None and not caps.get("overlay"):
+        notes.append("Wasserzeichen nicht gezeichnet: ffmpeg ohne overlay-Filter")
+        logo_index = None
+    if logo_index is not None:
+        chain += "[vc]" + (",".join(filters) if filters else "null") + "[vt];" + watermark_filter(plan, logo_index)
+        watermark = True
+    else:
+        chain += "[vc]" + (",".join(filters) if filters else "null") + "[vout]"
+    return chain, notes, burned, title_drawn, hook_drawn, watermark
 
 
 def loudness_for(plan: dict) -> Loudness:
@@ -304,15 +341,23 @@ def render_from_plan(
     fonts_dir: str | os.PathLike | None = None,
     x264_preset: str = "medium",
     crf: int = 19,
+    font_path: str | os.PathLike | None = None,
+    logo_path: str | os.PathLike | None = None,
 ) -> RenderResult:
-    """Rendert den Plan in ``out_path`` (MP4). Untertitel und Overlays sind best effort (siehe Modul-Docstring)."""
+    """Rendert den Plan in ``out_path`` (MP4). Untertitel und Overlays sind best effort (siehe Modul-Docstring).
+
+    ``font_path``: Marken-Font für ``drawtext`` (sonst Inter aus ``fonts_dir``). ``logo_path``: PNG für das
+    Wasserzeichen, nur wirksam bei ``plan.brand.watermark.enabled``."""
     if not Path(src_path).is_file():
         raise RenderError("Quelldatei für den Render fehlt")
     caps = capabilities()
     if not caps.get("loudnorm"):
         raise RenderError("ffmpeg ohne loudnorm-Filter, Master-Lautheit nicht möglich")
     fdir = Path(fonts_dir) if fonts_dir else default_fonts_dir()
-    font = font_file(fdir)
+    font = Path(font_path) if font_path and Path(font_path).is_file() else font_file(fdir)
+    logo: Path | None = None
+    if logo_path and dict(plan.get("brand", {}).get("watermark") or {}).get("enabled"):
+        logo = Path(logo_path) if Path(logo_path).is_file() else None
     loud = loudness_for(plan)
     expected = round(sum(float(s["end"]) - float(s["start"]) for s in plan["segments"]), 3)
 
@@ -321,14 +366,18 @@ def render_from_plan(
     if compressor:
         measured = measure_loudnorm(src_path, plan, compressor=True)
 
-    shots, _ = _inputs(plan)
-    vchain, notes, burned, title_drawn, hook_drawn = video_chain(plan, str(ass_path) if ass_path else None, font, caps, fdir)
+    shots, segments = _inputs(plan)
+    logo_index = len(shots) + len(segments) if logo is not None else None
+    vchain, notes, burned, title_drawn, hook_drawn, watermark = video_chain(
+        plan, str(ass_path) if ass_path else None, font, caps, fdir, logo_index
+    )
     achain = audio_chain(plan, len(shots), loudnorm_pass2(loud, measured), compressor)
     graph = vchain + ";" + achain
     fps = float(plan["output"].get("fps") or 25.0)
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    logo_args = ["-i", str(logo)] if watermark and logo is not None else []
     cmd = [
-        *input_args(src_path, plan),
+        *input_args(src_path, plan), *logo_args,
         "-filter_complex", graph, "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-profile:v", "high", "-preset", x264_preset, "-crf", str(crf), "-pix_fmt", "yuv420p",
         "-r", f"{fps:g}", "-c:a", "aac", "-b:a", "192k", "-ar", str(AUDIO_RATE), "-movflags", "+faststart", str(out_path),
@@ -343,6 +392,7 @@ def render_from_plan(
         captions_burned=burned,
         title_card_drawn=title_drawn,
         hook_overlay_drawn=hook_drawn,
+        watermark_drawn=watermark,
         filter_graph=graph,
     )
 
@@ -411,8 +461,10 @@ def write_captions(
     play_res: tuple[int, int],
     directory: str | os.PathLike,
     basename: str,
+    font_family: str | None = None,
 ) -> dict[str, str]:
-    """Schreibt ASS (eingebrannt), SRT und VTT (Sidecars) auf die Ausgabe-Timeline. Gibt die Pfade zurück."""
+    """Schreibt ASS (eingebrannt), SRT und VTT (Sidecars) auf die Ausgabe-Timeline. Gibt die Pfade zurück.
+    ``font_family`` setzt den ``Fontname`` der ASS (Marken-Font); ohne ihn gilt der Preset-Font."""
     d = Path(directory)
     d.mkdir(parents=True, exist_ok=True)
     paths = {
@@ -420,7 +472,7 @@ def write_captions(
         "srt": d / f"{basename}.srt",
         "vtt": d / f"{basename}.vtt",
     }
-    paths["ass"].write_text(captions_de.to_ass(out_words, 0.0, preset, play_res), encoding="utf-8")
+    paths["ass"].write_text(captions_de.to_ass(out_words, 0.0, preset, play_res, font_family=font_family), encoding="utf-8")
     paths["srt"].write_text(captions_de.to_srt(out_words, 0.0, preset.max_chars), encoding="utf-8")
     paths["vtt"].write_text(captions_de.to_vtt(out_words, 0.0, preset.max_chars), encoding="utf-8")
     return {k: str(v) for k, v in paths.items()}
@@ -459,5 +511,6 @@ __all__ = [
     "regression_checks",
     "render_from_plan",
     "video_chain",
+    "watermark_filter",
     "write_captions",
 ]

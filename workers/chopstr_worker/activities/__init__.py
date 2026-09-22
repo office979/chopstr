@@ -8,12 +8,16 @@ vorhandene Outputs übersprungen.
 from __future__ import annotations
 
 from .analyze import detect_candidates, heatmap, notify
+from .deletion import delete_entity, enqueue_deletion, find_expired
 from .ingest import probe_and_extract
 from .nlp import fuse_and_nlp
 from .render import render_pack
 from .transcribe import diarize, transcribe_de
 
-CPU_ACTIVITIES = [probe_and_extract, heatmap, fuse_and_nlp, detect_candidates, render_pack, notify]
+CPU_ACTIVITIES = [
+    probe_and_extract, heatmap, fuse_and_nlp, detect_candidates, render_pack, notify,
+    delete_entity, find_expired, enqueue_deletion,
+]  # fmt: skip
 GPU_ACTIVITIES = [transcribe_de, diarize]
 ALL_ACTIVITIES = CPU_ACTIVITIES + GPU_ACTIVITIES
 
@@ -21,8 +25,11 @@ __all__ = [
     "ALL_ACTIVITIES",
     "CPU_ACTIVITIES",
     "GPU_ACTIVITIES",
+    "delete_entity",
     "detect_candidates",
     "diarize",
+    "enqueue_deletion",
+    "find_expired",
     "fuse_and_nlp",
     "heatmap",
     "notify",

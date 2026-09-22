@@ -102,6 +102,10 @@ class Settings:
     render_fonts_dir: str = ""
     yunet_model_path: str = ""
 
+    # Retention (Phase 4): Temporal-Schedule ``retention-daily``
+    retention_cron: str = "0 3 * * *"
+    retention_timezone: str = "Europe/Vienna"
+
     # Kostenmodell (EUR); alle Werte per ENV überschreibbar, siehe costlog.py
     gpu_eur_per_hour: float = 1.20
     cpu_eur_per_hour: float = 0.05
@@ -163,6 +167,8 @@ def load_settings() -> Settings:
         render_x264_preset=_env("RENDER_X264_PRESET", "medium"),
         render_fonts_dir=_env("RENDER_FONTS_DIR"),
         yunet_model_path=_env("YUNET_MODEL_PATH"),
+        retention_cron=_env("RETENTION_CRON", "0 3 * * *"),
+        retention_timezone=_env("RETENTION_TIMEZONE", "Europe/Vienna"),
         gpu_eur_per_hour=_env_float("GPU_EUR_PER_HOUR", 1.20),
         cpu_eur_per_hour=_env_float("CPU_EUR_PER_HOUR", 0.05),
         storage_eur_per_gb_month=_env_float("STORAGE_EUR_PER_GB_MONTH", 0.02),

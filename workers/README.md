@@ -6,8 +6,10 @@ Postgres (Schema: `packages/schema/migrations/0001_init.sql`). Alle Verarbeitung
 Residency-Guard (`chopstr_worker/residency.py`) blockiert jeden anderen Aufruf, bevor er das Netz erreicht.
 
 Phase 0 (Fundament), Phase 1 („Deutsch hören"), Phase 2 („Story-Engine": Kandidaten mit Begründung,
-Gates, Story-Graph) und Phase 3 („Render": Copy, Reframe, Captions, ffmpeg, Provenienz) sind umgesetzt und im
-Workflow verdrahtet. Vertrag für Phase 3: `packages/schema/CLIPS.md` (`clips_v1`, `render_plan_v1`).
+Gates, Story-Graph), Phase 3 („Render": Copy, Reframe, Captions, ffmpeg, Provenienz) und der Worker-Teil von
+Phase 4 (Lösch-Workflow mit Nachweis, Retention-Schedule, Verbrauch nach Stunden, Marken-Fonts und Logo im
+Render, Seed) sind umgesetzt. Verträge: `packages/schema/CLIPS.md` (`clips_v1`, `render_plan_v1`) und
+`packages/schema/PHASE4.md` (Abschnitte 5, 7, 8; Migration `0003_auth_billing.sql`).
 
 ## Struktur
 
@@ -20,6 +22,7 @@ workers/
     storage.py         S3 (boto3, path-style) oder lokaler Ordner; derived_key() für Idempotenz
     residency.py       Provider- und Host-Allowlist, Deny-Liste, guarded_client()
     costlog.py         job_costs-Zeilen, Preistabelle per ENV, estimate_eur()
+    usage.py           usage_periods: Quellminuten je Kalendermonat, Mehrverbrauch pro angefangener Stunde, Render- und Token-Zähler
     prompts.py         packages/prompts/<name>_v<N>.md laden, rendern, prompt_version
     providers_llm.py   LLM.structured() über bedrock-eu | mistral-eu | selfhost-eu | local-heuristic, Redis-Cache
     heuristic_llm.py   Heuristik-Provider ohne Netz (Entwicklung, Demo; kein Ersatz für ein Sprachmodell)
@@ -27,10 +30,12 @@ workers/
     pipeline/          reine Funktionen (transcribe, dach_nlp, segment, signals, story_score, story_graph,
                        story_engine, fidelity, copy_engine, render_plan, reframe, captions_de, render, compliance)
     activities/        Temporal-Activities (probe_and_extract, transcribe_de, diarize, heatmap,
-                       fuse_and_nlp, detect_candidates, render_pack, notify)
+                       fuse_and_nlp, detect_candidates, render_pack, notify,
+                       delete_entity, find_expired, enqueue_deletion)
+    workflows/         ClipProjectWorkflow, RetentionWorkflow
+    worker.py          python -m chopstr_worker.worker --queues cpu,gpu [--ensure-schedules]
   fonts/               Inter-Bold (OFL) für drawtext und libass, siehe fonts/README.md
-    workflows/         ClipProjectWorkflow
-    worker.py          python -m chopstr_worker.worker --queues cpu,gpu
+  scripts/             seed_dev.py (python -m scripts.seed_dev): Dev-Nutzer, Workspace, Markenprofil, Abo
   eval/                wer_eval.py, eval_harness.py, export_predictions.py, README.md
   tests/               pytest, läuft ohne GPU, ohne Modelle, ohne Postgres, ohne S3
   Dockerfile           CPU-Image (python:3.12-slim + ffmpeg + fonts-inter)
@@ -96,6 +101,7 @@ Quelle: `.env.example` im Monorepo-Root. Der Worker liest zusätzlich die mit �
 | `YUNET_MODEL_PATH` (Worker) | YuNet-ONNX für Reframing; fehlt die Datei oder OpenCV, läuft Reframe `neutral` |
 | `RENDER_X264_PRESET`, `RENDER_FONTS_DIR` (Worker) | x264-Preset (Default `medium`, Tests `ultrafast`), Fontordner (Default `workers/fonts`) |
 | `C2PA_SIGN_CERT`, `C2PA_PRIVATE_KEY` | c2patool-Signatur; ohne c2patool ist `provenance.c2pa = "skipped"` |
+| `RETENTION_CRON`, `RETENTION_TIMEZONE` | Schedule `retention-daily` (Default `0 3 * * *`, `Europe/Vienna`), angelegt mit `--ensure-schedules` |
 
 Modell-IDs haben bewusst keine Defaults im Code. Fehlt `ASR_MODEL_DE`, schlägt `transcribe_de` mit einer
 klaren Meldung fehl („Kein ASR-Modell für Variante de konfiguriert (ASR_MODEL_DE setzen)").
@@ -117,7 +123,7 @@ klaren Meldung fehl („Kein ASR-Modell für Variante de konfiguriert (ASR_MODEL
 
 | Queue | Activities |
 |---|---|
-| `chopstr-cpu` | probe_and_extract, heatmap, fuse_and_nlp, detect_candidates, render_pack, notify, Workflow |
+| `chopstr-cpu` | probe_and_extract, heatmap, fuse_and_nlp, detect_candidates, render_pack, notify, delete_entity, find_expired, enqueue_deletion, Workflows |
 | `chopstr-gpu` | transcribe_de, diarize |
 
 Ablauf `ClipProjectWorkflow`:
@@ -222,6 +228,76 @@ Heuristik-Provider für die Copy (`LLM_PROVIDER=local-heuristic`): `write_hooks`
 Satzanfängen, erster Zahl und Kontrastmarker des Clips (Anrede aus dem Prompt, keine erfundenen Zahlen),
 `write_post_caption` nur aus Sätzen des Clips. Kein Ersatz für ein Sprachmodell.
 
+## Phase 4: Löschung, Retention, Verbrauch, Marken-Assets
+
+### Lösch-Workflow (`activities/deletion.py`, Activity `delete_entity(job_id)`)
+
+Die Web-App legt eine Zeile in `deletion_jobs` an (`entity` source | clip | brand_profile | workspace, `reason`
+user_request | retention | workspace_deleted | gdpr_request) und startet die Activity. Sie setzt den Job auf
+`running`, löscht zuerst Objektspeicher-Keys, dann Datenbankzeilen, schreibt einen Audit-Eintrag
+(`<entity>.deleted`, `actor_type = system`, Payload mit Job-ID, Anzahl Keys und Zählern) und schließt mit `done`
+und `finished_at`. Fehler: `failed` mit `error`, Audit `<entity>.delete_failed`, die Ausnahme geht an Temporal
+(Retry nach Policy). Ein Job mit `done` wird nicht wiederholt.
+
+| Entität | Objektspeicher | Datenbank |
+|---|---|---|
+| `source` | Original (`sources`), `audio_key`, `proxy_key`, alle `clips.file_key/srt_key/vtt_key/poster_key`, `caption_versions.ass_key/srt_key`, der ganze Ordner `renders/<clip_id>/` (`Storage.list`), die JSONs unter `asr/`, `diar/`, `heatmap/`, `candidates/` (aus den `key`-Feldern der `pipeline_events`-Payloads) | caption_versions, hook_versions, guest_approvals, clips, candidates, transcript_corrections, transcript_versions, pipeline_events (in dieser Reihenfolge, Zähler in `rows_deleted`); die `sources`-Zeile bleibt anonymisiert: Titel „gelöscht“, `original_filename`, `audio_key`, `proxy_key`, `sha256` null, `storage_key` leer, `brief` `{}`, Status `deleted`, `deleted_at` |
+| `clip` | Render-Dateien und Caption-Keys des Clips, Ordner `renders/<clip_id>/` | caption_versions, hook_versions, guest_approvals des Clips; Keys am Clip werden genullt |
+| `brand_profile` | alle `brand_assets.storage_key` des Profils | `brand_assets` |
+| `workspace` | wie `source` je Quelle, dann alle Brand-Assets des Workspace | je nicht gelöschter Quelle ein eigener Job (`reason = workspace_deleted`), inline ausgeführt; Audit `workspace.deleted`; die `workspaces`-Zeile löscht die Web-App danach |
+
+`keys_deleted` ist der Löschnachweis: eine Liste `{bucket, key, deleted_at, existed}`; Keys, die schon fehlten,
+stehen mit `existed = false` drin (bereits weg). Läuft für die Quelle noch ein `ClipProjectWorkflow`
+(`sources.temporal_workflow_id`), wird er vorher per `terminate` beendet; ein Fehler dabei wird nur geloggt.
+Die Activity schreibt keine `pipeline_events` (die werden gerade gelöscht) und loggt nur IDs und Zähler.
+
+### Retention (`workflows/retention.py`, Schedule `retention-daily`)
+
+`RetentionWorkflow` läuft täglich über den Temporal-Schedule: `find_expired(now)` liefert Quellen mit
+`delete_after < now` und Status nicht `deleted` ohne offenen Job sowie Workspaces mit gesetztem
+`deletion_requested_at` und `deletion_scheduled_for < now` (30 Tage Karenz). Je Treffer `enqueue_deletion`
+(`reason = retention`) und direkt danach `delete_entity`, sequenziell, höchstens 50 pro Lauf (`max_per_run`).
+Ein fehlgeschlagener Job zählt in `failed`, die anderen laufen weiter. Der Schedule wird mit
+`python -m chopstr_worker.worker --queues cpu --ensure-schedules` angelegt (`client.create_schedule` mit
+`ScheduleSpec(cron_expressions=[RETENTION_CRON], time_zone_name=RETENTION_TIMEZONE)`; existiert er, wird er
+übersprungen). Zum manuellen Start: `temporal schedule trigger --schedule-id retention-daily`.
+
+### Verbrauch nach Stunden (`usage.py`)
+
+Eine Zeile in `usage_periods` pro Workspace und Kalendermonat (`period_start` erster, `period_end` letzter Tag).
+`included_minutes` kommt aus `subscriptions.plan_code` und `plans.included_hours * 60`; ohne Abo gilt Starter
+(240 Minuten), ohne `plans`-Zeile feste Starter-Defaults. `book_source_minutes` addiert Quellminuten und rechnet
+`overage_minutes = max(0, used - included)` und `overage_eur = ceil(overage_minutes / 60) * plans.overage_eur_per_hour`
+(pro angefangener Stunde). Aufrufe: `probe_and_extract` bucht die Dauer der Quelle beim ersten Ingest (Zeile ohne
+`duration_s`, damit ein Re-Run nicht doppelt zählt; der `finished`-Payload zeigt `booked_minutes`), `render_pack`
+erhöht `render_count`, und der `cost_sink` von Story-Engine und Copy-Engine (`usage.llm_sink`) addiert
+`llm_input_tokens` und `llm_output_tokens` je LLM-Aufruf. Die `job_costs`-Zeilen bleiben unverändert daneben.
+
+### Marken-Fonts und Logo im Render
+
+`render_pack` liest `brand_profiles.ci` (`fonts.primary_asset_id` oder `secondary_asset_id`, `logo_asset_id`,
+`watermark.enabled`) und lädt die Assets aus `brand_assets` (Bucket `derived`) nach
+`WORKER_WORK_DIR/fonts/<sha>.<ext>` (Fonts) beziehungsweise `WORKER_WORK_DIR/brand/<sha>.<ext>` (Logo), per
+Hash gecacht. Der `font_family` des Assets steht als `Fontname` in der ASS (`captions_de.to_ass(font_family=...)`,
+libass findet die Datei über `fontsdir`) und im Plan unter `captions.font`; die Datei geht als `fontfile` in
+`drawtext` für Titelkarte und Hook-Overlay. Fehlt das Asset, der Familienname oder der Download, bleibt Inter mit
+dem Hinweis „Marken-Font fehlt, Inter verwendet“ in `notes`. Das Logo wird als PNG unten rechts innerhalb der
+Safe Zone per `overlay` gelegt (`watermark.opacity` Default 0,85, `width_ratio` 0,18 der Ausgabebreite); SVG wird
+mit Hinweis übersprungen. `render_plan.brand = { font_asset_id, logo_asset_id, watermark }` ist Teil des Plans und
+damit des Idempotenz-Hashes: ein anderer Font oder ein Wasserzeichen ergibt einen neuen Render.
+
+### Seed für die lokale Entwicklung
+
+```bash
+DATABASE_URL=postgres://... .venv/bin/python -m scripts.seed_dev
+```
+
+Legt idempotent an: Nutzer `dev@chopstr.local` (Passwort `chopstr-dev`), Workspace „PLACEMedia“ (Slug
+`placemedia`), Mitgliedschaft `owner`, Markenprofil „PLACEMedia“, Abo `starter` im Status `trialing` (14 Tage)
+und die `usage_periods`-Zeile des aktuellen Monats. Der Passwort-Hash ist ein Argon2id-PHC-String
+(`$argon2id$v=19$m=65536,t=3,p=4$...`, 32 Byte Hash, 16 Byte Salt) über `argon2-cffi` (Extra `dev`); das sind
+die Standardparameter von `@node-rs/argon2` in der Web-App, `verify()` liest sie aus dem String.
+
 ## Lokal gegen Temporal und MinIO
 
 ```bash
@@ -247,6 +323,8 @@ Bucket-Unterordner an. Ohne GPU laufen `transcribe_de` und `diarize` auf der CPU
 ```bash
 .venv/bin/python -m pytest -q                       # alle Tests (Workflow-Test lädt einmalig ein Temporal-Testbinary)
 .venv/bin/python -m pytest -q tests/test_render_media.py tests/test_render_activity.py   # Render mit echtem ffmpeg (12-s-Testvideo, Lautheit, Regressionschecks)
+.venv/bin/python -m pytest -q tests/test_render_brand.py                                # Marken-Font (echte OTF als Asset) und Logo-Wasserzeichen
+.venv/bin/python -m pytest -q tests/test_deletion.py tests/test_usage.py tests/test_seed_dev.py   # Phase 4 ohne ffmpeg
 .venv/bin/python -m pytest -q -m "not network"      # ohne Netz
 .venv/bin/ruff check .
 .venv/bin/python -m eval.wer_eval gold/ hyp/ --lexicon names.txt
@@ -292,7 +370,24 @@ docker run --gpus all --env-file .env chopstr-worker-gpu --queues gpu
 | `pipeline/render_plan.py` | `render_plan_v1` deterministisch, Hash für Idempotenz | verdrahtet |
 | `pipeline/render.py` | ffmpeg-Render aus dem Plan, Loudness zweistufig, Messung, Poster, Regressionschecks | verdrahtet, libass/drawtext optional |
 | `pipeline/compliance.py` | C2PA via c2patool, AI-Act-Label, Quellenangabe | verdrahtet, c2patool optional |
-| `activities/render.py` | `render_pack`: Copy, Reframe, Captions, Encode, Provenienz, Upload, DB | verdrahtet |
+| `activities/render.py` | `render_pack`: Copy, Reframe, Captions, Encode, Provenienz, Upload, DB, Marken-Font und Logo | verdrahtet |
+| `activities/deletion.py` | `delete_entity` mit Löschnachweis, `find_expired`, `enqueue_deletion` | verdrahtet |
+| `workflows/retention.py` | `RetentionWorkflow` über Schedule `retention-daily` | verdrahtet, Schedule per `--ensure-schedules` |
+| `usage.py` | `usage_periods` je Kalendermonat, Mehrverbrauch pro angefangener Stunde | verdrahtet in Ingest, Render, LLM-Sink |
+| `scripts/seed_dev.py` | Dev-Nutzer, Workspace, Markenprofil, Abo, Verbrauchsperiode | vorhanden |
+
+`DeletionWorkflow` (Workflow-ID `deletion-<job_id>`, CPU-Queue) führt einen einzelnen Lösch-Job sofort aus;
+die Web-App startet ihn nach einer Nutzeranfrage. Der tägliche `RetentionWorkflow` holt alle übrigen Jobs ab.
+
+Offene Punkte Phase 4 (Worker):
+
+- Ein Job `entity = clip` löscht Dateien und Versionen, nullt die Keys und setzt `clips.status = 'deleted'`
+  mit `deleted_at` (Migration 0004). Die Clip-Zeile bleibt als Nachweis.
+- Die Storage-JSONs unter `asr/`, `diar/`, `heatmap/`, `candidates/` werden über die `key`-Felder der
+  `pipeline_events` gefunden; sind diese Events schon weg, bleiben verwaiste JSONs liegen (Inhalte ohne
+  Bezug zur Quelle, aber Transkripttext). Eine spätere Bereinigung braucht ein Prefix pro Quelle.
+- Das Wasserzeichen sitzt unten rechts in der Safe Zone und kann sich mit langen Caption-Zeilen überschneiden;
+  Position und Größe kommen aus `ci.watermark`, eine Kollisionsprüfung fehlt.
 
 ## Regeln
 

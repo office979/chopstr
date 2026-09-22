@@ -145,5 +145,22 @@ class Storage:
             return
         self._s3().delete_object(Bucket=self._bucket_name(bucket), Key=key)
 
+    def list(self, bucket: str, prefix: str) -> list[str]:
+        """Alle Keys unter ``prefix`` (sortiert). Lokal per Ordnerdurchlauf, in S3 per Paginator."""
+        prefix = prefix.lstrip("/")
+        if self.local_root is not None:
+            base = self._local_path(bucket, prefix)
+            root = self._local_path(bucket, "")
+            if base.is_file():
+                return [prefix]
+            if not base.is_dir():
+                return []
+            return sorted(str(f.relative_to(root)).replace(os.sep, "/") for f in base.rglob("*") if f.is_file())
+        keys: list[str] = []
+        paginator = self._s3().get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket_name(bucket), Prefix=prefix):
+            keys.extend(obj["Key"] for obj in page.get("Contents", []))
+        return sorted(keys)
+
 
 __all__ = ["BUCKETS", "Storage", "derived_key"]

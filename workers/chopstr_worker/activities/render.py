@@ -7,10 +7,17 @@ Ausgabe-Timeline, ffmpeg-Encode, Provenienz (C2PA nur mit c2patool, sonst ``skip
 Fehler: ``failed`` plus ``render_error`` (deutsch). Events ``step = 'render'`` mit ``progress`` je Schritt
 (copy, reframe, captions, encode, provenance). Idempotent über den Hash aus Plan, Hook-Version und
 Transkriptversion: existiert die MP4 unter diesem Hash und ist sie am Clip eingetragen, wird nicht neu gerendert.
+
+Marke (Phase 4): Font-Assets des Markenprofils (``brand_profiles.ci.fonts.primary_asset_id`` oder
+``secondary_asset_id`` in ``brand_assets``) werden aus dem Storage nach ``WORKER_WORK_DIR/fonts/<sha>.<ext>`` geladen,
+der Familienname steht als ``Fontname`` in der ASS und im Plan (``captions.font``), die Datei geht als ``fontfile``
+in ``drawtext``. Fehlt der Font, bleibt Inter mit Hinweis in ``notes``. Logo (``ci.logo_asset_id``) mit
+``ci.watermark.enabled`` wird als PNG-Wasserzeichen unten rechts gelegt (SVG wird übersprungen).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -20,7 +27,7 @@ from typing import Any
 
 from temporalio import activity
 
-from .. import costlog, db, events, ingest
+from .. import costlog, db, events, ingest, usage
 from ..pipeline import (
     captions_de,
     compliance,
@@ -46,9 +53,13 @@ CONTENT_TYPES = {"mp4": "video/mp4", "srt": "application/x-subrip", "vtt": "text
 SQL_CANDIDATE = "select id, source_id, segments, rubric, risk_flags, start_s, end_s from candidates where id = %s"
 SQL_BRAND_EXTRA = (
     "select p.gender_mode, p.banned_phrases, p.tone_adjectives, p.default_platform, p.caption_preset, p.caption_style, "
-    "s.rights_status, s.source_owner, s.source_title, s.source_url "
+    "s.rights_status, s.source_owner, s.source_title, s.source_url, p.ci "
     "from sources s left join brand_profiles p on p.id = s.brand_profile_id where s.id = %s"
 )
+SQL_ASSET = "select id, kind, name, storage_key, mime_type, sha256, font_family, font_weight from brand_assets where id = %s"
+FONT_EXTS = {".ttf", ".otf", ".woff2", ".woff"}
+NOTE_FONT_MISSING = "Marken-Font fehlt, Inter verwendet"
+NOTE_LOGO_SVG = "Logo im SVG-Format wird übersprungen, für das Wasserzeichen ein PNG hochladen"
 SQL_CLIP = (
     "select id, status, aspect, composition, title_card, ad_label, ai_features, speaker_positions, file_key "
     "from clips where candidate_id = %s and platform = %s order by created_at desc limit 1"
@@ -91,7 +102,7 @@ def _load_brand_extra(ctx: common.Context, source_id: str) -> dict[str, Any]:
     row = db.fetch_one(ctx.conn, SQL_BRAND_EXTRA, (source_id,))
     keys = [
         "gender_mode", "banned_phrases", "tone_adjectives", "default_platform", "caption_preset", "caption_style",
-        "rights_status", "source_owner", "source_title", "source_url",
+        "rights_status", "source_owner", "source_title", "source_url", "ci",
     ]  # fmt: skip
     out = dict(zip(keys, row)) if row else {}
     out["gender_mode"] = out.get("gender_mode") or "neutral"
@@ -101,6 +112,76 @@ def _load_brand_extra(ctx: common.Context, source_id: str) -> dict[str, Any]:
     out["caption_preset"] = out.get("caption_preset") or "linkedin_static"
     out["caption_style"] = dict(_json(out.get("caption_style"), {}) or {})
     out["rights_status"] = out.get("rights_status") or "own"
+    out["ci"] = dict(_json(out.get("ci"), {}) or {})
+    return out
+
+
+def _load_asset(ctx: common.Context, asset_id: str | None) -> dict[str, Any] | None:
+    if not asset_id:
+        return None
+    row = db.fetch_one(ctx.conn, SQL_ASSET, (str(asset_id),))
+    if row is None:
+        return None
+    keys = ["id", "kind", "name", "storage_key", "mime_type", "sha256", "font_family", "font_weight"]
+    out = dict(zip(keys, row))
+    out["id"] = str(out["id"])
+    return out
+
+
+def _fetch_asset(ctx: common.Context, asset: dict[str, Any], folder: str) -> Path:
+    """Lädt ein Asset nach ``WORKER_WORK_DIR/<folder>/<sha>.<ext>`` (Cache über den Hash, idempotent)."""
+    key = str(asset["storage_key"])
+    ext = Path(key).suffix.lower() or ""
+    sha = str(asset.get("sha256") or "").strip() or hashlib.sha256(key.encode("utf-8")).hexdigest()
+    local = ctx.work_dir / folder / f"{sha}{ext}"
+    if not local.is_file():
+        ctx.store.download_to("derived", key, local)
+    return local
+
+
+def brand_assets_for(ctx: common.Context, ci: dict[str, Any]) -> dict[str, Any]:
+    """Font und Logo des Markenprofils aus ``ci`` auflösen und lokal bereitstellen.
+
+    Liefert ``font_path``, ``font_family``, ``font_asset_id``, ``fonts_dir``, ``logo_path``, ``logo_asset_id``,
+    ``watermark`` (Einstellung aus ``ci.watermark``) und deutsche ``notes`` für alles, was fehlt."""
+    fonts = dict(ci.get("fonts") or {})
+    wm = dict(ci.get("watermark") or {})
+    out: dict[str, Any] = {
+        "font_path": None, "font_family": None, "font_asset_id": None, "fonts_dir": None,
+        "logo_path": None, "logo_asset_id": None, "watermark": wm, "notes": [],
+    }  # fmt: skip
+    font_id = fonts.get("primary_asset_id") or fonts.get("secondary_asset_id")
+    if font_id:
+        asset = _load_asset(ctx, str(font_id))
+        family = str((asset or {}).get("font_family") or "").strip()
+        if asset is None or asset.get("kind") != "font" or Path(str(asset["storage_key"])).suffix.lower() not in FONT_EXTS:
+            out["notes"].append(NOTE_FONT_MISSING)
+        elif not family:
+            out["notes"].append("Marken-Font ohne Familienname, Inter verwendet")
+        else:
+            try:
+                path = _fetch_asset(ctx, asset, "fonts")
+            except Exception as exc:
+                log.warning("brand font download failed asset=%s error=%s", asset["id"], exc.__class__.__name__)
+                out["notes"].append(NOTE_FONT_MISSING)
+            else:
+                out.update(font_path=path, font_family=family, font_asset_id=asset["id"], fonts_dir=path.parent)
+    logo_id = ci.get("logo_asset_id")
+    if logo_id and bool(wm.get("enabled")):
+        asset = _load_asset(ctx, str(logo_id))
+        if asset is None:
+            out["notes"].append("Logo-Asset fehlt, kein Wasserzeichen")
+        else:
+            is_svg = Path(str(asset["storage_key"])).suffix.lower() == ".svg" or "svg" in str(asset.get("mime_type") or "")
+            if is_svg:
+                out["notes"].append(NOTE_LOGO_SVG)
+            else:
+                try:
+                    out["logo_path"] = _fetch_asset(ctx, asset, "brand")
+                    out["logo_asset_id"] = asset["id"]
+                except Exception as exc:
+                    log.warning("brand logo download failed asset=%s error=%s", asset["id"], exc.__class__.__name__)
+                    out["notes"].append("Logo-Asset konnte nicht geladen werden, kein Wasserzeichen")
     return out
 
 
@@ -330,7 +411,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     llm_provider = None
     if hook is None:
         tenant = Tenant(id=src["workspace_id"], tier=src["tier"], allow_us_subprocessors=bool(src.get("allow_us_subprocessors")))
-        llm = LLM(tenant, cost_sink=llm_usage.append, s=s)
+        llm = LLM(tenant, cost_sink=usage.llm_sink(conn, src["workspace_id"], llm_usage), s=s)
         if not llm.model():
             raise RuntimeError(
                 f"Kein Sprachmodell für Provider {llm.provider} konfiguriert "
@@ -370,6 +451,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     style = extra.get("caption_style") or {}
     hook_override = style.get("hook_overlay") if isinstance(style.get("hook_overlay"), bool) else None
     audio_preset = style.get("audio_preset") if style.get("audio_preset") in render_plan.AUDIO_PRESETS else "master"
+    brand_assets = brand_assets_for(ctx, extra.get("ci") or {})
     plan = render_plan.build_plan(
         platform=destination,
         aspect=aspect,
@@ -383,6 +465,12 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         onscreen_hook=hook["onscreen_hook"],
         hook_overlay=hook_override,
         audio_preset=audio_preset,
+        caption_font=brand_assets["font_family"],
+        brand={
+            "font_asset_id": brand_assets["font_asset_id"],
+            "logo_asset_id": brand_assets["logo_asset_id"],
+            "watermark": brand_assets["watermark"],
+        },
     )
     h = render_plan.plan_hash(plan, hook["version"], tv_version)
     keys = {ext: f"{RENDER_PREFIX}/{clip_id}/{h}.{ext}" for ext in ("mp4", "srt", "vtt", "jpg", "ass")}
@@ -398,11 +486,15 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     common.heartbeat("render", "encode")
     work = ctx.source_dir(source_id) / RENDER_PREFIX / clip_id
     work.mkdir(parents=True, exist_ok=True)
-    paths = render.write_captions(out_words, preset, (out_w, out_h), work, h)
+    paths = render.write_captions(out_words, preset, (out_w, out_h), work, h, font_family=brand_assets["font_family"])
     mp4 = work / f"{h}.mp4"
-    fonts_dir = s.render_fonts_dir or None
-    result = render.render_from_plan(plan, local_src, paths["ass"], mp4, fonts_dir=fonts_dir, x264_preset=s.render_x264_preset)
-    notes = [*rf.notes, *result.notes]
+    fonts_dir = brand_assets["fonts_dir"] or s.render_fonts_dir or None
+    result = render.render_from_plan(
+        plan, local_src, paths["ass"], mp4,
+        fonts_dir=fonts_dir, x264_preset=s.render_x264_preset,
+        font_path=brand_assets["font_path"], logo_path=brand_assets["logo_path"],
+    )  # fmt: skip
+    notes = [*rf.notes, *brand_assets["notes"], *result.notes]
     loud = render.measure_loudness(mp4)
     loudness = {"integrated_lufs": loud["integrated_lufs"], "true_peak_dbtp": loud["true_peak_dbtp"], "preset": plan["audio"]["preset"]}
     checks = render.regression_checks(mp4, duration, out_w, out_h)
@@ -461,6 +553,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         cps_warnings=db.jsonb(cps),
         origin="auto",
     )
+    usage.book_render(conn, src["workspace_id"])
     costlog.record(
         conn,
         costlog.Cost(
@@ -495,6 +588,9 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         reframe=plan["reframe"],
         captions_burned=result.captions_burned,
         overlays_drawn=result.title_card_drawn or result.hook_overlay_drawn,
+        watermark_drawn=result.watermark_drawn,
+        font=plan["captions"]["font"],
+        brand=plan["brand"],
         compressor=result.compressor,
         cps_warnings=len(cps),
         fidelity_warnings=len(fid),
@@ -519,6 +615,7 @@ __all__ = [
     "RENDER_PREFIX",
     "STEP_RENDER",
     "ad_label_for",
+    "brand_assets_for",
     "caption_preset_for",
     "clip_words",
     "fidelity_warnings",

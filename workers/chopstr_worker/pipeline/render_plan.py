@@ -29,6 +29,7 @@ AUDIO_PRESETS: dict[str, dict[str, float]] = {
 }
 DEFAULT_FPS = 25.0
 VERSIONS = {"captions_de": CAPTIONS_VERSION, "render": RENDER_VERSION, "reframe": reframe.REFRAME_VERSION}
+WATERMARK_DEFAULTS: dict[str, Any] = {"enabled": False, "position": "bottom_right", "opacity": 0.85, "width_ratio": 0.18}
 
 
 def output_size(aspect: str) -> tuple[int, int]:
@@ -48,19 +49,36 @@ def hook_overlay_enabled(platform: str, override: bool | None = None) -> bool:
     return HOOK_OVERLAY_DEFAULT.get(platform, False)
 
 
-def caption_block(preset: str | captions_de.CaptionPreset, out_w: int, out_h: int, cards: int) -> dict[str, Any]:
+def caption_block(
+    preset: str | captions_de.CaptionPreset, out_w: int, out_h: int, cards: int, font: str | None = None
+) -> dict[str, Any]:
     """Block ``captions``: Basis-Preset (Name oder Objekt für 1080x1920) auf die Ausgabegröße skaliert,
-    Safe Zone als Randabstände. Ein bereits skaliertes Preset hier nicht übergeben (doppelte Skalierung)."""
+    Safe Zone als Randabstände. Ein bereits skaliertes Preset hier nicht übergeben (doppelte Skalierung).
+    ``font`` ist der echte Familienname des Marken-Fonts; ohne ihn gilt der Preset-Font (Inter)."""
     p = captions_de.scaled_preset(preset, out_w, out_h)
     return {
         "preset": p.name,
-        "font": p.font,
+        "font": (font or "").strip() or p.font,
         "font_px": p.font_px,
         "max_chars": p.max_chars,
         "baseline_y": p.baseline_y,
         "safe_zone": captions_de.safe_zone_margins(p, out_w, out_h),
         "cards": int(cards),
         "highlight": bool(p.highlight_words),
+    }
+
+
+def brand_block(brand: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Block ``brand``: Font- und Logo-Asset des Markenprofils plus Wasserzeichen-Einstellung (keine Pfade)."""
+    b = dict(brand or {})
+    wm = {**WATERMARK_DEFAULTS, **dict(b.get("watermark") or {})}
+    wm["enabled"] = bool(wm["enabled"]) and bool(b.get("logo_asset_id"))
+    wm["opacity"] = min(1.0, max(0.0, float(wm["opacity"])))
+    wm["width_ratio"] = min(0.5, max(0.05, float(wm["width_ratio"])))
+    return {
+        "font_asset_id": str(b["font_asset_id"]) if b.get("font_asset_id") else None,
+        "logo_asset_id": str(b["logo_asset_id"]) if b.get("logo_asset_id") else None,
+        "watermark": wm,
     }
 
 
@@ -102,9 +120,12 @@ def build_plan(
     hook_overlay: bool | None = None,
     audio_preset: str = "master",
     filler_cuts: bool = False,
+    caption_font: str | None = None,
+    brand: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Baut den Plan. ``caption_preset`` ist das Basis-Preset (Name oder 1080x1920-Objekt), die Skalierung passiert hier.
-    ``sources`` erwartet ``storage_key``, ``transcript_version``, ``hook_version``, ``candidate_id``."""
+    ``sources`` erwartet ``storage_key``, ``transcript_version``, ``hook_version``, ``candidate_id``.
+    ``caption_font`` ist der Familienname des Marken-Fonts, ``brand`` die Asset-IDs und das Wasserzeichen."""
     aspect = aspect or aspect_for_platform(platform)
     out_w, out_h = output_size(aspect)
     fps = float(src_fps) if src_fps else DEFAULT_FPS
@@ -123,10 +144,11 @@ def build_plan(
         "filler_cuts": bool(filler_cuts),
         "reframe": reframe_result.plan_block(),
         "shots": reframe_result.shots_json(),
-        "captions": caption_block(caption_preset, out_w, out_h, caption_cards),
+        "captions": caption_block(caption_preset, out_w, out_h, caption_cards, caption_font),
         "title_card": {"text": title, "seconds": TITLE_CARD_S} if title else None,
         "hook_overlay": {"text": hook, "seconds": HOOK_OVERLAY_S} if hook and hook_overlay_enabled(platform, hook_overlay) else None,
         "audio": audio_block(audio_preset),
+        "brand": brand_block(brand),
         "sources": {
             "storage_key": sources.get("storage_key"),
             "transcript_version": sources.get("transcript_version"),
@@ -158,8 +180,10 @@ __all__ = [
     "RENDER_VERSION",
     "TITLE_CARD_S",
     "VERSIONS",
+    "WATERMARK_DEFAULTS",
     "aspect_for_platform",
     "audio_block",
+    "brand_block",
     "build_plan",
     "caption_block",
     "hook_overlay_enabled",

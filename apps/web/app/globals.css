@@ -203,6 +203,30 @@ body {
   text-underline-offset: 4px;
 }
 
+/* Blaue Hintergrund-Blasen (BlueBubbles): stark weichgezeichnet, driften langsam */
+.bubble {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(120px);
+  will-change: transform;
+}
+.bubble-a { width: 46vw; height: 46vw; left: 12vw; top: -18vw; animation: bubble-drift 28s var(--ease) infinite alternate; }
+.bubble-b { width: 34vw; height: 34vw; right: -10vw; top: 22vh; animation: bubble-drift 34s var(--ease) infinite alternate-reverse; }
+.bubble-c { width: 52vw; height: 40vw; left: 28vw; bottom: -26vw; animation: bubble-drift 40s var(--ease) infinite alternate; }
+.bubble-d { width: 22vw; height: 22vw; left: -6vw; top: 48vh; animation: bubble-drift 30s var(--ease) infinite alternate-reverse; }
+@keyframes bubble-drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(4vw, 3vh, 0) scale(1.12); }
+}
+@media (max-width: 1023px) {
+  .bubble { filter: blur(80px); }
+  .bubble-a { width: 90vw; height: 90vw; left: -10vw; top: -40vw; }
+  .bubble-b { width: 70vw; height: 70vw; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bubble { animation: none !important; }
+}
+
 /* Hintergrundwort: riesig, halb verdeckt */
 .bg-word {
   font-weight: 700;

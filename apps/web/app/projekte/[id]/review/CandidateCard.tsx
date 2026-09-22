@@ -64,8 +64,8 @@ export function CandidateCard({ candidate: c, index, selected, glitch, onSelect,
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span
           className={cn(
-            "inline-flex h-6 items-center rounded-pill border px-2.5 font-mono text-[11px] tabular-nums",
-            c.gate_passed ? "border-line-strong text-text" : "border-line text-text-2",
+            "inline-flex h-6 items-center rounded-md px-2 font-mono text-[11px] tabular-nums",
+            c.gate_passed ? "bg-white/10 text-text" : "bg-white/[0.06] text-text-2",
           )}
         >
           {gates.passed} von {gates.total} Pflichtkriterien
@@ -73,7 +73,7 @@ export function CandidateCard({ candidate: c, index, selected, glitch, onSelect,
         {warnings.map((w) => (
           <span
             key={w.key}
-            className="inline-flex h-6 items-center rounded-pill border border-attention/60 bg-attention/10 px-2.5 text-[11px] font-medium text-attention"
+            className="inline-flex h-6 items-center rounded-md bg-attention/15 px-2 text-[11px] font-medium text-attention"
           >
             {w.label}
           </span>

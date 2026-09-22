@@ -70,7 +70,7 @@ export default async function ClipsPage({ params }: Props) {
   const candidateIds = new Set(clips.map((c) => c.candidate_id));
 
   return (
-    <PageShell width="wide" backgroundWord="Clips" className="pt-24 sm:pt-28">
+    <PageShell width="wide" backgroundWord="Clips">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm text-text-2">

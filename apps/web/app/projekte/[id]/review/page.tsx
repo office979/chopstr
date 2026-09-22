@@ -65,7 +65,7 @@ export default async function ReviewPage({ params }: Props) {
   const passed = candidates.filter((c) => c.gate_passed).length;
 
   return (
-    <PageShell width="wide" backgroundWord="Review" className="pt-24 sm:pt-28">
+    <PageShell width="wide" backgroundWord="Review">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm text-text-2">

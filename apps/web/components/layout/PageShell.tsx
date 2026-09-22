@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { PillNav, type NavUser } from "@/components/ui/PillNav";
-import { LightCone } from "@/components/ui/LightCone";
-import { BackgroundWord } from "@/components/ui/BackgroundWord";
+import { Sidebar, type NavUser } from "@/components/layout/Sidebar";
+import { BlueBubbles } from "@/components/ui/BlueBubbles";
 import { cn } from "@/components/ui/cn";
 import { getAuthUser, getSession } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
@@ -11,6 +10,7 @@ import { formatDate } from "@/lib/format";
 
 interface PageShellProps {
   children: ReactNode;
+  /* Veraltet: das Hintergrundwort ist mit der Seitenleiste entfallen, der Prop bleibt für bestehende Aufrufe */
   backgroundWord?: string;
   lightTone?: "brand" | "ai";
   width?: "narrow" | "default" | "wide";
@@ -25,8 +25,8 @@ const widths = {
   wide: "max-w-[1440px]",
 };
 
-/* Seitenrahmen: Hintergrundwort → Lichtkegel mit Körnung → Glas → Inhalt. Liest die Sitzung für die Navigation. */
-export async function PageShell({ children, backgroundWord, lightTone = "brand", width = "default", className }: PageShellProps) {
+/* Seitenrahmen: blaue Blasen → Seitenleiste links → Inhalt. Liest die Sitzung für die Navigation. */
+export async function PageShell({ children, lightTone = "brand", width = "default", className }: PageShellProps) {
   const [session, user] = await Promise.all([getSession(), getAuthUser()]);
   const navUser: NavUser | null = session
     ? {
@@ -59,48 +59,41 @@ export async function PageShell({ children, backgroundWord, lightTone = "brand",
 
   return (
     <div className="relative min-h-dvh overflow-x-clip">
-      <LightCone tone={lightTone} />
-      {backgroundWord && <BackgroundWord word={backgroundWord} />}
-      <PillNav user={navUser} />
-      <main className={cn("relative z-10 mx-auto w-full px-4 pb-24 pt-28 sm:px-6 sm:pt-32", widths[width], className)}>
-        {(dpaBanner || deletionBanner) && (
-          <div className="print:hidden mb-6 flex flex-col gap-2">
-            {deletionBanner && (
-              <p role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-inner border border-attention/50 bg-attention/10 px-4 py-2.5 text-sm text-text">
-                <span>
-                  <span className="font-medium text-attention">Löschung des Workspace eingeplant</span> für {deletionBanner}. Bis dahin kannst du sie zurücknehmen.
-                </span>
-                <Link href="/einstellungen/loeschung" className="text-text underline-offset-4 hover:underline">
-                  Zur Löschung
-                </Link>
-              </p>
-            )}
-            {dpaBanner && (
-              <p role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-inner border border-attention/40 px-4 py-2.5 text-sm text-text-2">
-                <span>
-                  <span className="text-attention">AVV noch nicht angenommen.</span> Uploads sind möglich, der Auftragsverarbeitungsvertrag fehlt aber noch.
-                </span>
-                <Link href="/rechtliches/avv" className="text-text underline-offset-4 hover:underline">
-                  AVV lesen und annehmen
-                </Link>
-              </p>
-            )}
-          </div>
-        )}
-        {children}
-      </main>
-      <footer className="relative z-10 mx-auto flex w-full max-w-[1120px] flex-wrap items-center justify-between gap-3 px-4 pb-8 text-xs text-text-3 sm:px-6">
-        <span>chopstr · EU-verarbeitet · Mensch gibt frei</span>
-        <span className="flex gap-4">
-          <Link href="/rechtliches/avv" className="hover:text-text-2">
-            Rechtliches
-          </Link>
-          <Link href="/einstellungen" className="hover:text-text-2">
-            Workspace
-          </Link>
+      <BlueBubbles tone={lightTone} />
+      <Sidebar user={navUser} />
+      <div className="relative z-10 flex min-h-dvh flex-col lg:pl-[264px]">
+        <main className={cn("mx-auto w-full flex-1 px-4 pb-16 pt-8 sm:px-8 lg:pt-12", widths[width], className)}>
+          {(dpaBanner || deletionBanner) && (
+            <div className="print:hidden mb-6 flex flex-col gap-2">
+              {deletionBanner && (
+                <p role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-inner border border-attention/50 bg-attention/10 px-4 py-2.5 text-sm text-text">
+                  <span>
+                    <span className="font-medium text-attention">Löschung des Workspace eingeplant</span> für {deletionBanner}. Bis dahin kannst du sie zurücknehmen.
+                  </span>
+                  <Link href="/einstellungen/loeschung" className="text-text underline-offset-4 hover:underline">
+                    Zur Löschung
+                  </Link>
+                </p>
+              )}
+              {dpaBanner && (
+                <p role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-inner border border-attention/40 px-4 py-2.5 text-sm text-text-2">
+                  <span>
+                    <span className="text-attention">AVV noch nicht angenommen.</span> Uploads sind möglich, der Auftragsverarbeitungsvertrag fehlt aber noch.
+                  </span>
+                  <Link href="/rechtliches/avv" className="text-text underline-offset-4 hover:underline">
+                    AVV lesen und annehmen
+                  </Link>
+                </p>
+              )}
+            </div>
+          )}
+          {children}
+        </main>
+        <footer className="mx-auto flex w-full max-w-[1440px] items-center justify-between gap-3 px-4 pb-6 text-xs text-text-3 sm:px-8 print:hidden">
+          <span>chopstr · EU-verarbeitet · Mensch gibt frei</span>
           <span className="font-mono">v{process.env.APP_VERSION ?? "0.1.0"}</span>
-        </span>
-      </footer>
+        </footer>
+      </div>
     </div>
   );
 }

@@ -1,13 +1,13 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { Wordmark } from "@/components/brand/Wordmark";
-import { LightCone } from "@/components/ui/LightCone";
-import { BackgroundWord } from "@/components/ui/BackgroundWord";
+import { BlueBubbles } from "@/components/ui/BlueBubbles";
 import { GlassCard } from "@/components/ui/GlassCard";
 
 interface AuthShellProps {
   title: string;
   description?: ReactNode;
+  /* Veraltet, wird ignoriert */
   backgroundWord?: string;
   children: ReactNode;
   footer?: ReactNode;
@@ -16,11 +16,10 @@ interface AuthShellProps {
 }
 
 /* Rahmen für Anmelden, Registrieren, Magic-Link, Passwort, Einladung: ohne Navigation, eine Glas-Karte mittig */
-export function AuthShell({ title, description, backgroundWord = "Login", children, footer, demo }: AuthShellProps) {
+export function AuthShell({ title, description, children, footer, demo }: AuthShellProps) {
   return (
     <div className="relative min-h-dvh overflow-x-clip">
-      <LightCone tone="brand" />
-      <BackgroundWord word={backgroundWord} />
+      <BlueBubbles />
       <main className="relative z-10 mx-auto flex w-full max-w-[520px] flex-col px-4 pb-16 pt-16 sm:px-6 sm:pt-24">
         <Link href="/" aria-label="chopstr" className="mb-10 inline-flex w-fit">
           <Wordmark width={140} className="opacity-95" />

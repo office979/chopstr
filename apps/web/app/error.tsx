@@ -3,16 +3,14 @@
 import Link from "next/link";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button, ButtonLink } from "@/components/ui/Button";
-import { LightCone } from "@/components/ui/LightCone";
-import { BackgroundWord } from "@/components/ui/BackgroundWord";
+import { BlueBubbles } from "@/components/ui/BlueBubbles";
 
 /* Globale Fehlergrenze: 403 aus requireRole() (ForbiddenError) und sonstige Serverfehler in Lichtbruch-Optik */
 export default function ErrorPage({ error, reset }: { error: Error & { digest?: string; status?: number }; reset: () => void }) {
   const forbidden = error.name === "ForbiddenError" || error.status === 403 || /nicht freigegeben|vorbehalten|dürfen nur|keinen Zugriff/i.test(error.message);
   return (
     <div className="relative min-h-dvh overflow-x-clip">
-      <LightCone tone="brand" />
-      <BackgroundWord word={forbidden ? "403" : "Fehler"} />
+      <BlueBubbles />
       <main className="relative z-10 mx-auto w-full max-w-[640px] px-4 pb-24 pt-28 sm:px-6 sm:pt-32">
         <GlassCard padding="lg" className="text-center">
           <p className="text-lg font-medium">{forbidden ? "Kein Zugriff" : "Da ist etwas schiefgelaufen"}</p>

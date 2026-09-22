@@ -183,7 +183,7 @@ function EndpointRow({ endpoint }: { endpoint: WebhookEndpoint }) {
           </p>
           <p className="mt-1 flex flex-wrap gap-1">
             {endpoint.events.map((e) => (
-              <code key={e} className="rounded-pill border border-line px-2 py-0.5 font-mono text-[11px] text-text-2">
+              <code key={e} className="rounded-md bg-white/[0.06] px-2 py-0.5 font-mono text-[11px] text-text-2">
                 {e}
               </code>
             ))}

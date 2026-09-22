@@ -49,7 +49,7 @@ export default async function TranscriptPage({ params }: Props) {
   const videoSrc = source.proxy_key && mediaBase ? `${mediaBase.replace(/\/$/, "")}/${source.proxy_key}` : null;
 
   return (
-    <PageShell width="wide" backgroundWord="Text" className="pt-24 sm:pt-28">
+    <PageShell width="wide" backgroundWord="Text">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm text-text-2">

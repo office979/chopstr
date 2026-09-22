@@ -64,7 +64,7 @@ export default async function HookStudioPage({ params }: Props) {
   const extras = extrasList[0] ?? { id: clipId, experiment_id: null, variant: null, series_id: null, series_index: null, reframe_override: null };
 
   return (
-    <PageShell width="wide" backgroundWord="Hook" className="pt-24 sm:pt-28">
+    <PageShell width="wide" backgroundWord="Hook">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm text-text-2">

@@ -54,7 +54,7 @@ export function ClipText({ candidate: c, sentences, speakerNames, currentTime, o
             return (
               <section key={`${b.speaker}-${i}`} aria-label={`${label} ab ${Math.floor(b.start)} Sekunden`}>
                 <div className="mb-1.5 flex items-center gap-3">
-                  <span className="inline-flex h-7 items-center rounded-pill border border-line-strong px-3 text-xs font-medium text-text">
+                  <span className="inline-flex h-6 items-center rounded-md bg-white/10 px-2 text-xs font-medium text-text">
                     {label}
                   </span>
                   <Timecode seconds={b.start} className="text-xs" />

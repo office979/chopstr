@@ -2,7 +2,8 @@ import type { NextRequest } from "next/server";
 import { getRepo } from "@/lib/repo";
 import { clientIp } from "@/lib/auth/guard";
 import { isTokenShape } from "@/lib/auth/tokens";
-import { mediaUrl } from "@/lib/clips/labels";
+import { guestMediaUrl } from "@/lib/clips/labels";
+import { isLocalMedia } from "@/lib/env";
 import { isExpired, isGuestDecision } from "@/lib/guest/approval";
 import { emitOutbox } from "@/lib/outbox";
 
@@ -12,11 +13,18 @@ type Params = { params: Promise<{ token: string }> };
 
 function publicView(view: NonNullable<Awaited<ReturnType<ReturnType<typeof getRepo>["getGuestApprovalByToken"]>>>) {
   const base = process.env.NEXT_PUBLIC_MEDIA_BASE_URL ?? null;
+  const mediaToken = isLocalMedia() ? view.approval.token : null;
   return {
     approval: { ...view.approval, token: undefined, expired: isExpired(view.approval) },
     workspace_name: view.workspace_name,
     source_title: view.source_title,
-    clip: { ...view.clip, file_key: undefined, poster_key: undefined, video_url: mediaUrl(base, view.clip.file_key), poster_url: mediaUrl(base, view.clip.poster_key) },
+    clip: {
+      ...view.clip,
+      file_key: undefined,
+      poster_key: undefined,
+      video_url: guestMediaUrl(base, view.clip.file_key, mediaToken),
+      poster_url: guestMediaUrl(base, view.clip.poster_key, mediaToken),
+    },
     onscreen_hook: view.onscreen_hook,
     spoken_hook: view.spoken_hook,
     post_caption: view.post_caption,

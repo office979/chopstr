@@ -34,5 +34,6 @@ export async function GET(request: NextRequest, { params }: Params) {
     await repo.updateClip(clip.id, { status: "exported" });
     await repo.audit({ action: "export.created", entity: "clips", entity_id: clip.id, payload: { source_id: id, kind, key } });
   }
-  return Response.redirect(url, 302);
+  /* Lokaler Modus: NEXT_PUBLIC_MEDIA_BASE_URL ist relativ (/api/media), Response.redirect braucht eine absolute URL */
+  return Response.redirect(new URL(url, request.nextUrl.origin), 302);
 }

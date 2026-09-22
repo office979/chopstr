@@ -21,7 +21,15 @@ dependencies = [
 asr = ["faster-whisper>=1.1", "pyannote.audio>=3.3", "torch"]
 nlp = ["spacy>=3.7"]
 vision = ["opencv-python-headless>=4.9"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5", "argon2-cffi>=23"]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.5",
+  "argon2-cffi>=23",
+  # Nur Entwicklung: statisches ffmpeg mit libass und drawtext für den lokalen Testmodus (scripts/local_env.sh
+  # verlinkt es nach .local/bin). Docker-Images bringen ihr eigenes ffmpeg mit.
+  "imageio-ffmpeg>=0.5",
+]
 
 [project.scripts]
 chopstr-worker = "chopstr_worker.worker:main"

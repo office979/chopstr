@@ -374,6 +374,9 @@ class FakeDB:
         handled = self._execute_phase5(sql, q, params)
         if handled is not None:
             return handled
+        handled = self._execute_local_worker(q, params)
+        if handled is not None:
+            return handled
         if q.startswith("select s.id, s.workspace_id"):
             sid = params[0]
             s = self.sources.get(sid)
@@ -695,6 +698,29 @@ class FakeDB:
             return FakeCursor(rows)
         if q.startswith("select id, name from workspaces where weekly_report_enabled"):
             return FakeCursor([(w["id"], w.get("name")) for w in self.workspaces.values() if w.get("weekly_report_enabled", True)])
+        return None
+
+    # -- Lokaler Testmodus (local_worker.py): Warteschlangen per Status ------------------------
+    def _execute_local_worker(self, q: str, params: tuple):
+        if q.startswith("select id from sources where status = 'uploaded'"):
+            rows = [s for s in self.sources.values() if s["status"] == "uploaded"]
+            rows.sort(key=lambda s: s.get("created_at", 0))
+            return FakeCursor([(s["id"],) for s in rows[: int(params[0])]])
+        if q.startswith("select status, status_message from sources where id"):
+            s = self.sources.get(params[0])
+            return FakeCursor([(s["status"], s.get("status_message"))] if s else [])
+        if q.startswith("select c.id, c.candidate_id, c.platform from clips c join candidates k"):
+            accepted = {c["id"] for c in self.candidates if c.get("human_verdict") == "accepted"}
+            rows = [c for c in self.clips.values() if c["status"] == "draft" and c.get("candidate_id") in accepted]
+            rows.sort(key=lambda c: c["created_at"])
+            return FakeCursor([(c["id"], c["candidate_id"], c["platform"]) for c in rows[: int(params[0])]])
+        if q.startswith("select id from deletion_jobs where status = 'queued'"):
+            rows = [j for j in self.deletion_jobs.values() if j["status"] == "queued"]
+            return FakeCursor([(j["id"],) for j in rows[: int(params[0])]])
+        if q.startswith("select id from publications where status = 'scheduled'"):
+            rows = [p for p in self.publications.values() if p["status"] == "scheduled" and p.get("scheduled_for") is not None and p["scheduled_for"] <= params[0]]
+            rows.sort(key=lambda p: p["scheduled_for"])
+            return FakeCursor([(p["id"],) for p in rows[: int(params[1])]])
         return None
 
     @staticmethod

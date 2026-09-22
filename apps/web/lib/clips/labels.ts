@@ -79,3 +79,11 @@ export function mediaUrl(base: string | null | undefined, key: string | null | u
   if (!base || !key) return null;
   return `${base.replace(/\/$/, "")}/${key.replace(/^\//, "")}`;
 }
+
+/* Medien-URL für die Gast-Freigabe: im lokalen Modus (MEDIA_MODE=local) prüft /api/media das Token ?t=,
+ * sonst (CDN, MinIO) bleibt die URL wie sie ist */
+export function guestMediaUrl(base: string | null | undefined, key: string | null | undefined, token: string | null): string | null {
+  const url = mediaUrl(base, key);
+  if (!url || !token) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}t=${encodeURIComponent(token)}`;
+}

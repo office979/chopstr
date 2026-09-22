@@ -1,7 +1,7 @@
 import { PageShell } from "@/components/layout/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { getRepo } from "@/lib/repo";
-import { isDemoMode, uploadMaxBytes } from "@/lib/env";
+import { isDemoMode, isDirectUpload, temporalConfigured, uploadMaxBytes } from "@/lib/env";
 import { requirePageRole } from "@/lib/session";
 import { UploadForm } from "./UploadForm";
 
@@ -18,13 +18,19 @@ export default async function UploadPage() {
       <PageHeader
         eyebrow="Neues Projekt"
         title="Upload"
-        description="Podcast, Keynote oder Interview als Video. Der Upload ist fortsetzbar, die Verarbeitung läuft in der EU."
+        description={
+          !isDemoMode() && isDirectUpload()
+            ? "Podcast, Keynote oder Interview als Video. Lokaler Testmodus: die Datei landet direkt im lokalen Speicherordner."
+            : "Podcast, Keynote oder Interview als Video. Der Upload ist fortsetzbar, die Verarbeitung läuft in der EU."
+        }
       />
       <UploadForm
         profiles={profiles.map((p) => ({ id: p.id, name: p.name, platform: p.default_platform }))}
         maxBytes={uploadMaxBytes()}
         tusEndpoint={process.env.NEXT_PUBLIC_TUS_ENDPOINT ?? process.env.TUS_ENDPOINT ?? "http://localhost:1080/files/"}
         demoUpload={isDemoMode() || process.env.NEXT_PUBLIC_DEMO_UPLOAD === "true"}
+        uploadMode={!isDemoMode() && isDirectUpload() ? "direct" : "tus"}
+        localWorker={!isDemoMode() && !temporalConfigured()}
       />
     </PageShell>
   );

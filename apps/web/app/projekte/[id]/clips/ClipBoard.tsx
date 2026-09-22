@@ -231,7 +231,7 @@ export function ClipBoard({
             ? `Render für ${PLATFORM_LABELS[clip.platform]} angestoßen.`
             : data.demo
               ? `Demo-Render für ${PLATFORM_LABELS[clip.platform]} läuft.`
-              : `Render für ${PLATFORM_LABELS[clip.platform]} vorgemerkt. Er startet, sobald der Worker erreichbar ist.`,
+              : `Render für ${PLATFORM_LABELS[clip.platform]} eingeplant, lokaler Worker holt ab.`,
         });
       } catch (err) {
         setMessage({ tone: "error", text: err instanceof Error ? err.message : "Render konnte nicht angestoßen werden" });
@@ -378,6 +378,8 @@ export function ClipBoard({
               const srt = dl("srt", clip.srt_key);
               const vtt = dl("vtt", clip.vtt_key);
               const poster = mediaUrl(mediaBase, clip.poster_key);
+              /* Gerendertes MP4 direkt aus der Medien-URL (lokal /api/media, sonst CDN oder MinIO) */
+              const video = isDone(clip) ? mediaUrl(mediaBase, clip.file_key) : null;
               const neutral = clip.render_plan?.reframe.strategy === "neutral";
               const duration = clip.duration_s ?? compositionDuration(clip);
               const detail = details[clip.id];
@@ -393,7 +395,9 @@ export function ClipBoard({
                     className="relative w-full overflow-hidden rounded-[12px] border border-line bg-black"
                     style={{ aspectRatio: clip.aspect === "4:5" ? "4 / 5" : "9 / 16", maxHeight: 220 }}
                   >
-                    {poster ? (
+                    {video ? (
+                      <ClipVideo src={video} poster={poster} label={`${PLATFORM_LABELS[clip.platform]} ${clip.aspect}`} />
+                    ) : poster ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={poster} alt={`Poster ${PLATFORM_LABELS[clip.platform]}`} className="h-full w-full object-cover" />
                     ) : (
@@ -601,7 +605,24 @@ export function ClipBoard({
 
                   {open && (
                     <div className="border-t border-line pt-4">
-                      {detail ? (
+                      {video ? (
+                        <div className="flex flex-col gap-2">
+                          <video
+                            src={video}
+                            poster={poster ?? undefined}
+                            muted
+                            autoPlay
+                            loop
+                            playsInline
+                            controls
+                            preload="metadata"
+                            aria-label={`Ton-aus-Vorschau ${PLATFORM_LABELS[clip.platform]}`}
+                            className="mx-auto w-full max-w-[300px] rounded-inner border border-line-strong bg-black"
+                            style={{ aspectRatio: clip.aspect === "4:5" ? "4 / 5" : "9 / 16" }}
+                          />
+                          <p className="text-center text-xs text-text-2">Gerenderte Datei, stumm in Schleife. Ton über die Steuerung im Player.</p>
+                        </div>
+                      ) : detail ? (
                         <SilentPreview
                           aspect={clip.aspect}
                           preset={detail.captions?.preset ?? clip.render_plan?.captions.preset ?? PLATFORM_DEFAULT_PRESET[clip.platform]}
@@ -618,7 +639,7 @@ export function ClipBoard({
                           Vorschau wird geladen
                         </p>
                       )}
-                      {detail && !detail.captions && (
+                      {!video && detail && !detail.captions && (
                         <p className="mt-2 text-center text-xs text-text-2">Noch keine Caption-Karten. Sie entstehen beim Render.</p>
                       )}
                     </div>
@@ -630,5 +651,41 @@ export function ClipBoard({
         </GlassCard>
       ))}
     </div>
+  );
+}
+
+/* Karten-Vorschau: Poster, Klick spielt das gerenderte MP4 ab (mit Ton), zweiter Klick pausiert */
+function ClipVideo({ src, poster, label }: { src: string; poster: string | null; label: string }) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const toggle = () => {
+    const el = ref.current;
+    if (!el) return;
+    if (el.paused) void el.play().catch(() => undefined);
+    else el.pause();
+  };
+  return (
+    <button type="button" onClick={toggle} aria-label={playing ? `${label} pausieren` : `${label} abspielen`} aria-pressed={playing} className="group relative block h-full w-full">
+      <video
+        ref={ref}
+        src={src}
+        poster={poster ?? undefined}
+        playsInline
+        preload="metadata"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+        className="h-full w-full object-cover"
+      />
+      {!playing && (
+        <span aria-hidden="true" className="transition-soft absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/35">
+          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-text text-black">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M4.5 2.8v10.4c0 .8.9 1.3 1.6.9l8-5.2c.6-.4.6-1.4 0-1.8l-8-5.2c-.7-.4-1.6.1-1.6.9z" />
+            </svg>
+          </span>
+        </span>
+      )}
+    </button>
   );
 }

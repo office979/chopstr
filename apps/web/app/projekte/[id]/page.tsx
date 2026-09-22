@@ -9,6 +9,7 @@ import { getRepo } from "@/lib/repo";
 import { requireSession } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
 import { STATUS_LABELS, isTerminalStatus } from "@/lib/pipeline";
+import { isDemoMode, temporalConfigured } from "@/lib/env";
 import { DeleteSourceButton } from "@/components/projects/DeleteSourceButton";
 import { formatBytes, formatDate, shortHash } from "@/lib/format";
 import { PipelineLive } from "./PipelineLive";
@@ -88,6 +89,7 @@ export default async function ProjectPage({ params }: Props) {
           initialEvents={events}
           hasTranscript={Boolean(transcript)}
           candidateCount={candidateCount}
+          localWorker={!isDemoMode() && !temporalConfigured()}
         />
 
         <div className="flex flex-col gap-5">

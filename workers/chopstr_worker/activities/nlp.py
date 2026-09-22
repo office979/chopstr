@@ -35,7 +35,7 @@ def _find_latest_key(ctx: common.Context, src: dict, kind: str) -> str:
         model_id = s.asr_model_for(src["asr_variant"])
         key = asr_key_for(audio_key, src["asr_variant"], src["brand_vocab"], model_id, s)
     else:
-        key = diar_key_for(audio_key, src.get("expected_speakers"), s.diarizer_model or asr._DEFAULT_DIARIZER)
+        key = diar_key_for(audio_key, src.get("expected_speakers"), asr.diarizer_id(s))
     if not ctx.store.exists("derived", key):
         what = "Transkript" if kind == "asr" else "Sprecherzuordnung"
         raise RuntimeError(f"{what} nicht im Speicher gefunden (Key {key[:24]}...)")
@@ -70,6 +70,7 @@ def run(ctx: common.Context, source_id: str, asr_key: str | None = None, diar_ke
         stats["verb_bracket_available"] = dach_nlp.verb_bracket_available
         stats["dialect"] = {"variant": dialect["variant"], "confidence": dialect["confidence"], "markers": dialect["markers"]}
         stats["text_norm_count"] = sum(1 for w in words if w.get("text_norm"))
+        stats["diarization"] = "skipped" if diar_doc.get("skipped") else "done"
         hint = HINT_CH_MODEL if dialect["variant"] == "de-CH" and asr_variant != "de-CH" else None
 
         row = db.fetch_one(ctx.conn, "select coalesce(max(version), 0) from transcript_versions where source_id = %s", (source_id,))

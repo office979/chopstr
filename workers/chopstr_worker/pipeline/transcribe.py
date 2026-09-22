@@ -30,6 +30,11 @@ log = logging.getLogger("chopstr.asr")
 VARIANTS = ("de", "de-CH")
 LOW_CONF_THRESHOLD = 0.5
 _DEFAULT_DIARIZER = "pyannote/speaker-diarization-community-1"  # TODO: per DIARIZER_MODEL bestätigen
+DIARIZER_NONE = "none"  # Fallback ohne pyannote: ein Sprecher für die ganze Datei
+FALLBACK_SPEAKER = "SPEAKER_00"
+HINT_DIARIZATION_SKIPPED = "Sprechertrennung übersprungen: HF_TOKEN fehlt (pyannote)"
+HINT_PYANNOTE_MISSING = "Sprechertrennung übersprungen: pyannote.audio nicht installiert"
+HINT_GENERIC_WHISPER = "Standard-Whisper statt deutschem Fine-Tune"
 
 
 class TranscribeError(RuntimeError):
@@ -428,7 +433,50 @@ def _transcribe_gladia(audio_path: str, brand_vocab: list[str], s: config.Settin
     )
 
 
+def model_hint(model_id: str) -> str | None:
+    """Hinweis für das Event, wenn die konfigurierte Modell-ID kein deutscher Fine-Tune ist (Name ohne „german“)."""
+    return None if "german" in (model_id or "").lower() else HINT_GENERIC_WHISPER
+
+
+def wav_duration_s(audio_path: str) -> float:
+    import wave
+
+    with wave.open(audio_path, "rb") as wf:
+        return round(wf.getnframes() / float(wf.getframerate() or 16000), 3)
+
+
 _DIARIZER_CACHE: dict[str, Any] = {}
+
+
+def diarization_availability(s: config.Settings | None = None) -> tuple[bool, str | None]:
+    """(verfügbar, Hinweis). Ohne ``HF_TOKEN`` oder ohne installiertes ``pyannote.audio`` läuft der Fallback."""
+    import importlib.util
+
+    s = s or config.settings()
+    if not s.hf_token:
+        return False, HINT_DIARIZATION_SKIPPED
+    if importlib.util.find_spec("pyannote") is None or importlib.util.find_spec("pyannote.audio") is None:
+        return False, HINT_PYANNOTE_MISSING
+    return True, None
+
+
+def diarizer_id(s: config.Settings | None = None) -> str:
+    """Modell-ID für Storage-Keys: konfiguriertes Modell oder ``none`` im Fallback (neuer Key, sobald pyannote da ist)."""
+    s = s or config.settings()
+    available, _ = diarization_availability(s)
+    return (s.diarizer_model or _DEFAULT_DIARIZER) if available else DIARIZER_NONE
+
+
+def fallback_diarization(duration_s: float, reason: str) -> dict[str, Any]:
+    """Ein Sprecher ``SPEAKER_00`` über die ganze Datei; ``skipped = True`` und ``hint`` für das Event."""
+    return {
+        "turns": [[0.0, round(float(duration_s), 3), FALLBACK_SPEAKER]] if duration_s > 0 else [],
+        "model_id": DIARIZER_NONE,
+        "speakers": [FALLBACK_SPEAKER],
+        "compute_seconds": 0.0,
+        "skipped": True,
+        "hint": reason,
+    }
 
 
 def load_diarizer(s: config.Settings | None = None):
@@ -457,8 +505,14 @@ def diarize(
 ) -> dict[str, Any]:
     """Liefert ``{"turns": [[start, end, speaker], ...], "model_id": ..., "compute_seconds": ...}``.
 
-    DSGVO: anonyme Labels (SPEAKER_00 ...), keine projektübergreifende Stimm-Wiedererkennung."""
+    DSGVO: anonyme Labels (SPEAKER_00 ...), keine projektübergreifende Stimm-Wiedererkennung.
+    Ohne ``HF_TOKEN`` oder ohne ``pyannote.audio``: kein Fehler, sondern ``fallback_diarization``
+    (ein Sprecher, ``skipped = True``, ``hint`` mit dem Grund)."""
     s = s or config.settings()
+    available, reason = diarization_availability(s)
+    if not available:
+        log.info("diarization skipped reason=%s", reason)
+        return fallback_diarization(wav_duration_s(audio_path), reason or HINT_DIARIZATION_SKIPPED)
     t0 = time.monotonic()
     pipe = load_diarizer(s)
     kwargs = {}
@@ -481,6 +535,11 @@ def diarize(
 
 
 __all__ = [
+    "DIARIZER_NONE",
+    "FALLBACK_SPEAKER",
+    "HINT_DIARIZATION_SKIPPED",
+    "HINT_GENERIC_WHISPER",
+    "HINT_PYANNOTE_MISSING",
     "LOW_CONF_THRESHOLD",
     "VARIANTS",
     "TranscribeError",
@@ -489,13 +548,18 @@ __all__ = [
     "apply_brand_vocab",
     "assign_speakers",
     "confidence_stats",
+    "diarization_availability",
     "diarize",
+    "diarizer_id",
+    "fallback_diarization",
     "load_diarizer",
     "load_model",
     "merge_windows",
+    "model_hint",
     "normalize_numbers",
     "plan_windows",
     "to_json",
     "transcribe",
     "transcribe_window",
+    "wav_duration_s",
 ]

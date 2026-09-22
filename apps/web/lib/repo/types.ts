@@ -159,6 +159,7 @@ export interface SourceInput {
   size_bytes: number | null;
   storage_key: string;
   storage_bucket?: string | null;
+  sha256?: string | null;
   rights_status: RightsStatus;
   rights_confirmed_by: string | null;
   source_owner?: string | null;
@@ -539,7 +540,10 @@ export interface Repo extends AuthRepo, WorkspaceAdminRepo, BlockBRepo {
   getClip(id: string): Promise<Clip | null>;
   updateClip(id: string, patch: Partial<Clip>): Promise<Clip | null>;
   /* Demo: startet die Render-Simulation erneut; Postgres: keine Änderung, der Worker übernimmt nach dem Signal */
-  requestClipRender(id: string): Promise<Clip | null>;
+  /* signaled = false: kein Temporal-Signal, der Clip geht als `draft` in die Warteschlange des lokalen Workers */
+  requestClipRender(id: string, signaled?: boolean): Promise<Clip | null>;
+  /* Lokaler Testmodus: zu welchem Bucket gehört ein Medien-Key des Workspace (proxy, audio, original, Clip-Dateien)? null = unbekannt */
+  resolveMediaBucket(key: string): Promise<"sources" | "derived" | null>;
   countClips(sourceId: string): Promise<ClipCount>;
   getCurrentHook(clipId: string): Promise<HookVersion | null>;
   listHookVersions(clipId: string): Promise<HookVersion[]>;

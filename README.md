@@ -89,6 +89,27 @@ Worker-Tests ohne GPU und ohne Modelle:
 cd workers && python3 -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]" && pytest -q
 ```
 
+## Lokaler Testmodus (ohne Docker, auf dem Mac)
+
+Echter Durchlauf mit Upload, Transkription auf CPU, Kandidaten (Heuristik statt Sprachmodell), Review und Render:
+
+```bash
+scripts/local-stack.sh start            # Postgres unter .local/pgdata, Migrationen, Testnutzer dev@chopstr.local / chopstr-dev
+cp scripts/local-env.example apps/web/.env.local   # LOCAL_STORAGE_DIR auf den absoluten Pfad zu .local/storage setzen
+npm run dev                             # Web-App auf http://localhost:3000
+```
+
+Zweites Terminal, der Worker holt Uploads, Renders und Löschjobs ab:
+
+```bash
+cd workers && source scripts/local_env.sh && python -m chopstr_worker.local_worker
+```
+
+Beim ersten Lauf lädt der Worker das deutsche Whisper-Modell (rund 800 MB). Grenzen: Transkription auf CPU
+dauert etwa so lange wie das Video, Sprechertrennung braucht `HF_TOKEN` plus `pyannote.audio` (sonst ein
+Sprecher mit Hinweis), Kandidaten kommen aus dem Heuristik-Provider (kein Sprachmodell), Reframe neutral ohne
+YuNet, kein C2PA ohne c2patool. Stoppen: `scripts/local-stack.sh stop`.
+
 ## Umgebungsvariablen
 
 Alle Variablen mit Erklärung stehen in [`.env.example`](.env.example). Die wichtigsten:

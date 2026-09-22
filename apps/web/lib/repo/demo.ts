@@ -520,7 +520,7 @@ export const demoRepo: Repo = {
       original_filename: input.original_filename,
       mime_type: input.mime_type,
       size_bytes: input.size_bytes,
-      sha256: null,
+      sha256: input.sha256 ?? null,
       storage_key: input.storage_key,
       proxy_key: null,
       duration_s: null,
@@ -726,6 +726,11 @@ export const demoRepo: Repo = {
     if (!c) return null;
     Object.assign(c, patch, { updated_at: nowIso() });
     return { ...c };
+  },
+
+  async resolveMediaBucket() {
+    /* Demo: keine Dateien, die Medienroute antwortet 404 */
+    return null;
   },
 
   async requestClipRender(id) {

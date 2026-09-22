@@ -33,6 +33,8 @@ Alle Variablen stehen in `.env.example` im Monorepo-Root. Für die Web-App relev
 | `UPLOAD_MAX_BYTES` | Upload-Limit, Default 5 GB. |
 | `NEXT_PUBLIC_DEMO_UPLOAD=true` | Erzwingt den simulierten Upload auch mit Datenbank. |
 | `NEXT_PUBLIC_MEDIA_BASE_URL` | Basis-URL für Medien aus dem `derived`-Bucket: 720p-Proxy im Editor sowie MP4, SRT, VTT und Poster auf der Clip-Seite (lokal MinIO `http://localhost:9000/chopstr-derived`). Ohne sie: simulierter Player und deaktivierte Export-Links. |
+| `UPLOAD_MODE`, `NEXT_PUBLIC_UPLOAD_MODE` | `tus` (Default) oder `direct`: direkter Upload über `POST /api/uploads/direct` in `LOCAL_STORAGE_DIR` statt tusd (siehe „Lokaler Testmodus“). |
+| `MEDIA_MODE`, `LOCAL_STORAGE_DIR` | `MEDIA_MODE=local` schaltet `GET /api/media/[...key]` frei, das Dateien aus `LOCAL_STORAGE_DIR/<bucket-name>/<key>` liefert; dazu `NEXT_PUBLIC_MEDIA_BASE_URL=/api/media`. `LOCAL_STORAGE_DIR` ohne S3 macht auch `lib/storage.ts` (CI-Assets) zum Dateispeicher. |
 | `APP_VERSION` | Wird im Footer angezeigt. |
 | `BILLING_PROVIDER` | `manual` (Default) oder `stripe`. Stripe braucht zusätzlich `STRIPE_SECRET_KEY`; ohne Schlüssel fällt die App auf `manual` zurück. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_STARTER|PRO|AGENCY|SOVEREIGN` | Checkout-Session, Customer-Portal und Webhook-Signaturprüfung (`POST /api/billing/webhook`); Preis-IDs je Tarif. |
@@ -46,6 +48,38 @@ Alle Variablen stehen in `.env.example` im Monorepo-Root. Für die Web-App relev
 | `PUBLISH_REDIRECT_BASE` | Basis der OAuth-Redirect-URIs `/api/publishing/oauth/<platform>/callback` (Default `APP_BASE_URL`, sonst die aufrufende Origin). |
 
 Die Sitzung wird pro Transaktion als `app.workspace_id`, `app.actor_id` und (nur Rolle `client`) `app.brand_scope` gesetzt (`lib/db.ts`, via `set_config(..., true)` = `SET LOCAL`), damit die Row-Level-Security aus `packages/schema/migrations/0001_init.sql` und `0003_auth_billing.sql` greift. Zusätzlich filtern die Repository-Abfragen explizit nach `workspace_id` und Brand-Scope, weil die Entwicklungsverbindung Tabellen-Owner ist und RLS dort nicht greift.
+
+## Lokaler Testmodus
+
+Echtes Video hochladen und die Pipeline durchlaufen lassen, ohne Docker, tusd, MinIO und Temporal. Du brauchst nur Postgres (mit den Migrationen aus `packages/schema`), ffmpeg und die Python-Umgebung des Workers.
+
+```bash
+# Web-App (vom Monorepo-Root)
+DATABASE_URL=postgres://chopstr@127.0.0.1:5432/chopstr \
+UPLOAD_MODE=direct NEXT_PUBLIC_UPLOAD_MODE=direct \
+MEDIA_MODE=local NEXT_PUBLIC_MEDIA_BASE_URL=/api/media \
+LOCAL_STORAGE_DIR=$HOME/chopstr-store \
+npm run dev --workspace apps/web
+
+# Worker (in workers/, gleiche DATABASE_URL und LOCAL_STORAGE_DIR, kein S3_ENDPOINT, kein TEMPORAL_ADDRESS)
+python -m chopstr_worker.local_worker
+```
+
+Was dabei passiert:
+
+- **Upload**: Das Formular unter `/upload` schickt die Datei per `XMLHttpRequest` als `multipart/form-data` an `POST /api/uploads/direct` (Fortschritt über das Upload-Progress-Ereignis). Die Route prüft Rolle `source.upload`, Kontingent und Rechte-Checkbox wie `POST /api/uploads/token`, streamt die Datei nach `LOCAL_STORAGE_DIR/chopstr-sources/uploads/<uuid><ext>` (`lib/uploads/multipart.ts`, nichts liegt komplett im Speicher), berechnet nebenbei SHA-256 und legt die Quelle über `lib/uploads/finalize.ts` an (dieselbe Funktion wie `post-finish` im tusd-Hook: `sources` mit `storage_key`, `sha256`, `size_bytes`, `mime_type`, Audit `upload.created` und `rights.confirmed`). Ohne `TEMPORAL_ADDRESS` bleibt die Quelle `uploaded`; die Projektseite zeigt „Warte auf Worker“, bis der lokale Worker sie abholt. Der Bucket-Ordner `chopstr-sources` (beziehungsweise `S3_BUCKET_SOURCES`) ist derselbe, den der Python-Worker unter `LOCAL_STORAGE_DIR/<bucket-name>/<key>` liest (`workers/chopstr_worker/storage.py`).
+- **Medien**: `GET /api/media/<key>` liefert Proxy, Audio, MP4, Poster, SRT und VTT aus `LOCAL_STORAGE_DIR/chopstr-derived/<key>` (das Original aus `chopstr-sources/`), mit Content-Type, `Accept-Ranges: bytes`, Range-Antworten (206) für das Scrubbing und `Cache-Control: private`. Berechtigt ist die Sitzung des Workspace, dem der Key gehört (`sources.storage_key|proxy_key|audio_key`, `clips.file_key|poster_key|srt_key|vtt_key`, sonst 404, ohne Sitzung 401). Die Gast-Freigabe `/freigabe/[token]` hängt `?t=<token>` an, das gegen `guest_approvals` geprüft wird (nur MP4 und Poster des freigegebenen Clips).
+- **Editor und Review**: Sobald der Worker `proxy_key` gesetzt hat, spielen `VideoStage` (Transkript) und die Review-Seite das Proxy-Video über `<video src>`; `usePlayer` läuft synchron mit dem Element (currentTime per `requestAnimationFrame`, play/pause, seek). Vorher bleibt der simulierte Player.
+- **Clips**: Karten zeigen das Poster und spielen das gerenderte MP4 per Klick ab; die Ton-aus-Vorschau zeigt bei fertigem Render die echte Datei stumm in Schleife. MP4-, SRT- und VTT-Links laufen über `GET /api/projects/[id]/clips/[clipId]/download`, das auf `/api/media/...` umleitet.
+- **Render ohne Temporal**: `POST /api/projects/[id]/clips/[clipId]/render` und das Annehmen im Review setzen den Clip auf `draft` (`render_error = null`), wenn kein Signal zugestellt wurde; der lokale Worker rendert Clips mit `status = 'draft'`. Die UI meldet „Render eingeplant, lokaler Worker holt ab“. Löschjobs bleiben `queued` und werden ebenfalls vom lokalen Worker ausgeführt.
+
+Prüfen per curl (Sitzungs-Cookie `chopstr_session` aus dem Browser):
+
+```bash
+ffmpeg -f lavfi -i testsrc=size=1280x720:rate=25 -f lavfi -i sine=frequency=440 -t 20 -pix_fmt yuv420p test.mp4
+curl -b "chopstr_session=<id>" -F title=Test -F rights_status=own -F rights_confirmed=true -F file=@test.mp4 http://localhost:3000/api/uploads/direct
+curl -b "chopstr_session=<id>" -H "Range: bytes=0-99" -I http://localhost:3000/api/media/renders/<clip>/<hash>.mp4
+```
 
 ## Auth, Sitzungen und Rollen (Phase 4, Block A)
 
@@ -135,7 +169,7 @@ Die App ist im Demo-Modus vollständig bedienbar: kein Postgres, kein Temporal, 
 | Route | Inhalt |
 |---|---|
 | `/` | Projekte: Pill-Navigation, Hintergrundwort, Glas-Karten mit Status, Dauer, Fortschritt, Zähler-Badge „6 Kandidaten“ und „Review öffnen“ (Transkript als Ghost-Link), sonst „Transkript öffnen“. |
-| `/upload` | Upload-Formular (Titel, Markenprofil, Drag-and-drop, Rechtestatus, Pflicht-Checkbox, Sprecher, Briefing), tus-Upload mit Fortschritt, Weiterleitung zum Projekt. |
+| `/upload` | Upload-Formular (Titel, Markenprofil, Drag-and-drop, Rechtestatus, Pflicht-Checkbox, Sprecher, Briefing), tus-Upload mit Fortschritt (oder direkter Upload im lokalen Testmodus), Weiterleitung zum Projekt. |
 | `/projekte/[id]` | Pipeline-Schritte live per SSE (`/api/projects/[id]/events`), Metadaten (Dauer, Auflösung, SHA-256, Löschfrist), Briefing. Bei `ready` mit Kandidaten: „Kandidaten prüfen“ mit Zähler („3 von 6 erfüllen alle Pflichtkriterien“). |
 | `/projekte/[id]/transkript` | Transkript-Editor: Video (oder simulierter Player), synchrones Wort-Highlight, Klick springt, Konfidenz < 0,9 orange, Sprecher umbenennen, Wort per Doppelklick/Enter bearbeiten, Füllwort-Diff, Korrekturzähler, Speichern als neue Version, Korrekturen ins Marken-Wörterbuch. Tastatur: Leertaste, Pfeiltasten ±5 s. |
 | `/projekte/[id]/review` | Kandidaten-Review (Phase 2): Player mit 8-Sekunden-Vorschau (gleicher Hook wie der Editor), Clip-Text mit Sprechern und Timecodes, Glas-Karten mit Struktur-Badge, Dauer, „DACH-Qualität“ (Gesamtwert) und Gate-Zähler, orange Warn-Chips (Relativierung, Humor, sensibles Thema, Heuristik). Detail: „Warum dieser Clip?“, Rubrik mit Score-Balken, Gewicht und Belegzitat, Pflichtkriterien als Status-Liste, Story-Graph als Haarlinien-Graph, Hinweis „Scores veraltet“ nach Grenzänderung. Aktionen: Annehmen öffnet die Ziel-Auswahl (Chips TikTok, Reels, Shorts, LinkedIn, Standard alle vier, Standard-Plattform des Markenprofils hervorgehoben und immer dabei), dann Spektrum-Glitch auf der Karte und Link zur Clip-Übersicht; Ablehnen mit Pflichtgrund, Verlängern und Kürzen um einen Satz, Titelkarte (max. 8 Wörter), „Umschreiben“ führt nach dem Annehmen ins Hook-Studio. Filter: Alle, Pflichtkriterien erfüllt, Mit Warnung, Angenommen, Abgelehnt. Tastatur: J/K, A (öffnet die Ziel-Auswahl), R, Leertaste. |

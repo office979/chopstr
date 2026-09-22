@@ -371,7 +371,7 @@ export const apiPostgresRepo: ApiRepo = {
     return withContext(session, async (tx) => {
       const rows = await tx`
         update sources set storage_key = ${patch.storage_key}, original_filename = ${patch.original_filename}, mime_type = ${patch.mime_type},
-          size_bytes = ${patch.size_bytes}, status = 'uploaded', status_message = null
+          size_bytes = ${patch.size_bytes}, sha256 = coalesce(${patch.sha256 ?? null}, sha256), status = 'uploaded', status_message = null
         where id = ${id} and workspace_id = ${session.workspaceId} and status = 'uploading' returning id`;
       return rows.length > 0;
     });

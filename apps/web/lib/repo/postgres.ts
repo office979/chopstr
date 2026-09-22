@@ -675,12 +675,12 @@ export const postgresRepo: Repo = {
       const retentionDays = num((wsRows[0] as Row | undefined)?.retention_days) ?? 30;
       const rows = await tx`
         insert into sources (
-          id, workspace_id, brand_profile_id, title, original_filename, mime_type, size_bytes,
+          id, workspace_id, brand_profile_id, title, original_filename, mime_type, size_bytes, sha256,
           storage_key, rights_status, rights_confirmed_at, rights_confirmed_by, source_owner,
           source_title, source_url, expected_speakers, brief, status, delete_after, created_by
         ) values (
           ${input.id ?? tx`gen_random_uuid()`}, ${session.workspaceId}, ${input.brand_profile_id},
-          ${input.title}, ${input.original_filename}, ${input.mime_type}, ${input.size_bytes},
+          ${input.title}, ${input.original_filename}, ${input.mime_type}, ${input.size_bytes}, ${input.sha256 ?? null},
           ${input.storage_key}, ${input.rights_status}, now(), ${input.rights_confirmed_by ?? session.userId},
           ${input.source_owner ?? null}, ${input.source_title ?? null}, ${input.source_url ?? null},
           ${input.expected_speakers}, ${tx.json((input.brief ?? {}) as never)}, ${input.status ?? "uploaded"},
@@ -902,11 +902,41 @@ export const postgresRepo: Repo = {
     });
   },
 
-  /* Der Worker setzt status = 'rendering' nach dem Signal; hier nur der Fehlertext zurücksetzen */
-  async requestClipRender(id) {
+  /* Mit Temporal-Signal setzt der Worker status = 'rendering', hier wird nur der Fehlertext zurückgesetzt.
+   * Ohne Signal (kein TEMPORAL_ADDRESS oder Signal fehlgeschlagen) geht der Clip als `draft` in die
+   * Warteschlange, der lokale Worker (chopstr_worker.local_worker) holt ihn per Polling ab. */
+  async requestClipRender(id, signaled = false) {
     return withContext(await currentSession(), async (tx) => {
-      const rows = await tx`update clips set render_error = null where id = ${id} returning *`;
+      const rows = signaled
+        ? await tx`update clips set render_error = null where id = ${id} returning *`
+        : await tx`update clips set render_error = null, status = 'draft' where id = ${id} and status <> 'deleted' returning *`;
       return rows.length ? toClip(rows[0] as Row) : null;
+    });
+  },
+
+  /* Lokaler Testmodus (GET /api/media): Key gehört zum Workspace, wenn er Original, Proxy oder Audio einer Quelle
+   * oder MP4, Poster, SRT oder VTT eines Clips ist. client sieht nur Quellen seiner Marke. */
+  async resolveMediaBucket(key) {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const scope = session.brandScope ?? null;
+      const rows = await tx`
+        select bucket from (
+          select 'sources' as bucket, 0 as prio from sources s
+            where s.workspace_id = ${session.workspaceId} and s.status <> 'deleted' and s.storage_key = ${key}
+              and (${scope}::uuid is null or s.brand_profile_id = ${scope}::uuid)
+          union all
+          select 'derived', 1 from sources s
+            where s.workspace_id = ${session.workspaceId} and s.status <> 'deleted' and (s.proxy_key = ${key} or s.audio_key = ${key})
+              and (${scope}::uuid is null or s.brand_profile_id = ${scope}::uuid)
+          union all
+          select 'derived', 2 from clips c join sources s on s.id = c.source_id
+            where s.workspace_id = ${session.workspaceId} and c.status <> 'deleted'
+              and (c.file_key = ${key} or c.poster_key = ${key} or c.srt_key = ${key} or c.vtt_key = ${key})
+              and (${scope}::uuid is null or s.brand_profile_id = ${scope}::uuid)
+        ) hits order by prio limit 1`;
+      const bucket = rows.length ? ((rows[0] as Row).bucket as string) : null;
+      return bucket === "sources" || bucket === "derived" ? bucket : null;
     });
   },
 

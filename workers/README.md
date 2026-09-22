@@ -45,8 +45,10 @@ workers/
     workflows/         ClipProjectWorkflow, DeletionWorkflow, RetentionWorkflow, OutboxWorkflow, PublishWorkflow,
                        LearningWorkflow, WeeklyReportWorkflow
     worker.py          python -m chopstr_worker.worker --queues cpu,gpu [--ensure-schedules]
+    local_worker.py    python -m chopstr_worker.local_worker [--once] [--interval 3]: Polling ohne Temporal (siehe „Lokaler Testmodus“)
   fonts/               Inter-Bold (OFL) für drawtext und libass, siehe fonts/README.md
   scripts/             seed_dev.py (python -m scripts.seed_dev): Dev-Nutzer, Workspace, Markenprofil, Abo
+                       local_env.sh (source scripts/local_env.sh): Umgebung für den lokalen Testmodus, ffmpeg-Symlinks in .local/bin
   eval/                wer_eval.py, eval_harness.py, export_predictions.py, README.md
   tests/               pytest, läuft ohne GPU, ohne Modelle, ohne Postgres, ohne S3
   Dockerfile           CPU-Image (python:3.12-slim + ffmpeg + fonts-inter)
@@ -103,7 +105,7 @@ Quelle: `.env.example` im Monorepo-Root. Der Worker liest zusätzlich die mit �
 | `ASR_MODEL_DE`, `ASR_MODEL_CH` | faster-whisper-Modelle (CTranslate2); CH ist Beta |
 | `ASR_DEVICE`, `ASR_COMPUTE` | `auto|cpu|cuda`, `int8|int8_float16|float16` |
 | `ASR_WINDOW_S`, `ASR_OVERLAP_S` (Worker) | Fensterlänge und Überlappung (Default 600 s / 20 s) |
-| `HF_TOKEN`, `DIARIZER_MODEL` (Worker) | pyannote-Zugang, Modell-ID (Default siehe TODO in `pipeline/transcribe.py`) |
+| `HF_TOKEN`, `DIARIZER_MODEL` (Worker) | pyannote-Zugang, Modell-ID (Default siehe TODO in `pipeline/transcribe.py`); ohne `HF_TOKEN` oder ohne `pyannote.audio` läuft `diarize` als Fallback mit einem Sprecher `SPEAKER_00` (Event „Sprechertrennung übersprungen: HF_TOKEN fehlt (pyannote)“, `stats.diarization = "skipped"`) |
 | `GLADIA_API_KEY`, `GLADIA_BASE_URL` | ASR-Fallback, nur mit gesetzter Basis-URL und erlaubtem Host |
 | `LANGUAGETOOL_URL` | Grammatikprüfung der Copy (nur wenn gesetzt; Fehler dort sind Hinweise, nie fatal) |
 | `EGRESS_ALLOWLIST` | zusätzliche erlaubte Hosts, kommagetrennt |
@@ -120,7 +122,9 @@ Quelle: `.env.example` im Monorepo-Root. Der Worker liest zusätzlich die mit �
 | `LEARNING_CRON` (Worker) | Schedule `learning-nightly` (Default `0 4 * * *`) |
 
 Modell-IDs haben bewusst keine Defaults im Code. Fehlt `ASR_MODEL_DE`, schlägt `transcribe_de` mit einer
-klaren Meldung fehl („Kein ASR-Modell für Variante de konfiguriert (ASR_MODEL_DE setzen)").
+klaren Meldung fehl („Kein ASR-Modell für Variante de konfiguriert (ASR_MODEL_DE setzen)"). Enthält die
+Modell-ID kein „german“, trägt das `finished`-Event von `transcribe_de` den Hinweis „Standard-Whisper statt
+deutschem Fine-Tune“ (`payload.hint`). Verifizierte IDs stehen unter „Lokaler Testmodus“.
 
 ## Residency-Guard
 
@@ -466,6 +470,91 @@ cp ../.env.example ../.env    # Werte anpassen; die Shell muss sie exportieren (
 Ohne MinIO: `S3_ENDPOINT` leer lassen und `LOCAL_STORAGE_DIR=/pfad/zum/ordner` setzen. Der Worker legt dann
 Bucket-Unterordner an. Ohne GPU laufen `transcribe_de` und `diarize` auf der CPU (`ASR_DEVICE=cpu`,
 `ASR_COMPUTE=int8`), was für Tests mit kurzen Dateien reicht.
+
+## Lokaler Testmodus (ohne Docker, Temporal, MinIO, GPU)
+
+`python -m chopstr_worker.local_worker` ersetzt Temporal durch eine Polling-Schleife über die Datenbank und
+ruft dieselben Activity-Funktionen (`run_*`) auf wie der Temporal-Worker; es gibt keine zweite Pipeline.
+Dateien liegen im lokalen Ordner (`S3_ENDPOINT` leer, `LOCAL_STORAGE_DIR`), die Web-App legt Uploads unter
+`chopstr-sources/uploads/<uuid><ext>` ab und setzt `sources.status = 'uploaded'`.
+
+### Schritte
+
+```bash
+cd workers
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"                 # pytest, ruff, imageio-ffmpeg (statisches ffmpeg mit libass und drawtext)
+pip install faster-whisper              # CPU-ASR (CTranslate2); pyannote und torch sind nicht nötig
+source scripts/local_env.sh             # bash oder zsh; setzt ENV und verlinkt ffmpeg/ffprobe nach .local/bin
+export DATABASE_URL=postgres://chopstr@127.0.0.1:5499/chopstr   # falls abweichend, VOR dem source setzen
+python -m chopstr_worker.local_worker --once        # ein Durchlauf, Exit-Code 1 bei Fehlern (für Skripte und Tests)
+python -m chopstr_worker.local_worker --interval 3  # Dauerbetrieb, Stopp mit Ctrl-C nach dem laufenden Schritt
+```
+
+`scripts/local_env.sh` setzt (bereits gesetzte Werte bleiben): `DATABASE_URL`, `S3_ENDPOINT=`,
+`LOCAL_STORAGE_DIR` (Default `workers/.local/storage`), `WORKER_WORK_DIR`, `LLM_PROVIDER=local-heuristic`,
+`ASR_DEVICE=cpu`, `ASR_COMPUTE=int8`, `ASR_MODEL_DE` (siehe Modellwahl), `APP_INTERNAL_URL=http://localhost:3000`,
+`RENDER_X264_PRESET=veryfast` und stellt `.local/bin` mit `ffmpeg` (aus `imageio-ffmpeg`, hat `subtitles` und
+`drawtext`) und `ffprobe` (Homebrew oder PATH) vorn in den `PATH`. Der Homebrew-ffmpeg hat oft kein libass;
+dann liegen Untertitel nur als SRT/VTT bei.
+
+Was die Schleife je Durchlauf abarbeitet (Reihenfolge fest, je Zeile einzeln, älteste zuerst):
+
+| Warteschlange | Bedingung | Aufruf |
+|---|---|---|
+| `sources` | `status = 'uploaded'` | `probe_and_extract` → `transcribe_de` → `diarize` → `heatmap` → `fuse_and_nlp` → `detect_candidates` (Ende: `ready`) |
+| `clips` | `status = 'draft'` und Kandidat `human_verdict = 'accepted'` | `render_pack(candidate_id, "<platform>:<clip_id>")` |
+| `deletion_jobs` | `status = 'queued'` | `delete_entity` |
+| `publications` | `status = 'scheduled'`, `scheduled_for <= now` | `publish_clip`, nur wenn `APP_INTERNAL_URL` per TCP erreichbar ist, sonst Hinweis im Log und die Zeile bleibt fällig |
+| Outbox | alle 60 s (`--outbox-every`) | `dispatch_outbox`, dann fällige `deliver_webhook` |
+
+Fehler: der erste fehlgeschlagene Schritt setzt `sources.status = 'failed'` mit deutscher `status_message`
+(`events.step` macht das für die meisten Schritte selbst, der Worker ergänzt es ohne Dublette), Clips stehen
+auf `failed` mit `render_error`, Lösch-Jobs auf `failed` mit `error`. Zusätzlich merkt sich der Prozess jede
+fehlgeschlagene ID, damit nichts endlos wiederholt wird; ein erneuter Versuch braucht einen Neustart und
+den Status `uploaded` bzw. `draft`. Eine Quelle, die beim Abbruch (Ctrl-C) mitten in der Pipeline stand,
+bleibt in ihrem Zwischenstatus (`transcribing`, `analyzing`, ...) und wird nicht automatisch weitergeführt:
+Status per SQL auf `uploaded` zurücksetzen, die Zwischenergebnisse im Storage werden dann übersprungen
+(idempotente Keys). Logs enthalten IDs, Schritte, Dauern und Zähler, keine Transkriptinhalte.
+
+### Modellwahl (auf Hugging Face geprüft, Stand September 2026)
+
+| Zweck | Modell-ID | Befund |
+|---|---|---|
+| `ASR_MODEL_DE` (Default in `local_env.sh`) | `cstr/whisper-large-v3-turbo-german-int8_float32` | Modellkarte: „int8 quantization from primeline/whisper-large-v3-turbo-german per ctranslate2-converter“; Dateien `model.bin`, `config.json`, `tokenizer.json`, `vocabulary.json`, `preprocessor_config.json`; Apache-2.0. Direkt mit faster-whisper ladbar, kein Transformers-Format. |
+| Alternative ohne deutschen Fine-Tune | `deepdml/faster-whisper-large-v3-turbo-ct2` | Konvertierung von `deepdml/whisper-large-v3-turbo` (`ct2-transformers-converter ... --quantization float16`), mehrsprachig inklusive Deutsch, MIT, sehr verbreitet. Das Event `transcribe_de` trägt dann den Hinweis „Standard-Whisper statt deutschem Fine-Tune“. |
+| Nicht direkt nutzbar | `primeline/whisper-large-v3-turbo-german` | Transformers/Safetensors (BF16), kein CTranslate2. Eigene Konvertierung (nicht ausgeführt): `pip install transformers ctranslate2` und `ct2-transformers-converter --model primeline/whisper-large-v3-turbo-german --output_dir models/whisper-turbo-german-ct2 --copy_files tokenizer.json preprocessor_config.json --quantization int8`, dann `ASR_MODEL_DE=<absoluter Pfad zu models/whisper-turbo-german-ct2>`. |
+
+Weitere CT2-Konvertierungen des primeline-Modells existieren (`TheTobyB/whisper-large-v3-turbo-german-ct2`,
+`beydogan/whisper-large-v3-turbo-german-ct2`, ...), sind aber ohne Lizenzangabe oder ohne `tokenizer.json`;
+deshalb der `cstr`-Stand. Der erste Lauf lädt das Modell (`model.bin` 814 MB, passt zur turbo-Größe von 809M
+Parametern in int8) in den Hugging-Face-Cache (`~/.cache/huggingface`).
+
+### Grenzen
+
+- CPU-ASR ist langsam: large-v3-turbo mit `int8` auf Apple Silicon braucht grob ein Drittel bis die Hälfte der
+  Laufzeit der Aufnahme (gemessen: 49 s Sprache aus `say -v Anna` in 18 s inklusive Modell laden, 105 Wörter
+  fehlerfrei; Render 9:16 mit Captions 4 s). Eine Stunde Podcast dauert also 20 bis 30 Minuten, Geduld.
+- Sprechertrennung braucht `HF_TOKEN` und `pyannote.audio` (Extra `asr`, zieht torch). Ohne beides: ein
+  Sprecher `SPEAKER_00`, Hinweis im Event, `stats.diarization = "skipped"`; bei `expected_speakers > 1` steht
+  ein zweiter Hinweis dabei. Reframe `two_speakers` ist damit nicht möglich.
+- `LLM_PROVIDER=local-heuristic`: Kandidaten, Rubrik und Copy kommen aus der Heuristik (`heuristic-v1`,
+  `risk_flags` enthält `heuristic_only`). Kein Ersatz für ein Sprachmodell, nur zum Durchspielen der Pipeline.
+- Publishing braucht die laufende Web-App mit `INTERNAL_API_SECRET`; Webhooks an `http://localhost` gehen nur
+  in `APP_ENV=development`.
+- Kein Temporal: keine Retries, keine Heartbeats, keine Schedules (Retention, Lernschleife, Wochenreport
+  laufen hier nicht).
+
+### Tests dazu
+
+```bash
+.venv/bin/python -m pytest -q tests/test_local_worker.py tests/test_diarize_fallback.py   # Fake-DB, ohne Modelle
+.venv/bin/python -m pytest -q tests/test_asr_real.py                                     # echte CPU-Transkription (Marker network, macOS say -v Anna, lädt das Modell)
+```
+
+`tests/test_asr_real.py` spricht einen Satz mit `say -v Anna`, wandelt ihn per ffmpeg in 16-kHz-WAV und prüft,
+dass „vierzig Prozent“ (oder „40 Prozent“) und „Preismodell“ im Transkript stehen; ohne `faster_whisper`, `say`
+oder ffmpeg wird er übersprungen, ohne Netz beim ersten Lauf schlägt er mit klarer Meldung fehl.
 
 ## Tests und Eval
 

@@ -18,18 +18,24 @@ interface Props {
   maxBytes: number;
   tusEndpoint: string;
   demoUpload: boolean;
+  /* direct: POST /api/uploads/direct (lokaler Testmodus ohne tusd), tus: fortsetzbarer tus-Upload */
+  uploadMode?: "tus" | "direct";
+  /* Ohne Temporal holt der lokale Worker die Quelle per Polling ab */
+  localWorker?: boolean;
 }
 
 type Phase = "form" | "uploading" | "finishing" | "done" | "error";
 
 class UploadTokenError extends Error {}
+/* Fehler der direkten Route (Kontingent, Rolle, Validierung): anzeigen, nicht simulieren */
+class DirectUploadError extends Error {}
 
 const RIGHTS_TEXT =
   "Ich bestätige, dass ich die Rechte an diesem Material besitze oder eine Lizenz habe, es zu bearbeiten und zu veröffentlichen.";
 
 const ACCEPT = "video/mp4,video/quicktime,video/x-matroska,video/webm,audio/mpeg,audio/wav,audio/x-m4a,.mp4,.mov,.mkv,.webm,.mp3,.wav,.m4a";
 
-export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload }: Props) {
+export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, uploadMode = "tus", localWorker = false }: Props) {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -180,6 +186,50 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload }: Prop
     });
   };
 
+  /* Lokaler Testmodus: multipart per XMLHttpRequest (Fortschritt über upload.onprogress), Datei als letztes Feld */
+  const directUpload = async (data: ReturnType<typeof collect>, clientRef: string): Promise<string> => {
+    if (!file) throw new DirectUploadError("Bitte eine Datei auswählen.");
+    const fd = new FormData();
+    fd.append("client_ref", clientRef);
+    fd.append("brand_profile_id", data.brand_profile_id ?? "");
+    fd.append("title", data.title);
+    fd.append("rights_status", rights);
+    fd.append("rights_confirmed", "true");
+    fd.append("expected_speakers", data.expected_speakers != null ? String(data.expected_speakers) : "");
+    fd.append("brief_audience", data.brief_audience);
+    fd.append("brief_wanted", data.brief_wanted);
+    fd.append("brief_exclude", data.brief_exclude);
+    fd.append("platform", data.platform);
+    if (rights === "third_party") {
+      fd.append("source_owner", data.source_owner);
+      fd.append("source_title", data.source_title);
+      fd.append("source_url", data.source_url);
+    }
+    fd.append("file", file, file.name);
+
+    return new Promise<string>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/uploads/direct");
+      xhr.responseType = "json";
+      xhr.upload.onprogress = (ev) => {
+        if (ev.lengthComputable) setProgress(Math.min(100, Math.round((ev.loaded / ev.total) * 100)));
+      };
+      xhr.upload.onload = () => {
+        setProgress(100);
+        setPhase("finishing");
+      };
+      xhr.onload = () => {
+        const body = (xhr.response ?? {}) as { source_id?: string; error?: string };
+        if (xhr.status >= 200 && xhr.status < 300 && body.source_id) resolve(body.source_id);
+        else reject(new DirectUploadError(body.error ?? `Upload fehlgeschlagen (${xhr.status}).`));
+      };
+      xhr.onerror = () => reject(new DirectUploadError("Verbindung zum Server abgebrochen. Läuft der Dev-Server noch?"));
+      xhr.onabort = () => reject(new DirectUploadError("Upload abgebrochen."));
+      abortRef.current = { abort: () => xhr.abort() };
+      xhr.send(fd);
+    });
+  };
+
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
@@ -198,6 +248,18 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload }: Prop
     }
 
     const clientRef = globalThis.crypto.randomUUID();
+    if (uploadMode === "direct") {
+      try {
+        const sourceId = await directUpload(data, clientRef);
+        setPhase("done");
+        router.push(`/projekte/${sourceId}`);
+      } catch (err) {
+        setPhase("error");
+        setNote(err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
     try {
       await realUpload(data, clientRef);
       setPhase("done");
@@ -237,7 +299,13 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload }: Prop
           </Select>
         </Field>
 
-        <Field label="Datei" htmlFor="file" required error={errors.file} hint={`Video oder Audio, maximal ${formatBytes(maxBytes)}. Der Upload ist fortsetzbar.`}>
+        <Field
+          label="Datei"
+          htmlFor="file"
+          required
+          error={errors.file}
+          hint={`Video oder Audio, maximal ${formatBytes(maxBytes)}. ${uploadMode === "direct" ? "Der Upload läuft in einem Stück." : "Der Upload ist fortsetzbar."}`}
+        >
           <div
             onDragOver={(e) => {
               e.preventDefault();
@@ -378,19 +446,29 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload }: Prop
                 <StatusCheck state="idle" size={32} />
                 <div className="text-sm">
                   <span className="font-medium text-text">{step.label}</span>
-                  <span className="ml-2 text-text-2">{step.phase === 2 ? "kommt in Phase 2" : "startet nach dem Upload"}</span>
+                  <span className="ml-2 text-text-2">
+                    {step.phase === 2 ? "kommt in Phase 2" : localWorker && !demoUpload ? "übernimmt der lokale Worker" : "startet nach dem Upload"}
+                  </span>
                 </div>
               </li>
             ))}
           </ol>
           {note && <p className={cn("mt-4 text-sm", phase === "error" ? "text-attention" : "text-text-2")}>{note}</p>}
-          {phase === "finishing" && <p className="mt-4 text-sm text-text-2">Projekt wird angelegt</p>}
+          {phase === "finishing" && (
+            <p className="mt-4 text-sm text-text-2">
+              {uploadMode === "direct" ? "Datei ist übertragen, Prüfsumme wird gebildet und das Projekt angelegt" : "Projekt wird angelegt"}
+            </p>
+          )}
         </GlassCard>
       )}
 
       <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-text-2">
-          {demoUpload ? "Demo-Modus aktiv: kein tusd, kein Temporal. Das Projekt entsteht im Speicher." : "Ziel: " + tusEndpoint}
+          {demoUpload
+            ? "Demo-Modus aktiv: kein tusd, kein Temporal. Das Projekt entsteht im Speicher."
+            : uploadMode === "direct"
+              ? `Lokaler Testmodus: direkter Upload nach /api/uploads/direct${localWorker ? ", der lokale Worker holt die Quelle ab" : ""}.`
+              : "Ziel: " + tusEndpoint}
         </p>
         <div className="flex gap-2">
           {phase === "uploading" && (

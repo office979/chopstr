@@ -16,6 +16,8 @@ interface Props {
   initialEvents: PipelineEvent[];
   hasTranscript: boolean;
   candidateCount: CandidateCount;
+  /* Lokaler Testmodus ohne Temporal: der Worker (python -m chopstr_worker.local_worker) holt die Quelle per Polling ab */
+  localWorker?: boolean;
 }
 
 interface StepView {
@@ -53,7 +55,7 @@ function timeOf(iso: string | null): string {
 }
 
 /* Pipeline-Schritte als Live-Ansicht über Server-Sent Events */
-export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, initialEvents, hasTranscript, candidateCount }: Props) {
+export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, initialEvents, hasTranscript, candidateCount, localWorker = false }: Props) {
   const [events, setEvents] = useState<PipelineEvent[]>(initialEvents);
   const [status, setStatus] = useState<SourceStatus>(initialStatus);
   const [statusMessage, setStatusMessage] = useState<string | null>(initialStatusMessage);
@@ -148,6 +150,15 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
           );
         })}
       </ol>
+
+      {localWorker && status === "uploaded" && (
+        <p role="status" className="mt-6 flex flex-wrap items-center gap-2 rounded-inner border border-line px-4 py-3 text-sm text-text-2">
+          <span className="h-1.5 w-1.5 rounded-full bg-ai-soft" aria-hidden="true" />
+          <span>
+            <span className="font-medium text-text">Warte auf Worker.</span> Kein Temporal konfiguriert, der lokale Worker holt die Quelle ab: <code className="font-mono text-xs">python -m chopstr_worker.local_worker</code>
+          </span>
+        </p>
+      )}
 
       {failed && (
         <p className="mt-6 rounded-inner border border-attention/50 bg-attention/10 p-4 text-sm text-text">

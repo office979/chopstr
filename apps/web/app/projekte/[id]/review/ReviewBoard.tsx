@@ -205,7 +205,7 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
                       ? `Angenommen. ${created.length} Clips angelegt (${names}), Render angestoßen.`
                       : data.demo
                         ? `Angenommen. ${created.length} Clips angelegt (${names}), Demo-Render läuft.`
-                        : `Angenommen. ${created.length} Clips angelegt (${names}). Render startet, sobald der Worker erreichbar ist.`,
+                        : `Angenommen. ${created.length} Clips angelegt (${names}). Render eingeplant, lokaler Worker holt ab.`,
                 href: `/projekte/${sourceId}/clips`,
                 hrefLabel: "Clips ansehen",
               }

@@ -179,6 +179,7 @@ export interface UploadCompletionPatch {
   original_filename: string | null;
   mime_type: string | null;
   size_bytes: number | null;
+  sha256?: string | null;
 }
 
 /* 5c: Caption-Textfeld im Markenprofil (caption_style.caption_text_field), Erweiterung ohne Änderung an types.ts */

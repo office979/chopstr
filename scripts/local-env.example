@@ -1,0 +1,13 @@
+# apps/web/.env.local für den lokalen Testmodus ohne Docker (kopieren und Pfade anpassen)
+DATABASE_URL=postgres://chopstr@127.0.0.1:5499/chopstr
+UPLOAD_MODE=direct
+NEXT_PUBLIC_UPLOAD_MODE=direct
+MEDIA_MODE=local
+NEXT_PUBLIC_MEDIA_BASE_URL=/api/media
+# absoluter Pfad zum Repo-Ordner .local/storage
+LOCAL_STORAGE_DIR=/ABSOLUTER/PFAD/zu/chopstr/.local/storage
+TUS_HOOK_SECRET=local-dev-secret
+INTERNAL_API_SECRET=local-dev-internal
+SESSION_SECRET=local-dev-session-secret-mindestens-32-zeichen
+APP_ENV=development
+APP_BASE_URL=http://localhost:3000

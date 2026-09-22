@@ -1,12 +1,15 @@
 import "server-only";
-import { isDemoMode } from "@/lib/env";
+import { bucketName, isDemoMode, localStorageDir } from "@/lib/env";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 /* Objektspeicher der Web-App (Phase 4, Block B): CI-Assets im `derived`-Bucket.
  *
  * Mit S3_ENDPOINT (oder S3_REGION plus Schlüssel) läuft alles über @aws-sdk/client-s3 mit path-style
- * Adressierung (MinIO, Hetzner Object Storage). Ohne S3-Konfiguration oder im Demo-Modus liegen die Objekte
- * im Speicher des Serverprozesses (überlebt Hot Reloads über globalThis, nicht den Neustart). Der Worker
- * liest dieselben Keys aus dem `derived`-Bucket (workers/chopstr_worker/storage.py). */
+ * Adressierung (MinIO, Hetzner Object Storage). Mit LOCAL_STORAGE_DIR (lokaler Testmodus ohne Docker) liegen die
+ * Objekte als Dateien unter <dir>/<bucket-name>/<key>. Sonst oder im Demo-Modus liegen sie im Speicher des
+ * Serverprozesses (überlebt Hot Reloads über globalThis, nicht den Neustart). Der Worker liest dieselben Keys
+ * aus dem `derived`-Bucket (workers/chopstr_worker/storage.py). */
 
 export type Bucket = "sources" | "derived";
 
@@ -16,7 +19,7 @@ export interface StoredObject {
 }
 
 export interface ObjectStore {
-  readonly kind: "s3" | "memory";
+  readonly kind: "s3" | "memory" | "local";
   put(bucket: Bucket, key: string, body: Uint8Array, contentType: string | null): Promise<void>;
   get(bucket: Bucket, key: string): Promise<StoredObject | null>;
   delete(bucket: Bucket, key: string): Promise<void>;
@@ -44,10 +47,6 @@ const memoryStore: ObjectStore = {
   },
 };
 
-function bucketName(bucket: Bucket): string {
-  if (bucket === "sources") return process.env.S3_BUCKET_SOURCES ?? "chopstr-sources";
-  return process.env.S3_BUCKET_DERIVED ?? "chopstr-derived";
-}
 
 function s3Configured(): boolean {
   return Boolean(process.env.S3_ENDPOINT || (process.env.S3_ACCESS_KEY && process.env.S3_SECRET_KEY));
@@ -92,7 +91,44 @@ const s3Store: ObjectStore = {
   },
 };
 
+/* Lokaler Testmodus: LOCAL_STORAGE_DIR/<bucket-name>/<key>, derselbe Ordner wie beim Python-Worker */
+function localPath(bucket: Bucket, key: string): string {
+  const root = path.resolve(localStorageDir() ?? "");
+  const target = path.resolve(root, bucketName(bucket), key.replace(/^\/+/, ""));
+  if (target !== root && !target.startsWith(root + path.sep)) throw new Error("Ungültiger Storage-Key");
+  return target;
+}
+
+function contentTypeFromExt(key: string): string | null {
+  const ext = path.extname(key).toLowerCase();
+  const map: Record<string, string> = { ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".otf": "font/otf", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" };
+  return map[ext] ?? null;
+}
+
+const localStore: ObjectStore = {
+  kind: "local",
+  async put(bucket, key, body) {
+    const target = localPath(bucket, key);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, body);
+  },
+  async get(bucket, key) {
+    try {
+      const body = await readFile(localPath(bucket, key));
+      return { body: new Uint8Array(body), contentType: contentTypeFromExt(key) };
+    } catch (error) {
+      if ((error as { code?: string })?.code === "ENOENT") return null;
+      throw error;
+    }
+  },
+  async delete(bucket, key) {
+    await rm(localPath(bucket, key), { force: true });
+  },
+};
+
 export function getStore(): ObjectStore {
-  if (isDemoMode() || !s3Configured()) return memoryStore;
-  return s3Store;
+  if (isDemoMode()) return memoryStore;
+  if (s3Configured()) return s3Store;
+  if (localStorageDir()) return localStore;
+  return memoryStore;
 }

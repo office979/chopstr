@@ -5,7 +5,8 @@ import { BackgroundWord } from "@/components/ui/BackgroundWord";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { getRepo } from "@/lib/repo";
 import { isTokenShape } from "@/lib/auth/tokens";
-import { mediaUrl } from "@/lib/clips/labels";
+import { guestMediaUrl } from "@/lib/clips/labels";
+import { isLocalMedia } from "@/lib/env";
 import { isExpired } from "@/lib/guest/approval";
 import { GuestDecision } from "./GuestDecision";
 
@@ -19,6 +20,7 @@ export default async function GuestApprovalPage({ params }: { params: Promise<{ 
   const view = isTokenShape(token) ? await repo.getGuestApprovalByToken(token) : null;
   if (view && !view.approval.viewed_at) await repo.markGuestApprovalViewed(token);
   const base = process.env.NEXT_PUBLIC_MEDIA_BASE_URL ?? null;
+  const mediaToken = isLocalMedia() ? token : null;
 
   return (
     <div className="relative min-h-dvh overflow-x-clip">
@@ -54,8 +56,8 @@ export default async function GuestApprovalPage({ params }: { params: Promise<{ 
               aspect: view.clip.aspect,
               title_card: view.clip.title_card,
               duration_s: view.clip.duration_s,
-              video_url: mediaUrl(base, view.clip.file_key),
-              poster_url: mediaUrl(base, view.clip.poster_key),
+              video_url: guestMediaUrl(base, view.clip.file_key, mediaToken),
+              poster_url: guestMediaUrl(base, view.clip.poster_key, mediaToken),
               onscreen_hook: view.onscreen_hook,
               spoken_hook: view.spoken_hook,
               post_caption: view.post_caption,

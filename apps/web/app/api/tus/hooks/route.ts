@@ -1,13 +1,11 @@
 import type { NextRequest } from "next/server";
 import { getRepo } from "@/lib/repo";
-import { getApiRepo } from "@/lib/repo/api";
 import { uploadMaxBytes } from "@/lib/env";
-import { startClipProjectWorkflow } from "@/lib/temporal";
 import { withSessionContext, type Session } from "@/lib/session";
 import { verifyUploadToken, type UploadTokenPayload } from "@/lib/auth/upload-token";
 import { can } from "@/lib/auth/permissions";
 import { getQuota } from "@/lib/billing/quota";
-import type { Brief, Platform, RightsStatus } from "@/lib/repo/types";
+import { finalizeUpload } from "@/lib/uploads/finalize";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +15,8 @@ export const dynamic = "force-dynamic";
  *
  * Der Hook hat keine Browser-Sitzung. Der Browser holt vor dem Upload ein Upload-Token (POST /api/uploads/token)
  * und schickt es als Metadatum `upload_token` mit. `pre-create` prüft Signatur, Ablauf, Rolle und Kontingent;
- * `post-finish` nimmt workspace_id, user_id und brand_profile_id aus dem Token (nicht aus freien Metadaten). */
+ * `post-finish` nimmt workspace_id, user_id und brand_profile_id aus dem Token (nicht aus freien Metadaten) und legt
+ * die Quelle über lib/uploads/finalize.ts an (gemeinsam mit dem direkten Upload im lokalen Testmodus). */
 
 interface TusStorage {
   Type?: string;
@@ -38,10 +37,6 @@ interface TusHookBody {
   Type?: string;
   Event?: { Upload?: TusUpload };
 }
-
-const RIGHTS: RightsStatus[] = ["own", "licensed", "third_party"];
-const PLATFORMS: Platform[] = ["tiktok", "reels", "shorts", "linkedin"];
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function reject(status: number, message: string) {
   return Response.json({ RejectUpload: true, HTTPResponse: { StatusCode: status, Body: message } });
@@ -123,89 +118,17 @@ export async function POST(request: NextRequest) {
       const session = await sessionFromToken(token.payload);
       if ("error" in session) return new Response(session.error, { status: session.status });
 
-      return withSessionContext(session, async () => {
-        const repo = getRepo();
-        const rightsStatus = (RIGHTS as string[]).includes(meta.rights_status ?? "") ? (meta.rights_status as RightsStatus) : "own";
-        const platform = (PLATFORMS as string[]).includes(meta.platform ?? "") ? (meta.platform as Platform) : undefined;
-        const brief: Brief = {
-          audience: meta.brief_audience || undefined,
-          wanted: meta.brief_wanted || undefined,
-          exclude: meta.brief_exclude || undefined,
-          platform,
-        };
-        const expected = Number(meta.expected_speakers);
-        const storageKey = upload.Storage?.Key ?? upload.Storage?.Path ?? upload.ID ?? "";
-        const storageBucket = upload.Storage?.Bucket ?? null;
-        const clientRef = meta.client_ref && UUID_RE.test(meta.client_ref) ? meta.client_ref : undefined;
-
-        /* Phase 5a: POST /api/v1/sources mit upload = tus hat die Quelle schon als `uploading` angelegt (client_ref = source.id) */
-        const pending = clientRef ? await repo.getSource(clientRef) : null;
-        if (pending && pending.status === "uploading") {
-          const completed = await getApiRepo().completeUploadingSource(pending.id, {
-            storage_key: storageKey,
-            original_filename: meta.filename ?? null,
-            mime_type: meta.filetype ?? null,
-            size_bytes: Number.isFinite(size) ? size : null,
-          });
-          if (completed) {
-            await repo.audit({
-              action: "upload.created",
-              entity: "sources",
-              entity_id: pending.id,
-              payload: { storage_key: storageKey, storage_bucket: storageBucket, size_bytes: size, mime_type: meta.filetype ?? null, tus_id: upload.ID ?? null, via: "api_upload_token" },
-            });
-            const workflowId = await startClipProjectWorkflow({ sourceId: pending.id, workspaceId: session.workspaceId });
-            if (workflowId) await repo.updateSource(pending.id, { temporal_workflow_id: workflowId });
-            return Response.json({ source_id: pending.id, workflow_id: workflowId });
-          }
-        }
-
-        const source = await repo.createSource({
-          id: clientRef,
-          brand_profile_id: token.payload.brand_profile_id,
-          title: meta.title?.trim() || meta.filename || "Ohne Titel",
-          original_filename: meta.filename ?? null,
-          mime_type: meta.filetype ?? null,
-          size_bytes: Number.isFinite(size) ? size : null,
-          storage_key: storageKey,
-          storage_bucket: storageBucket,
-          rights_status: rightsStatus,
-          rights_confirmed_by: session.userId,
-          source_owner: rightsStatus === "third_party" ? meta.source_owner ?? null : null,
-          source_title: rightsStatus === "third_party" ? meta.source_title ?? null : null,
-          source_url: rightsStatus === "third_party" ? meta.source_url ?? null : null,
-          expected_speakers: Number.isFinite(expected) && expected > 0 ? Math.round(expected) : null,
-          brief,
-          status: "uploaded",
-        });
-
-        await repo.audit({
-          action: "upload.created",
-          entity: "sources",
-          entity_id: source.id,
-          payload: {
-            storage_key: storageKey,
-            storage_bucket: storageBucket,
-            size_bytes: size,
-            mime_type: meta.filetype ?? null,
-            tus_id: upload.ID ?? null,
-            via: "upload_token",
-          },
-        });
-        await repo.audit({
-          action: "rights.confirmed",
-          entity: "sources",
-          entity_id: source.id,
-          payload: { rights_status: rightsStatus, confirmed_by: session.userId },
-        });
-
-        const workflowId = await startClipProjectWorkflow({ sourceId: source.id, workspaceId: session.workspaceId });
-        if (workflowId) {
-          await repo.updateSource(source.id, { temporal_workflow_id: workflowId });
-        }
-
-        return Response.json({ source_id: source.id, workflow_id: workflowId });
+      const result = await finalizeUpload({
+        session,
+        brandProfileId: token.payload.brand_profile_id,
+        meta,
+        storageKey: upload.Storage?.Key ?? upload.Storage?.Path ?? upload.ID ?? "",
+        storageBucket: upload.Storage?.Bucket ?? null,
+        sizeBytes: Number.isFinite(size) ? size : null,
+        tusId: upload.ID ?? null,
+        via: "upload_token",
       });
+      return Response.json(result);
     }
 
     default:

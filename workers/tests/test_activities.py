@@ -88,7 +88,7 @@ def test_heatmap_fuse_and_nlp_end_to_end(fake_db, fake_context, source, monkeypa
     ]
     akey = asr_key_for(audio_key, "de", ["chopstr"], "dummy/model", fake_context.settings)
     fake_context.store.put_json("derived", akey, {"words": words, "model_id": "dummy/model", "variant": "de", "beta": False})
-    dkey = diar_key_for(audio_key, 2, fake_context.settings.diarizer_model or asr._DEFAULT_DIARIZER)
+    dkey = diar_key_for(audio_key, 2, asr.diarizer_id(fake_context.settings))
     fake_context.store.put_json("derived", dkey, {"turns": [[0.0, 1.95, "SPEAKER_00"], [1.95, 3.0, "SPEAKER_01"]], "model_id": "diar-x"})
 
     hkey = analyze.run_heatmap(fake_context, source)

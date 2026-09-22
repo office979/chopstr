@@ -83,24 +83,28 @@ def run_transcribe(ctx: common.Context, source_id: str, fallback: str | None = N
             ),
             s,
         )
+        hint = None if result.provider == "gladia-eu" else asr.model_hint(result.model_id)
         st.finish(
             f"{result.stats.get('word_count', 0)} Wörter in {result.windows} Fenstern"
-            + (" (Schweizerdeutsch, Beta)" if result.beta else ""),
+            + (" (Schweizerdeutsch, Beta)" if result.beta else "")
+            + (f" ({hint})" if hint else ""),
             key=key,
             word_count=result.stats.get("word_count", 0),
             low_conf_ratio=result.stats.get("low_conf_ratio", 0.0),
             windows=result.windows,
             beta=result.beta,
             model_id=result.model_id,
+            hint=hint,
         )
     return key
 
 
 def run_diarize(ctx: common.Context, source_id: str) -> str:
+    """Sprechererkennung; ohne ``HF_TOKEN`` oder pyannote läuft der Fallback (ein Sprecher) mit Hinweis im Event."""
     src = db.load_source(ctx.conn, source_id)
     s = ctx.settings
     n = src.get("expected_speakers")
-    model_id = s.diarizer_model or asr._DEFAULT_DIARIZER
+    model_id = asr.diarizer_id(s)
     with events.step(ctx.conn, source_id, STEP_DIAR, "Sprechererkennung startet") as st:
         audio_key = common.require(src, "audio_key", "Audio-Spur")
         key = diar_key_for(audio_key, n, model_id)
@@ -113,6 +117,14 @@ def run_diarize(ctx: common.Context, source_id: str) -> str:
         common.heartbeat("diarized")
         result["source_id"] = source_id
         ctx.store.put_json("derived", key, result)
+        if result.get("skipped"):
+            hints = [str(result.get("hint") or asr.HINT_DIARIZATION_SKIPPED)]
+            if n and int(n) > 1:
+                hints.append(f"Quelle erwartet {int(n)} Sprecher, alle Wörter werden {asr.FALLBACK_SPEAKER} zugeordnet")
+            st.finish(
+                "; ".join(hints), key=key, speakers=1, diarization="skipped", hint=hints[0], hints=hints,
+            )  # fmt: skip
+            return key
         costlog.record(
             ctx.conn,
             costlog.Cost(
@@ -126,7 +138,10 @@ def run_diarize(ctx: common.Context, source_id: str) -> str:
             ),
             s,
         )
-        st.finish(f"{len(result['speakers'])} Sprecher, {len(result['turns'])} Abschnitte", key=key, speakers=len(result["speakers"]))
+        st.finish(
+            f"{len(result['speakers'])} Sprecher, {len(result['turns'])} Abschnitte",
+            key=key, speakers=len(result["speakers"]), diarization="done",
+        )  # fmt: skip
     return key
 
 

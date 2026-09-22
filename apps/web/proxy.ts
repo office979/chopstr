@@ -24,6 +24,8 @@ const PUBLIC_PATHS: RegExp[] = [
   /^\/api\/internal(\/|$)/,
   /* Phase 5b: OAuth-Rückrufe der Publishing-Provider */
   /^\/api\/publishing\/oauth(\/|$)/,
+  /* Lokaler Testmodus: Medien prüfen Sitzung oder Gast-Token (?t=) selbst */
+  /^\/api\/media\//,
 ];
 
 export function proxy(request: NextRequest) {
@@ -53,5 +55,7 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon\\.ico|icon\\.svg|brand/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|txt)$).*)"],
+  /* api/uploads/direct und api/tus/hooks laufen ohne Proxy: der Proxy begrenzt Request-Bodies auf 10 MB
+   * (middlewareClientMaxBodySize), beide Routen prüfen Sitzung bzw. Secret selbst. */
+  matcher: ["/((?!_next/static|_next/image|favicon\\.ico|icon\\.svg|brand/|api/uploads/direct|api/tus/hooks|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|txt)$).*)"],
 };

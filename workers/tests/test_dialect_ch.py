@@ -125,7 +125,7 @@ def ch_source(fake_db, fake_context, monkeypatch):
     s = fake_context.settings
     akey = asr_key_for("audio/ch.wav", "de", [], "dummy/model", s)
     fake_context.store.put_json("derived", akey, {"words": _words(CH), "model_id": "dummy/model", "variant": "de", "beta": False})
-    dkey = diar_key_for("audio/ch.wav", None, s.diarizer_model or asr._DEFAULT_DIARIZER)
+    dkey = diar_key_for("audio/ch.wav", None, asr.diarizer_id(s))
     fake_context.store.put_json("derived", dkey, {"turns": [[0.0, 10.0, "SPEAKER_00"]], "model_id": "diar-x"})
     return sid
 

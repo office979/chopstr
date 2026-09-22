@@ -24,3 +24,5 @@ coverage/
 .turbo/
 chopstr_worker.egg-info/
 *.egg-info/
+.local/
+apps/web/.env.local

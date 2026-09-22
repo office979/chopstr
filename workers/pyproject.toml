@@ -1,0 +1,57 @@
+[project]
+name = "chopstr-worker"
+version = "0.1.0"
+description = "chopstr Python-Worker: Ingest, deutsche ASR, Diarisierung, DACH-NLP, Story-Engine, Render (EU-verarbeitet)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+dependencies = [
+  "numpy>=1.26",
+  "pyphen>=0.15",
+  "psycopg[binary]>=3.2",
+  "redis>=5",
+  "temporalio>=1.7",
+  "httpx>=0.27",
+  "boto3>=1.35",
+  "pydantic>=2.7",
+  "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+asr = ["faster-whisper>=1.1", "pyannote.audio>=3.3", "torch"]
+nlp = ["spacy>=3.7"]
+vision = ["opencv-python-headless>=4.9"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
+
+[project.scripts]
+chopstr-worker = "chopstr_worker.worker:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["chopstr_worker*"]
+
+[tool.uv]
+# uv sync --extra dev   (Standard-Entwicklung ohne GPU-Pakete)
+# uv sync --all-extras  (GPU-Worker)
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+  "network: benötigt Netzwerk (z. B. Download des Temporal-Test-Servers)",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = [".venv", "_scaffold"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = ["E501", "SIM108", "SIM102", "B905"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["chopstr_worker", "eval"]

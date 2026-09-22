@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Ebene_1" data-name="Ebene 1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1504.03 1445.66">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #020cf5;
+      }
+
+      .cls-2 {
+        fill: #f4f5fe;
+        font-family: SFProDisplay-Bold, 'SF Pro Display';
+        font-size: 382.37px;
+        font-weight: 700;
+      }
+
+      .cls-3 {
+        fill: #1b1a62;
+      }
+    </style>
+  </defs>
+  <text class="cls-2" transform="translate(20.08 405.55)"><tspan x="0" y="0">chop</tspan></text>
+  <text class="cls-2" transform="translate(1032.041 405.5524)"><tspan x="0" y="0">str</tspan></text>
+  <rect class="cls-3" x="817.77" y="515.81" width="459.08" height="120.05" rx="32" ry="32"/>
+  <rect class="cls-1" y="515.81" width="739.81" height="120.05" rx="32" ry="32"/>
+  <path class="cls-1" d="M992.42,0h-68.55c-14.41,0-26.09,11.68-26.09,26.09v33.11c0,14.41,11.68,26.09,26.09,26.09h20.71v709.66c0,7.39,5.99,13.38,13.38,13.38s13.38-5.99,13.38-13.38V85.28h21.08c14.41,0,26.09-11.68,26.09-26.09V26.09c0-14.41-11.68-26.09-26.09-26.09Z"/>
+</svg>

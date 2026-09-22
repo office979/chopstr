@@ -1,0 +1,196 @@
+# chopstr · lokale Entwicklung
+# Produktion: Web + Worker auf EU-Hosting, Postgres = Supabase eu-central-1 (Standard) oder Hetzner (Sovereign),
+# Temporal self-hosted in der EU, S3-kompatibler Objektspeicher in einer EU-Region, GPU-Worker auf EU-GPU-Cloud.
+#
+# Start:   docker compose --env-file ../.env -f infra/docker-compose.yml up -d
+# Danach:  npm run migrate   (Schema anlegen)   ·   Temporal-UI http://localhost:8080   ·   MinIO http://localhost:9001
+
+name: chopstr
+
+x-common-env: &common-env
+  DATABASE_URL: postgres://chopstr:chopstr@postgres:5432/chopstr
+  REDIS_URL: redis://redis:6379
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_NAMESPACE: default
+  TEMPORAL_TASK_QUEUE_CPU: chopstr-cpu
+  TEMPORAL_TASK_QUEUE_GPU: chopstr-gpu
+  S3_ENDPOINT: http://minio:9000
+  S3_REGION: eu-central-1
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-chopstr}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-chopstr-secret}
+  S3_BUCKET_SOURCES: chopstr-sources
+  S3_BUCKET_DERIVED: chopstr-derived
+  S3_FORCE_PATH_STYLE: "true"
+  LANGUAGETOOL_URL: http://languagetool:8010/v2
+  TUS_HOOK_SECRET: ${TUS_HOOK_SECRET:-dev-hook-secret}
+  UPLOAD_MAX_BYTES: "5368709120"
+  APP_ENV: development
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: chopstr
+      POSTGRES_PASSWORD: chopstr
+      POSTGRES_DB: chopstr
+    ports: ["5432:5432"]
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chopstr -d chopstr"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: chopstr
+      POSTGRES_PWD: chopstr
+      POSTGRES_SEEDS: postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+      DYNAMIC_CONFIG_FILE_PATH: /etc/temporal/config/dynamicconfig/development-sql.yaml
+    ports: ["7233:7233"]
+    volumes:
+      - ./temporal/dynamicconfig:/etc/temporal/config/dynamicconfig
+    healthcheck:
+      test: ["CMD-SHELL", "temporal operator cluster health --address temporal:7233 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    depends_on: [temporal]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+    ports: ["8080:8080"]
+
+  minio:
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-chopstr}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-chopstr-secret}
+      MINIO_REGION: eu-central-1
+    ports: ["9000:9000", "9001:9001"]
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Buckets + Lifecycle: Rohdaten 30 Tage, Renders/Ableitungen 90 Tage (Löschnachweis zusätzlich im Audit-Log)
+  minio-init:
+    image: minio/mc:RELEASE.2025-01-17T23-25-50Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-chopstr} ${S3_SECRET_KEY:-chopstr-secret} &&
+      mc mb --ignore-existing local/chopstr-sources &&
+      mc mb --ignore-existing local/chopstr-derived &&
+      mc ilm rule add --expire-days 30 local/chopstr-sources || true &&
+      mc ilm rule add --expire-days 90 local/chopstr-derived || true &&
+      echo 'buckets ready'"
+
+  # Resumable Upload (TUS) direkt in den Objektspeicher; Hooks gehen an die Web-App
+  tusd:
+    image: tusproject/tusd:v2.6.0
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    command: >
+      -port=1080
+      -base-path=/files/
+      -s3-bucket=chopstr-sources
+      -s3-endpoint=http://minio:9000
+      -s3-object-prefix=uploads/
+      -max-size=5368709120
+      -hooks-http=http://web:3000/api/tus/hooks?secret=${TUS_HOOK_SECRET:-dev-hook-secret}
+      -hooks-enabled-events=pre-create,post-finish
+      -behind-proxy
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-chopstr}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-chopstr-secret}
+      AWS_REGION: eu-central-1
+    ports: ["1080:1080"]
+
+  # Grammatik (de-DE, de-AT, de-CH), self-hosted, keine Daten verlassen den Stack
+  languagetool:
+    image: erikvl87/languagetool:6.5
+    environment:
+      Java_Xms: 512m
+      Java_Xmx: 1g
+    ports: ["8010:8010"]
+
+  # Ein CPU-Worker bedient in der Entwicklung beide Queues (ASR auf CPU ist langsam, aber funktional).
+  # Produktion: separater GPU-Worker (Dockerfile.gpu) nur für die Queue chopstr-gpu.
+  worker:
+    build:
+      context: ../workers
+      dockerfile: Dockerfile
+    depends_on:
+      temporal:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    command: python -m chopstr_worker.worker --queues cpu,gpu
+    environment:
+      <<: *common-env
+      LLM_PROVIDER: ${LLM_PROVIDER:-bedrock-eu}
+      AWS_REGION: eu-central-1
+      BEDROCK_MODEL_ID: ${BEDROCK_MODEL_ID:-}
+      MISTRAL_BASE_URL: ${MISTRAL_BASE_URL:-https://api.mistral.ai}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      MISTRAL_MODEL: ${MISTRAL_MODEL:-}
+      ASR_MODEL_DE: ${ASR_MODEL_DE:-primeline/whisper-large-v3-turbo-german}
+      ASR_MODEL_CH: ${ASR_MODEL_CH:-models/swissgerman-ct2}
+      ASR_DEVICE: cpu
+      ASR_COMPUTE: int8
+      HF_TOKEN: ${HF_TOKEN:-}
+      EGRESS_ALLOWLIST: ${EGRESS_ALLOWLIST:-}
+    volumes:
+      - ../workers/models:/app/models
+      - hf-cache:/root/.cache/huggingface
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/web.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      APP_BASE_URL: http://localhost:3000
+      NEXT_PUBLIC_TUS_ENDPOINT: http://localhost:1080/files/
+    ports: ["3000:3000"]
+
+volumes:
+  pg-data:
+  minio-data:
+  hf-cache:

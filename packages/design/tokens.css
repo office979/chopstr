@@ -1,0 +1,76 @@
+/* chopstr · Design-Sprache „Lichtbruch“ · Tokens
+ * Essenz: Schwarz als Raum, Licht als einzige Farbe, Glas und Chrom als Material.
+ * Farbsemantik (strikt):
+ *   Weiß            = Aktion
+ *   Brand-Blau      = Marke, Lichtkanten, Klinge (Logo). Nie als Fließtext (Kontrast zu gering).
+ *   AI-Blau         = KI arbeitet / KI-Vorschlag ausgewählt
+ *   Orange          = Mensch muss prüfen (Sinntreue-Warnung, Relativierung, unsichere Wörter). Sonst nie.
+ *   Spektrum        = nur Verwandlungsmomente (Clip entsteht, Render fertig)
+ */
+:root {
+  /* Räume */
+  --bg: #000000;
+  --bg-raised: #0a0a13;          /* Logo-Tinte */
+  --glass: rgba(255, 255, 255, 0.05);
+  --glass-strong: rgba(255, 255, 255, 0.08);
+  --glass-blur: 32px;
+
+  /* Text-Hierarchie (WCAG AA auf --bg / --bg-raised) */
+  --text: #f4f5fe;               /* Logo-Papier */
+  --text-2: #a1a1aa;
+  --text-3: #71717a;
+  --text-4: #52525b;
+
+  /* Linien */
+  --line: rgba(255, 255, 255, 0.12);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --line-mute: #27272a;
+
+  /* Marke (aus dem Logo) */
+  --brand: #020cf5;
+  --brand-deep: #1b1a62;
+  --brand-glow: 0 0 0 1px rgba(2, 12, 245, 0.55), 0 0 56px rgba(2, 12, 245, 0.45);
+
+  /* KI */
+  --ai: #2f6bff;
+  --ai-soft: #5b8cff;
+  --ai-glow: 0 0 0 1px rgba(91, 140, 255, 0.5), 0 0 48px rgba(47, 107, 255, 0.35);
+  --ai-surface: rgba(27, 26, 98, 0.35);
+
+  /* Mensch muss prüfen */
+  --attention: #ff7a45;
+  --attention-soft: rgba(255, 122, 69, 0.16);
+
+  /* Spektrum (nur Verwandlung) */
+  --spectrum-1: #ffb27a;
+  --spectrum-2: #7fd4ff;
+  --spectrum-3: #ff4fa3;
+  --spectrum: linear-gradient(90deg, var(--spectrum-1), var(--spectrum-2), var(--spectrum-3));
+
+  /* Status */
+  --ok: #f4f5fe;                 /* helles Icon im --line-mute-Kreis */
+  --danger: #ff5c5c;
+
+  /* Geometrie */
+  --radius-card: 30px;
+  --radius-inner: 18px;
+  --radius-pill: 999px;
+  --grain-opacity: 0.05;
+
+  /* Bewegung */
+  --ease: cubic-bezier(0.22, 0.8, 0.2, 1);
+  --dur: 550ms;
+  --dur-fast: 220ms;
+
+  /* Typografie */
+  --font-sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --tracking-display: -0.03em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur: 1ms;
+    --dur-fast: 1ms;
+  }
+}

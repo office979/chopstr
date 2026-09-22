@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Ebene_1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 2160 2160">
+  <!-- Generator: Adobe Illustrator 30.8.1, SVG Export Plug-In . SVG Version: 2.1.4 Build 1)  -->
+  <defs>
+    <style>
+      .st0 {
+        fill: #020cf5;
+      }
+
+      .st1 {
+        stroke: #f4f5fe;
+        stroke-miterlimit: 10;
+        stroke-width: 5px;
+      }
+
+      .st1, .st2 {
+        fill: #0a0a13;
+      }
+
+      .st3 {
+        font-family: SFProDisplay-Medium, 'SF Pro Display';
+        font-size: 50px;
+        font-weight: 500;
+      }
+
+      .st3, .st4, .st5 {
+        fill: #f4f5fe;
+      }
+
+      .st4 {
+        font-family: SFProDisplay-Bold, 'SF Pro Display';
+        font-size: 382.37px;
+        font-weight: 700;
+      }
+
+      .st6 {
+        fill: #1b1a62;
+      }
+    </style>
+  </defs>
+  <rect class="st2" width="2160" height="2160"/>
+  <g>
+    <circle class="st0" cx="738.43" cy="1949.77" r="91.67"/>
+    <text class="st3" transform="translate(641.7177 2098.8947)"><tspan x="0" y="0">#020cf5</tspan></text>
+    <circle class="st6" cx="978.13" cy="1949.77" r="91.67"/>
+    <text class="st3" transform="translate(883.2162 2098.8947)"><tspan x="0" y="0">#1b1a62</tspan></text>
+    <circle class="st1" cx="1212.77" cy="1949.77" r="91.67"/>
+    <text class="st3" transform="translate(1114.3423 2098.8947)"><tspan x="0" y="0">#0a0a13</tspan></text>
+    <circle class="st5" cx="1426.62" cy="1949.77" r="91.67"/>
+    <text class="st3" transform="translate(1344.67 2098.8947)"><tspan x="0" y="0">#f4f5fe</tspan></text>
+  </g>
+  <g>
+    <text class="st4" transform="translate(348.0659 1081.393)"><tspan x="0" y="0">chop</tspan></text>
+    <text class="st4" transform="translate(1360.0249 1081.393)"><tspan x="0" y="0">str</tspan></text>
+    <rect class="st6" x="1145.75" y="1191.65" width="459.08" height="120.05" rx="32" ry="32"/>
+    <rect class="st0" x="327.98" y="1191.65" width="739.81" height="120.05" rx="32" ry="32"/>
+    <path class="st0" d="M1320.41,675.84h-68.55c-14.41,0-26.09,11.68-26.09,26.09v33.11c0,14.41,11.68,26.09,26.09,26.09h20.71v709.66c0,7.39,5.99,13.38,13.38,13.38s13.38-5.99,13.38-13.38v-709.66h21.08c14.41,0,26.09-11.68,26.09-26.09v-33.11c0-14.41-11.68-26.09-26.09-26.09Z"/>
+  </g>
+</svg>

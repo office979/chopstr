@@ -1,0 +1,29 @@
+# chopstr Worker, GPU-Variante (ASR und Diarisierung). Build-Kontext: Monorepo-Root
+#   docker build -f workers/Dockerfile.gpu -t chopstr-worker-gpu .
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 python3-pip python3-venv ffmpeg fonts-inter ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY packages/prompts /app/packages/prompts
+COPY workers/pyproject.toml workers/README.md /app/workers/
+COPY workers/chopstr_worker /app/workers/chopstr_worker
+COPY workers/eval /app/workers/eval
+
+# torch mit CUDA-Wheels; Version an das Basis-Image anpassen
+RUN python3 -m pip install --no-cache-dir --upgrade pip \
+ && python3 -m pip install --no-cache-dir "/app/workers[asr,nlp]"
+
+# Modelle werden zur Laufzeit geladen (ASR_MODEL_DE, ASR_MODEL_CH, HF_TOKEN); Cache als Volume mounten:
+#   -v /srv/hf-cache:/home/worker/.cache
+WORKDIR /app/workers
+RUN useradd -m worker && chown -R worker /app
+USER worker
+ENV ASR_DEVICE=cuda ASR_COMPUTE=int8_float16
+
+ENTRYPOINT ["python3", "-m", "chopstr_worker.worker"]
+CMD ["--queues", "gpu"]

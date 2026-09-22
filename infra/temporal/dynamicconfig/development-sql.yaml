@@ -1,0 +1,12 @@
+# Temporal Dynamic Config für die lokale Entwicklung.
+# Produktion: eigene Werte, insbesondere längere Retention der Workflow-Historie NICHT erhöhen,
+# weil die Historie Transkripte (personenbezogene Daten) enthält.
+limit.maxIDLength:
+  - value: 255
+    constraints: {}
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true
+    constraints: {}
+frontend.enableUpdateWorkflowExecution:
+  - value: true
+    constraints: {}

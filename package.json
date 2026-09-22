@@ -1,0 +1,22 @@
+{
+  "name": "chopstr",
+  "private": true,
+  "version": "0.1.0",
+  "description": "chopstr: Clipping-Tool für den DACH-Raum. Sinntreu geschnitten, jede Auswahl erklärt, EU-verarbeitet.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace apps/web",
+    "build": "npm run build --workspace apps/web",
+    "lint": "npm run lint --workspace apps/web",
+    "test": "npm run test --workspace apps/web --if-present && npm run test:worker",
+    "test:worker": "cd workers && (uv run pytest -q || python3 -m pytest -q)",
+    "migrate": "node scripts/migrate.mjs",
+    "residency:check": "cd workers && (uv run pytest -q tests/test_residency.py || python3 -m pytest -q tests/test_residency.py)"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

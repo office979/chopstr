@@ -29,6 +29,8 @@ export interface CaptionPresetDef {
   highlight_words: boolean;
   /* nur Anzeige in der stummen Vorschau */
   animated: boolean;
+  /* 1 = ein Wort je Einblendung (Karaoke-Stil). Spiegel von words_per_card in captions_de.py */
+  words_per_card?: number;
 }
 
 export const PRESETS: Record<CaptionPreset, CaptionPresetDef> = {
@@ -71,6 +73,48 @@ export const PRESETS: Record<CaptionPreset, CaptionPresetDef> = {
     highlight_words: true,
     animated: true,
   },
+  tiktok_words: {
+    name: "tiktok_words",
+    safe: { top: 108, bottom: OUTPUT_H - 320, left: 60, right: OUTPUT_W - 120 },
+    font: "Inter",
+    font_px: 104,
+    bold: true,
+    max_lines: 1,
+    outline_px: 5,
+    box: false,
+    bottom_margin_px: 260,
+    highlight_words: true,
+    animated: true,
+    words_per_card: 1,
+  },
+  reels_words: {
+    name: "reels_words",
+    safe: { top: 210, bottom: 1610, left: 60, right: OUTPUT_W - 120 },
+    font: "Inter",
+    font_px: 92,
+    bold: true,
+    max_lines: 1,
+    outline_px: 4,
+    box: false,
+    bottom_margin_px: 260,
+    highlight_words: true,
+    animated: true,
+    words_per_card: 1,
+  },
+  shorts_words: {
+    name: "shorts_words",
+    safe: { top: 120, bottom: 1620, left: 60, right: OUTPUT_W - 120 },
+    font: "Inter",
+    font_px: 92,
+    bold: true,
+    max_lines: 1,
+    outline_px: 4,
+    box: false,
+    bottom_margin_px: 260,
+    highlight_words: true,
+    animated: true,
+    words_per_card: 1,
+  },
   linkedin_static: {
     name: "linkedin_static",
     safe: { top: 120, bottom: 1700, left: 80, right: OUTPUT_W - 80 },
@@ -99,10 +143,12 @@ export const PRESETS: Record<CaptionPreset, CaptionPresetDef> = {
   },
 };
 
+/* Kurzformate wortweise, LinkedIn bleibt ruhig und mehrwortig (Entscheidung P7).
+ * Muss zu PLATFORM_DEFAULT_PRESET in captions_de.py passen. */
 export const PLATFORM_DEFAULT_PRESET: Record<Platform, CaptionPreset> = {
-  tiktok: "tiktok_bold",
-  reels: "reels_clean",
-  shorts: "shorts_clean",
+  tiktok: "tiktok_words",
+  reels: "reels_words",
+  shorts: "shorts_words",
   linkedin: "linkedin_static",
 };
 

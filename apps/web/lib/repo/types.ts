@@ -20,10 +20,15 @@ export type Address = "du" | "sie";
 export type Country = "DE" | "AT" | "CH";
 export type GenderMode = "neutral" | "paarform" | "doppelpunkt" | "stern" | "keine";
 export type AsrVariant = "de" | "de-CH";
+/* Die *_words-Presets zeigen ein Wort je Einblendung (Karaoke-Stil) und sind der Standard der
+ * Kurzformate. Spiegel von PRESETS in workers/chopstr_worker/pipeline/captions_de.py. */
 export type CaptionPreset =
   | "tiktok_bold"
   | "reels_clean"
   | "shorts_clean"
+  | "tiktok_words"
+  | "reels_words"
+  | "shorts_words"
   | "linkedin_static"
   | "corporate_third";
 

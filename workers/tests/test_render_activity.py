@@ -65,7 +65,7 @@ def test_render_pack_writes_clip_hook_captions_events_and_costs(fake_db, fake_co
     }  # fmt: skip
     plan = clip["render_plan"]
     assert plan["contract"] == "render_plan_v1" and plan["reframe"]["strategy"] == AUTO_STRATEGY and plan["reframe"]["detector"] == "none"
-    assert plan["captions"]["preset"] == "tiktok_bold" and plan["hook_overlay"]["seconds"] == 3.0
+    assert plan["captions"]["preset"] == "tiktok_words" and plan["hook_overlay"]["seconds"] == 3.0
     assert plan["sources"] == {"storage_key": "uploads/in.mp4", "transcript_version": 1, "hook_version": 1, "candidate_id": project["cid"]}
     assert plan["title_card"] == {"text": "Preise im Handwerk", "seconds": 2.5}
     assert isinstance(clip["cps_warnings"], list) and isinstance(clip["fidelity_warnings"], list)
@@ -79,7 +79,9 @@ def test_render_pack_writes_clip_hook_captions_events_and_costs(fake_db, fake_co
     assert plan["hook_overlay"]["text"] == hooks[0]["onscreen_hook"]
 
     caps = [c for c in fake_db.caption_versions if c["clip_id"] == clip_id]
-    assert len(caps) == 1 and caps[0]["version"] == 1 and caps[0]["origin"] == "auto" and caps[0]["preset"] == "tiktok_bold"
+    assert len(caps) == 1 and caps[0]["version"] == 1 and caps[0]["origin"] == "auto" and caps[0]["preset"] == "tiktok_words"
+    # Wortweise: jede Karte trägt genau eine Zeile mit einem Wort
+    assert all(len(card["lines"]) == 1 and " " not in card["lines"][0].strip() for card in caps[0]["cards"])
     assert caps[0]["cards"] and set(caps[0]["cards"][0]) == {"start", "end", "lines"} and caps[0]["ass_key"] == base + ".ass"
     assert caps[0]["cards"][0]["start"] >= 0.0 and caps[0]["cards"][-1]["end"] <= 11.5 + 0.01
     assert plan["captions"]["cards"] == len(caps[0]["cards"])
@@ -173,7 +175,7 @@ def test_helpers_fidelity_and_preset():
     assert any(w["type"] == "negation_removed" for w in warns)  # "nicht" fällt in die Lücke 6,5 bis 7,0
     assert act_render.fidelity_warnings(words, [{"start": 0.5, "end": 13.0, "role": "body"}], 0.5, 13.0) == []
     assert act_render.caption_preset_for("linkedin", {"default_platform": "linkedin", "caption_preset": "corporate_third"}) == "corporate_third"
-    assert act_render.caption_preset_for("tiktok", {"default_platform": "linkedin", "caption_preset": "corporate_third"}) == "tiktok_bold"
+    assert act_render.caption_preset_for("tiktok", {"default_platform": "linkedin", "caption_preset": "corporate_third"}) == "tiktok_words"
     assert act_render.ad_label_for({"is_ad": True}, "AT") == "Werbung" and act_render.ad_label_for({}, "DE") is None
 
 

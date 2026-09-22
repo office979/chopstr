@@ -506,7 +506,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     text_field = caption_text_field_for(style)
     cards = captions_de.cards_for(out_words, preset, text_field=text_field)
     cps = captions_de.cps_warnings(
-        captions_de.build_cards(out_words, preset.max_chars, preset.max_lines, text_field), text_field=text_field
+        captions_de.build_cards(out_words, preset.max_chars, preset.max_lines, text_field, preset.words_per_card), text_field=text_field
     )
     fid = fidelity_warnings(words, segments, cand.get("start_s"), cand.get("end_s"))
     hook_override = style.get("hook_overlay") if isinstance(style.get("hook_overlay"), bool) else None

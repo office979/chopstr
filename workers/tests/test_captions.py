@@ -23,9 +23,21 @@ def test_presets_and_safe_zones():
     assert (tt.safe.top, tt.safe.bottom, tt.safe.left, tt.safe.right) == (108, 1600, 60, 960)
     assert cap.PRESETS["reels_clean"].safe.top == 210 and cap.PRESETS["reels_clean"].safe.bottom == 1610
     assert cap.PRESETS["shorts_clean"].safe.top == 120 and cap.PRESETS["shorts_clean"].safe.bottom == 1620
-    assert set(cap.PRESETS) == {"tiktok_bold", "reels_clean", "shorts_clean", "linkedin_static", "corporate_third"}
-    assert cap.preset_for("tiktok").name == "tiktok_bold"
+    assert set(cap.PRESETS) == {
+        "tiktok_bold",
+        "reels_clean",
+        "shorts_clean",
+        "tiktok_words",
+        "reels_words",
+        "shorts_words",
+        "linkedin_static",
+        "corporate_third",
+    }
+    # Kurzformate wortweise als Standard, LinkedIn bleibt mehrwortig
+    assert cap.preset_for("tiktok").name == "tiktok_words"
+    assert cap.preset_for("tiktok").words_per_card == 1
     assert cap.preset_for("linkedin").name == "linkedin_static"
+    assert cap.preset_for("linkedin").words_per_card is None
     assert cap.preset_for("corporate_third").name == "corporate_third"
     for p in cap.PRESETS.values():
         assert p.safe.top < p.baseline_y < p.safe.bottom

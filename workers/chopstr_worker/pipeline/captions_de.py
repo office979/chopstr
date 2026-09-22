@@ -75,6 +75,8 @@ class CaptionPreset:
     bottom_margin_px: int = 260  # Abstand der Textunterkante zur Unterkante der Safe Zone
     highlight_words: bool = True
     all_caps: bool = False
+    # 1 = ein Wort je Einblendung (Karaoke-Stil der Kurzformate), None = nach Sinn gruppieren
+    words_per_card: int | None = None
     extra: dict = field(default_factory=dict)
 
     @property
@@ -91,6 +93,17 @@ PRESETS: dict[str, CaptionPreset] = {
     "tiktok_bold": CaptionPreset("tiktok_bold", SafeZone(108, H - 320, 60, W - 120), font_px=78, bold=True),
     "reels_clean": CaptionPreset("reels_clean", SafeZone(210, 1610, 60, W - 120), font_px=66, bold=True, outline_px=3),
     "shorts_clean": CaptionPreset("shorts_clean", SafeZone(120, 1620, 60, W - 120), font_px=66, bold=True, outline_px=3),
+    # Ein Wort je Einblendung, größer gesetzt: der Karaoke-Stil, der auf TikTok und Reels üblich ist.
+    # Wortweise gibt es nie eine zweite Zeile, deshalb max_lines = 1.
+    "tiktok_words": CaptionPreset(
+        "tiktok_words", SafeZone(108, H - 320, 60, W - 120), font_px=104, bold=True, max_lines=1, words_per_card=1,
+    ),
+    "reels_words": CaptionPreset(
+        "reels_words", SafeZone(210, 1610, 60, W - 120), font_px=92, bold=True, outline_px=4, max_lines=1, words_per_card=1,
+    ),
+    "shorts_words": CaptionPreset(
+        "shorts_words", SafeZone(120, 1620, 60, W - 120), font_px=92, bold=True, outline_px=4, max_lines=1, words_per_card=1,
+    ),
     "linkedin_static": CaptionPreset(
         "linkedin_static", SafeZone(120, 1700, 80, W - 80), font_px=54, bold=False, outline_px=0, box=True,
         highlight_words=False, bottom_margin_px=200,
@@ -100,7 +113,9 @@ PRESETS: dict[str, CaptionPreset] = {
         highlight_words=False, max_lines=2, bottom_margin_px=160,
     ),
 }
-PLATFORM_DEFAULT_PRESET = {"tiktok": "tiktok_bold", "reels": "reels_clean", "shorts": "shorts_clean", "linkedin": "linkedin_static"}
+# Kurzformate wortweise (Karaoke-Stil), LinkedIn bleibt ruhig und mehrwortig (Entscheidung P7).
+# Die mehrwortigen Varianten bleiben als Preset wählbar: tiktok_bold, reels_clean, shorts_clean.
+PLATFORM_DEFAULT_PRESET = {"tiktok": "tiktok_words", "reels": "reels_words", "shorts": "shorts_words", "linkedin": "linkedin_static"}
 
 
 def preset_for(name_or_platform: str) -> CaptionPreset:
@@ -138,6 +153,7 @@ def scaled_preset(preset: str | CaptionPreset, out_w: int, out_h: int) -> Captio
         bottom_margin_px=int(round(p.bottom_margin_px * fy)),
         highlight_words=p.highlight_words,
         all_caps=p.all_caps,
+        words_per_card=p.words_per_card,
         extra=dict(p.extra),
     )
 
@@ -214,9 +230,21 @@ def wrap_lines(tokens: list[str], limit: int, max_lines: int = 2) -> list[str]:
     return out
 
 
-def build_cards(words: list[dict], limit: int | None = None, max_lines: int = 2, text_field: str = "text") -> list[list[dict]]:
+def build_cards(
+    words: list[dict],
+    limit: int | None = None,
+    max_lines: int = 2,
+    text_field: str = "text",
+    words_per_card: int | None = None,
+) -> list[list[dict]]:
     """Gruppiert Wörter zu Karten. Bricht an Satzzeichen, Konjunktionen, Pausen und vor langen Komposita.
-    ``text_field`` bestimmt, welche Wortform Länge und Satzzeichen liefert (siehe ``word_text``)."""
+    ``text_field`` bestimmt, welche Wortform Länge und Satzzeichen liefert (siehe ``word_text``).
+
+    ``words_per_card`` schaltet auf feste Gruppengröße um: 1 bedeutet ein Wort je Einblendung, der
+    Karaoke-Stil der Kurzformate. Satzzeichen bleiben am Wort, die Zeiten kommen unverändert aus dem
+    Transkript. Ohne den Parameter gilt die sinngemäße Gruppierung."""
+    if words_per_card and words_per_card > 0:
+        return [words[i : i + words_per_card] for i in range(0, len(words), words_per_card)]
     limit = limit or PRESETS["tiktok_bold"].max_chars
     cap = limit * max_lines
     cards: list[list[dict]] = []
@@ -309,7 +337,7 @@ def to_ass(
         "[Events]\nFormat: Layer, Start, End, Style, Text\n"
     )
     events = []
-    for card in build_cards(words, p.max_chars, p.max_lines, text_field):
+    for card in build_cards(words, p.max_chars, p.max_lines, text_field, p.words_per_card):
         lines = card_lines(card, p, text_field)
         if not p.highlight_words:
             s, e = float(card[0]["start"]) - clip_start, float(card[-1]["end"]) - clip_start
@@ -366,7 +394,7 @@ def cards_for(
     text_field = check_text_field(text_field)
     p = preset if isinstance(preset, CaptionPreset) else preset_for(preset)
     out = []
-    for card in build_cards(words, p.max_chars, p.max_lines, text_field):
+    for card in build_cards(words, p.max_chars, p.max_lines, text_field, p.words_per_card):
         lines = [" ".join(piece for _, piece in ln) for ln in card_lines(card, p, text_field)]
         out.append(
             {

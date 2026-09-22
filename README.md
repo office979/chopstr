@@ -11,9 +11,10 @@ Die KI erzeugt Vorschläge, Scores, Belege und Render-Pläne. Ein Mensch gibt fr
 Renderer baut das Video.
 
 Stand: **Phase 0 bis 4 sind gebaut** (Fundament, Deutsch hören, Story-Engine und Review, Copy/Reframing/
-Captions/Render/Provenienz, Auth/Rollen/Gast-Freigabe/Abrechnung/AVV/Löschung/CI-Manager). **Phase 5**
-(API + MCP, Publishing, Lernschleife, Serien, Hook-A/B, Folien-Crop, Schweizerdeutsch-Beta, Sovereign) ist auf
-Worker-Seite und im MCP-Server fertig; die Web-Wellen 5a und 5b sind in Arbeit.
+Captions/Render/Provenienz, Auth/Rollen/Gast-Freigabe/Abrechnung/AVV/Löschung/CI-Manager). **Phase 5** (API + MCP,
+Publishing, Lernschleife, Serien, Hook-A/B, Folien-Crop, Schweizerdeutsch-Beta, Sovereign) ist ebenfalls gebaut.
+Alle sechs Phasen des Build-Prompts sind damit umgesetzt; was fehlt, ist Betrieb und Abnahme (siehe
+`docs/RISIKEN-UND-RUECKFRAGEN.md`).
 
 ## Architektur
 
@@ -109,7 +110,7 @@ Alle Variablen mit Erklärung stehen in [`.env.example`](.env.example). Die wich
 | `docker compose up` startet alles; Upload erscheint als Workflow in der Temporal-UI | Compose-Datei vorhanden. Auf dieser Entwicklungsmaschine ist kein Docker installiert, deshalb noch nicht als Ganzes gestartet. |
 | 60-Min-Podcast wird transkribiert und diarisiert, Ergebnis im Editor korrigierbar | Pipeline und Editor gebaut. Echtlauf braucht GPU-Worker und Modelle (siehe `workers/README.md`). |
 | WER auf Referenz-Set (Ziel Studio-Audio < 5 %) | `workers/eval/wer_eval.py` vorhanden; Referenzdaten fehlen noch. |
-| Unit-Tests für Phase-0/1-Module grün | 161 Tests grün (inkl. Phase 2 und 3, Medien-Regression mit ffmpeg), `ruff` sauber (22.09.2026). |
+| Unit-Tests für Phase-0/1-Module grün | 264 Worker-Tests grün (Phase 0 bis 5, Medien-Regression mit ffmpeg), 53 MCP-Tests grün, `ruff` sauber (22.09.2026). |
 | Kein Aufruf außerhalb der EU (Test grün) | `workers/tests/test_residency.py` grün: Sovereign blockt Bedrock, Nicht-EU-Hosts werden vor dem Verbindungsaufbau abgewiesen. |
 | UI erfüllt WCAG AA, Fallback ohne `backdrop-filter` | Umgesetzt in `apps/web/app/globals.css` und Komponenten. |
 | README mit Setup, Env-Variablen, Architektur | Diese Datei. |
@@ -140,6 +141,21 @@ gerendert (1080×1920 und 1080×1350, je 17,6 s, -16,0 LUFS), manuelle Hook-Vers
 Re-Render übernimmt sie. Frames zeigen Titelkarte, Overlay und Captions. Dabei behoben: Render-Geometrie kommt
 jetzt immer aus ffprobe der echten Datei, nicht aus DB-Metadaten.
 
+**Phase 4 (Pilot in der Agentur)**: eigene Auth (Argon2id, Sitzungen, Magic-Link), Registrierung mit Workspace,
+Einladungen mit Rollen und Marken-Scope, signierte Upload-Token, Gast-Freigabe mit öffentlicher Seite und
+Export-Sperre, Abrechnung nach Stunden (manual, Stripe-Webhook idempotent, Mollie vorgesehen), AVV/TOMs/
+Subprozessoren mit Annahme, Lösch-Workflow mit Nachweis und Retention-Schedule, Datenexport als ZIP, CI-Manager
+mit Font- und Logo-Upload, Markenprofil-Historie. Gegen Postgres durchgespielt (Registrierung, Einladung,
+Rollen 403, Upload-Token, Gast-Entscheidung, Webhook-Signatur, AVV, Löschjob, Export, Font-Upload).
+
+**Phase 5 (erste Kunden außerhalb des Netzwerks)**: API-Schlüssel mit Scopes, `/api/v1` (21 Pfade, OpenAPI 3.1),
+Webhooks mit Outbox, HMAC-Signatur und Backoff, MCP-Server (`packages/mcp-server`, gegen die echte API geprüft),
+Publishing-Verbindungen mit Capability-Flags (manual, TikTok, Instagram, YouTube, LinkedIn nach Doku),
+PublishWorkflow mit Metrik-Fenstern, Decision Log, Reward je Account, Ridge-Lernschleife für Rubrik-Gewichte,
+Thompson-Sampling für Hook-Muster, Hook-A/B-Experimente mit Posterior-Konfidenz, Content-Serien mit
+Variations-Prüfung, Wochenreport, Folien-Crop als Bild-im-Bild, Schweizerdeutsch-Erkennung mit Original/Standard-
+Umschalter, Sovereign-Compose-Overlay mit vLLM (`docs/SOVEREIGN.md`).
+
 **ffmpeg-Hinweis**: Einbrennen von Captions, Titelkarte und Hook braucht ffmpeg mit `libass` und
 `libfreetype`. Das Homebrew-ffmpeg auf der Entwicklungsmaschine hat beides nicht; der Worker erkennt das,
 rendert ohne Overlays und meldet es im Event (`captions_burned = false`). Für Tests und lokale Renders liefert
@@ -163,4 +179,4 @@ das PyPI-Paket `imageio-ffmpeg` ein statisches ffmpeg mit libass (`pip install i
 | 2 | Heatmap, LLM-Vorschlag, Rubrik, Story-Graph, Review-UI (gebaut; Blindtest offen) | Blindtest: Precision@10 > 0,5 |
 | 3 | Reframing, Caption-Presets, Copy-Engine + Linter, LinkedIn-Paket, C2PA (gebaut; YuNet und c2patool im Produktions-Image nachrüsten) | Ein Klick → postbares Paket |
 | 4 | Organisationen, Rollen, Freigaben, Gast-Links, Abrechnung nach Stunden, AVV, Lösch-Workflow, CI-Manager (gebaut; Stripe Checkout ohne Konto ungetestet) | Pilot in der eigenen Agentur |
-| 5 | Sovereign-Tarif, API + MCP-Server, Publishing, Lernschleife, Serien, Hook-A/B, Folien-Crop, Schweizerdeutsch-Beta (Worker und MCP gebaut, Web in Arbeit; Plattform-APIs vor Release gegen Originaldoku prüfen) | Erste zahlende Kunden |
+| 5 | Sovereign-Tarif, API + MCP-Server, Publishing, Lernschleife, Serien, Hook-A/B, Folien-Crop, Schweizerdeutsch-Beta (gebaut; Plattform-APIs ohne registrierte Apps ungetestet, vor Release gegen Originaldoku prüfen) | Erste zahlende Kunden |

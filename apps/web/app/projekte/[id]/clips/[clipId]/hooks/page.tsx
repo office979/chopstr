@@ -10,6 +10,10 @@ import { previewFontFor } from "@/lib/brand/preview-font";
 import { latestByClip } from "@/lib/guest/approval";
 import { lintProfileFrom } from "@/lib/clips/render-demo";
 import { PLATFORM_LABELS } from "@/lib/clips/labels";
+import { getPublishingRepo } from "@/lib/repo/publishing";
+import { canExt } from "@/lib/auth/permissions-publishing";
+import { orderVariants } from "@/lib/experiments/thompson";
+import { recordDecision } from "@/lib/decision-log";
 import { HookStudio } from "./HookStudio";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +42,26 @@ export default async function HookStudioPage({ params }: Props) {
     getQuota(repo),
   ]);
   const previewFont = await previewFontFor(repo, brand);
+
+  /* Lernschleife: Reihenfolge der fünf Varianten per Thompson Sampling über hook_pattern_stats der Marke (P14) */
+  const pub = getPublishingRepo();
+  const [stats, extrasList] = await Promise.all([brand ? pub.listHookPatternStats(brand.id) : Promise.resolve([]), pub.getClipExtras([clipId])]);
+  const rawVariants = [...versions].reverse().find((v) => v.variants.length > 0)?.variants ?? [];
+  const ordered = orderVariants(rawVariants, stats, clipId);
+  if (rawVariants.length > 0 && can(session.role, "hook.edit")) {
+    await recordDecision({
+      decision_type: "hook_variant_shown",
+      actor_type: "system",
+      brand_profile_id: brand?.id ?? null,
+      source_id: source.id,
+      candidate_id: clip.candidate_id,
+      clip_id: clipId,
+      features: { patterns: ordered.variants.map((v) => v.pattern), learned: ordered.learned, platform: clip.platform },
+      alternatives: [],
+      chosen: { order: ordered.order, first: ordered.variants[0]?.pattern ?? null },
+    });
+  }
+  const extras = extrasList[0] ?? { id: clipId, experiment_id: null, variant: null, series_id: null, series_index: null, reframe_override: null };
 
   return (
     <PageShell width="wide" backgroundWord="Hook" className="pt-24 sm:pt-28">
@@ -77,6 +101,9 @@ export default async function HookStudioPage({ params }: Props) {
         planAllowsGuest={Boolean(quota.plan?.features?.guest_approval)}
         planName={quota.plan?.name ?? "Starter"}
         previewFont={previewFont}
+        variantOrder={{ patterns: ordered.order, learned: ordered.learned }}
+        extras={extras}
+        canExperiment={canExt(session.role, "experiments.manage")}
       />
     </PageShell>
   );

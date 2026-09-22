@@ -335,7 +335,10 @@ class FakeDB:
                 src.get("source_title"), src.get("source_url"), p.get("ci"),
             )])  # fmt: skip
         if q.startswith("select id, status, aspect, composition, title_card, ad_label, ai_features, speaker_positions, file_key from clips"):
-            rows = sorted((c for c in self.clips.values() if c["candidate_id"] == params[0] and c["platform"] == params[1]), key=lambda c: -c["created_at"])
+            if "where id = %s" in q:  # gezielter Render eines Clips (Ziel "plattform:clip_id")
+                rows = [c for c in self.clips.values() if c["id"] == params[0] and c["candidate_id"] == params[1] and c["platform"] == params[2]]
+            else:
+                rows = sorted((c for c in self.clips.values() if c["candidate_id"] == params[0] and c["platform"] == params[1]), key=lambda c: -c["created_at"])
             return FakeCursor([(c["id"], c["status"], c["aspect"], c["composition"], c["title_card"], c["ad_label"], c["ai_features"], c["speaker_positions"], c["file_key"]) for c in rows[:1]])
         if q.startswith("insert into clips"):
             row = self._insert_row(sql, params)

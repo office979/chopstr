@@ -10,6 +10,7 @@ import { Timecode } from "@/components/ui/Timecode";
 import { cn } from "@/components/ui/cn";
 import { reclassify, countFillers } from "@/lib/transcript/fillers";
 import type { TranscriptVersion, TranscriptWord } from "@/lib/repo/types";
+import { countNormalizedWords, dialectHint, dialectOf, displayText, type TextMode } from "@/lib/transcript/dialect";
 import { usePlayer } from "./usePlayer";
 import { VideoStage } from "./VideoStage";
 
@@ -87,6 +88,12 @@ export function TranscriptEditor({ sourceId, title, durationS, videoSrc, transcr
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [followPlayback, setFollowPlayback] = useState(true);
+  /* Schweizerdeutsch-Beta (5c): Hinweis aus stats.dialect, Umschalter Original / Standard über words[].text_norm */
+  const dialect = useMemo(() => dialectOf(transcript.stats), [transcript.stats]);
+  const hint = useMemo(() => dialectHint(dialect, transcript.asr_variant), [dialect, transcript.asr_variant]);
+  const normalizedCount = useMemo(() => countNormalizedWords(words), [words]);
+  const showTextMode = normalizedCount > 0 || dialect?.variant === "de-CH";
+  const [textMode, setTextMode] = useState<TextMode>("original");
 
   const paragraphs = useMemo(() => buildParagraphs(words), [words]);
   const activeIndex = useMemo(() => findActiveIndex(words, player.currentTime), [words, player.currentTime]);
@@ -243,6 +250,40 @@ export function TranscriptEditor({ sourceId, title, durationS, videoSrc, transcr
             />
             <Toggle checked={followPlayback} onChange={setFollowPlayback} label="Text folgt Wiedergabe" />
           </div>
+          {(hint || showTextMode) && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+              {hint && (
+                <div className="flex min-w-0 flex-col gap-1">
+                  <Badge tone={hint.tone}>{hint.text}</Badge>
+                  {hint.detail && <p className="text-xs text-text-2">{hint.detail}</p>}
+                  {hint.tone === "attention" && (
+                    <p className="text-xs text-text-2">Im Markenprofil die ASR-Variante de-CH wählen und neu transkribieren. Geschützte Begriffe bleiben immer im Original.</p>
+                  )}
+                </div>
+              )}
+              {showTextMode && (
+                <div role="group" aria-label="Textform" className="flex items-center gap-2">
+                  <span className="text-xs text-text-2">Textform</span>
+                  <div className="flex rounded-pill border border-line p-0.5">
+                    {(["original", "standard"] as TextMode[]).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        aria-pressed={textMode === mode}
+                        onClick={() => setTextMode(mode)}
+                        className={cn(
+                          "transition-soft rounded-pill px-3 py-1 text-xs font-medium",
+                          textMode === mode ? "bg-white/10 text-text" : "text-text-2 hover:text-text",
+                        )}
+                      >
+                        {mode === "original" ? "Original" : `Standard (${normalizedCount})`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-line pt-4 text-sm">
             <div>
               <dt className="text-text-2">Wörter</dt>
@@ -355,6 +396,7 @@ export function TranscriptEditor({ sourceId, title, durationS, videoSrc, transcr
                         softSuggested ? "Weicher Füller, Vorschlag zur Entfernung" : null,
                         w.negation ? "Verneinung" : null,
                         corrected ? `Korrigiert (vorher „${corrections.get(i)?.old_text}“)` : null,
+                        textMode === "standard" && displayText(w, "standard") !== w.text ? `Original: ${w.text}` : null,
                       ]
                         .filter(Boolean)
                         .join(" · ");
@@ -385,9 +427,10 @@ export function TranscriptEditor({ sourceId, title, durationS, videoSrc, transcr
                             corrected && "text-ai-soft",
                             w.negation && "font-semibold",
                             active && "word-active",
+                            textMode === "standard" && displayText(w, "standard") !== w.text && "underline decoration-dotted underline-offset-4",
                           )}
                         >
-                          {w.text}
+                          {displayText(w, textMode)}
                         </button>
                       );
                     })}

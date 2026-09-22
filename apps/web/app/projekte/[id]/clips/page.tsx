@@ -8,6 +8,8 @@ import { requireSession } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
 import { getQuota } from "@/lib/billing/quota";
 import { previewFontFor } from "@/lib/brand/preview-font";
+import { getPublishingRepo } from "@/lib/repo/publishing";
+import { canExt } from "@/lib/auth/permissions-publishing";
 import { ClipBoard } from "./ClipBoard";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +37,16 @@ export default async function ClipsPage({ params }: Props) {
     getQuota(repo),
   ]);
   const previewFont = await previewFontFor(repo, brand);
+  const pub = getPublishingRepo();
+  const clipIds = clips.map((c) => c.id);
+  const [connections, seriesList, publications, feedback, extrasList, workspace] = await Promise.all([
+    pub.listConnections(),
+    pub.listSeries(),
+    pub.listPublicationsForClips(clipIds),
+    pub.listFeedbackForClips(clipIds),
+    pub.getClipExtras(clipIds),
+    repo.getWorkspace(),
+  ]);
 
   if (clips.length === 0) {
     return (
@@ -70,6 +82,12 @@ export default async function ClipsPage({ params }: Props) {
           <p className="mt-1 text-sm text-text-2">Jeder Render ist ein deterministischer Plan, den du prüfen kannst.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <ButtonLink href="/serien" variant="ghost" size="sm">
+            Serien
+          </ButtonLink>
+          <ButtonLink href="/experimente" variant="ghost" size="sm">
+            Experimente
+          </ButtonLink>
           <ButtonLink href={`/projekte/${source.id}/review`} variant="ghost" size="sm">
             Review
           </ButtonLink>
@@ -93,6 +111,18 @@ export default async function ClipsPage({ params }: Props) {
         planName={quota.plan?.name ?? "Starter"}
         canDelete={can(session.role, "source.delete")}
         previewFont={previewFont}
+        publishing={{
+          connections: connections.filter((c) => c.status === "connected"),
+          series: seriesList.filter((s) => s.active),
+          publications,
+          feedback,
+          extras: Object.fromEntries(extrasList.map((e) => [e.id, e])),
+          dpaSigned: Boolean(workspace.dpa_signed_at),
+          plan: quota.plan ? { name: quota.plan.name, features: quota.plan.features } : null,
+          canPublish: canExt(session.role, "publishing.publish"),
+          canSeries: canExt(session.role, "series.manage"),
+          canRender: can(session.role, "clip.render"),
+        }}
       />
     </PageShell>
   );

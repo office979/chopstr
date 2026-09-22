@@ -4,6 +4,7 @@ import { requireApiRole } from "@/lib/auth/guard";
 import { signalApprove } from "@/lib/temporal";
 import type { Clip, Platform } from "@/lib/repo/types";
 import { PLATFORMS, isPlatform } from "@/lib/clips/labels";
+import { candidateFeatures, recordDecision } from "@/lib/decision-log";
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +72,18 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const candidate = await repo.setCandidateVerdict(cid, verdict, reason || undefined);
   if (!candidate) return Response.json({ error: "Kandidat nicht gefunden" }, { status: 404 });
+
+  /* Decision Log (A3): menschliches Urteil mit Rubrik-Merkmalen, Lernsignal für learning.py */
+  await recordDecision({
+    decision_type: "candidate_verdict",
+    actor_type: "user",
+    brand_profile_id: source.brand_profile_id,
+    source_id: id,
+    candidate_id: cid,
+    features: { ...candidateFeatures(candidate), platforms: verdict === "accepted" ? clips.map((c) => c.platform) : [] },
+    alternatives: [{ verdict: verdict === "accepted" ? "rejected" : "accepted" }],
+    chosen: { verdict, reason: reason || null, clip_ids: clips.map((c) => c.id) },
+  });
 
   const signaled: Platform[] = [];
   if (verdict === "accepted") {

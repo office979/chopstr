@@ -25,6 +25,23 @@ import {
 import { RENDER_STEP } from "@/lib/pipeline";
 import { compositionDuration } from "@/lib/clips/render-demo";
 import { PLATFORM_DEFAULT_PRESET } from "@/lib/clips/presets";
+import { publishGates } from "@/lib/publishing/gates";
+import type { ClipExtras, PerformanceFeedback, PlatformConnection, Publication, Series } from "@/lib/repo/types-publishing";
+import { ClipPublishing } from "./ClipPublishing";
+
+/* Publishing, Serien und Reframe-Override je Clip (Phase 5b, 5c) */
+export interface ClipBoardPublishing {
+  connections: PlatformConnection[];
+  series: Series[];
+  publications: Publication[];
+  feedback: PerformanceFeedback[];
+  extras: Record<string, ClipExtras>;
+  dpaSigned: boolean;
+  plan: { name: string; features: Record<string, unknown> } | null;
+  canPublish: boolean;
+  canSeries: boolean;
+  canRender: boolean;
+}
 
 interface Props {
   sourceId: string;
@@ -42,6 +59,7 @@ interface Props {
   planName: string;
   canDelete: boolean;
   previewFont: PreviewFont | null;
+  publishing?: ClipBoardPublishing;
 }
 
 interface ApiError {
@@ -111,8 +129,10 @@ export function ClipBoard({
   planName,
   canDelete,
   previewFont,
+  publishing,
 }: Props) {
   const [clips, setClips] = useState<Clip[]>(initialClips);
+  const [extras, setExtras] = useState<Record<string, ClipExtras>>(publishing?.extras ?? {});
   const [approvals, setApprovals] = useState<Map<string, GuestApproval>>(() => latestByClip(guestApprovals));
   const [deleteTarget, setDeleteTarget] = useState<Clip | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -363,6 +383,10 @@ export function ClipBoard({
               const detail = details[clip.id];
               const open = previewId === clip.id;
               const c2pa = clip.provenance?.c2pa;
+              const clipExtras = extras[clip.id] ?? { id: clip.id, experiment_id: null, variant: null, series_id: null, series_index: null, reframe_override: null };
+              const gates = publishing
+                ? publishGates({ clip, candidate: g.candidate, approval, workspace: { dpa_signed_at: publishing.dpaSigned ? "ja" : null }, plan: publishing.plan })
+                : [];
               return (
                 <li key={clip.id} className="flex min-w-0 flex-col gap-3 rounded-inner border border-line p-4">
                   <div
@@ -389,6 +413,11 @@ export function ClipBoard({
                         {PLATFORM_LABELS[clip.platform]}
                       </Badge>
                       <Badge className="h-6 bg-black/60 px-2 font-mono text-[11px]">{clip.aspect}</Badge>
+                      {clipExtras?.variant && (
+                        <Badge tone="ai" className="h-6 bg-black/60 px-2 font-mono text-[11px]" title="Hook-A/B-Variante">
+                          {clipExtras.variant}
+                        </Badge>
+                      )}
                     </div>
                   </div>
 
@@ -457,6 +486,15 @@ export function ClipBoard({
                   {isDone(clip) && clip.render_plan && !neutral && (
                     <p className="text-xs text-text-2">
                       Reframe: {clip.render_plan.reframe.strategy === "talking_head" ? "ein Sprecher" : "zwei Sprecher"}, Detektor {clip.render_plan.reframe.detector}
+                    </p>
+                  )}
+
+                  {clipExtras.experiment_id && (
+                    <p className="text-xs text-text-2">
+                      Hook-A/B, Variante {clipExtras.variant ?? "?"}.{" "}
+                      <Link href={`/experimente/${clipExtras.experiment_id}`} className="text-text underline-offset-4 hover:underline">
+                        Experiment öffnen
+                      </Link>
                     </p>
                   )}
 
@@ -542,6 +580,24 @@ export function ClipBoard({
                       </Button>
                     )}
                   </div>
+
+                  {publishing && (
+                    <ClipPublishing
+                      sourceId={sourceId}
+                      clip={clip}
+                      extras={clipExtras}
+                      gates={gates}
+                      connections={publishing.connections}
+                      series={publishing.series}
+                      initialPublications={publishing.publications.filter((p) => p.clip_id === clip.id)}
+                      initialFeedback={publishing.feedback.filter((f) => f.clip_id === clip.id)}
+                      canPublish={publishing.canPublish}
+                      canSeries={publishing.canSeries}
+                      canRender={publishing.canRender}
+                      onExtras={(next) => setExtras((prev) => ({ ...prev, [next.id]: next }))}
+                      onRerender={() => rerender(clip)}
+                    />
+                  )}
 
                   {open && (
                     <div className="border-t border-line pt-4">

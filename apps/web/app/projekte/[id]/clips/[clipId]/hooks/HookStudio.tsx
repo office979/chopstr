@@ -17,6 +17,7 @@ import { compositionDuration } from "@/lib/clips/render-demo";
 import { ONSCREEN_HOOK_MAX_WORDS, SPOKEN_HOOK_MAX_WORDS, countWords, lintCopy, lintHook, type LintProfile } from "@/lib/copy/lint";
 import { hookClaimCheck } from "@/lib/copy/claims";
 import { formatDateTime } from "@/lib/format";
+import type { ClipExtras } from "@/lib/repo/types-publishing";
 
 interface Props {
   sourceId: string;
@@ -34,6 +35,10 @@ interface Props {
   planAllowsGuest: boolean;
   planName: string;
   previewFont: PreviewFont | null;
+  /* Phase 5b: Reihenfolge der Varianten aus der Lernschleife (Thompson Sampling), Hook-A/B */
+  variantOrder: { patterns: HookPattern[]; learned: boolean };
+  extras: ClipExtras;
+  canExperiment: boolean;
 }
 
 interface ApiError {
@@ -85,12 +90,26 @@ export function HookStudio({
   planAllowsGuest,
   planName,
   previewFont,
+  variantOrder,
+  extras,
+  canExperiment,
 }: Props) {
   const [versions, setVersions] = useState<HookVersion[]>(initialVersions);
   const [approval, setApproval] = useState<GuestApproval | null>(guestApproval);
   const [guestRequired, setGuestRequired] = useState(clip.guest_approval_required);
   const current = versions.length ? versions[versions.length - 1] : null;
-  const variants = useMemo(() => [...versions].reverse().find((v) => v.variants.length > 0)?.variants ?? [], [versions]);
+  const rawVariants = useMemo(() => [...versions].reverse().find((v) => v.variants.length > 0)?.variants ?? [], [versions]);
+  /* Reihenfolge nach Lernschleife (Thompson Sampling je Marke, deterministischer Seed je Clip); Index bleibt der der Originalliste */
+  const variants = useMemo(() => {
+    if (!variantOrder.learned) return rawVariants;
+    const rank = new Map(variantOrder.patterns.map((p, i) => [p, i]));
+    return [...rawVariants].sort((a, b) => (rank.get(a.pattern) ?? 99) - (rank.get(b.pattern) ?? 99));
+  }, [rawVariants, variantOrder]);
+  const [experimentOpen, setExperimentOpen] = useState(false);
+  const [experimentVariant, setExperimentVariant] = useState<number | null>(null);
+  const [hypothesis, setHypothesis] = useState("");
+  const [experimentBusy, setExperimentBusy] = useState(false);
+  const [experimentId, setExperimentId] = useState<string | null>(extras.experiment_id);
 
   const [selectedVariant, setSelectedVariant] = useState<number | null>(() => {
     if (!current) return null;
@@ -182,6 +201,28 @@ export function HookStudio({
     }
   }, [sourceId, clip.id]);
 
+  const createExperiment = useCallback(async () => {
+    if (experimentVariant == null) return;
+    setExperimentBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/experiments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source_id: sourceId, clip_id: clip.id, variant_index: experimentVariant, hypothesis }),
+      });
+      const data = (await res.json()) as ApiError & { experiment?: { id: string }; href?: string };
+      if (!res.ok || !data.experiment) throw new Error(data.error ?? "Experiment konnte nicht angelegt werden");
+      setExperimentId(data.experiment.id);
+      setExperimentOpen(false);
+      setMessage({ tone: "ok", text: "Variante B angelegt. Der zweite Clip wartet auf den Render.", href: data.href ?? `/experimente/${data.experiment.id}` });
+    } catch (err) {
+      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Experiment konnte nicht angelegt werden" });
+    } finally {
+      setExperimentBusy(false);
+    }
+  }, [experimentVariant, sourceId, clip.id, hypothesis]);
+
   const duration = clip.duration_s ?? compositionDuration(clip);
   const canSave = !saving && dirty && (spoken.trim() || onscreen.trim());
 
@@ -195,6 +236,7 @@ export function HookStudio({
               <h2 className="text-sm font-medium">Fünf Varianten</h2>
               <p className="mt-0.5 text-xs text-text-2">
                 {current?.origin === "llm" ? `${current.model_id ?? "Sprachmodell"}` : "Aus Version 1 (Sprachmodell)"}. Auswahl übernimmt die Texte.
+                {variantOrder.learned ? " Reihenfolge aus der Lernschleife." : " Standardreihenfolge."}
               </p>
             </div>
             {variants.length === 0 ? (
@@ -215,9 +257,16 @@ export function HookStudio({
                         )}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <Badge tone={active ? "ai" : "neutral"} className="h-6 px-2.5 text-[11px]">
-                            {patternLabel(v.pattern)}
-                          </Badge>
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            <Badge tone={active ? "ai" : "neutral"} className="h-6 px-2.5 text-[11px]">
+                              {patternLabel(v.pattern)}
+                            </Badge>
+                            {variantOrder.learned && i === 0 && (
+                              <Badge tone="ai" className="h-6 px-2.5 text-[11px]" title="Thompson Sampling über hook_pattern_stats der Marke, Exploration bleibt sichtbar">
+                                Vorschlag der Lernschleife
+                              </Badge>
+                            )}
+                          </span>
                           <span className="font-mono text-[11px] tabular-nums text-text-3">
                             {countWords(v.spoken)}/{countWords(v.onscreen)} W
                           </span>
@@ -232,6 +281,56 @@ export function HookStudio({
                   );
                 })}
               </ul>
+            )}
+            {canExperiment && variants.length > 0 && (
+              <div className="border-t border-line pt-3">
+                {experimentId ? (
+                  <p className="text-xs text-text-2">
+                    Hook-A/B, Variante {extras.variant ?? "A"}.{" "}
+                    <Link href={`/experimente/${experimentId}`} className="text-text underline-offset-4 hover:underline">
+                      Experiment öffnen
+                    </Link>
+                  </p>
+                ) : experimentOpen ? (
+                  <form
+                    className="flex flex-col gap-3"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void createExperiment();
+                    }}
+                  >
+                    <p className="text-xs text-text-2">Variante B bekommt einen anderen Hook bei gleicher Komposition. Wähle das Muster für B:</p>
+                    <div className="flex flex-col gap-1">
+                      {variants.map((v) => {
+                        const idx = rawVariants.indexOf(v);
+                        const same = v.spoken === spoken.trim() && v.onscreen === onscreen.trim();
+                        return (
+                          <label key={`exp-${idx}`} className={cn("flex items-start gap-2 text-xs", same && "opacity-50")}>
+                            <input type="radio" name="variant-b" disabled={same} checked={experimentVariant === idx} onChange={() => setExperimentVariant(idx)} className="mt-0.5" />
+                            <span>
+                              <span className="font-medium">{patternLabel(v.pattern)}</span>
+                              {same ? " (aktueller Hook, Variante A)" : `: ${v.spoken}`}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <Input value={hypothesis} onChange={(e) => setHypothesis(e.target.value)} placeholder="Hypothese (optional)" maxLength={500} className="py-2 text-sm" />
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" type="submit" disabled={experimentBusy || experimentVariant == null}>
+                        {experimentBusy ? "Wird angelegt" : "Variante B anlegen"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setExperimentOpen(false)} disabled={experimentBusy}>
+                        Abbrechen
+                      </Button>
+                    </div>
+                  </form>
+                ) : (
+                  <Button size="sm" variant="ghost" onClick={() => setExperimentOpen(true)} disabled={!current}>
+                    Variante B anlegen
+                  </Button>
+                )}
+              </div>
             )}
           </GlassCard>
 
@@ -306,7 +405,7 @@ export function HookStudio({
                     <>
                       {" "}
                       <Link href={message.href} className="font-medium underline-offset-4 hover:underline">
-                        Clips ansehen
+                        {message.href.startsWith("/experimente") ? "Experiment öffnen" : "Clips ansehen"}
                       </Link>
                     </>
                   )}

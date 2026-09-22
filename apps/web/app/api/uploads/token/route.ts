@@ -3,6 +3,7 @@ import { getRepo } from "@/lib/repo";
 import { requireApiRole } from "@/lib/auth/guard";
 import { signUploadToken, UPLOAD_TOKEN_TTL_S } from "@/lib/auth/upload-token";
 import { getQuota } from "@/lib/billing/quota";
+import { noteUsageThresholds } from "@/lib/outbox";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,8 @@ export async function POST(request: NextRequest) {
   }
 
   const quota = await getQuota(repo);
+  /* Phase 5a: usage.threshold (80 %, 100 %) je einmal pro Periode als Outbox-Ereignis */
+  void noteUsageThresholds(auth.workspaceId, quota);
   if (quota.exhausted) {
     return Response.json(
       { error: quota.message, code: "quota_exhausted", used_minutes: quota.used_minutes, included_minutes: quota.included_minutes },

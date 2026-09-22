@@ -1,4 +1,4 @@
-# Risiken und Rückfragen (Stand 22.09.2026, nach Phase 0 + 1)
+# Risiken und Rückfragen (Stand 22.09.2026, nach Phase 0 bis 5)
 
 ## Was vom Gerüst übernommen, geändert oder verworfen wurde
 
@@ -29,6 +29,10 @@
 | Generischer Output | Plattform-Abwertung, Markenschaden | Brand-Profile, Stil-Linter, keine Templates als Default, Variations-Prüfung in Phase 3. |
 | ffmpeg ohne libass/freetype (z. B. minimales Homebrew-Build) | Captions und Overlays fehlen still | Worker prüft `capabilities()` und meldet `captions_burned = false`; Produktions-Image mit Debian-ffmpeg; Regressionstest prüft Overlays, wenn ffmpeg sie kann. |
 | YuNet-Modell und c2patool fehlen im Image | neutraler Crop, keine Provenienz | Beides sichtbar im Render-Plan und in der UI (Orange); vor dem Pilot ins Image aufnehmen und Lizenz (Apache-2.0, c2pa-rs) dokumentieren. |
+| Plattform-Publishing (TikTok, Instagram, YouTube, LinkedIn) nach Dokumentation gebaut, ohne registrierte Apps | Erster echter Post scheitert an Feldnamen oder Berechtigungen | Alle Endpunkte mit `TODO verify` markiert, manueller Connector funktioniert immer, je Plattform ein Testlauf mit App-Zugangsdaten vor Release. |
+| Ingest per URL (`POST /sources` mit `upload: url`) hat im Worker noch keinen Download-Schritt | Quelle bleibt `uploading` | Activity `import_url` nachrüsten (Rechte-Bestätigung ist im API-Vertrag bereits Pflicht). |
+| Rate-Limits und Login-Drossel in-memory je Prozess | Bei mehreren Web-Instanzen wirkungslos | Redis-Backend vor dem Horizontal-Scaling. |
+| Stripe Checkout und Portal ohne Konto ungetestet, Mollie nur Interface | Zahlungsfluss erst im Pilot sichtbar | Stripe-Testkonto vor dem ersten externen Kunden; Mollie für Sovereign umsetzen. |
 | Aufwand Phase 2 (Story-Engine) unterschätzt | Zeitplan rutscht | Concierge-Pilot mit 10 Videos parallel starten, Precision@5 messen, bevor UI-Feinschliff beginnt. |
 
 ## Rückfragen vor Phase 2 (maximal fünf)

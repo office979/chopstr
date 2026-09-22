@@ -16,6 +16,7 @@ import type {
   GenderMode,
   Platform,
 } from "@/lib/repo/types";
+import type { CaptionStyleExt, CaptionTextField } from "@/lib/repo/types-api";
 
 export interface BrandFormState {
   ok: boolean;
@@ -29,6 +30,7 @@ const GENDER: GenderMode[] = ["neutral", "paarform", "doppelpunkt", "stern", "ke
 const ASR: AsrVariant[] = ["de", "de-CH"];
 const PLATFORM: Platform[] = ["tiktok", "reels", "shorts", "linkedin"];
 const PRESET: CaptionPreset[] = ["tiktok_bold", "reels_clean", "shorts_clean", "linkedin_static", "corporate_third"];
+const CAPTION_TEXT: CaptionTextField[] = ["text", "text_norm"];
 
 function pick<T extends string>(value: FormDataEntryValue | null, allowed: T[], fallback: T): T {
   const v = typeof value === "string" ? value : "";
@@ -103,9 +105,11 @@ export async function saveBrandProfileAction(_prev: BrandFormState, formData: Fo
     },
     hook_overlay: hookOverlay,
   };
-  const captionStyle: CaptionStyle = {
+  const captionStyle: CaptionStyleExt = {
     highlight_color: color(formData, "caption_highlight", errors),
     hook_overlay: hookOverlay,
+    /* 5c: Captions aus Original (text) oder Standardform (text_norm, Schweizerdeutsch-Beta) */
+    caption_text_field: pick(formData.get("caption_text_field"), CAPTION_TEXT, "text"),
   };
 
   if (Object.keys(errors).length > 0) {

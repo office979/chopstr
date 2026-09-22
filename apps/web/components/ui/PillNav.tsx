@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Mark } from "@/components/brand/Mark";
-import { ROLE_LABELS, type Role } from "@/lib/auth/permissions";
+import { ROLE_LABELS, can, type Role } from "@/lib/auth/permissions";
 import { cn } from "./cn";
 
 export interface NavUser {
@@ -58,6 +58,8 @@ export function PillNav({ user }: { user: NavUser | null }) {
   ];
   if (user?.canUpload) items.push({ href: "/upload", label: "Upload", short: "Upload", match: (p) => p.startsWith("/upload") });
   if (user?.canBrand) items.push({ href: "/marke", label: "Markenprofil", short: "Marke", match: (p) => p.startsWith("/marke") });
+  /* Entwicklerseite (API, MCP): nur admin und owner (api.manage) */
+  if (can(user?.role, "api.manage")) items.push({ href: "/entwickler", label: "Entwickler", short: "API", match: (p) => p.startsWith("/entwickler") });
 
   const initials = user ? user.name.split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() : "";
 

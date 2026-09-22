@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { getRepo } from "@/lib/repo";
+import { getApiRepo } from "@/lib/repo/api";
 import { uploadMaxBytes } from "@/lib/env";
 import { startClipProjectWorkflow } from "@/lib/temporal";
 import { withSessionContext, type Session } from "@/lib/session";
@@ -136,6 +137,28 @@ export async function POST(request: NextRequest) {
         const storageKey = upload.Storage?.Key ?? upload.Storage?.Path ?? upload.ID ?? "";
         const storageBucket = upload.Storage?.Bucket ?? null;
         const clientRef = meta.client_ref && UUID_RE.test(meta.client_ref) ? meta.client_ref : undefined;
+
+        /* Phase 5a: POST /api/v1/sources mit upload = tus hat die Quelle schon als `uploading` angelegt (client_ref = source.id) */
+        const pending = clientRef ? await repo.getSource(clientRef) : null;
+        if (pending && pending.status === "uploading") {
+          const completed = await getApiRepo().completeUploadingSource(pending.id, {
+            storage_key: storageKey,
+            original_filename: meta.filename ?? null,
+            mime_type: meta.filetype ?? null,
+            size_bytes: Number.isFinite(size) ? size : null,
+          });
+          if (completed) {
+            await repo.audit({
+              action: "upload.created",
+              entity: "sources",
+              entity_id: pending.id,
+              payload: { storage_key: storageKey, storage_bucket: storageBucket, size_bytes: size, mime_type: meta.filetype ?? null, tus_id: upload.ID ?? null, via: "api_upload_token" },
+            });
+            const workflowId = await startClipProjectWorkflow({ sourceId: pending.id, workspaceId: session.workspaceId });
+            if (workflowId) await repo.updateSource(pending.id, { temporal_workflow_id: workflowId });
+            return Response.json({ source_id: pending.id, workflow_id: workflowId });
+          }
+        }
 
         const source = await repo.createSource({
           id: clientRef,

@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string; clipId: string }> };
 
-/* POST: Render (erneut) anstoßen. Signal approve(candidate_id, platform) an project-<source_id>;
+/* POST: Render (erneut) anstoßen. Signal approve(candidate_id, "platform:clip_id") an project-<source_id>;
  * im Demo-Modus startet das Repository die Simulation. */
 export async function POST(_request: NextRequest, { params }: Params) {
   const auth = await requireApiRole("clip.render");
@@ -24,7 +24,8 @@ export async function POST(_request: NextRequest, { params }: Params) {
   }
 
   const updated = (await repo.requestClipRender(clipId)) ?? clip;
-  const signaled = await signalApprove({ sourceId: id, candidateId: clip.candidate_id, destination: clip.platform });
+  /* Ziel "plattform:clip_id": der Worker rendert genau diesen Clip (wichtig für Hook-A/B, Variante B hat dieselbe Plattform) */
+  const signaled = await signalApprove({ sourceId: id, candidateId: clip.candidate_id, destination: `${clip.platform}:${clipId}` });
   await repo.audit({
     action: "clip.render_requested",
     entity: "clips",

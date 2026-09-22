@@ -107,3 +107,60 @@ export async function startDeletionWorkflow(jobId: string): Promise<boolean> {
     return false;
   }
 }
+
+/* Publishing (PHASE5.md, 5b): PublishWorkflow mit ID publish-<publication_id> auf der CPU-Queue, Argument
+ * { publication_id } (Dataclass PublishParams in workers/chopstr_worker/workflows/publish.py). Ohne Temporal bleibt die
+ * Publikation `scheduled`; der Worker holt sie beim nächsten Lauf ab. Fehler werden geloggt, nicht weitergereicht. */
+export async function startPublishWorkflow(publicationId: string): Promise<boolean> {
+  const workflowId = `publish-${publicationId}`;
+  const taskQueue = process.env.TEMPORAL_TASK_QUEUE_CPU ?? "chopstr-cpu";
+  const address = process.env.TEMPORAL_ADDRESS;
+
+  if (isDemoMode() || !address) {
+    console.info(`[temporal] Kein Temporal: PublishWorkflow ${workflowId} nicht gestartet, Publikation bleibt scheduled`);
+    return false;
+  }
+
+  try {
+    const { Connection, Client } = await import("@temporalio/client");
+    const connection = await Connection.connect({ address });
+    try {
+      const client = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE ?? "default" });
+      await client.workflow.start("PublishWorkflow", { taskQueue, workflowId, args: [{ publication_id: publicationId }] });
+      return true;
+    } finally {
+      await connection.close();
+    }
+  } catch (error) {
+    console.warn(`[temporal] PublishWorkflow ${workflowId} konnte nicht gestartet werden:`, error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
+/* Signale an den PublishWorkflow: `cancel` (vor dem Publish) und `reschedule(iso)` (neuer Zeitpunkt). */
+export async function signalPublish(publicationId: string, signal: "cancel" | "reschedule", scheduledFor?: string): Promise<boolean> {
+  const workflowId = `publish-${publicationId}`;
+  const address = process.env.TEMPORAL_ADDRESS;
+
+  if (isDemoMode() || !address) {
+    console.info(`[temporal] Kein Temporal: Signal ${signal} an ${workflowId} nur geloggt`);
+    return false;
+  }
+
+  try {
+    const { Connection, Client } = await import("@temporalio/client");
+    const connection = await Connection.connect({ address });
+    try {
+      const client = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE ?? "default" });
+      const handle = client.workflow.getHandle(workflowId);
+      if (signal === "reschedule") await handle.signal("reschedule", scheduledFor ?? new Date().toISOString());
+      else await handle.signal("cancel");
+      return true;
+    } finally {
+      await connection.close();
+    }
+  } catch (error) {
+    console.warn(`[temporal] Signal ${signal} an ${workflowId} fehlgeschlagen:`, error instanceof Error ? error.message : error);
+    return false;
+  }
+}

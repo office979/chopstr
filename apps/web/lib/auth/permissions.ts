@@ -35,6 +35,8 @@ export const ACTIONS = [
   "billing.manage",
   "dpa.accept",
   "audit.read",
+  /* API-Schlüssel, Webhooks, Entwicklerseite (Phase 5a) */
+  "api.manage",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -58,6 +60,7 @@ const MATRIX: Record<Action, readonly Role[]> = {
   "billing.manage": ["owner", "admin"],
   "dpa.accept": ["owner", "admin"],
   "audit.read": ["owner", "admin"],
+  "api.manage": ["owner", "admin"],
 };
 
 export function can(role: Role | null | undefined, action: Action): boolean {
@@ -112,6 +115,7 @@ export const ACTION_DENIED: Record<Action, string> = {
   "billing.manage": "Abrechnung und Plan sind Inhabern und Admins vorbehalten.",
   "dpa.accept": "Den AV-Vertrag dürfen nur Inhaber und Admins annehmen.",
   "audit.read": "Das Audit-Log ist Inhabern und Admins vorbehalten.",
+  "api.manage": "API-Schlüssel und Webhooks dürfen nur Inhaber und Admins verwalten.",
 };
 
 export class ForbiddenError extends Error {

@@ -198,8 +198,25 @@ def ad_label_for(brief: dict, country: str) -> str | None:
     return None
 
 
-def _find_or_create_clip(ctx: common.Context, cand: dict, src: dict, destination: str) -> dict[str, Any]:
-    row = db.fetch_one(ctx.conn, SQL_CLIP, (cand["id"], destination))
+SQL_CLIP_BY_ID = (
+    "select id, status, aspect, composition, title_card, ad_label, ai_features, speaker_positions, file_key "
+    "from clips where id = %s and candidate_id = %s and platform = %s"
+)
+
+
+def parse_destination(destination: str) -> tuple[str, str | None]:
+    """``"tiktok"`` oder ``"tiktok:<clip_id>"`` (gezielter Render eines Clips, z. B. Variante B im Hook-A/B)."""
+    platform, _, clip_id = (destination or "").partition(":")
+    return platform.strip(), (clip_id.strip() or None)
+
+
+def _find_or_create_clip(ctx: common.Context, cand: dict, src: dict, destination: str, clip_id: str | None = None) -> dict[str, Any]:
+    if clip_id:
+        row = db.fetch_one(ctx.conn, SQL_CLIP_BY_ID, (clip_id, cand["id"], destination))
+        if row is None:
+            raise LookupError(f"Clip {clip_id} gehört nicht zu Kandidat {cand['id']} und Ziel {destination}")
+    else:
+        row = db.fetch_one(ctx.conn, SQL_CLIP, (cand["id"], destination))
     if row is not None:
         cid, status, aspect, composition, title_card, ad_label, ai_features, speaker_positions, file_key = row
         if status not in ("draft", "failed", "rendered", "approved"):
@@ -390,6 +407,7 @@ def _provenance(ctx: common.Context, mp4: Path, title: str, clip: dict, extra: d
 
 def run_render_pack(ctx: common.Context, candidate_id: str, destination: str) -> str:
     """Rendert das Paket für ``(candidate_id, destination)`` und gibt die ``clips``-ID zurück."""
+    destination, clip_id_hint = parse_destination(destination)
     if destination not in PLATFORMS:
         raise ValueError(f"Unbekanntes Ziel {destination!r} (erlaubt: {', '.join(PLATFORMS)})")
     t0 = time.monotonic()
@@ -397,7 +415,7 @@ def run_render_pack(ctx: common.Context, candidate_id: str, destination: str) ->
     source_id = cand["source_id"]
     src = db.load_source(ctx.conn, source_id)
     extra = _load_brand_extra(ctx, source_id)
-    clip = _find_or_create_clip(ctx, cand, src, destination)
+    clip = _find_or_create_clip(ctx, cand, src, destination, clip_id_hint)
     clip_id = clip["id"]
     db.update(ctx.conn, "clips", {"id": clip_id}, status="rendering", destination=destination, render_error=None)
 

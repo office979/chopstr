@@ -4,6 +4,7 @@ import { clientIp } from "@/lib/auth/guard";
 import { isTokenShape } from "@/lib/auth/tokens";
 import { mediaUrl } from "@/lib/clips/labels";
 import { isExpired, isGuestDecision } from "@/lib/guest/approval";
+import { emitOutbox } from "@/lib/outbox";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,15 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const decided = await repo.decideGuestApproval(token, body.decision, comment || null, clientIp(request.headers));
   if (!decided) return Response.json({ error: "Diese Freigabe konnte nicht gespeichert werden." }, { status: 409 });
+  /* Phase 5a: Webhook-Ereignis (nur IDs, Entscheidung, Name; kein Kommentar, kein Transkript) */
+  await emitOutbox(view.workspace_id, "guest_approval.decided", "guest_approval", decided.id, {
+    approval_id: decided.id,
+    clip_id: decided.clip_id,
+    source_title: view.source_title,
+    decision: decided.decision,
+    guest_name: decided.guest_name,
+    decided_at: decided.decided_at,
+  });
   const fresh = await repo.getGuestApprovalByToken(token);
   return Response.json({ ok: true, ...(fresh ? publicView(fresh) : {}) });
 }

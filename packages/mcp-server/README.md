@@ -177,8 +177,8 @@ unter anderem Bestätigungspflicht, Fehlerübersetzung, Fensterung des Transkrip
 ## Abweichungen und offene Punkte gegenüber `packages/schema/PHASE5.md`
 
 - `request_guest_approval` ruft `POST /clips/{id}/guest-approval` mit `{ guest_name, guest_email, message }`
-  auf. Dieser Endpunkt steht noch nicht in der Endpunkt-Tabelle des Vertrags; die API muss ihn anbieten
-  (Antwort mit `approval` und `link`).
+  auf und erwartet `{ approval, link }`. Der Endpunkt ist Teil des Vertrags (PHASE5.md) und in der API umgesetzt;
+  gegen die echte API geprüft.
 - Antwortformen: Der Server akzeptiert Listen roh oder unter `sources`, `candidates`, `clips` (auch
   `data`, `items`) und Einzelobjekte roh oder unter `source`, `clip`, `candidate`, `hook`, `publication`,
   `approval`. Medien-URLs werden aus `media.{video_url, poster_url, srt_url, vtt_url}` oder gleichnamigen

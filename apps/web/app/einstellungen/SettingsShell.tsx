@@ -6,7 +6,7 @@ import { cn } from "@/components/ui/cn";
 import type { Session } from "@/lib/session";
 import { can, type Action } from "@/lib/auth/permissions";
 
-export type SettingsTab = "allgemein" | "mitglieder" | "abrechnung" | "sicherheit" | "loeschung" | "audit";
+export type SettingsTab = "allgemein" | "mitglieder" | "abrechnung" | "sicherheit" | "loeschung" | "audit" | "api" | "webhooks" | "verbindungen";
 
 const TABS: { key: SettingsTab; href: string; label: string; action?: Action }[] = [
   { key: "allgemein", href: "/einstellungen", label: "Allgemein" },
@@ -15,6 +15,10 @@ const TABS: { key: SettingsTab; href: string; label: string; action?: Action }[]
   { key: "sicherheit", href: "/einstellungen/sicherheit", label: "Sicherheit" },
   { key: "loeschung", href: "/einstellungen/loeschung", label: "Löschung" },
   { key: "audit", href: "/einstellungen/audit", label: "Audit-Log", action: "audit.read" },
+  /* Phase 5: API-Schlüssel und Webhooks (5a), Plattform-Verbindungen (5b) */
+  { key: "api", href: "/einstellungen/api", label: "API", action: "api.manage" },
+  { key: "webhooks", href: "/einstellungen/webhooks", label: "Webhooks", action: "api.manage" },
+  { key: "verbindungen", href: "/einstellungen/verbindungen", label: "Verbindungen", action: "api.manage" },
 ];
 
 interface Props {

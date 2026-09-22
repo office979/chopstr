@@ -175,3 +175,17 @@ def test_helpers_fidelity_and_preset():
     assert act_render.caption_preset_for("linkedin", {"default_platform": "linkedin", "caption_preset": "corporate_third"}) == "corporate_third"
     assert act_render.caption_preset_for("tiktok", {"default_platform": "linkedin", "caption_preset": "corporate_third"}) == "tiktok_bold"
     assert act_render.ad_label_for({"is_ad": True}, "AT") == "Werbung" and act_render.ad_label_for({}, "DE") is None
+
+
+def test_destination_with_clip_id_renders_exactly_that_clip(fake_db, fake_context, project):
+    """Hook-A/B: Variante A und B haben dieselbe Plattform; "tiktok:<clip_id>" rendert gezielt B."""
+    clip_a = fake_db.add_clip(project["sid"], project["cid"], "tiktok", SEGMENTS, variant="A")
+    clip_b = fake_db.add_clip(project["sid"], project["cid"], "tiktok", SEGMENTS, variant="B")
+    rendered = act_render.run_render_pack(fake_context, project["cid"], f"tiktok:{clip_b}")
+    assert rendered == clip_b
+    assert fake_db.clips[clip_b]["status"] == "rendered"
+    assert fake_db.clips[clip_a]["status"] != "rendered"  # A bleibt unberührt
+    assert act_render.parse_destination("linkedin") == ("linkedin", None)
+    assert act_render.parse_destination("tiktok:abc") == ("tiktok", "abc")
+    with pytest.raises(LookupError):
+        act_render.run_render_pack(fake_context, project["cid"], "linkedin:" + clip_b)  # falsche Plattform für diesen Clip

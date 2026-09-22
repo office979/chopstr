@@ -19,6 +19,11 @@ const PUBLIC_PATHS: RegExp[] = [
   /^\/api\/tus\/hooks(\/|$)/,
   /^\/api\/auth\//,
   /^\/api\/billing\/webhook(\/|$)/,
+  /* Phase 5a: öffentliche API mit eigener Bearer-Auth (lib/api/auth.ts), interne Worker-Endpunkte (X-Internal-Secret) */
+  /^\/api\/v1(\/|$)/,
+  /^\/api\/internal(\/|$)/,
+  /* Phase 5b: OAuth-Rückrufe der Publishing-Provider */
+  /^\/api\/publishing\/oauth(\/|$)/,
 ];
 
 export function proxy(request: NextRequest) {

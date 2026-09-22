@@ -1,0 +1,24 @@
+import { PageShell } from "@/components/layout/PageShell";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { PublishingNav } from "@/components/publishing/PublishingNav";
+import { getRepo } from "@/lib/repo";
+import { getPublishingRepo } from "@/lib/repo/publishing";
+import { requirePublishingPage } from "@/lib/publishing/auth";
+import { canExt } from "@/lib/auth/permissions-publishing";
+import { SeriesPanel } from "./SeriesPanel";
+
+export const dynamic = "force-dynamic";
+export const metadata = { title: "Serien" };
+
+/* Content-Serien (editor, admin, owner): Liste und Anlegen. Kalender und Zuordnung auf der Detailseite. */
+export default async function SeriesPage() {
+  const session = await requirePublishingPage("series.manage");
+  const [series, brands] = await Promise.all([getPublishingRepo().listSeries(), getRepo().listBrandProfiles()]);
+  return (
+    <PageShell width="default" backgroundWord="Serie">
+      <PageHeader eyebrow={`Workspace · ${session.workspaceName}`} title="Serien" description="Wiederkehrende Formate mit Kadenz und Regeln. Die Variations-Prüfung warnt, wenn ein Clip den letzten neun zu ähnlich ist." />
+      <PublishingNav current="serien" showConnections={canExt(session.role, "publishing.manage")} />
+      <SeriesPanel initialSeries={series} brands={brands.map((b) => ({ id: b.id, name: b.name }))} />
+    </PageShell>
+  );
+}

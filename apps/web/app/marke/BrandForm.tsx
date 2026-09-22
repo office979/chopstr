@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/Badge";
 import { ColorField } from "@/components/ui/ColorField";
 import { Toggle } from "@/components/ui/Toggle";
 import type { BrandAsset, BrandProfile, Platform } from "@/lib/repo/types";
+import type { CaptionStyleExt } from "@/lib/repo/types-api";
 import { AssetsCard } from "./AssetsCard";
 import { PLATFORMS, PLATFORM_LABELS } from "@/lib/clips/labels";
 import { useState } from "react";
@@ -19,7 +20,7 @@ const initialState: BrandFormState = { ok: false, message: "", errors: {} };
 export function BrandForm({ profile, assets, canUploadAssets }: { profile: BrandProfile | null; assets: BrandAsset[]; canUploadAssets: boolean }) {
   const [state, action, pending] = useActionState(saveBrandProfileAction, initialState);
   const ci = profile?.ci ?? {};
-  const style = profile?.caption_style ?? {};
+  const style: CaptionStyleExt = profile?.caption_style ?? {};
   const [lowerThird, setLowerThird] = useState(ci.lower_third?.enabled ?? false);
   const [hookOverlay, setHookOverlay] = useState<Record<Platform, boolean>>({
     tiktok: style.hook_overlay?.tiktok ?? true,
@@ -66,7 +67,14 @@ export function BrandForm({ profile, assets, canUploadAssets }: { profile: Brand
           <Field
             label="ASR-Variante"
             htmlFor="asr_variant"
-            hint="de-CH ist Beta: Schweizerdeutsch wird erkannt, aber mit geringerer Konfidenz."
+            hint={
+              <span className="inline-flex flex-wrap items-center gap-2">
+                <Badge tone="attention" className="h-5 px-2 text-[10px]">
+                  de-CH Beta
+                </Badge>
+                Schweizerdeutsch wird erkannt, aber mit geringerer Konfidenz. Der Editor zeigt einen Hinweis, wenn CH-Marker ohne CH-Modell auftauchen.
+              </span>
+            }
           >
             <Select id="asr_variant" name="asr_variant" defaultValue={profile?.asr_variant ?? "de"}>
               <option value="de">Deutsch (DE/AT)</option>
@@ -85,6 +93,16 @@ export function BrandForm({ profile, assets, canUploadAssets }: { profile: Brand
               <option value="tiktok">TikTok</option>
               <option value="reels">Instagram Reels</option>
               <option value="shorts">YouTube Shorts</option>
+            </Select>
+          </Field>
+          <Field
+            label="Caption-Text"
+            htmlFor="caption_text_field"
+            hint="Schweizerdeutsch-Beta: Original nimmt den gesprochenen Wortlaut, Standard die hochdeutsche Form (text_norm), wo das CH-Modell oder das Lexikon sie sicher liefert. Geschützte Begriffe bleiben immer im Original."
+          >
+            <Select id="caption_text_field" name="caption_text_field" defaultValue={style.caption_text_field ?? "text"}>
+              <option value="text">Original (text)</option>
+              <option value="text_norm">Standard (text_norm)</option>
             </Select>
           </Field>
           <Field label="Caption-Preset" htmlFor="caption_preset">

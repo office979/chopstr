@@ -132,3 +132,34 @@ def test_filter_graph_structure_without_ffmpeg(tmp_path):
     assert render.loudnorm_pass2(render.Loudness(-16, -1.5), {"input_i": -21.79, "input_tp": -14.46, "input_lra": 0.1, "input_thresh": -31.79, "target_offset": -0.03}).endswith(
         "measured_I=-21.79:measured_TP=-14.46:measured_LRA=0.10:measured_thresh=-31.79:offset=-0.03:linear=true:print_format=summary"
     )
+
+
+def test_zoom_filter_expression_and_chain():
+    """Push-in: Supersampling vor zoompan, linear bis zoom_to, ein Ausgabeframe je Eingabeframe."""
+    from chopstr_worker.pipeline import render as r
+
+    f = r.zoom_filter(1080, 1920, 25.0, 4.0, 1.08)
+    assert "scale=2160:3840" in f          # doppelte Ausgabegröße gegen Stufen im Zoom
+    assert "zoompan=" in f and "d=1" in f  # Länge bleibt unverändert
+    assert "on/100" in f                   # 4 s bei 25 fps
+    assert "s=1080x1920" in f and f.endswith("setsar=1")
+
+    # Kurze Einstellungen bleiben still, lange bekommen den Zoom
+    plan = {
+        "output": {"width": 1080, "height": 1920, "fps": 25.0},
+        "motion": {"zoom_to": 1.08, "min_shot_s": 1.2},
+        "shots": [
+            {"start": 0.0, "end": 0.5, "crop_x": 0, "crop_y": 0, "crop_w": 608, "crop_h": 1080, "layout": "single"},
+            {"start": 0.5, "end": 5.0, "crop_x": 0, "crop_y": 0, "crop_w": 608, "crop_h": 1080, "layout": "single"},
+        ],
+        "segments": [{"start": 0.0, "end": 5.0, "role": "body"}],
+        "sources": {"storage_key": "uploads/in.mp4"},
+    }
+    chain, _, _, _, _, _ = r.video_chain(plan, None, None, {"zoompan": True, "vstack": True}, None)
+    assert "[v0]" in chain and "[v1]" in chain
+    assert chain.count("zoompan=") == 1     # nur die lange Einstellung
+    assert "zoompan" not in chain.split("[v0];")[0]
+
+    # Ohne zoompan im ffmpeg bleibt es beim statischen Ausschnitt
+    plain, _, _, _, _, _ = r.video_chain(plan, None, None, {"zoompan": False, "vstack": True}, None)
+    assert "zoompan=" not in plain

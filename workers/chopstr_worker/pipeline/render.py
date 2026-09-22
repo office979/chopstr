@@ -109,6 +109,7 @@ def capabilities() -> dict[str, bool]:
     return {
         "subtitles": "subtitles" in f, "drawtext": "drawtext" in f, "loudnorm": "loudnorm" in f, "ebur128": "ebur128" in f,
         "overlay": "overlay" in f, "vstack": "vstack" in f and "split" in f and "pad" in f,
+        "zoompan": "zoompan" in f,
     }  # fmt: skip
 
 
@@ -266,6 +267,21 @@ def pip_shot_filter(plan: dict, index: int, shot: dict) -> str:
     )
 
 
+def zoom_filter(out_w: int, out_h: int, fps: float, duration: float, zoom_to: float) -> str:
+    """Langsamer Push-in über eine Einstellung: linear von 1,0 auf ``zoom_to``, mittig.
+
+    Vor dem Zoom wird auf die doppelte Ausgabegröße hochskaliert. ``zoompan`` quantisiert den
+    Zoomfaktor je Frame; ohne diesen Zwischenschritt springt das Bild sichtbar in Stufen.
+    ``d=1`` heißt: ein Ausgabeframe je Eingabeframe, die Länge bleibt also unverändert."""
+    frames = max(1, int(round(max(duration, 0.04) * fps)))
+    expr = f"min(1+{zoom_to - 1:.4f}*on/{frames},{zoom_to:.4f})"
+    return (
+        f"scale={out_w * 2}:{out_h * 2}:flags=lanczos,"
+        f"zoompan=z='{expr}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={out_w}x{out_h}:fps={fps:g},"
+        f"setsar=1"
+    )
+
+
 def video_chain(
     plan: dict,
     ass_path: str | None,
@@ -278,6 +294,11 @@ def video_chain(
     Wasserzeichen. Endet in ``[vout]``."""
     shots, _ = _inputs(plan)
     out_w, out_h = int(plan["output"]["width"]), int(plan["output"]["height"])
+    fps = float(plan["output"].get("fps") or 25.0)
+    motion = plan.get("motion") or {}
+    zoom_to = float(motion.get("zoom_to") or 1.0)
+    zoom_min_s = float(motion.get("min_shot_s") or 0.0)
+    can_zoom = zoom_to > 1.0 and caps.get("zoompan", True)
     parts, labels = [], []
     for i, s in enumerate(shots):
         if s.get("layout") == "pip":
@@ -285,10 +306,12 @@ def video_chain(
                 raise RenderError("ffmpeg ohne split/pad/vstack-Filter, Layout pip nicht möglich")
             parts.append(pip_shot_filter(plan, i, s))
         else:
-            parts.append(
-                f"[{i}:v]setpts=PTS-STARTPTS,crop={int(s['crop_w'])}:{int(s['crop_h'])}:{int(s['crop_x'])}:{int(s['crop_y'])},"
-                f"scale={out_w}:{out_h}:flags=lanczos,setsar=1[v{i}];"
-            )
+            crop = f"crop={int(s['crop_w'])}:{int(s['crop_h'])}:{int(s['crop_x'])}:{int(s['crop_y'])}"
+            duration = float(s.get("end", 0.0)) - float(s.get("start", 0.0))
+            if can_zoom and duration >= zoom_min_s:
+                parts.append(f"[{i}:v]setpts=PTS-STARTPTS,{crop},{zoom_filter(out_w, out_h, fps, duration, zoom_to)}[v{i}];")
+            else:
+                parts.append(f"[{i}:v]setpts=PTS-STARTPTS,{crop},scale={out_w}:{out_h}:flags=lanczos,setsar=1[v{i}];")
         labels.append(f"[v{i}]")
     chain = "".join(parts) + "".join(labels) + f"concat=n={len(shots)}:v=1:a=0[vc];"
     filters: list[str] = []

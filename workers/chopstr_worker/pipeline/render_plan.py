@@ -27,6 +27,11 @@ PLATFORM_ASPECT = {"tiktok": "9:16", "reels": "9:16", "shorts": "9:16", "linkedi
 TITLE_CARD_S = 2.5
 HOOK_OVERLAY_S = 3.0
 MICRO_FADE_MS = 20
+# Langsamer Push-in je Einstellung: 8 Prozent über die Länge der Einstellung, linear.
+# Nur bei umgerahmten Clips, also wenn das Ausgabeformat vom Format der Quelle abweicht. Behält der
+# Clip das Format der Quelle (Hochformat-Schalter aus), bleibt das Bild unangetastet.
+ZOOM_TO = 1.08
+ZOOM_MIN_SHOT_S = 1.2
 HOOK_OVERLAY_DEFAULT = {"tiktok": True, "reels": True, "shorts": True, "linkedin": False}
 AUDIO_PRESETS: dict[str, dict[str, float]] = {
     "master": {"lufs": -16.0, "true_peak": -1.5},
@@ -101,6 +106,20 @@ def brand_block(brand: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
+def motion_block(reframe_result: reframe.ReframeResult, out_w: int, out_h: int) -> dict[str, Any]:
+    """Block ``motion``: langsamer Push-in je Einstellung.
+
+    Aktiv nur, wenn umgerahmt wird, das Ausgabeformat also vom Format der Quelle abweicht. Behält der
+    Clip das Format der Quelle, bleibt das Bild unangetastet und es gibt keinen Zoom. Einstellungen
+    unter ``min_shot_s`` bleiben still, damit kurze Schnitte nicht zappeln."""
+    src_w, src_h = reframe_result.src_w, reframe_result.src_h
+    same_format = bool(src_w and src_h) and abs((src_w / src_h) - (out_w / out_h)) < 0.01
+    return {
+        "zoom_to": 1.0 if same_format else ZOOM_TO,
+        "min_shot_s": ZOOM_MIN_SHOT_S,
+    }
+
+
 def audio_block(preset: str = "master") -> dict[str, Any]:
     if preset not in AUDIO_PRESETS:
         raise ValueError(f"Unbekanntes Audio-Preset {preset!r}")
@@ -168,6 +187,7 @@ def build_plan(
         "filler_cuts": bool(filler_cuts),
         "reframe": reframe_result.plan_block(),
         "shots": reframe_result.shots_json(),
+        "motion": motion_block(reframe_result, out_w, out_h),
         "captions": caption_block(caption_preset, out_w, out_h, caption_cards, caption_font, caption_top, caption_text_field),
         "title_card": {"text": title, "seconds": TITLE_CARD_S} if title else None,
         "hook_overlay": {"text": hook, "seconds": HOOK_OVERLAY_S} if hook and hook_overlay_enabled(platform, hook_overlay) else None,

@@ -11,7 +11,7 @@ from chopstr_worker.pipeline import captions_de, reframe, render_plan
 SEGMENTS = [{"start": 812.4, "end": 830.1, "role": "body"}, {"start": 840.0, "end": 861.0, "role": "body"}]
 SOURCES = {"storage_key": "uploads/abc", "transcript_version": 3, "hook_version": 1, "candidate_id": "cand-1"}
 CONTRACT_KEYS = {
-    "contract", "platform", "aspect", "output", "segments", "filler_cuts", "reframe", "shots", "captions",
+    "contract", "platform", "aspect", "output", "segments", "filler_cuts", "reframe", "shots", "motion", "captions",
     "title_card", "hook_overlay", "audio", "brand", "sources", "versions",
 }  # fmt: skip
 
@@ -117,3 +117,19 @@ def test_plan_hash_is_deterministic_and_sensitive():
     assert render_plan.plan_hash(a, 2, 3) != render_plan.plan_hash(a, 1, 3)
     assert render_plan.plan_hash(a, 1, 4) != render_plan.plan_hash(a, 1, 3)
     assert len(render_plan.plan_hash(a, 1, 3)) == 16
+
+
+def test_motion_zoom_only_when_reframing():
+    """Hochformat aus einer Querformat-Quelle: Push-in. Gleiches Format: Bild bleibt unangetastet."""
+    portrait = _plan("tiktok")  # Quelle 1920x1080, Ausgabe 1080x1920
+    assert portrait["motion"]["zoom_to"] == render_plan.ZOOM_TO
+    assert portrait["motion"]["min_shot_s"] == render_plan.ZOOM_MIN_SHOT_S
+
+    out_w, out_h = render_plan.output_size("16:9")
+    shots = reframe.plan_shots_for_positions(SEGMENTS, [], 1920, 1080, out_w, out_h, [], {}, strategy="neutral")
+    same = reframe.ReframeResult("neutral", "none", False, [], shots, 1920, 1080, out_w, out_h)
+    plan = render_plan.build_plan(
+        platform="tiktok", aspect="16:9", segments=SEGMENTS, reframe_result=same, caption_cards=14,
+        sources=SOURCES, caption_preset="tiktok_words", src_fps=25.0,
+    )  # fmt: skip
+    assert plan["motion"]["zoom_to"] == 1.0

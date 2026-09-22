@@ -42,10 +42,10 @@ export function Sidebar({ user }: { user: NavUser | null }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [drawerOpen]);
 
+  /* „Neues Video“ steht nur als großer Knopf oben, nicht zusätzlich in der Liste (war doppelt). */
   const main: NavItem[] = [
     { href: "/", label: "Meine Videos", icon: <IconGrid />, match: (p) => p === "/" || p.startsWith("/projekte") },
   ];
-  if (user?.canUpload) main.push({ href: "/upload", label: "Neues Video", icon: <IconUpload />, match: (p) => p.startsWith("/upload") });
   if (user?.canBrand) main.push({ href: "/marke", label: "Aussehen", icon: <IconBrand />, match: (p) => p.startsWith("/marke") });
 
   const publishing: NavItem[] = [];
@@ -251,13 +251,6 @@ const IconGrid = () => (
     <rect x="14" y="3" width="7" height="7" rx="1.5" />
     <rect x="3" y="14" width="7" height="7" rx="1.5" />
     <rect x="14" y="14" width="7" height="7" rx="1.5" />
-  </Svg>
-);
-const IconUpload = () => (
-  <Svg>
-    <path d="M12 15V3" />
-    <path d="m7 8 5-5 5 5" />
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
   </Svg>
 );
 const IconBrand = () => (

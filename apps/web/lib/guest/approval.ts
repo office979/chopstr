@@ -7,12 +7,12 @@ export const GUEST_APPROVAL_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 export type GuestStatus = "none" | "pending" | "expired" | GuestDecision;
 
 export const GUEST_STATUS_LABELS: Record<GuestStatus, string> = {
-  none: "Keine Gast-Freigabe",
-  pending: "Freigabe ausstehend",
-  expired: "Freigabe-Link abgelaufen",
-  approved: "Vom Gast freigegeben",
-  changes: "Gast wünscht Änderungen",
-  rejected: "Vom Gast abgelehnt",
+  none: "Niemand gefragt",
+  pending: "Wartet auf Antwort",
+  expired: "Link abgelaufen",
+  approved: "Freigegeben",
+  changes: "Änderungen gewünscht",
+  rejected: "Abgelehnt",
 };
 
 export const DECISION_LABELS: Record<GuestDecision, string> = {
@@ -51,4 +51,4 @@ export function exportBlocked(clip: Pick<Clip, "guest_approval_required">, lates
   return latest?.decision !== "approved";
 }
 
-export const EXPORT_BLOCKED_MESSAGE = "Export gesperrt: Die Gast-Freigabe steht noch aus.";
+export const EXPORT_BLOCKED_MESSAGE = "Noch gesperrt: Du wartest auf die Antwort der Person, die du gefragt hast.";

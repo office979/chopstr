@@ -9,7 +9,7 @@ import { getQuota } from "@/lib/billing/quota";
 import { previewFontFor } from "@/lib/brand/preview-font";
 import { latestByClip } from "@/lib/guest/approval";
 import { lintProfileFrom } from "@/lib/clips/render-demo";
-import { PLATFORM_LABELS } from "@/lib/clips/labels";
+import { ASPECT_LABELS, PLATFORM_LABELS } from "@/lib/clips/labels";
 import { getPublishingRepo } from "@/lib/repo/publishing";
 import { canExt } from "@/lib/auth/permissions-publishing";
 import { orderVariants } from "@/lib/experiments/thompson";
@@ -23,7 +23,7 @@ type Props = { params: Promise<{ id: string; clipId: string }> };
 export async function generateMetadata({ params }: Props) {
   const { clipId } = await params;
   const clip = await getRepo().getClip(clipId);
-  return { title: clip ? `Hook-Studio · ${PLATFORM_LABELS[clip.platform]}` : "Hook-Studio" };
+  return { title: clip ? `Text oder Bild ändern · ${PLATFORM_LABELS[clip.platform]}` : "Text oder Bild ändern" };
 }
 
 export default async function HookStudioPage({ params }: Props) {
@@ -64,7 +64,7 @@ export default async function HookStudioPage({ params }: Props) {
   const extras = extrasList[0] ?? { id: clipId, experiment_id: null, variant: null, series_id: null, series_index: null, reframe_override: null };
 
   return (
-    <PageShell width="wide" backgroundWord="Hook" className="pt-24 sm:pt-28">
+    <PageShell width="wide" backgroundWord="Feinschliff" className="pt-24 sm:pt-28">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm text-text-2">
@@ -76,9 +76,9 @@ export default async function HookStudioPage({ params }: Props) {
               Clips
             </Link>
           </p>
-          <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Hook-Studio</h1>
+          <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Text oder Bild ändern</h1>
           <p className="mt-1 text-sm text-text-2">
-            {PLATFORM_LABELS[clip.platform]}, {clip.aspect}. Jede Änderung wird eine neue Version, der Render folgt erst auf deinen Klick.
+            {PLATFORM_LABELS[clip.platform]}, {ASPECT_LABELS[clip.aspect]}. Nichts geht verloren, und der Clip wird erst neu gebaut, wenn du es sagst.
           </p>
         </div>
         <ButtonLink href={`/projekte/${source.id}/clips`} variant="ghost" size="sm">

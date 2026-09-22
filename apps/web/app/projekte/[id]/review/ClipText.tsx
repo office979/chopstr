@@ -46,7 +46,7 @@ export function ClipText({ candidate: c, sentences, speakerNames, currentTime, o
       )}
 
       {blocks.length === 0 ? (
-        <p className="text-sm text-text-2">Die Sätze dieses Kandidaten liegen nicht im aktuellen Transkript.</p>
+        <p className="text-sm text-text-2">Die Sätze zu diesem Moment stehen nicht mehr im aktuellen Text.</p>
       ) : (
         <div className="flex flex-col gap-4">
           {blocks.map((b, i) => {

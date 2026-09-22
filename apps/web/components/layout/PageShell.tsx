@@ -78,10 +78,10 @@ export async function PageShell({ children, backgroundWord, lightTone = "brand",
             {dpaBanner && (
               <p role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-inner border border-attention/40 px-4 py-2.5 text-sm text-text-2">
                 <span>
-                  <span className="text-attention">AVV noch nicht angenommen.</span> Uploads sind möglich, der Auftragsverarbeitungsvertrag fehlt aber noch.
+                  <span className="text-attention">Ein Vertrag fehlt noch.</span> Hochladen geht schon, zum Posten brauchst du ihn.
                 </span>
                 <Link href="/rechtliches/avv" className="text-text underline-offset-4 hover:underline">
-                  AVV lesen und annehmen
+                  Vertrag lesen und annehmen
                 </Link>
               </p>
             )}

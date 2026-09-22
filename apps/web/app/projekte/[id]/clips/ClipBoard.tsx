@@ -15,11 +15,13 @@ import { EXPORT_BLOCKED_MESSAGE, exportBlocked, latestByClip } from "@/lib/guest
 import { structureLabel } from "@/lib/candidates/labels";
 import {
   CLIP_STATUS_LABELS,
+  ASPECT_LABELS,
   PLATFORM_LABELS,
   RENDER_STAGES,
   RENDER_STAGE_LABELS,
   formatClipDuration,
   formatLoudness,
+  loudnessPlain,
   mediaUrl,
 } from "@/lib/clips/labels";
 import { RENDER_STEP } from "@/lib/pipeline";
@@ -321,7 +323,7 @@ export function ClipBoard({
       </Modal>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-text-2">
-          Paket: {groups.length} {groups.length === 1 ? "Kandidat" : "Kandidaten"}, {clips.filter(isDone).length} von {clips.length} Clips gerendert.
+          {groups.length} {groups.length === 1 ? "Moment" : "Momente"}, {clips.filter(isDone).length} von {clips.length} Clips fertig.
         </p>
         <div className="flex items-center gap-2 text-xs">
           {live && (
@@ -331,7 +333,7 @@ export function ClipBoard({
             </span>
           )}
           {connection === "error" && !allSettled && <span className="text-attention">Verbindung unterbrochen, versuche erneut</span>}
-          {demo && <Badge tone="ai">Demo-Render</Badge>}
+          {demo && <Badge tone="ai">Testmodus</Badge>}
         </div>
       </div>
 
@@ -349,23 +351,23 @@ export function ClipBoard({
         <GlassCard key={g.candidateId} padding="lg" className={cn("flex flex-col gap-5", glitchGroups.has(g.candidateId) && "spectrum-glitch")}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs uppercase tracking-wide text-text-2">Paket {gi + 1}</p>
-              <h2 className="mt-1 text-lg font-medium">{g.candidate ? structureLabel(g.candidate.structure) : "Kandidat entfernt"}</h2>
+              <p className="text-xs uppercase tracking-wide text-text-2">Moment {gi + 1}</p>
+              <h2 className="mt-1 text-lg font-medium">{g.candidate ? structureLabel(g.candidate.structure) : "Moment gelöscht"}</h2>
               {g.candidate && <p className="mt-1 line-clamp-2 text-sm text-text-2">{snippet(g.candidate.rubric.text)}</p>}
             </div>
             <div className="flex items-center gap-2">
               <span className="font-mono text-sm tabular-nums text-text">
-                {g.rendered} von {g.clips.length} gerendert
+                {g.rendered} von {g.clips.length} fertig
               </span>
               {g.candidate && (
                 <Link href={`/projekte/${sourceId}/review`} className="text-sm text-text-2 hover:text-text hover:underline">
-                  Review
+                  Moment ansehen
                 </Link>
               )}
             </div>
           </div>
 
-          <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label={`Clips Paket ${gi + 1}`}>
+          <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label={`Clips zu Moment ${gi + 1}`}>
             {g.clips.map((clip) => {
               const ev = latest.get(clip.id);
               const state = checkState(clip);
@@ -416,7 +418,7 @@ export function ClipBoard({
                       <Badge tone="ok" className="h-6 bg-black/60 px-2.5 text-[11px]">
                         {PLATFORM_LABELS[clip.platform]}
                       </Badge>
-                      <Badge className="h-6 bg-black/60 px-2 font-mono text-[11px]">{clip.aspect}</Badge>
+                      <Badge className="h-6 bg-black/60 px-2 text-[11px]" title={clip.aspect}>{ASPECT_LABELS[clip.aspect]}</Badge>
                       {clipExtras?.variant && (
                         <Badge tone="ai" className="h-6 bg-black/60 px-2 font-mono text-[11px]" title="Hook-A/B-Variante">
                           {clipExtras.variant}
@@ -458,11 +460,14 @@ export function ClipBoard({
                           </ol>
                         </>
                       )}
-                      {clip.status === "failed" && <p className="mt-0.5 text-sm text-attention">{clip.render_error ?? "Render fehlgeschlagen, bitte erneut starten."}</p>}
-                      {clip.status === "draft" && <p className="mt-0.5 text-sm text-text-2">Wartet auf den Render.</p>}
+                      {clip.status === "failed" && <p className="mt-0.5 text-sm text-attention">{clip.render_error ?? "Das Erstellen hat nicht geklappt. Bitte nochmal versuchen."}</p>}
+                      {clip.status === "draft" && <p className="mt-0.5 text-sm text-text-2">Wird gleich erstellt.</p>}
                       {isDone(clip) && clip.loudness && (
-                        <p className="mt-0.5 font-mono text-xs text-text-2">
-                          {formatLoudness(clip.loudness.integrated_lufs, clip.loudness.true_peak_dbtp)}
+                        <p
+                          className="mt-0.5 text-xs text-text-2"
+                          title={formatLoudness(clip.loudness.integrated_lufs, clip.loudness.true_peak_dbtp)}
+                        >
+                          {loudnessPlain(clip.loudness.integrated_lufs, clip.loudness.true_peak_dbtp)}
                         </p>
                       )}
                     </div>
@@ -470,13 +475,13 @@ export function ClipBoard({
 
                   {isDone(clip) && (
                     <div className="flex flex-wrap gap-1.5">
-                      {c2pa === "signed" && <Badge tone="ok">C2PA signiert</Badge>}
+                      {c2pa === "signed" && <Badge tone="ok">Echtheitssiegel gesetzt</Badge>}
+                      {/* Klasse C (docs/BEDIENKONZEPT.md, Abschnitt 7): Serverzustand, der Nutzer kann nichts tun.
+                          Wandert in Etappe 2 nach „Details für Profis“. Bis dahin neutral statt orange. */}
                       {c2pa === "skipped" && (
-                        <Badge tone="attention" title={clip.provenance.reason ?? undefined}>
-                          C2PA übersprungen{clip.provenance.reason ? `: ${clip.provenance.reason}` : ""}
-                        </Badge>
+                        <Badge title={clip.provenance.reason ?? undefined}>Ohne Echtheitssiegel</Badge>
                       )}
-                      {c2pa === "failed" && <Badge tone="attention">C2PA fehlgeschlagen{clip.provenance.reason ? `: ${clip.provenance.reason}` : ""}</Badge>}
+                      {c2pa === "failed" && <Badge title={clip.provenance.reason ?? undefined}>Ohne Echtheitssiegel</Badge>}
                       {clip.ad_label && <Badge>Werbelabel: {clip.ad_label}</Badge>}
                       {clip.provenance.source_credit && <Badge>{clip.provenance.source_credit}</Badge>}
                     </div>
@@ -484,12 +489,12 @@ export function ClipBoard({
 
                   {isDone(clip) && neutral && (
                     <p className="rounded-[12px] border border-attention/50 bg-attention/10 px-3 py-2 text-xs text-text">
-                      <span className="font-medium text-attention">Reframe: neutraler Crop, kein Detektor.</span> Bildausschnitt bitte in der Vorschau prüfen.
+                      <span className="font-medium text-attention">Bildausschnitt: Mitte.</span> Schau in der Vorschau nach, ob alles Wichtige im Bild ist.
                     </p>
                   )}
                   {isDone(clip) && clip.render_plan && !neutral && (
                     <p className="text-xs text-text-2">
-                      Reframe: {clip.render_plan.reframe.strategy === "talking_head" ? "ein Sprecher" : "zwei Sprecher"}, Detektor {clip.render_plan.reframe.detector}
+                      Bildausschnitt: {clip.render_plan.reframe.strategy === "talking_head" ? "auf einen Sprecher" : "auf zwei Sprecher"}
                     </p>
                   )}
 
@@ -503,12 +508,12 @@ export function ClipBoard({
                   )}
 
                   {clip.cps_warnings.length > 0 && (
-                    <ul className="flex flex-col gap-1 text-xs text-attention" aria-label="Lesetempo-Warnungen">
-                      {clip.cps_warnings.slice(0, 3).map((w, i) => (
-                        <li key={i}>{w}</li>
-                      ))}
-                      {clip.cps_warnings.length > 3 && <li className="text-text-2">und {clip.cps_warnings.length - 3} weitere</li>}
-                    </ul>
+                    <p className="text-xs text-text-2" title={clip.cps_warnings.join("\n")}>
+                      {clip.cps_warnings.length === 1
+                        ? "Ein Untertitel läuft schnell durch."
+                        : `${clip.cps_warnings.length} Untertitel laufen schnell durch.`}{" "}
+                      Zum Mitlesen eventuell zu schnell.
+                    </p>
                   )}
 
                   <div className="border-t border-line pt-3">
@@ -570,13 +575,13 @@ export function ClipBoard({
                       href={`/projekte/${sourceId}/clips/${clip.id}/hooks`}
                       className="transition-soft inline-flex h-9 items-center rounded-pill bg-text px-4 text-sm font-medium text-black hover:bg-white"
                     >
-                      Hook-Studio
+                      Text oder Bild ändern
                     </Link>
                     <Button size="sm" variant="ghost" onClick={() => rerender(clip)} disabled={busyId === clip.id || clip.status === "rendering"}>
-                      Neu rendern
+                      Änderungen übernehmen
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => togglePreview(clip)} aria-expanded={open}>
-                      {open ? "Vorschau schließen" : "Ton-aus-Vorschau"}
+                      {open ? "Vorschau schließen" : "Vorschau"}
                     </Button>
                     {canDelete && (
                       <Button size="sm" variant="danger" onClick={() => setDeleteTarget(clip)} disabled={clip.status === "rendering"}>
@@ -616,7 +621,7 @@ export function ClipBoard({
                             playsInline
                             controls
                             preload="metadata"
-                            aria-label={`Ton-aus-Vorschau ${PLATFORM_LABELS[clip.platform]}`}
+                            aria-label={`Vorschau ohne Ton, ${PLATFORM_LABELS[clip.platform]}`}
                             className="mx-auto w-full max-w-[300px] rounded-inner border border-line-strong bg-black"
                             style={{ aspectRatio: clip.aspect === "4:5" ? "4 / 5" : "9 / 16" }}
                           />

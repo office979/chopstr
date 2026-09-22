@@ -15,7 +15,7 @@ type Props = { params: Promise<{ id: string }> };
 export async function generateMetadata({ params }: Props) {
   const { id } = await params;
   const source = await getRepo().getSource(id);
-  return { title: source ? `Review · ${source.title}` : "Review" };
+  return { title: source ? `Momente auswählen · ${source.title}` : "Momente auswählen" };
 }
 
 export default async function ReviewPage({ params }: Props) {
@@ -34,25 +34,24 @@ export default async function ReviewPage({ params }: Props) {
   if (candidates.length === 0 || !transcript) {
     const running = source.status !== "ready" && source.status !== "failed";
     return (
-      <PageShell width="narrow" backgroundWord="Review">
+      <PageShell width="narrow" backgroundWord="Momente">
         <GlassCard padding="lg" className="text-center">
-          <p className="text-lg font-medium">{running ? "Noch keine Kandidaten" : "Keine Kandidaten"}</p>
+          <p className="text-lg font-medium">{running ? "Der Computer sucht noch" : "Keine guten Stellen gefunden"}</p>
           <p className="mx-auto mt-2 max-w-md text-text-2">
             {running
-              ? "Die Story-Engine läuft noch. Sobald die Pipeline fertig ist, erscheinen die Kandidaten hier."
-              : "Verwerfen ist ein Ergebnis: das Material hat keinen eigenständigen Moment ergeben."}
+              ? "Sobald er fertig ist, erscheinen die gefundenen Momente hier."
+              : "In diesem Video steckt keine Stelle, die für sich allein funktioniert. Das kommt vor."}
           </p>
           {!running && (
             <p className="mx-auto mt-3 max-w-md text-sm text-text-2">
-              Prüfe das Redaktions-Briefing im Projekt: Zielgruppe, gewünschte Momente und Ausschlüsse steuern, was die
-              Story-Engine vorschlägt.
+              Schreib beim nächsten Mal im Video dazu, worum es gehen soll. Das hilft dem Computer beim Suchen.
             </p>
           )}
           <div className="mt-6 flex justify-center gap-2">
             <ButtonLink href={`/projekte/${source.id}`} variant="ghost">
-              Zum Projekt
+              Zum Video
             </ButtonLink>
-            {transcript && <ButtonLink href={`/projekte/${source.id}/transkript`}>Transkript öffnen</ButtonLink>}
+            {transcript && <ButtonLink href={`/projekte/${source.id}/transkript`}>Text öffnen</ButtonLink>}
           </div>
         </GlassCard>
       </PageShell>
@@ -65,7 +64,7 @@ export default async function ReviewPage({ params }: Props) {
   const passed = candidates.filter((c) => c.gate_passed).length;
 
   return (
-    <PageShell width="wide" backgroundWord="Review" className="pt-24 sm:pt-28">
+    <PageShell width="wide" backgroundWord="Momente" className="pt-24 sm:pt-28">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm text-text-2">
@@ -73,9 +72,10 @@ export default async function ReviewPage({ params }: Props) {
               {source.title}
             </Link>
           </p>
-          <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Kandidaten prüfen</h1>
+          <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Momente auswählen</h1>
           <p className="mt-1 text-sm text-text-2">
-            {candidates.length} Kandidaten, {passed} erfüllen alle Pflichtkriterien. Du entscheidest, was ein Clip wird.
+            Der Computer hat {candidates.length === 1 ? "einen Moment" : `${candidates.length} Momente`} gefunden,{" "}
+            {passed === candidates.length ? "alle sind vollständig geprüft" : `${passed} davon vollständig geprüft`}. Du entscheidest, was ein Clip wird.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -85,7 +85,7 @@ export default async function ReviewPage({ params }: Props) {
             </ButtonLink>
           )}
           <ButtonLink href={`/projekte/${source.id}/transkript`} variant="ghost" size="sm">
-            Transkript
+            Text
           </ButtonLink>
         </div>
       </div>

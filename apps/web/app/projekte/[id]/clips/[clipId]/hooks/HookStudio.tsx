@@ -424,7 +424,7 @@ export function HookStudio({
                   )}
                 </p>
                 <Button size="sm" onClick={rerender} disabled={rendering}>
-                  {rendering ? "Wird angestoßen" : "Neu rendern"}
+                  {rendering ? "Läuft" : "Änderungen übernehmen"}
                 </Button>
               </div>
             )}
@@ -461,7 +461,7 @@ export function HookStudio({
       {/* Stumme Vorschau */}
       <GlassCard padding="md" id="vorschau" className="flex flex-col gap-3">
         <div>
-          <h2 className="text-sm font-medium">Ton-aus-Vorschau</h2>
+          <h2 className="text-sm font-medium">Vorschau ohne Ton</h2>
           <p className="mt-0.5 text-xs text-text-2">
             {PLATFORM_LABELS[clip.platform]}, {clip.aspect}, Preset {captions?.preset ?? clip.render_plan?.captions.preset ?? PLATFORM_DEFAULT_PRESET[clip.platform]}
           </p>

@@ -305,8 +305,13 @@ export function TranscriptEditor({ sourceId, title, durationS, videoSrc, transcr
         <GlassCard padding="lg" className="max-h-[70vh] overflow-y-auto lg:max-h-[calc(100dvh-9rem)]">
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <Badge>{transcript.asr_model_id?.split("/").pop() ?? "ASR"}</Badge>
-              {lowCount > 0 && <Badge tone="attention">{lowCount} Wörter prüfen</Badge>}
+              {/* Modellname ist Profi-Information (docs/BEDIENKONZEPT.md, Abschnitt 9): nur noch im Tooltip. */}
+              <Badge title={transcript.asr_model_id ?? undefined}>Vom Computer mitgeschrieben</Badge>
+              {lowCount > 0 && (
+                <Badge tone="attention">
+                  {lowCount === 1 ? "1 Wort war unsicher" : `${lowCount} Wörter waren unsicher`}
+                </Badge>
+              )}
             </div>
             <p className="text-xs text-text-2">
               Orange unterstrichen: Konfidenz unter {Math.round(LOW_CONFIDENCE * 100)} %

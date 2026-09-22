@@ -127,20 +127,20 @@ export function GuestApprovalDialog({ sourceId, clipId, clipLabel, guestApproval
       {canRequest && (
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="ghost" onClick={openDialog}>
-            {status === "pending" ? "Neuen Link anfordern" : status === "none" ? "Gast-Freigabe anfordern" : "Erneut anfordern"}
+            {status === "pending" ? "Neuen Link erstellen" : status === "none" ? "Jemanden fragen" : "Nochmal fragen"}
           </Button>
         </div>
       )}
       {gateNotice && !planAllows && (
         <p role="status" className="rounded-[12px] border border-line px-3 py-2 text-xs text-text-2">
-          Gast-Freigaben sind im Tarif {planName} nicht enthalten.{" "}
+          Im Tarif {planName} kannst du niemanden um Freigabe bitten.{" "}
           <Link href="/einstellungen/abrechnung" className="text-text underline-offset-4 hover:underline">
             Tarif ab Pro wählen
           </Link>
         </p>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Gast-Freigabe anfordern" description={`${clipLabel}: Der Gast sieht Clip, Hook und Post-Text und entscheidet ohne Konto. Der Link gilt 14 Tage.`}>
+      <Modal open={open} onClose={() => setOpen(false)} title="Jemanden um Freigabe bitten" description={`${clipLabel}: Die Person bekommt einen Link, sieht den Clip mit Text und sagt Ja oder Nein. Ohne Konto. Der Link gilt 14 Tage.`}>
         {result ? (
           <div className="flex flex-col gap-4">
             <p className="text-sm text-text">

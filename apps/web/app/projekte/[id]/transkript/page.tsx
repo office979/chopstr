@@ -14,7 +14,7 @@ type Props = { params: Promise<{ id: string }> };
 export async function generateMetadata({ params }: Props) {
   const { id } = await params;
   const source = await getRepo().getSource(id);
-  return { title: source ? `Transkript · ${source.title}` : "Transkript" };
+  return { title: source ? `Text · ${source.title}` : "Text" };
 }
 
 export default async function TranscriptPage({ params }: Props) {
@@ -29,13 +29,13 @@ export default async function TranscriptPage({ params }: Props) {
     return (
       <PageShell width="narrow" backgroundWord="Text">
         <GlassCard padding="lg" className="text-center">
-          <p className="text-lg font-medium">Noch kein Transkript</p>
+          <p className="text-lg font-medium">Noch kein Text</p>
           <p className="mx-auto mt-2 max-w-md text-text-2">
-            Für „{source.title}“ liegt noch keine Transkript-Version vor. Sobald die Pipeline fertig ist, erscheint es hier.
+            Der Computer hört sich „{source.title}“ noch an. Sobald er fertig ist, steht der Text hier.
           </p>
           <div className="mt-6 flex justify-center gap-2">
             <ButtonLink href={`/projekte/${source.id}`} variant="ghost">
-              Zum Projekt
+              Zum Video
             </ButtonLink>
           </div>
         </GlassCard>
@@ -57,7 +57,7 @@ export default async function TranscriptPage({ params }: Props) {
               {source.title}
             </Link>
           </p>
-          <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Transkript</h1>
+          <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Text</h1>
         </div>
       </div>
       <TranscriptEditor

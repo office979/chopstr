@@ -54,10 +54,10 @@ export function PillNav({ user }: { user: NavUser | null }) {
   }, [open]);
 
   const items: NavItem[] = [
-    { href: "/", label: "Projekte", short: "Projekte", match: (p) => p === "/" || p.startsWith("/projekte") },
+    { href: "/", label: "Meine Videos", short: "Videos", match: (p) => p === "/" || p.startsWith("/projekte") },
   ];
-  if (user?.canUpload) items.push({ href: "/upload", label: "Upload", short: "Upload", match: (p) => p.startsWith("/upload") });
-  if (user?.canBrand) items.push({ href: "/marke", label: "Markenprofil", short: "Marke", match: (p) => p.startsWith("/marke") });
+  if (user?.canUpload) items.push({ href: "/upload", label: "Neues Video", short: "Neu", match: (p) => p.startsWith("/upload") });
+  if (user?.canBrand) items.push({ href: "/marke", label: "Aussehen", short: "Aussehen", match: (p) => p.startsWith("/marke") });
   /* Entwicklerseite (API, MCP): nur admin und owner (api.manage) */
   if (can(user?.role, "api.manage")) items.push({ href: "/entwickler", label: "Entwickler", short: "API", match: (p) => p.startsWith("/entwickler") });
 
@@ -102,7 +102,7 @@ export function PillNav({ user }: { user: NavUser | null }) {
             className="transition-soft flex h-9 shrink-0 items-center rounded-pill bg-text px-3 text-sm font-medium text-black hover:bg-white sm:px-4"
           >
             <span className="sm:hidden" aria-hidden="true">+</span>
-            <span className="sr-only sm:not-sr-only">Neues Projekt</span>
+            <span className="sr-only sm:not-sr-only">Neues Video</span>
           </Link>
         )}
         {user ? (

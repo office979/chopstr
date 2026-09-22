@@ -54,13 +54,13 @@ export default async function ClipsPage({ params }: Props) {
         <GlassCard padding="lg" className="text-center">
           <p className="text-lg font-medium">Noch keine Clips</p>
           <p className="mx-auto mt-2 max-w-md text-text-2">
-            Clips entstehen, wenn du im Review einen Kandidaten annimmst und Ziele wählst. Je Ziel wird ein Clip gerendert.
+            Clips entstehen, sobald du einen Moment nimmst. Für jede Plattform, die du wählst, wird einer erstellt.
           </p>
           <div className="mt-6 flex justify-center gap-2">
             <ButtonLink href={`/projekte/${source.id}`} variant="ghost">
-              Zum Projekt
+              Zum Video
             </ButtonLink>
-            <ButtonLink href={`/projekte/${source.id}/review`}>Kandidaten prüfen</ButtonLink>
+            <ButtonLink href={`/projekte/${source.id}/review`}>Momente auswählen</ButtonLink>
           </div>
         </GlassCard>
       </PageShell>
@@ -79,7 +79,7 @@ export default async function ClipsPage({ params }: Props) {
             </Link>
           </p>
           <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Clips</h1>
-          <p className="mt-1 text-sm text-text-2">Jeder Render ist ein deterministischer Plan, den du prüfen kannst.</p>
+          <p className="mt-1 text-sm text-text-2">Ansehen, herunterladen oder direkt posten.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <ButtonLink href="/serien" variant="ghost" size="sm">
@@ -89,10 +89,10 @@ export default async function ClipsPage({ params }: Props) {
             Experimente
           </ButtonLink>
           <ButtonLink href={`/projekte/${source.id}/review`} variant="ghost" size="sm">
-            Review
+            Momente
           </ButtonLink>
           <ButtonLink href={`/projekte/${source.id}`} variant="ghost" size="sm">
-            Projekt
+            Video
           </ButtonLink>
         </div>
       </div>

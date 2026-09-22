@@ -16,7 +16,7 @@ import type { Source } from "@/lib/repo/types";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "Projekte" };
+export const metadata = { title: "Meine Videos" };
 
 function checkState(status: Source["status"]): StatusCheckState {
   if (status === "ready") return "done";
@@ -66,21 +66,21 @@ export default async function ProjectsPage() {
       <div className="mb-10 flex flex-col gap-6 sm:mb-14">
         <Wordmark width={168} className="opacity-95" />
         <div className="max-w-2xl">
-          <h1 className="text-3xl font-semibold tracking-[var(--tracking-display)] sm:text-5xl">Projekte</h1>
+          <h1 className="text-3xl font-semibold tracking-[var(--tracking-display)] sm:text-5xl">Meine Videos</h1>
           <p className="mt-3 text-base text-text-2 sm:text-lg">
-            Long-Form-Video rein, sinntreue Clips raus. Jede Auswahl wird erklärt, du gibst frei.
+            Langes Video rein, kurze Clips raus. Der Computer sucht die besten Stellen, du wählst aus.
           </p>
         </div>
       </div>
 
       {sources.length === 0 ? (
         <GlassCard padding="lg" className="text-center">
-          <p className="text-lg font-medium">Noch keine Projekte</p>
+          <p className="text-lg font-medium">chopstr macht aus langen Videos kurze Clips</p>
           <p className="mx-auto mt-2 max-w-md text-text-2">
-            Lade eine Podcast-Folge, eine Keynote oder ein Interview hoch. Die Transkription läuft in der EU.
+            Du lädst ein Video hoch, der Computer sucht die besten Stellen, du wählst aus. Dauert etwa fünf Minuten.
           </p>
           <div className="mt-6 flex justify-center">
-            <ButtonLink href="/upload">Erstes Projekt anlegen</ButtonLink>
+            <ButtonLink href="/upload">Erstes Video hochladen</ButtonLink>
           </div>
         </GlassCard>
       ) : (
@@ -119,14 +119,14 @@ export default async function ProjectsPage() {
                       </Badge>
                       {hasCandidates && count && (
                         <Badge tone="ok">
-                          {count.total} {count.total === 1 ? "Kandidat" : "Kandidaten"}
+                          {count.total} {count.total === 1 ? "Moment" : "Momente"} gefunden
                         </Badge>
                       )}
                       {clipCount && clipCount.total > 0 && (
                         <Badge tone={clipCount.rendering > 0 ? "ai" : "ok"}>
                           {clipCount.rendered > 0
-                            ? `${clipCount.rendered} ${clipCount.rendered === 1 ? "Clip" : "Clips"} gerendert`
-                            : `${clipCount.total} ${clipCount.total === 1 ? "Clip" : "Clips"} in Arbeit`}
+                            ? `${clipCount.rendered} ${clipCount.rendered === 1 ? "Clip" : "Clips"} fertig`
+                            : `${clipCount.total} ${clipCount.total === 1 ? "Clip wird" : "Clips werden"} erstellt`}
                         </Badge>
                       )}
                       {clipCount && clipCount.total > 0 && (
@@ -137,19 +137,19 @@ export default async function ProjectsPage() {
                       {s.status === "ready" && hasCandidates ? (
                         <>
                           <ButtonLink href={`/projekte/${s.id}/transkript`} size="sm" variant="ghost">
-                            Transkript
+                            Text
                           </ButtonLink>
                           <ButtonLink href={`/projekte/${s.id}/review`} size="sm">
-                            Review öffnen
+                            Momente auswählen
                           </ButtonLink>
                         </>
                       ) : s.status === "ready" ? (
                         <ButtonLink href={`/projekte/${s.id}/transkript`} size="sm">
-                          Transkript öffnen
+                          Text öffnen
                         </ButtonLink>
                       ) : (
                         <ButtonLink href={`/projekte/${s.id}`} size="sm" variant="ghost">
-                          Details
+                          Ansehen
                         </ButtonLink>
                       )}
                       {canDelete && <DeleteSourceButton sourceId={s.id} title={s.title} />}

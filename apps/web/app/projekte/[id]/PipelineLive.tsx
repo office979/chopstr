@@ -170,12 +170,12 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
           <p className="text-sm text-text-2">
             {hasCandidates
-              ? `${candidateCount.gate_passed} von ${candidateCount.total} erfüllen alle Pflichtkriterien.${
-                  candidateCount.accepted > 0 ? ` ${candidateCount.accepted} angenommen.` : ""
+              ? `${candidateCount.total === 1 ? "Ein Moment" : `${candidateCount.total} Momente`} gefunden, ${candidateCount.gate_passed} davon vollständig geprüft.${
+                  candidateCount.accepted > 0 ? ` ${candidateCount.accepted} schon genommen.` : ""
                 }`
               : hasTranscript
-                ? "Transkript liegt vor. Prüfe unsichere Wörter und Sprechernamen."
-                : (statusMessage ?? "Verarbeitung abgeschlossen.")}
+                ? "Der Text ist fertig. Schau dir die unsicheren Wörter und die Namen an."
+                : (statusMessage ?? "Fertig.")}
           </p>
           <div className="flex flex-wrap gap-2">
             {hasTranscript && (
@@ -188,7 +188,7 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
                     : "bg-text text-black hover:bg-white",
                 )}
               >
-                Transkript öffnen
+                Text öffnen
               </Link>
             )}
             {hasCandidates && (
@@ -196,7 +196,7 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
                 href={`/projekte/${sourceId}/review`}
                 className="transition-soft inline-flex h-10 items-center rounded-pill bg-text px-5 text-sm font-medium text-black hover:bg-white"
               >
-                Kandidaten prüfen
+                Momente auswählen
               </Link>
             )}
           </div>

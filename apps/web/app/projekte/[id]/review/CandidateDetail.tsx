@@ -98,7 +98,7 @@ export function CandidateDetail({
     <GlassCard padding="lg" className="flex flex-col gap-7">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm text-text-2">Kandidat, Version {c.version}</p>
+          <p className="text-sm text-text-2">Moment, Fassung {c.version}</p>
           <h2 className="mt-1 text-xl font-medium">{structureLabel(c.structure)}</h2>
           <p className="mt-1 font-mono text-xs text-text-3">
             {c.model_id ?? "unbekanntes Modell"}
@@ -164,7 +164,7 @@ export function CandidateDetail({
       </section>
 
       <section>
-        <SectionTitle>Pflichtkriterien</SectionTitle>
+        <SectionTitle>Was geprüft wurde</SectionTitle>
         <ul className="flex flex-col gap-3">
           {GATE_ORDER.map((key) => {
             const g = c.gates?.[key];

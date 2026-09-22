@@ -31,7 +31,7 @@ class UploadTokenError extends Error {}
 class DirectUploadError extends Error {}
 
 const RIGHTS_TEXT =
-  "Ich bestätige, dass ich die Rechte an diesem Material besitze oder eine Lizenz habe, es zu bearbeiten und zu veröffentlichen.";
+  "Ich bestätige: Ich darf dieses Video bearbeiten und veröffentlichen.";
 
 const ACCEPT = "video/mp4,video/quicktime,video/x-matroska,video/webm,audio/mpeg,audio/wav,audio/x-m4a,.mp4,.mov,.mkv,.webm,.mp3,.wav,.m4a";
 
@@ -74,11 +74,11 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
 
   const validate = (fd: FormData): Record<string, string> => {
     const errs: Record<string, string> = {};
-    if (!String(fd.get("title") ?? "").trim()) errs.title = "Bitte einen Titel angeben.";
-    if (!file) errs.file = "Bitte eine Datei auswählen.";
-    if (!confirmed) errs.rights_confirmed = "Ohne Bestätigung der Rechte ist kein Upload möglich.";
+    if (!String(fd.get("title") ?? "").trim()) errs.title = "Gib dem Video einen Namen.";
+    if (!file) errs.file = "Wähle eine Datei aus.";
+    if (!confirmed) errs.rights_confirmed = "Setz unten den Haken, sonst geht es nicht weiter.";
     if (rights === "third_party" && !String(fd.get("source_owner") ?? "").trim()) {
-      errs.source_owner = "Bei Fremdmaterial ist die Quellenangabe Pflicht.";
+      errs.source_owner = "Schreib dazu, von wem das Video ist.";
     }
     return errs;
   };
@@ -284,13 +284,13 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-5" noValidate aria-busy={busy}>
       <GlassCard padding="lg" className="flex flex-col gap-5">
-        <h2 className="text-lg font-medium">Material</h2>
-        <Field label="Titel" htmlFor="title" required error={errors.title}>
+        <h2 className="text-lg font-medium">Dein Video</h2>
+        <Field label="Wie soll es heißen?" htmlFor="title" required error={errors.title}>
           <Input id="title" name="title" placeholder="z. B. Podcast Folge 13: Preise im Handwerk" required disabled={busy} />
         </Field>
-        <Field label="Markenprofil" htmlFor="brand_profile_id" hint="Steuert Anrede, Wörterbuch und Caption-Stil.">
+        <Field label="Aussehen" htmlFor="brand_profile_id" hint="Bestimmt Farben, Schrift und wie die Untertitel aussehen.">
           <Select id="brand_profile_id" name="brand_profile_id" defaultValue={profiles[0]?.id ?? ""} disabled={busy}>
-            {profiles.length === 0 && <option value="">Kein Markenprofil angelegt</option>}
+            {profiles.length === 0 && <option value="">Noch keines angelegt</option>}
             {profiles.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -350,12 +350,12 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
       </GlassCard>
 
       <GlassCard padding="lg" className="flex flex-col gap-5">
-        <h2 className="text-lg font-medium">Rechte</h2>
-        <Field label="Rechtestatus" htmlFor="rights_status">
+        <h2 className="text-lg font-medium">Darfst du das Video verwenden?</h2>
+        <Field label="Wem gehört das Video?" htmlFor="rights_status">
           <Select id="rights_status" name="rights_status" value={rights} onChange={(e) => setRights(e.target.value as RightsStatus)} disabled={busy}>
-            <option value="own">Eigenes Material</option>
-            <option value="licensed">Lizenziert</option>
-            <option value="third_party">Fremdmaterial (Zitat, § 63 UrhG)</option>
+            <option value="own">Mir selbst</option>
+            <option value="licensed">Jemand anderem, ich habe die Erlaubnis</option>
+            <option value="third_party">Jemand anderem, ich zitiere nur daraus</option>
           </Select>
         </Field>
         {rights === "third_party" && (
@@ -397,12 +397,15 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
       </GlassCard>
 
       <GlassCard padding="lg" className="flex flex-col gap-5">
-        <h2 className="text-lg font-medium">Redaktions-Briefing</h2>
+        <h2 className="text-lg font-medium">Wünsche</h2>
+        <p className="-mt-2 text-sm text-text-2">
+          Kannst du leer lassen. Wenn du etwas einträgst, sucht der Computer gezielter.
+        </p>
         <div className="grid gap-5 sm:grid-cols-2">
-          <Field label="Erwartete Sprecher" htmlFor="expected_speakers" hint="Hilft der Sprechertrennung.">
+          <Field label="Wie viele Personen sprechen?" htmlFor="expected_speakers" hint="Hilft beim Auseinanderhalten der Stimmen.">
             <Input id="expected_speakers" name="expected_speakers" type="number" min={1} max={12} defaultValue={2} disabled={busy} />
           </Field>
-          <Field label="Plattform" htmlFor="platform">
+          <Field label="Wo soll es hin?" htmlFor="platform">
             <Select id="platform" name="platform" defaultValue={profiles[0]?.platform ?? "linkedin"} disabled={busy}>
               <option value="linkedin">LinkedIn</option>
               <option value="tiktok">TikTok</option>
@@ -411,13 +414,13 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
             </Select>
           </Field>
         </div>
-        <Field label="Zielgruppe" htmlFor="brief_audience">
+        <Field label="Wer soll das sehen?" htmlFor="brief_audience">
           <Input id="brief_audience" name="brief_audience" placeholder="z. B. Geschäftsführung im Mittelstand" disabled={busy} />
         </Field>
-        <Field label="Gewünschte Momente" htmlFor="brief_wanted" hint="Was soll auf jeden Fall in die Clips?">
+        <Field label="Was muss unbedingt rein?" htmlFor="brief_wanted">
           <Textarea id="brief_wanted" name="brief_wanted" placeholder="z. B. Zahlen zu Vakanzkosten, klare Thesen" disabled={busy} />
         </Field>
-        <Field label="Ausschlüsse" htmlFor="brief_exclude" hint="Was darf nicht in die Clips?">
+        <Field label="Was soll auf keinen Fall rein?" htmlFor="brief_exclude">
           <Textarea id="brief_exclude" name="brief_exclude" placeholder="z. B. Smalltalk am Anfang, Werbeblock" disabled={busy} />
         </Field>
       </GlassCard>
@@ -447,7 +450,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
                 <div className="text-sm">
                   <span className="font-medium text-text">{step.label}</span>
                   <span className="ml-2 text-text-2">
-                    {step.phase === 2 ? "kommt in Phase 2" : localWorker && !demoUpload ? "übernimmt der lokale Worker" : "startet nach dem Upload"}
+                    {localWorker && !demoUpload ? "läuft gleich" : "startet nach dem Hochladen"}
                   </span>
                 </div>
               </li>
@@ -456,7 +459,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
           {note && <p className={cn("mt-4 text-sm", phase === "error" ? "text-attention" : "text-text-2")}>{note}</p>}
           {phase === "finishing" && (
             <p className="mt-4 text-sm text-text-2">
-              {uploadMode === "direct" ? "Datei ist übertragen, Prüfsumme wird gebildet und das Projekt angelegt" : "Projekt wird angelegt"}
+              {uploadMode === "direct" ? "Datei ist da, wird gerade geprüft und angelegt" : "Wird angelegt"}
             </p>
           )}
         </GlassCard>
@@ -485,7 +488,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
             </Button>
           )}
           <Button type="submit" disabled={busy || !confirmed}>
-            {phase === "uploading" ? "Wird hochgeladen" : phase === "finishing" ? "Wird angelegt" : "Hochladen"}
+            {phase === "uploading" ? "Wird hochgeladen" : phase === "finishing" ? "Fast fertig" : "Los geht's"}
           </Button>
         </div>
       </div>

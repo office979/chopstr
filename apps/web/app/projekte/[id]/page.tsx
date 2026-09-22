@@ -55,22 +55,22 @@ export default async function ProjectPage({ params }: Props) {
   const hasCandidates = source.status === "ready" && candidateCount.total > 0;
 
   return (
-    <PageShell backgroundWord="Projekt" lightTone={live ? "ai" : "brand"}>
+    <PageShell backgroundWord="Video" lightTone={live ? "ai" : "brand"}>
       <PageHeader
-        eyebrow="Projekt"
+        eyebrow="Video"
         title={source.title}
         description={source.original_filename ?? undefined}
         actions={
           <>
             <ButtonLink href="/" variant="ghost">
-              Alle Projekte
+              Alle Videos
             </ButtonLink>
             {transcript && (
               <ButtonLink href={`/projekte/${source.id}/transkript`} variant={hasCandidates ? "ghost" : "primary"}>
-                Transkript öffnen
+                Text öffnen
               </ButtonLink>
             )}
-            {hasCandidates && <ButtonLink href={`/projekte/${source.id}/review`}>Kandidaten prüfen</ButtonLink>}
+            {hasCandidates && <ButtonLink href={`/projekte/${source.id}/review`}>Momente auswählen</ButtonLink>}
             {clipCount.total > 0 && (
               <ButtonLink href={`/projekte/${source.id}/clips`} variant="ghost">
                 Clips
@@ -99,7 +99,7 @@ export default async function ProjectPage({ params }: Props) {
                 <div>
                   <h2 className="text-lg font-medium">Clips</h2>
                   <p className="mt-1 text-sm text-text-2">
-                    {clipCount.rendered} von {clipCount.total} gerendert
+                    {clipCount.rendered} von {clipCount.total} fertig
                     {clipCount.rendering > 0 ? `, ${clipCount.rendering} in Arbeit` : ""}
                     {clipCount.failed > 0 ? `, ${clipCount.failed} fehlgeschlagen` : ""}.
                   </p>
@@ -115,7 +115,7 @@ export default async function ProjectPage({ params }: Props) {
             </GlassCard>
           )}
           <GlassCard padding="lg">
-            <h2 className="mb-5 text-lg font-medium">Metadaten</h2>
+            <h2 className="mb-5 text-lg font-medium">Angaben zum Video</h2>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-5">
               <Meta label="Dauer">
                 <Timecode seconds={source.duration_s} className="text-text" />
@@ -152,7 +152,7 @@ export default async function ProjectPage({ params }: Props) {
                 </div>
               )}
               <div className="col-span-2">
-                <Meta label="Markenprofil">{brand?.name ?? <span className="text-text-2">keines</span>}</Meta>
+                <Meta label="Aussehen">{brand?.name ?? <span className="text-text-2">keines</span>}</Meta>
               </div>
               <div className="col-span-2">
                 <Meta label="Status">
@@ -166,7 +166,7 @@ export default async function ProjectPage({ params }: Props) {
 
           {(source.brief.audience || source.brief.wanted || source.brief.exclude) && (
             <GlassCard padding="lg">
-              <h2 className="mb-4 text-lg font-medium">Redaktions-Briefing</h2>
+              <h2 className="mb-4 text-lg font-medium">Deine Wünsche</h2>
               <dl className="flex flex-col gap-4">
                 {source.brief.audience && <Meta label="Zielgruppe">{source.brief.audience}</Meta>}
                 {source.brief.wanted && <Meta label="Gewünschte Momente">{source.brief.wanted}</Meta>}

@@ -21,19 +21,19 @@ export interface GateReason {
 export function publishGates(input: PublishGateInput): GateReason[] {
   const out: GateReason[] = [];
   if (input.clip.status !== "rendered" && input.clip.status !== "exported") {
-    out.push({ code: "clip_not_rendered", message: "Der Clip ist noch nicht gerendert." });
+    out.push({ code: "clip_not_rendered", message: "Der Clip ist noch nicht fertig." });
   }
   if (!input.candidate || input.candidate.human_verdict !== "accepted") {
-    out.push({ code: "candidate_not_accepted", message: "Der Kandidat ist nicht angenommen." });
+    out.push({ code: "candidate_not_accepted", message: "Du hast diesen Moment noch nicht genommen." });
   }
   if (input.clip.guest_approval_required && input.approval?.decision !== "approved") {
-    out.push({ code: "guest_approval", message: "Die Gast-Freigabe steht noch aus." });
+    out.push({ code: "guest_approval", message: "Die Person, die du gefragt hast, hat noch nicht geantwortet." });
   }
   if (!input.workspace?.dpa_signed_at) {
-    out.push({ code: "dpa", message: "Der AV-Vertrag ist noch nicht angenommen.", href: "/rechtliches/avv" });
+    out.push({ code: "dpa", message: "Ein Vertrag fehlt noch.", href: "/rechtliches/avv" });
   }
   if (!input.plan?.features?.publishing) {
-    out.push({ code: "plan", message: `Veröffentlichen ist im Tarif ${input.plan?.name ?? "Starter"} nicht enthalten.`, href: "/einstellungen/abrechnung" });
+    out.push({ code: "plan", message: `Im Tarif ${input.plan?.name ?? "Starter"} kannst du nicht direkt posten. Herunterladen geht aber.`, href: "/einstellungen/abrechnung" });
   }
   return out;
 }

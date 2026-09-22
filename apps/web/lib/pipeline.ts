@@ -11,32 +11,32 @@ export interface PipelineStepDef {
 export const PIPELINE_STEPS: PipelineStepDef[] = [
   {
     key: "probe_and_extract",
-    label: "Prüfung & Extraktion",
-    description: "Datei prüfen, Audio extrahieren, Proxy rendern",
+    label: "Video wird vorbereitet",
+    description: "Datei prüfen, Ton heraustrennen, Vorschau anlegen",
     phase: 1,
   },
   {
     key: "transcribe_de",
-    label: "Transkription",
-    description: "Deutsches ASR mit Wortzeiten und Konfidenzen",
+    label: "Der Computer hört zu",
+    description: "Alles Gesprochene wird mitgeschrieben",
     phase: 1,
   },
   {
     key: "diarize",
-    label: "Sprechertrennung",
-    description: "Wer spricht wann",
+    label: "Wer spricht wann",
+    description: "Die Stimmen werden auseinandergehalten",
     phase: 1,
   },
   {
     key: "fuse_and_nlp",
-    label: "Sprachanalyse",
-    description: "dach_nlp: Sätze, Füllwörter, Verneinungen",
+    label: "Sätze werden sortiert",
+    description: "Satzgrenzen, Füllwörter und Verneinungen erkennen",
     phase: 1,
   },
   {
     key: "detect_candidates",
-    label: "Kandidaten",
-    description: "Story-Engine: Vorschlag, Rubrik, Story-Graph",
+    label: "Gute Stellen werden gesucht",
+    description: "Die stärksten Momente finden und bewerten",
     phase: 2,
   },
 ];
@@ -44,20 +44,20 @@ export const PIPELINE_STEPS: PipelineStepDef[] = [
 /* Render-Schritt (Phase 3): erscheint nur auf der Clip-Seite, nicht in der Quellen-Pipeline */
 export const RENDER_STEP: PipelineStepDef = {
   key: "render",
-  label: "Render",
-  description: "Copy, Reframe, Captions, Encode, Provenienz",
+  label: "Clip wird erstellt",
+  description: "Text, Bildausschnitt, Untertitel und Ton zusammensetzen",
   phase: 3,
 };
 
 export const STATUS_LABELS: Record<SourceStatus, string> = {
   uploading: "Wird hochgeladen",
   uploaded: "Hochgeladen",
-  ingesting: "Wird geprüft",
-  transcribing: "Wird transkribiert",
-  analyzing: "Wird analysiert",
-  scoring: "Wird bewertet",
-  ready: "Bereit",
-  failed: "Fehlgeschlagen",
+  ingesting: "Wird vorbereitet",
+  transcribing: "Computer hört zu",
+  analyzing: "Computer sucht gute Stellen",
+  scoring: "Computer bewertet die Stellen",
+  ready: "Fertig",
+  failed: "Etwas ist schiefgegangen",
   deleted: "Gelöscht",
 };
 

@@ -82,7 +82,7 @@ export function ClipPublishing({ sourceId, clip, extras, gates, connections, ser
 
   /* Veröffentlichen-Dialog */
   const [open, setOpen] = useState(false);
-  const [gateNotice, setGateNotice] = useState(false);
+  /* Kein gateNotice-Schalter mehr: Die Liste der offenen Punkte steht dauerhaft da, sobald es welche gibt. */
   const [connectionId, setConnectionId] = useState("");
   const [title, setTitle] = useState(clip.title_card ?? "");
   const [caption, setCaption] = useState("");
@@ -113,10 +113,7 @@ export function ClipPublishing({ sourceId, clip, extras, gates, connections, ser
   const isManual = chosen?.platform === "manual";
 
   const openDialog = async () => {
-    if (gates.length) {
-      setGateNotice(true);
-      return;
-    }
+    if (gates.length) return;
     setOpen(true);
     setConfirm(false);
     if (hookLoaded) return;
@@ -249,7 +246,7 @@ export function ClipPublishing({ sourceId, clip, extras, gates, connections, ser
         const data = (await res.json()) as ApiError & { extras?: ClipExtras; needs_render?: boolean };
         if (!res.ok || !data.extras) throw new Error(data.error ?? "Bildausschnitt konnte nicht gespeichert werden");
         onExtras?.(data.extras);
-        setMessage({ tone: "ok", text: data.needs_render ? "Bildausschnitt gespeichert. Für das Video „Neu rendern“." : "Bildausschnitt gespeichert, wirkt beim nächsten Render." });
+        setMessage({ tone: "ok", text: data.needs_render ? "Bildausschnitt gespeichert. Klick auf „Änderungen übernehmen“, damit das Video neu gebaut wird." : "Bildausschnitt gespeichert. Wirkt, sobald das Video das nächste Mal gebaut wird." });
       } catch (err) {
         setMessage({ tone: "error", text: err instanceof Error ? err.message : "Bildausschnitt konnte nicht gespeichert werden" });
         setReframe(extras.reframe_override ?? "");
@@ -437,7 +434,7 @@ export function ClipPublishing({ sourceId, clip, extras, gates, connections, ser
           )}
           {extras.reframe_override && onRerender && clip.status !== "rendering" && (
             <button type="button" onClick={onRerender} className="self-start text-xs text-text-2 underline-offset-4 hover:text-text hover:underline">
-              Neu rendern mit diesem Bildausschnitt
+              Video mit diesem Bildausschnitt neu bauen
             </button>
           )}
         </div>
@@ -479,26 +476,30 @@ export function ClipPublishing({ sourceId, clip, extras, gates, connections, ser
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <Button size="sm" onClick={openDialog} disabled={busy === "publish"}>
-              Veröffentlichen
+              Posten
             </Button>
-            {gates.length > 0 && <Badge tone="attention" className="h-6 px-2.5 text-[11px]" title={gates.map((g) => g.message).join(" ")}>{gates.length === 1 ? "1 Gate offen" : `${gates.length} Gates offen`}</Badge>}
           </div>
-          {gateNotice && gates.length > 0 && (
-            <ul className="flex flex-col gap-1 rounded-[12px] border border-attention/50 bg-attention/10 px-3 py-2 text-xs text-text" aria-label="Warum nicht veröffentlicht werden kann">
-              {gates.map((g) => (
-                <li key={g.code}>
-                  {g.message}
-                  {g.href && (
-                    <>
-                      {" "}
-                      <Link href={g.href} className="font-medium underline-offset-4 hover:underline">
-                        {g.code === "plan" ? "Zur Abrechnung" : g.code === "dpa" ? "AVV annehmen" : "Öffnen"}
-                      </Link>
-                    </>
-                  )}
-                </li>
-              ))}
-            </ul>
+          {/* Kein Zähler-Badge mehr (docs/BEDIENKONZEPT.md, Abschnitt 5.7): Der Nutzer muss sehen,
+              WAS fehlt und wohin er klickt, nicht WIE VIELE Bedingungen offen sind. */}
+          {gates.length > 0 && (
+            <div className="flex flex-col gap-1 rounded-[12px] border border-attention/50 bg-attention/10 px-3 py-2 text-xs text-text">
+              <p className="font-medium text-attention">Noch nicht bereit zum Posten:</p>
+              <ul className="flex flex-col gap-1" aria-label="Was noch fehlt">
+                {gates.map((g) => (
+                  <li key={g.code}>
+                    {g.message}
+                    {g.href && (
+                      <>
+                        {" "}
+                        <Link href={g.href} className="font-medium underline-offset-4 hover:underline">
+                          {g.code === "plan" ? "Zur Abrechnung" : g.code === "dpa" ? "Vertrag annehmen" : "Erledigen"}
+                        </Link>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       )}

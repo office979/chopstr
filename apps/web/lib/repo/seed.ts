@@ -191,19 +191,19 @@ export const seedSources: Source[] = [
 export const seedPodcastEvents: Omit<PipelineEvent, "id">[] = [
   { source_id: DEMO_IDS.podcast, step: "probe_and_extract", status: "started", progress: 0, message: "Datei wird geprüft", payload: null, at: iso(-days(2) + minutes(1)) },
   { source_id: DEMO_IDS.podcast, step: "probe_and_extract", status: "finished", progress: 1, message: "1920×1080, 25 fps, 62:00", payload: { sha256_verified: true }, at: iso(-days(2) + minutes(4)) },
-  { source_id: DEMO_IDS.podcast, step: "transcribe_de", status: "started", progress: 0, message: "whisper-large-v3-turbo-german", payload: null, at: iso(-days(2) + minutes(4)) },
-  { source_id: DEMO_IDS.podcast, step: "transcribe_de", status: "finished", progress: 1, message: "9.412 Wörter, mittlere Konfidenz 0,94", payload: null, at: iso(-days(2) + minutes(31)) },
-  { source_id: DEMO_IDS.podcast, step: "diarize", status: "started", progress: 0, message: "2 Sprecher erwartet", payload: null, at: iso(-days(2) + minutes(31)) },
-  { source_id: DEMO_IDS.podcast, step: "diarize", status: "finished", progress: 1, message: "2 Sprecher erkannt", payload: null, at: iso(-days(2) + minutes(44)) },
-  { source_id: DEMO_IDS.podcast, step: "fuse_and_nlp", status: "started", progress: 0, message: "dach_nlp", payload: null, at: iso(-days(2) + minutes(44)) },
-  { source_id: DEMO_IDS.podcast, step: "fuse_and_nlp", status: "finished", progress: 1, message: "612 Sätze, 184 Füllwörter, 96 Verneinungen", payload: null, at: iso(-days(2) + minutes(52)) },
-  { source_id: DEMO_IDS.podcast, step: "detect_candidates", status: "started", progress: 0, message: "Story-Engine über Bedrock EU", payload: null, at: iso(-days(2) + minutes(52)) },
+  { source_id: DEMO_IDS.podcast, step: "transcribe_de", status: "started", progress: 0, message: "Der Computer hört sich das Video an", payload: null, at: iso(-days(2) + minutes(4)) },
+  { source_id: DEMO_IDS.podcast, step: "transcribe_de", status: "finished", progress: 1, message: "9.412 Wörter mitgeschrieben", payload: null, at: iso(-days(2) + minutes(31)) },
+  { source_id: DEMO_IDS.podcast, step: "diarize", status: "started", progress: 0, message: "2 Personen erwartet", payload: null, at: iso(-days(2) + minutes(31)) },
+  { source_id: DEMO_IDS.podcast, step: "diarize", status: "finished", progress: 1, message: "2 Personen erkannt", payload: null, at: iso(-days(2) + minutes(44)) },
+  { source_id: DEMO_IDS.podcast, step: "fuse_and_nlp", status: "started", progress: 0, message: "Sätze werden sortiert", payload: null, at: iso(-days(2) + minutes(44)) },
+  { source_id: DEMO_IDS.podcast, step: "fuse_and_nlp", status: "finished", progress: 1, message: "612 Sätze, 184 Füllwörter", payload: null, at: iso(-days(2) + minutes(52)) },
+  { source_id: DEMO_IDS.podcast, step: "detect_candidates", status: "started", progress: 0, message: "Gute Stellen werden gesucht", payload: null, at: iso(-days(2) + minutes(52)) },
   {
     source_id: DEMO_IDS.podcast,
     step: "detect_candidates",
     status: "finished",
     progress: 1,
-    message: "6 Kandidaten, 3 erfüllen alle Pflichtkriterien",
+    message: "6 Momente gefunden, 3 davon vollständig geprüft",
     payload: {
       candidates: 6,
       gate_passed: 3,
@@ -220,7 +220,7 @@ export const seedPodcastEvents: Omit<PipelineEvent, "id">[] = [
 export const seedKeynoteEvents: Omit<PipelineEvent, "id">[] = [
   { source_id: DEMO_IDS.keynote, step: "probe_and_extract", status: "started", progress: 0, message: "Datei wird geprüft", payload: null, at: iso(-minutes(11)) },
   { source_id: DEMO_IDS.keynote, step: "probe_and_extract", status: "finished", progress: 1, message: "3840×2160, 50 fps, 41:00", payload: null, at: iso(-minutes(8)) },
-  { source_id: DEMO_IDS.keynote, step: "transcribe_de", status: "started", progress: 0, message: "whisper-large-v3-turbo-german", payload: null, at: iso(-minutes(8)) },
+  { source_id: DEMO_IDS.keynote, step: "transcribe_de", status: "started", progress: 0, message: "Der Computer hört sich das Video an", payload: null, at: iso(-minutes(8)) },
   { source_id: DEMO_IDS.keynote, step: "transcribe_de", status: "progress", progress: 0.35, message: "Minute 14 von 41", payload: null, at: iso(-minutes(1)) },
 ];
 

@@ -14,14 +14,14 @@ export default async function UploadPage() {
   const profiles = await repo.listBrandProfiles();
 
   return (
-    <PageShell width="narrow" backgroundWord="Upload">
+    <PageShell width="narrow" backgroundWord="Video">
       <PageHeader
-        eyebrow="Neues Projekt"
-        title="Upload"
+        eyebrow="Schritt 1 von 5"
+        title="Video hochladen"
         description={
           !isDemoMode() && isDirectUpload()
-            ? "Podcast, Keynote oder Interview als Video. Lokaler Testmodus: die Datei landet direkt im lokalen Speicherordner."
-            : "Podcast, Keynote oder Interview als Video. Der Upload ist fortsetzbar, die Verarbeitung läuft in der EU."
+            ? "Ein Podcast, ein Vortrag oder ein Interview. Die Datei bleibt auf diesem Rechner."
+            : "Ein Podcast, ein Vortrag oder ein Interview. Bricht der Upload ab, läuft er weiter, wo er war."
         }
       />
       <UploadForm

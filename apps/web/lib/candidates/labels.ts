@@ -3,26 +3,26 @@ import type { Candidate, CandidateStructure, HumanVerdict, RiskFlag, RubricKey }
 /* Deutsche Labels für Struktur, Rubrik, Risiken und Urteile (nur Anzeige) */
 
 export const STRUCTURE_LABELS: Record<CandidateStructure, string> = {
-  payoff_first: "Payoff zuerst",
-  tension_first: "Spannung zuerst",
-  hook_build_payoff: "Hook, Aufbau, Payoff",
-  decision_story: "Entscheidungsgeschichte",
-  how_to_list: "Schrittfolge",
-  loop: "Schleife",
+  payoff_first: "Pointe am Anfang",
+  tension_first: "Spannung am Anfang",
+  hook_build_payoff: "Aufbau zur Pointe",
+  decision_story: "Eine Entscheidung",
+  how_to_list: "Schritt für Schritt",
+  loop: "Endet wie es anfängt",
 };
 
 export function structureLabel(s: CandidateStructure | null): string {
-  return s ? STRUCTURE_LABELS[s] : "Struktur offen";
+  return s ? STRUCTURE_LABELS[s] : "Ohne klare Form";
 }
 
 export const RUBRIC_ORDER: RubricKey[] = ["hook", "payoff", "specificity", "tension", "audience_fit"];
 
 export const RUBRIC_LABELS: Record<RubricKey, string> = {
-  hook: "Hook",
-  payoff: "Payoff",
-  specificity: "Konkretheit",
-  tension: "Spannung",
-  audience_fit: "Zielgruppe",
+  hook: "Anfang packt",
+  payoff: "Pointe sitzt",
+  specificity: "Konkret",
+  tension: "Spannend",
+  audience_fit: "Passt zur Zielgruppe",
 };
 
 export const VERDICT_LABELS: Record<HumanVerdict, string> = {
@@ -37,11 +37,11 @@ export interface Warning {
 }
 
 const RISK_LABELS: Record<RiskFlag, string> = {
-  humor: "Humor: Mensch prüft",
-  sensitive_topic: "Sensibles Thema",
-  claim: "Behauptung prüfen",
-  ad: "Werbung kennzeichnen",
-  heuristic_only: "Heuristik ohne Sprachmodell",
+  humor: "Ist Witz, bitte selbst prüfen",
+  sensitive_topic: "Heikles Thema",
+  claim: "Enthält eine Behauptung. Stimmt sie?",
+  ad: "Muss als Werbung gekennzeichnet werden",
+  heuristic_only: "Ohne KI gefunden",
 };
 
 export function formatSeconds(s: number): string {
@@ -66,4 +66,14 @@ export function warningsOf(c: Candidate): Warning[] {
 export function formatTotal(total: number | null): string {
   if (total == null) return "offen";
   return total.toLocaleString("de-AT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+/* Bewertung als Wort statt Zahl (docs/BEDIENKONZEPT.md, Abschnitt 5.5).
+ * Die Zahl bleibt über formatTotal in „Details für Profis“ erreichbar. */
+export function qualityWord(total: number | null): string {
+  if (total == null) return "Noch nicht bewertet";
+  if (total >= 8) return "Sehr stark";
+  if (total >= 6) return "Stark";
+  if (total >= 4) return "Geht so";
+  return "Eher schwach";
 }

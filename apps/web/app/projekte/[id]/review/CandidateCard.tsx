@@ -5,7 +5,7 @@ import { cn } from "@/components/ui/cn";
 import { formatTimecode } from "@/lib/format";
 import type { Candidate } from "@/lib/repo/types";
 import { countGates } from "@/lib/candidates/gates";
-import { VERDICT_LABELS, formatTotal, structureLabel, warningsOf } from "@/lib/candidates/labels";
+import { VERDICT_LABELS, formatTotal, qualityWord, structureLabel, warningsOf } from "@/lib/candidates/labels";
 
 interface Props {
   candidate: Candidate;
@@ -34,7 +34,7 @@ export function CandidateCard({ candidate: c, index, selected, glitch, onSelect,
       data-card="true"
       onClick={onSelect}
       aria-pressed={selected}
-      aria-label={`Kandidat ${index}: ${structureLabel(c.structure)}, ${durationLabel}, DACH-Qualität ${formatTotal(c.total)}`}
+      aria-label={`Moment ${index}: ${structureLabel(c.structure)}, ${durationLabel}, Bewertung ${qualityWord(c.total)}`}
       className={cn(
         "glass transition-soft relative w-full rounded-card p-5 text-left hover:border-white/25",
         selected && "glass-selected",
@@ -51,11 +51,10 @@ export function CandidateCard({ candidate: c, index, selected, glitch, onSelect,
           <span className="font-mono text-xs tabular-nums text-text-2">{durationLabel}</span>
           {c.version > 1 && <Badge>Version {c.version}</Badge>}
         </div>
-        <div className="shrink-0 text-right">
-          <p className="text-4xl font-light leading-none tabular-nums tracking-[var(--tracking-display)] text-text">
-            {formatTotal(c.total)}
+        <div className="shrink-0 text-right" title={`Bewertung ${formatTotal(c.total)} von 10`}>
+          <p className="text-2xl font-light leading-tight tracking-[var(--tracking-display)] text-text">
+            {qualityWord(c.total)}
           </p>
-          <p className="mt-1 text-[11px] uppercase tracking-wide text-text-2">DACH-Qualität</p>
         </div>
       </div>
 
@@ -68,7 +67,7 @@ export function CandidateCard({ candidate: c, index, selected, glitch, onSelect,
             c.gate_passed ? "border-line-strong text-text" : "border-line text-text-2",
           )}
         >
-          {gates.passed} von {gates.total} Pflichtkriterien
+          {c.gate_passed ? "Alles geprüft" : `${gates.passed} von ${gates.total} geprüft`}
         </span>
         {warnings.map((w) => (
           <span

@@ -31,8 +31,8 @@ type Filter = "all" | "passed" | "warning" | "accepted" | "rejected";
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "all", label: "Alle" },
-  { key: "passed", label: "Pflichtkriterien erfüllt" },
-  { key: "warning", label: "Mit Warnung" },
+  { key: "passed", label: "Vollständig geprüft" },
+  { key: "warning", label: "Mit Hinweis" },
   { key: "accepted", label: "Angenommen" },
   { key: "rejected", label: "Abgelehnt" },
 ];
@@ -239,7 +239,7 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
         setMessage({
           tone: "ok",
           text: changedBounds
-            ? `Version ${next.version} angelegt: Satz ${next.first_sent} bis ${next.last_sent}, Pflichtkriterien neu geprüft, Scores stammen vom alten Ausschnitt.`
+            ? `Neue Fassung gespeichert: Satz ${next.first_sent} bis ${next.last_sent}. Alles neu geprüft, die Bewertung stammt noch vom alten Ausschnitt.`
             : `Version ${next.version} angelegt: Titelkarte gespeichert.`,
         });
       } catch (err) {
@@ -306,7 +306,7 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
           title={title}
           player={player}
           activeSpeaker={null}
-          hint="J/K: nächster, voriger Kandidat · A: annehmen (Ziele wählen) · R: ablehnen · Leertaste: 8 s Vorschau"
+          hint="Tastatur: J und K blättern · A nimmt den Moment · R lehnt ihn ab · Leertaste spielt 8 Sekunden"
         />
         {selected && (
           <ClipText
@@ -329,7 +329,7 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
 
       {/* Liste */}
       <div className="flex flex-col gap-4 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Kandidaten filtern">
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Momente filtern">
           {FILTERS.map((f) => {
             const active = filter === f.key;
             return (
@@ -370,11 +370,11 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
 
         {visible.length === 0 ? (
           <GlassCard padding="lg" className="text-center">
-            <p className="font-medium">Kein Kandidat in diesem Filter</p>
-            <p className="mt-1 text-sm text-text-2">Wähle „Alle“, um wieder alle Kandidaten zu sehen.</p>
+            <p className="font-medium">Hier ist gerade nichts</p>
+            <p className="mt-1 text-sm text-text-2">Klick auf „Alle“, um wieder alle Momente zu sehen.</p>
           </GlassCard>
         ) : (
-          <ul className="flex flex-col gap-3 lg:max-h-[calc(100dvh-14rem)] lg:overflow-y-auto lg:pr-1 lg:pb-8" aria-label="Kandidaten">
+          <ul className="flex flex-col gap-3 lg:max-h-[calc(100dvh-14rem)] lg:overflow-y-auto lg:pr-1 lg:pb-8" aria-label="Momente">
             {visible.map((c, i) => (
               <li key={c.id}>
                 <CandidateCard

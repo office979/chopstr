@@ -13,6 +13,11 @@ Marke (Phase 4): Font-Assets des Markenprofils (``brand_profiles.ci.fonts.primar
 der Familienname steht als ``Fontname`` in der ASS und im Plan (``captions.font``), die Datei geht als ``fontfile``
 in ``drawtext``. Fehlt der Font, bleibt Inter mit Hinweis in ``notes``. Logo (``ci.logo_asset_id``) mit
 ``ci.watermark.enabled`` wird als PNG-Wasserzeichen unten rechts gelegt (SVG wird übersprungen).
+
+Phase 5c: ``clips.reframe_override`` geht als ``reframe_override`` an ``plan_reframe`` (Folien-Crop ``slide_pip``
+oder erzwungene Strategie; Abweichungen zwischen Erkennung und Nutzung stehen in ``notes``).
+``brand_profiles.caption_style.caption_text_field`` (``text`` | ``text_norm``, Default ``text``) wählt die Wortform
+der Captions (Schweizerdeutsch-Beta, Entscheidung P2).
 """
 
 from __future__ import annotations
@@ -27,7 +32,7 @@ from typing import Any
 
 from temporalio import activity
 
-from .. import costlog, db, events, ingest, usage
+from .. import costlog, db, decision_log, events, ingest, usage
 from ..pipeline import (
     captions_de,
     compliance,
@@ -69,6 +74,8 @@ SQL_HOOK = (
     "from hook_versions where clip_id = %s order by version desc limit 1"
 )
 SQL_CAPTION_MAX = "select coalesce(max(version), 0) from caption_versions where clip_id = %s"
+SQL_REFRAME_OVERRIDE = "select reframe_override from clips where id = %s"
+NOTE_OVERRIDE_UNREADABLE = "Reframe-Override konnte nicht gelesen werden (Migration 0005 eingespielt?), Automatik verwendet"
 
 
 def _json(value: Any, default: Any) -> Any:
@@ -238,6 +245,28 @@ def _find_or_create_clip(ctx: common.Context, cand: dict, src: dict, destination
         "file_key": None,
         "created": True,
     }
+
+
+def _load_reframe_override(ctx: common.Context, clip_id: str) -> tuple[str | None, str | None]:
+    """``clips.reframe_override`` (Phase 5c) lesen. Liefert (Override, Hinweis). Ohne Spalte (Migration 0005
+    fehlt) oder bei einem Lesefehler läuft die Automatik weiter, der Hinweis landet in ``notes``."""
+    try:
+        row = db.fetch_one(ctx.conn, SQL_REFRAME_OVERRIDE, (clip_id,))
+    except Exception as exc:
+        log.warning("reframe_override not readable clip=%s error=%s", clip_id, exc.__class__.__name__)
+        return None, NOTE_OVERRIDE_UNREADABLE
+    value = str(row[0]).strip() if row and row[0] else ""
+    if not value:
+        return None, None
+    if value not in reframe.STRATEGIES:
+        return None, f"Unbekannter Reframe-Override {value!r} ignoriert"
+    return value, None
+
+
+def caption_text_field_for(style: dict | None) -> str:
+    """``caption_style.caption_text_field`` des Markenprofils: ``text`` (Default) oder ``text_norm``."""
+    value = str((style or {}).get("caption_text_field") or "text").strip()
+    return value if value in captions_de.TEXT_FIELDS else "text"
 
 
 def _load_hook(ctx: common.Context, clip_id: str) -> dict[str, Any] | None:
@@ -420,6 +449,13 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         llm_provider = llm.provider
         copy = copy_engine.write_copy(llm, text, brand, PLATFORMS, s)
         hook = _write_hook_version(ctx, clip_id, copy)
+        try:
+            decision_log.record_copy_result(
+                ctx.conn, src["workspace_id"], clip_id, copy,
+                brand_profile_id=src.get("brand_profile_id"), source_id=source_id, candidate_id=cand["id"], platform=destination,
+            )  # fmt: skip
+        except Exception as exc:  # Decision Log darf den Render nie stoppen
+            log.warning("decision log copy failed clip=%s error=%s", clip_id, exc.__class__.__name__)
 
     # 2) Reframe
     st.progress(0.2, "Reframe: Sprecherpositionen und Shots", clip_id=clip_id, phase="reframe")
@@ -433,10 +469,13 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
             src["id"], src.get("width"), src.get("height"), src_probe.width, src_probe.height,
         )
     src = {**src, "width": src_probe.width, "height": src_probe.height, "fps": src_probe.fps or src.get("fps")}
+    override, override_note = _load_reframe_override(ctx, clip_id)
     rf = reframe.plan_reframe(
         str(local_src), segments, words, clip.get("speaker_positions"), aspect,
-        src_w=src_probe.width, src_h=src_probe.height, out_size=(out_w, out_h),
+        src_w=src_probe.width, src_h=src_probe.height, out_size=(out_w, out_h), reframe_override=override,
     )  # fmt: skip
+    if override_note:
+        rf.notes.append(override_note)
     speaker_positions = clip.get("speaker_positions") or (rf.speaker_positions or None)
 
     # 3) Captions auf der Ausgabe-Timeline
@@ -445,10 +484,13 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     out_words = compose.remap_words(words, comp)
     preset_name = caption_preset_for(destination, extra)
     preset = captions_de.scaled_preset(preset_name, out_w, out_h)
-    cards = captions_de.cards_for(out_words, preset)
-    cps = captions_de.cps_warnings(captions_de.build_cards(out_words, preset.max_chars, preset.max_lines))
-    fid = fidelity_warnings(words, segments, cand.get("start_s"), cand.get("end_s"))
     style = extra.get("caption_style") or {}
+    text_field = caption_text_field_for(style)
+    cards = captions_de.cards_for(out_words, preset, text_field=text_field)
+    cps = captions_de.cps_warnings(
+        captions_de.build_cards(out_words, preset.max_chars, preset.max_lines, text_field), text_field=text_field
+    )
+    fid = fidelity_warnings(words, segments, cand.get("start_s"), cand.get("end_s"))
     hook_override = style.get("hook_overlay") if isinstance(style.get("hook_overlay"), bool) else None
     audio_preset = style.get("audio_preset") if style.get("audio_preset") in render_plan.AUDIO_PRESETS else "master"
     brand_assets = brand_assets_for(ctx, extra.get("ci") or {})
@@ -471,7 +513,16 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
             "logo_asset_id": brand_assets["logo_asset_id"],
             "watermark": brand_assets["watermark"],
         },
+        caption_text_field=text_field,
     )
+    try:
+        decision_log.record_reframe_strategy(
+            ctx.conn, src["workspace_id"], clip_id, plan,
+            override=(plan.get("reframe") or {}).get("override"), source_id=source_id, candidate_id=cand["id"],
+            brand_profile_id=src.get("brand_profile_id"),
+        )  # fmt: skip
+    except Exception as exc:
+        log.warning("decision log reframe failed clip=%s error=%s", clip_id, exc.__class__.__name__)
     h = render_plan.plan_hash(plan, hook["version"], tv_version)
     keys = {ext: f"{RENDER_PREFIX}/{clip_id}/{h}.{ext}" for ext in ("mp4", "srt", "vtt", "jpg", "ass")}
     duration = render_plan.plan_duration(plan)
@@ -486,7 +537,9 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     common.heartbeat("render", "encode")
     work = ctx.source_dir(source_id) / RENDER_PREFIX / clip_id
     work.mkdir(parents=True, exist_ok=True)
-    paths = render.write_captions(out_words, preset, (out_w, out_h), work, h, font_family=brand_assets["font_family"])
+    paths = render.write_captions(
+        out_words, preset, (out_w, out_h), work, h, font_family=brand_assets["font_family"], text_field=text_field
+    )
     mp4 = work / f"{h}.mp4"
     fonts_dir = brand_assets["fonts_dir"] or s.render_fonts_dir or None
     result = render.render_from_plan(
@@ -590,6 +643,8 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         overlays_drawn=result.title_card_drawn or result.hook_overlay_drawn,
         watermark_drawn=result.watermark_drawn,
         font=plan["captions"]["font"],
+        caption_text_field=text_field,
+        reframe_override=override,
         brand=plan["brand"],
         compressor=result.compressor,
         cps_warnings=len(cps),
@@ -617,6 +672,7 @@ __all__ = [
     "ad_label_for",
     "brand_assets_for",
     "caption_preset_for",
+    "caption_text_field_for",
     "clip_words",
     "fidelity_warnings",
     "render_pack",

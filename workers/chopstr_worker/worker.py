@@ -1,11 +1,13 @@
 """Worker-Einstieg: ``python -m chopstr_worker.worker --queues cpu,gpu [--ensure-schedules]``.
 
 Startet pro Queue einen Temporal-Worker im selben Prozess. Der CPU-Worker registriert die Workflows
-(``ClipProjectWorkflow``, ``RetentionWorkflow``) und die CPU-Activities, der GPU-Worker die
+(``ClipProjectWorkflow``, ``DeletionWorkflow``, ``RetentionWorkflow``, ``OutboxWorkflow``, ``PublishWorkflow``,
+``LearningWorkflow``, ``WeeklyReportWorkflow``) und die CPU-Activities, der GPU-Worker die
 ASR/Diarisierungs-Activities. In der lokalen Entwicklung darf ein CPU-Rechner beide Queues bedienen
-(dann laufen ASR-Modelle auf der CPU, langsam). ``--ensure-schedules`` legt den Temporal-Schedule
-``retention-daily`` an (Cron aus ``RETENTION_CRON``, Zeitzone ``RETENTION_TIMEZONE``), idempotent.
-Logging enthält nur IDs, Dauern und Zähler, keine Transkriptinhalte.
+(dann laufen ASR-Modelle auf der CPU, langsam). ``--ensure-schedules`` legt die Temporal-Schedules
+``retention-daily`` (Cron ``RETENTION_CRON``), ``outbox-dispatch`` (alle ``OUTBOX_INTERVAL_S`` Sekunden),
+``learning-nightly`` (Cron ``LEARNING_CRON``) und ``weekly-report`` (Cron ``WEEKLY_REPORT_CRON``) an,
+Zeitzone ``RETENTION_TIMEZONE``, idempotent. Logging enthält nur IDs, Dauern und Zähler, keine Transkriptinhalte.
 """
 
 from __future__ import annotations
@@ -19,8 +21,24 @@ from concurrent.futures import ThreadPoolExecutor
 
 from . import config, residency
 from .activities import CPU_ACTIVITIES, GPU_ACTIVITIES
-from .workflows import ClipProjectWorkflow, DeletionWorkflow, RetentionWorkflow
-from .workflows.retention import SCHEDULE_ID, WORKFLOW_ID, RetentionParams
+from .workflows import (
+    ClipProjectWorkflow,
+    DeletionWorkflow,
+    LearningWorkflow,
+    OutboxWorkflow,
+    PublishWorkflow,
+    RetentionWorkflow,
+    WeeklyReportWorkflow,
+)
+from .workflows import learning as learning_wf
+from .workflows import outbox as outbox_wf
+from .workflows import reports as reports_wf
+from .workflows import retention as retention_wf
+
+WORKFLOWS = [
+    ClipProjectWorkflow, DeletionWorkflow, RetentionWorkflow,
+    OutboxWorkflow, PublishWorkflow, LearningWorkflow, WeeklyReportWorkflow,
+]  # fmt: skip
 
 log = logging.getLogger("chopstr.worker")
 
@@ -33,39 +51,68 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument(
         "--ensure-schedules",
         action="store_true",
-        help="Temporal-Schedule retention-daily anlegen, falls er fehlt (RETENTION_CRON, RETENTION_TIMEZONE)",
+        help="Temporal-Schedules anlegen, falls sie fehlen (retention-daily, outbox-dispatch, learning-nightly, weekly-report)",
     )
     return ap.parse_args(argv)
 
 
+def schedule_specs(s: config.Settings | None = None) -> list[tuple[str, str, object, object]]:
+    """``(schedule_id, workflow_id, run_fn, params)`` für alle Schedules des Workers; Spec je ID in ``_spec``."""
+    s = s or config.settings()
+    q = s.task_queue_cpu
+    return [
+        (retention_wf.SCHEDULE_ID, retention_wf.WORKFLOW_ID, RetentionWorkflow.run, retention_wf.RetentionParams(task_queue=q)),
+        (outbox_wf.SCHEDULE_ID, outbox_wf.WORKFLOW_ID, OutboxWorkflow.run, outbox_wf.OutboxParams(task_queue=q)),
+        (learning_wf.SCHEDULE_ID, learning_wf.WORKFLOW_ID, LearningWorkflow.run, learning_wf.LearningParams(task_queue=q)),
+        (reports_wf.SCHEDULE_ID, reports_wf.WORKFLOW_ID, WeeklyReportWorkflow.run, reports_wf.WeeklyReportParams(task_queue=q)),
+    ]
+
+
+def _spec(schedule_id: str, s: config.Settings):
+    from datetime import timedelta
+
+    from temporalio.client import ScheduleIntervalSpec, ScheduleSpec
+
+    tz = s.retention_timezone
+    if schedule_id == outbox_wf.SCHEDULE_ID:
+        every = timedelta(seconds=max(5, int(s.outbox_interval_s)))
+        return ScheduleSpec(intervals=[ScheduleIntervalSpec(every=every)], time_zone_name=tz)
+    cron = {
+        retention_wf.SCHEDULE_ID: s.retention_cron,
+        learning_wf.SCHEDULE_ID: s.learning_cron,
+        reports_wf.SCHEDULE_ID: s.weekly_report_cron,
+    }[schedule_id]
+    return ScheduleSpec(cron_expressions=[cron], time_zone_name=tz)
+
+
 async def ensure_schedules(client, s: config.Settings | None = None) -> dict[str, str]:
-    """Legt den Schedule ``retention-daily`` an. Existiert er schon, wird er übersprungen (idempotent)."""
+    """Legt alle Schedules an (``retention-daily``, ``outbox-dispatch``, ``learning-nightly``, ``weekly-report``).
+    Existiert einer schon, wird er übersprungen (idempotent). Ergebnis je ID ``created`` oder ``exists``."""
     from temporalio.client import (
         Schedule,
         ScheduleActionStartWorkflow,
         ScheduleAlreadyRunningError,
+        ScheduleOverlapPolicy,
         SchedulePolicy,
-        ScheduleSpec,
     )
 
     s = s or config.settings()
-    schedule = Schedule(
-        action=ScheduleActionStartWorkflow(
-            RetentionWorkflow.run,
-            RetentionParams(task_queue=s.task_queue_cpu),
-            id=WORKFLOW_ID,
-            task_queue=s.task_queue_cpu,
-        ),
-        spec=ScheduleSpec(cron_expressions=[s.retention_cron], time_zone_name=s.retention_timezone),
-        policy=SchedulePolicy(),
-    )
-    try:
-        await client.create_schedule(SCHEDULE_ID, schedule)
-    except ScheduleAlreadyRunningError:
-        log.info("schedule exists id=%s", SCHEDULE_ID)
-        return {SCHEDULE_ID: "exists"}
-    log.info("schedule created id=%s cron=%s tz=%s", SCHEDULE_ID, s.retention_cron, s.retention_timezone)
-    return {SCHEDULE_ID: "created"}
+    out: dict[str, str] = {}
+    for schedule_id, workflow_id, run_fn, params in schedule_specs(s):
+        schedule = Schedule(
+            action=ScheduleActionStartWorkflow(run_fn, params, id=workflow_id, task_queue=s.task_queue_cpu),
+            spec=_spec(schedule_id, s),
+            policy=SchedulePolicy(overlap=ScheduleOverlapPolicy.SKIP),  # kein zweiter Lauf, solange einer läuft
+        )
+        try:
+            await client.create_schedule(schedule_id, schedule)
+        except ScheduleAlreadyRunningError:
+            log.info("schedule exists id=%s", schedule_id)
+            out[schedule_id] = "exists"
+            continue
+        log.info("schedule created id=%s tz=%s", schedule_id, s.retention_timezone)
+        out[schedule_id] = "created"
+    return out
 
 
 async def run_workers(queues: list[str], max_concurrent: int = 2, schedules: bool = False) -> None:
@@ -85,7 +132,7 @@ async def run_workers(queues: list[str], max_concurrent: int = 2, schedules: boo
                 Worker(
                     client,
                     task_queue=s.task_queue_cpu,
-                    workflows=[ClipProjectWorkflow, DeletionWorkflow, RetentionWorkflow],
+                    workflows=WORKFLOWS,
                     activities=CPU_ACTIVITIES,
                     activity_executor=executor,
                     max_concurrent_activities=max_concurrent,

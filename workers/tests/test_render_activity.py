@@ -7,8 +7,13 @@ import pytest
 from chopstr_worker import config
 from chopstr_worker.activities import render as act_render
 from chopstr_worker.activities.render import STEP_RENDER
+from chopstr_worker.pipeline import reframe
 from tests.conftest import make_test_video, requires_ffmpeg
 from tests.transcript_fixtures import make_words
+
+# Mit OpenCV (Extra vision) erkennt der Folien-Crop (Phase 5c) das statische testsrc-Muster als Folie: slide_pip.
+HAVE_CV2 = reframe.slide_detector_available()[0]
+AUTO_STRATEGY = "slide_pip" if HAVE_CV2 else "neutral"
 
 SCRIPT = [
     ("SPEAKER_00", "Ehrlich gesagt war das der teuerste Fehler meiner Karriere.", 3.0),
@@ -59,7 +64,7 @@ def test_render_pack_writes_clip_hook_captions_events_and_costs(fake_db, fake_co
         "source_credit": "Quelle: Podcast XY, „Folge 3“", "ad_label": "Anzeige",
     }  # fmt: skip
     plan = clip["render_plan"]
-    assert plan["contract"] == "render_plan_v1" and plan["reframe"]["strategy"] == "neutral" and plan["reframe"]["detector"] == "none"
+    assert plan["contract"] == "render_plan_v1" and plan["reframe"]["strategy"] == AUTO_STRATEGY and plan["reframe"]["detector"] == "none"
     assert plan["captions"]["preset"] == "tiktok_bold" and plan["hook_overlay"]["seconds"] == 3.0
     assert plan["sources"] == {"storage_key": "uploads/in.mp4", "transcript_version": 1, "hook_version": 1, "candidate_id": project["cid"]}
     assert plan["title_card"] == {"text": "Preise im Handwerk", "seconds": 2.5}
@@ -134,7 +139,10 @@ def test_existing_draft_clip_and_linkedin_defaults(fake_db, fake_context, projec
     plan = clip["render_plan"]
     assert plan["hook_overlay"] is None and plan["title_card"]["text"] == "Eigener Titel"
     assert plan["captions"]["preset"] == "corporate_third"  # Standardplattform des Profils: dessen Preset
-    assert plan["captions"]["safe_zone"]["top"] == round(120 * 1350 / 1920)
+    if HAVE_CV2:  # Folie oben: Safe Zone beginnt unter der Sprecherfläche
+        assert plan["captions"]["safe_zone"]["top"] == plan["reframe"]["pip"]["y"] + round(1350 * reframe.SLIDE_CAPTION_GAP_RATIO)
+    else:
+        assert plan["captions"]["safe_zone"]["top"] == round(120 * 1350 / 1920)
     assert clip["speaker_positions"] == {"SPEAKER_00": 0}  # aus der UI bestätigt, bleibt erhalten
     assert clip["provenance"]["ad_label"] is None  # Draft der Web-App ohne ad_label
 

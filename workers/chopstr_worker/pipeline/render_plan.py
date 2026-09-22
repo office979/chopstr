@@ -4,6 +4,11 @@ Aus dem Plan lässt sich der Render wiederholen: Segmente, Ausgabegröße und Bi
 und Shots, Caption-Preset mit Safe Zones (für andere Größen als 9:16 proportional umgerechnet),
 Titelkarte, Hook-Overlay, Audio-Preset, Quellen und Modulversionen. Keine Umgebungswerte (Fontpfade,
 Filterverfügbarkeit) im Plan; die gehören zum Render-Ergebnis.
+
+Phase 5c: bei ``reframe.strategy = slide_pip`` beginnt die Caption-Safe-Zone unter der Folie (``pip.y`` plus
+Abstand), damit Captions, Titelkarte und Hook-Overlay in der Sprecherfläche liegen. ``captions.text_field``
+steht nur im Plan, wenn die normalisierte Form (``text_norm``) eingebrannt wird; so bleiben Hashes bestehender
+Pläne stabil.
 """
 
 from __future__ import annotations
@@ -50,22 +55,36 @@ def hook_overlay_enabled(platform: str, override: bool | None = None) -> bool:
 
 
 def caption_block(
-    preset: str | captions_de.CaptionPreset, out_w: int, out_h: int, cards: int, font: str | None = None
+    preset: str | captions_de.CaptionPreset,
+    out_w: int,
+    out_h: int,
+    cards: int,
+    font: str | None = None,
+    min_top: int | None = None,
+    text_field: str | None = None,
 ) -> dict[str, Any]:
     """Block ``captions``: Basis-Preset (Name oder Objekt für 1080x1920) auf die Ausgabegröße skaliert,
     Safe Zone als Randabstände. Ein bereits skaliertes Preset hier nicht übergeben (doppelte Skalierung).
-    ``font`` ist der echte Familienname des Marken-Fonts; ohne ihn gilt der Preset-Font (Inter)."""
+    ``font`` ist der echte Familienname des Marken-Fonts; ohne ihn gilt der Preset-Font (Inter).
+    ``min_top`` schiebt die Oberkante der Safe Zone nach unten (Folie oben bei ``slide_pip``).
+    ``text_field = "text_norm"`` wird als Feld eingetragen; ``"text"`` ist der Default und bleibt weg."""
     p = captions_de.scaled_preset(preset, out_w, out_h)
-    return {
+    safe = captions_de.safe_zone_margins(p, out_w, out_h)
+    if min_top is not None:
+        safe["top"] = max(int(safe["top"]), int(min_top))
+    block = {
         "preset": p.name,
         "font": (font or "").strip() or p.font,
         "font_px": p.font_px,
         "max_chars": p.max_chars,
         "baseline_y": p.baseline_y,
-        "safe_zone": captions_de.safe_zone_margins(p, out_w, out_h),
+        "safe_zone": safe,
         "cards": int(cards),
         "highlight": bool(p.highlight_words),
     }
+    if text_field and text_field != "text":
+        block["text_field"] = captions_de.check_text_field(text_field)
+    return block
 
 
 def brand_block(brand: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -122,10 +141,12 @@ def build_plan(
     filler_cuts: bool = False,
     caption_font: str | None = None,
     brand: dict[str, Any] | None = None,
+    caption_text_field: str | None = None,
 ) -> dict[str, Any]:
     """Baut den Plan. ``caption_preset`` ist das Basis-Preset (Name oder 1080x1920-Objekt), die Skalierung passiert hier.
     ``sources`` erwartet ``storage_key``, ``transcript_version``, ``hook_version``, ``candidate_id``.
-    ``caption_font`` ist der Familienname des Marken-Fonts, ``brand`` die Asset-IDs und das Wasserzeichen."""
+    ``caption_font`` ist der Familienname des Marken-Fonts, ``brand`` die Asset-IDs und das Wasserzeichen.
+    ``caption_text_field`` (``text`` | ``text_norm``) wählt die Wortform der Captions (Schweizerdeutsch-Beta)."""
     aspect = aspect or aspect_for_platform(platform)
     out_w, out_h = output_size(aspect)
     fps = float(src_fps) if src_fps else DEFAULT_FPS
@@ -135,6 +156,9 @@ def build_plan(
         )
     title = (title_card or "").strip()
     hook = (onscreen_hook or "").strip()
+    caption_top: int | None = None
+    if reframe_result.strategy == "slide_pip" and reframe_result.pip is not None:
+        caption_top = int(reframe_result.pip["y"]) + int(round(out_h * reframe.SLIDE_CAPTION_GAP_RATIO))
     plan: dict[str, Any] = {
         "contract": CONTRACT,
         "platform": platform,
@@ -144,7 +168,7 @@ def build_plan(
         "filler_cuts": bool(filler_cuts),
         "reframe": reframe_result.plan_block(),
         "shots": reframe_result.shots_json(),
-        "captions": caption_block(caption_preset, out_w, out_h, caption_cards, caption_font),
+        "captions": caption_block(caption_preset, out_w, out_h, caption_cards, caption_font, caption_top, caption_text_field),
         "title_card": {"text": title, "seconds": TITLE_CARD_S} if title else None,
         "hook_overlay": {"text": hook, "seconds": HOOK_OVERLAY_S} if hook and hook_overlay_enabled(platform, hook_overlay) else None,
         "audio": audio_block(audio_preset),

@@ -7,6 +7,8 @@ Regeln:
 - lange Komposita: eigene Karte; wenn breiter als die Zeile, Silbentrennung an Morphemgrenze (pyphen de_DE)
 - Substantiv-Großschreibung bleibt (keine ALL-CAPS als Default)
 - Presets mit Safe Zones pro Plattform (Pixel bei 1080x1920)
+- Wortform wählbar (Phase 5c, Schweizerdeutsch-Beta): ``text_field = "text"`` (Original) oder ``"text_norm"``
+  (normalisierte Form aus ``dach_nlp``); fehlt ``text_norm`` an einem Wort, gilt ``text`` (Entscheidung P2)
 """
 
 from __future__ import annotations
@@ -20,6 +22,24 @@ NEWLINE = "\\N"  # ASS-Zeilenumbruch
 AVG_CHAR_EM = 0.56  # mittlere Zeichenbreite in em für Inter Bold; pro Font messen
 MAX_CPS = 17.0
 BREAK_WORDS = {"und", "aber", "weil", "dass", "denn", "oder", "wenn", "sondern", "also", "obwohl", "damit"}
+TEXT_FIELDS = ("text", "text_norm")
+
+
+def check_text_field(text_field: str | None) -> str:
+    """``text`` oder ``text_norm``; alles andere ist ein Programmierfehler."""
+    field_name = text_field or "text"
+    if field_name not in TEXT_FIELDS:
+        raise ValueError(f"Unbekanntes Caption-Textfeld {text_field!r} (erlaubt: {', '.join(TEXT_FIELDS)})")
+    return field_name
+
+
+def word_text(word: dict, text_field: str = "text") -> str:
+    """Anzeigetext eines Wortes; ``text_norm`` fällt auf ``text`` zurück, wenn es fehlt oder leer ist."""
+    if text_field != "text":
+        norm = word.get(text_field)
+        if norm is not None and str(norm).strip():
+            return str(norm)
+    return str(word["text"])
 
 
 @dataclass(frozen=True)
@@ -194,15 +214,16 @@ def wrap_lines(tokens: list[str], limit: int, max_lines: int = 2) -> list[str]:
     return out
 
 
-def build_cards(words: list[dict], limit: int | None = None, max_lines: int = 2) -> list[list[dict]]:
-    """Gruppiert Wörter zu Karten. Bricht an Satzzeichen, Konjunktionen, Pausen und vor langen Komposita."""
+def build_cards(words: list[dict], limit: int | None = None, max_lines: int = 2, text_field: str = "text") -> list[list[dict]]:
+    """Gruppiert Wörter zu Karten. Bricht an Satzzeichen, Konjunktionen, Pausen und vor langen Komposita.
+    ``text_field`` bestimmt, welche Wortform Länge und Satzzeichen liefert (siehe ``word_text``)."""
     limit = limit or PRESETS["tiktok_bold"].max_chars
     cap = limit * max_lines
     cards: list[list[dict]] = []
     cur: list[dict] = []
     cur_len = 0
     for i, w in enumerate(words):
-        t = str(w["text"])
+        t = word_text(w, text_field)
         is_long = len(t) > limit
         if is_long and cur and cur_len > 8:
             cards.append(cur)
@@ -222,13 +243,13 @@ def build_cards(words: list[dict], limit: int | None = None, max_lines: int = 2)
     return cards
 
 
-def cps_warnings(cards: list[list[dict]], max_cps: float = MAX_CPS) -> list[str]:
+def cps_warnings(cards: list[list[dict]], max_cps: float = MAX_CPS, text_field: str = "text") -> list[str]:
     out = []
     for c in cards:
-        chars = sum(len(str(w["text"])) for w in c)
+        chars = sum(len(word_text(w, text_field)) for w in c)
         dur = max(float(c[-1]["end"]) - float(c[0]["start"]), 0.01)
         if chars / dur > max_cps:
-            out.append(f"Zu schnell ({chars / dur:.0f} Z/s): '{' '.join(str(w['text']) for w in c)}'")
+            out.append(f"Zu schnell ({chars / dur:.0f} Z/s): '{' '.join(word_text(w, text_field) for w in c)}'")
     return out
 
 
@@ -242,11 +263,11 @@ def _ass_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("{", "(").replace("}", ")")
 
 
-def card_lines(card: list[dict], preset: CaptionPreset) -> list[list[tuple[dict, str]]]:
+def card_lines(card: list[dict], preset: CaptionPreset, text_field: str = "text") -> list[list[tuple[dict, str]]]:
     """Zeilen einer Karte als Liste von (Wort, Textstück)-Paaren, inklusive Silbentrennung."""
     pieces: list[tuple[dict, str]] = []
     for w in card:
-        for piece in hyphenate(str(w["text"]), preset.max_chars):
+        for piece in hyphenate(word_text(w, text_field), preset.max_chars):
             pieces.append((w, piece))
     tokens = [p for _, p in pieces]
     lines_text = wrap_lines(tokens, preset.max_chars, preset.max_lines)
@@ -265,11 +286,14 @@ def to_ass(
     preset: str | CaptionPreset = "tiktok_bold",
     play_res: tuple[int, int] = (W, H),
     font_family: str | None = None,
+    text_field: str = "text",
 ) -> str:
     """ASS mit Wort-Highlight: pro Wort ein Event, aktives Wort eingefärbt (bei ``highlight_words``).
 
     ``play_res`` ist die Ausgabegröße; das Preset muss dazu passen (siehe ``scaled_preset``).
-    ``font_family`` überschreibt den ``Fontname`` des Presets (Marken-Font aus ``brand_assets``)."""
+    ``font_family`` überschreibt den ``Fontname`` des Presets (Marken-Font aus ``brand_assets``).
+    ``text_field`` wählt Original (``text``) oder normalisierte Form (``text_norm``, Fallback ``text``)."""
+    text_field = check_text_field(text_field)
     p = preset if isinstance(preset, CaptionPreset) else preset_for(preset)
     font = (font_family or "").strip() or p.font
     play_w, play_h = play_res
@@ -285,8 +309,8 @@ def to_ass(
         "[Events]\nFormat: Layer, Start, End, Style, Text\n"
     )
     events = []
-    for card in build_cards(words, p.max_chars, p.max_lines):
-        lines = card_lines(card, p)
+    for card in build_cards(words, p.max_chars, p.max_lines, text_field):
+        lines = card_lines(card, p, text_field)
         if not p.highlight_words:
             s, e = float(card[0]["start"]) - clip_start, float(card[-1]["end"]) - clip_start
             text = NEWLINE.join(" ".join(_ass_escape(piece) for _, piece in ln) for ln in lines)
@@ -302,11 +326,12 @@ def to_ass(
     return head + "\n".join(events) + "\n"
 
 
-def to_srt(words: list[dict], clip_start: float = 0.0, limit: int | None = None) -> str:
+def to_srt(words: list[dict], clip_start: float = 0.0, limit: int | None = None, text_field: str = "text") -> str:
+    text_field = check_text_field(text_field)
     out = []
-    for i, card in enumerate(build_cards(words, limit), start=1):
+    for i, card in enumerate(build_cards(words, limit, text_field=text_field), start=1):
         s, e = float(card[0]["start"]) - clip_start, float(card[-1]["end"]) - clip_start
-        text = "\n".join(wrap_lines([str(w["text"]) for w in card], limit or PRESETS["tiktok_bold"].max_chars))
+        text = "\n".join(wrap_lines([word_text(w, text_field) for w in card], limit or PRESETS["tiktok_bold"].max_chars))
         out.append(f"{i}\n{_srt_t(s)} --> {_srt_t(e)}\n{text}\n")
     return "\n".join(out)
 
@@ -323,22 +348,26 @@ def _vtt_t(t: float) -> str:
     return _srt_t(t).replace(",", ".")
 
 
-def to_vtt(words: list[dict], clip_start: float = 0.0, limit: int | None = None) -> str:
+def to_vtt(words: list[dict], clip_start: float = 0.0, limit: int | None = None, text_field: str = "text") -> str:
     """WebVTT mit denselben Karten wie ``to_srt`` (Punkt statt Komma in den Zeiten, Kopfzeile WEBVTT)."""
+    text_field = check_text_field(text_field)
     out = ["WEBVTT", ""]
-    for i, card in enumerate(build_cards(words, limit), start=1):
+    for i, card in enumerate(build_cards(words, limit, text_field=text_field), start=1):
         s, e = float(card[0]["start"]) - clip_start, float(card[-1]["end"]) - clip_start
-        text = "\n".join(wrap_lines([str(w["text"]) for w in card], limit or PRESETS["tiktok_bold"].max_chars))
+        text = "\n".join(wrap_lines([word_text(w, text_field) for w in card], limit or PRESETS["tiktok_bold"].max_chars))
         out.append(f"{i}\n{_vtt_t(s)} --> {_vtt_t(e)}\n{text}\n")
     return "\n".join(out)
 
 
-def cards_for(words: list[dict], preset: str | CaptionPreset = "tiktok_bold", clip_start: float = 0.0) -> list[dict]:
+def cards_for(
+    words: list[dict], preset: str | CaptionPreset = "tiktok_bold", clip_start: float = 0.0, text_field: str = "text"
+) -> list[dict]:
     """Karten als JSON für ``caption_versions.cards``: ``{start, end, lines}`` auf der Ausgabe-Timeline."""
+    text_field = check_text_field(text_field)
     p = preset if isinstance(preset, CaptionPreset) else preset_for(preset)
     out = []
-    for card in build_cards(words, p.max_chars, p.max_lines):
-        lines = [" ".join(piece for _, piece in ln) for ln in card_lines(card, p)]
+    for card in build_cards(words, p.max_chars, p.max_lines, text_field):
+        lines = [" ".join(piece for _, piece in ln) for ln in card_lines(card, p, text_field)]
         out.append(
             {
                 "start": round(float(card[0]["start"]) - clip_start, 3),
@@ -355,11 +384,13 @@ __all__ = [
     "MAX_CPS",
     "PLATFORM_DEFAULT_PRESET",
     "PRESETS",
+    "TEXT_FIELDS",
     "CaptionPreset",
     "SafeZone",
     "build_cards",
     "card_lines",
     "cards_for",
+    "check_text_field",
     "cps_warnings",
     "hyphenate",
     "max_chars",
@@ -369,5 +400,6 @@ __all__ = [
     "to_ass",
     "to_srt",
     "to_vtt",
+    "word_text",
     "wrap_lines",
 ]

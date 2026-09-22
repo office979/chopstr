@@ -4,6 +4,11 @@ Ablauf: ASR-JSON + Diarisierungs-JSON aus dem Storage laden, ``assign_speakers``
 Wortdauer), DANACH ``normalize_numbers`` (Zahlen erst nach dem Alignment), ``dach_nlp.annotate``
 (filler, negation, sentence_idx), Statistik, ``transcript_versions`` (version = max+1, origin 'asr').
 Der Status bleibt ``analyzing``; Phase 2 (``detect_candidates``) setzt ``scoring`` und am Ende ``ready``.
+
+Schweizerdeutsch-Beta (Phase 5c): ``dach_nlp.detect_dialect`` schreibt ``stats.dialect``; bei erkanntem CH
+oder ``asr_variant = de-CH`` bekommen Wörter mit sicherer Entsprechung ``text_norm`` (Original bleibt ``text``,
+``protected_terms`` des Markenprofils werden nie normalisiert). Ist CH erkannt, aber die Quelle läuft mit dem
+DE-Modell, steht der Hinweis im Event (``hint``), damit der Editor das CH-Modell empfehlen kann.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ from . import common
 from .transcribe import asr_key_for, diar_key_for
 
 STEP = "fuse_and_nlp"
+HINT_CH_MODEL = "Schweizerdeutsch erkannt, CH-Modell empfohlen (Beta)"
 
 
 def _find_latest_key(ctx: common.Context, src: dict, kind: str) -> str:
@@ -50,7 +56,10 @@ def run(ctx: common.Context, source_id: str, asr_key: str | None = None, diar_ke
 
         asr.assign_speakers(words, turns)
         asr.normalize_numbers(words)  # erst nach dem Alignment
-        dach_nlp.annotate(words)
+        dialect = dach_nlp.detect_dialect(words)
+        asr_variant = str(asr_doc.get("variant") or src.get("asr_variant") or "de")
+        ch = dialect["variant"] == "de-CH" or asr_variant == "de-CH"
+        dach_nlp.annotate(words, protected_terms=src.get("protected_terms") or [], dialect="de-CH" if ch else None)
         common.heartbeat("annotated")
 
         stats = asr.confidence_stats(words)
@@ -59,6 +68,9 @@ def run(ctx: common.Context, source_id: str, asr_key: str | None = None, diar_ke
         stats["negations"] = sum(1 for w in words if w.get("negation"))
         stats["beta"] = bool(asr_doc.get("beta"))
         stats["verb_bracket_available"] = dach_nlp.verb_bracket_available
+        stats["dialect"] = {"variant": dialect["variant"], "confidence": dialect["confidence"], "markers": dialect["markers"]}
+        stats["text_norm_count"] = sum(1 for w in words if w.get("text_norm"))
+        hint = HINT_CH_MODEL if dialect["variant"] == "de-CH" and asr_variant != "de-CH" else None
 
         row = db.fetch_one(ctx.conn, "select coalesce(max(version), 0) from transcript_versions where source_id = %s", (source_id,))
         version = int(row[0] if row else 0) + 1
@@ -90,11 +102,15 @@ def run(ctx: common.Context, source_id: str, asr_key: str | None = None, diar_ke
             ctx.settings,
         )
         st.finish(
-            f"Transkript Version {version}: {stats['word_count']} Wörter, {stats['sentence_count']} Sätze, {len(stats['speakers'])} Sprecher",
+            f"Transkript Version {version}: {stats['word_count']} Wörter, {stats['sentence_count']} Sätze, {len(stats['speakers'])} Sprecher"
+            + (f" ({hint})" if hint else ""),
             transcript_version=version,
             transcript_version_id=tv_id,
             word_count=stats["word_count"],
             low_conf_ratio=stats["low_conf_ratio"],
+            dialect=stats["dialect"],
+            text_norm_count=stats["text_norm_count"],
+            hint=hint,
         )
     return tv_id
 
@@ -108,4 +124,4 @@ def fuse_and_nlp(source_id: str) -> str:
         ctx.close()
 
 
-__all__ = ["STEP", "fuse_and_nlp", "run"]
+__all__ = ["HINT_CH_MODEL", "STEP", "fuse_and_nlp", "run"]

@@ -13,6 +13,7 @@ Zwei Ebenen:
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -85,6 +86,7 @@ def allowed_hosts(s: config.Settings | None = None) -> set[str]:
         s.mistral_base_url,
         s.selfhost_llm_base_url,
         s.gladia_base_url,
+        s.app_internal_url,
     ):
         h = _host_of(value)
         if h:
@@ -127,11 +129,72 @@ def assert_eu_host(url: str, s: config.Settings | None = None) -> str:
     return host
 
 
+# Webhooks (Phase 5): Ziel darf ein beliebiger öffentlicher https-Host sein, aber nie ein privates Netz
+PRIVATE_SUFFIXES = (".local", ".localhost", ".internal", ".lan", ".home.arpa", ".intranet", ".corp")
+
+
+def _is_private_ip(host: str) -> bool | None:
+    """True/False für IP-Literale, None für Hostnamen."""
+    try:
+        ip = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return None
+    return bool(ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+
+
+def is_private_host(host: str) -> bool:
+    """Lokale, private oder nicht öffentliche Hosts (Loopback, RFC 1918, Link-local, .local, ohne Punkt)."""
+    host = (host or "").lower().rstrip(".")
+    if not host:
+        return True
+    private_ip = _is_private_ip(host)
+    if private_ip is not None:
+        return private_ip
+    return host in LOCAL_HOSTS or host.endswith(PRIVATE_SUFFIXES) or "." not in host
+
+
+def assert_webhook_host(url: str, s: config.Settings | None = None) -> str:
+    """Freigabe für Webhook-Ziele: https ist Pflicht, private und lokale Hosts sind gesperrt.
+
+    In ``APP_ENV=development`` sind http und lokale Hosts erlaubt (Tests gegen einen lokalen Empfänger).
+    Payloads von Webhooks enthalten keine Transkriptinhalte, deshalb gilt hier keine EU-Allowlist."""
+    s = s or config.settings()
+    value = (url or "").strip()
+    try:
+        parts = urlsplit(value)
+    except ValueError as exc:
+        raise ResidencyError(f"Webhook-URL ungültig: {value!r}") from exc
+    host = (parts.hostname or "").lower().rstrip(".")
+    if not host:
+        raise ResidencyError(f"Webhook-URL ohne gültigen Host: {value!r}")
+    dev = s.app_env == "development"
+    if parts.scheme != "https" and not (dev and parts.scheme == "http"):
+        raise ResidencyError(f"Webhook-URL muss https verwenden: {value!r}")
+    if is_private_host(host) and not dev:
+        raise ResidencyError(f"Webhook-Ziel {host} liegt in einem privaten oder lokalen Netz und ist gesperrt")
+    return host
+
+
 def _make_hook(s: config.Settings | None):
     def _hook(request):
         assert_eu_host(str(request.url), s)
 
     return _hook
+
+
+def webhook_client(s: config.Settings | None = None, **kwargs):
+    """``httpx.Client`` für Webhook-Zustellung: Request-Hook ``assert_webhook_host`` statt der EU-Allowlist,
+    keine Weiterleitungen (ein Redirect auf einen privaten Host wäre sonst ein Umweg um die Prüfung)."""
+    import httpx
+
+    def _hook(request):
+        assert_webhook_host(str(request.url), s)
+
+    hooks = kwargs.pop("event_hooks", {}) or {}
+    hooks.setdefault("request", [])
+    hooks["request"] = [_hook, *hooks["request"]]
+    kwargs.setdefault("follow_redirects", False)
+    return httpx.Client(event_hooks=hooks, **kwargs)
 
 
 def guarded_client(s: config.Settings | None = None, **kwargs):
@@ -169,8 +232,11 @@ __all__ = [
     "allowed_hosts",
     "assert_allowed",
     "assert_eu_host",
+    "assert_webhook_host",
     "guarded_async_client",
     "guarded_client",
     "host_allowed",
     "host_denied",
+    "is_private_host",
+    "webhook_client",
 ]

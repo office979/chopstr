@@ -106,6 +106,14 @@ class Settings:
     retention_cron: str = "0 3 * * *"
     retention_timezone: str = "Europe/Vienna"
 
+    # Phase 5: interne Schnittstelle zur Web-App, Webhooks, Schedules
+    app_internal_url: str = "http://localhost:3000"
+    internal_api_secret: str = ""
+    webhook_timeout_ms: int = 8000
+    outbox_interval_s: int = 30
+    weekly_report_cron: str = "0 7 * * 1"
+    learning_cron: str = "0 4 * * *"
+
     # Kostenmodell (EUR); alle Werte per ENV überschreibbar, siehe costlog.py
     gpu_eur_per_hour: float = 1.20
     cpu_eur_per_hour: float = 0.05
@@ -169,6 +177,12 @@ def load_settings() -> Settings:
         yunet_model_path=_env("YUNET_MODEL_PATH"),
         retention_cron=_env("RETENTION_CRON", "0 3 * * *"),
         retention_timezone=_env("RETENTION_TIMEZONE", "Europe/Vienna"),
+        app_internal_url=_env("APP_INTERNAL_URL", "http://localhost:3000"),
+        internal_api_secret=_env("INTERNAL_API_SECRET"),
+        webhook_timeout_ms=_env_int("WEBHOOK_TIMEOUT_MS", 8000),
+        outbox_interval_s=_env_int("OUTBOX_INTERVAL_S", 30),
+        weekly_report_cron=_env("WEEKLY_REPORT_CRON", "0 7 * * 1"),
+        learning_cron=_env("LEARNING_CRON", "0 4 * * *"),
         gpu_eur_per_hour=_env_float("GPU_EUR_PER_HOUR", 1.20),
         cpu_eur_per_hour=_env_float("CPU_EUR_PER_HOUR", 0.05),
         storage_eur_per_gb_month=_env_float("STORAGE_EUR_PER_GB_MONTH", 0.02),

@@ -94,8 +94,9 @@ async def test_ensure_schedules_is_idempotent(monkeypatch):
     monkeypatch.setenv("RETENTION_TIMEZONE", "Europe/Berlin")
     s = config.reload()
     client = FakeScheduleClient()
-    assert await worker.ensure_schedules(client, s) == {"retention-daily": "created"}
-    assert await worker.ensure_schedules(client, s) == {"retention-daily": "exists"}
+    first = await worker.ensure_schedules(client, s)
+    assert first["retention-daily"] == "created" and set(first) == {"retention-daily", "outbox-dispatch", "learning-nightly", "weekly-report"}
+    assert set((await worker.ensure_schedules(client, s)).values()) == {"exists"}
     schedule = client.created["retention-daily"]
     assert list(schedule.spec.cron_expressions) == ["30 4 * * *"] and schedule.spec.time_zone_name == "Europe/Berlin"
     assert schedule.action.task_queue == s.task_queue_cpu and schedule.action.id == "retention-daily"

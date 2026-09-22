@@ -14,7 +14,7 @@ import time
 
 from temporalio import activity
 
-from .. import costlog, db, events, storage, usage
+from .. import costlog, db, decision_log, events, outbox, storage, usage
 from ..pipeline import signals, story_engine
 from ..providers_llm import LLM
 from ..residency import Tenant
@@ -173,6 +173,11 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
             ctx.store.put_json("derived", key, report.to_json())
 
         ids = _write_rows(ctx, source_id, report.candidates)
+        decisions = decision_log.record_detect_report(
+            ctx.conn, src["workspace_id"], source_id, src.get("brand_profile_id"), report, ids,
+            str(brief.get("platform") or "linkedin"),
+        )  # fmt: skip
+        outbox.candidates_ready(ctx.conn, src["workspace_id"], source_id, len(report.candidates), report.gate_passed)
         events.set_source_status(ctx.conn, source_id, "ready", None)
         costlog.record(
             ctx.conn,
@@ -202,6 +207,7 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
             transcript_version=tv_version,
             cached=cached,
             key=key,
+            decisions=decisions,
         )
     return ids
 

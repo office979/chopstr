@@ -82,6 +82,18 @@ class FakeDB:
         self.subscriptions: dict[str, dict] = {}
         self.brand_assets: dict[str, dict] = {}
         self.audit_log: list[dict] = []
+        # Phase 5
+        self.outbox_events: list[dict] = []
+        self.webhook_endpoints: dict[str, dict] = {}
+        self.webhook_deliveries: dict[str, dict] = {}
+        self.publications: dict[str, dict] = {}
+        self.platform_connections: dict[str, dict] = {}
+        self.performance_feedback: list[dict] = []
+        self.decision_log: list[dict] = []
+        self.hook_pattern_stats: dict[tuple[str, str], dict] = {}
+        self.weekly_reports: dict[str, dict] = {}
+        self.users: dict[str, dict] = {}
+        self.workspace_members: list[dict] = []
         self.plans: dict[str, dict] = {
             "starter": {"code": "starter", "included_hours": 4, "overage_eur_per_hour": 9.0},
             "pro": {"code": "pro", "included_hours": 12, "overage_eur_per_hour": 7.5},
@@ -96,12 +108,55 @@ class FakeDB:
     def add_workspace(self, tier: str = "standard", **fields) -> str:
         wid = str(uuid.uuid4())
         row = {
-            "id": wid, "tier": tier, "allow_us_subprocessors": False,
-            "deletion_requested_at": None, "deletion_scheduled_for": None,
+            "id": wid, "name": "Workspace", "tier": tier, "allow_us_subprocessors": False,
+            "deletion_requested_at": None, "deletion_scheduled_for": None, "weekly_report_enabled": True,
         }  # fmt: skip
         row.update(fields)
         self.workspaces[wid] = row
         return wid
+
+    # -- Phase 5 -------------------------------------------------------------------------------
+    def add_webhook_endpoint(self, workspace_id: str, url: str, events: list[str], secret: str = "whsec_test", **fields) -> str:
+        row = {"id": str(uuid.uuid4()), "workspace_id": workspace_id, "url": url, "secret": secret, "events": list(events), "active": True}
+        row.update(fields)
+        self.webhook_endpoints[row["id"]] = row
+        return row["id"]
+
+    def add_connection(self, workspace_id: str, platform: str = "linkedin", **fields) -> str:
+        row = {"id": str(uuid.uuid4()), "workspace_id": workspace_id, "brand_profile_id": None, "platform": platform, "account_label": platform, "status": "connected", "capabilities": {}}
+        row.update(fields)
+        self.platform_connections[row["id"]] = row
+        return row["id"]
+
+    def add_publication(self, workspace_id: str, clip_id: str, platform: str = "linkedin", **fields) -> str:
+        row = {
+            "id": str(uuid.uuid4()), "workspace_id": workspace_id, "clip_id": clip_id, "connection_id": None, "platform": platform,
+            "status": "scheduled", "scheduled_for": None, "external_id": None, "external_url": None, "published_at": None,
+            "metrics": None, "error": None, "metrics_fetched_at": None,
+        }  # fmt: skip
+        row.update(fields)
+        self.publications[row["id"]] = row
+        return row["id"]
+
+    def add_feedback(self, workspace_id: str, clip_id: str | None, publication_id: str | None, platform: str = "linkedin", metric_window: str = "7d", **fields) -> str:
+        row = {
+            "id": str(uuid.uuid4()), "workspace_id": workspace_id, "clip_id": clip_id, "publication_id": publication_id, "platform": platform,
+            "metric_window": metric_window, "views": None, "likes": None, "comments": None, "shares": None, "saves": None, "follows": None,
+            "avg_watch_time_s": None, "retention_curve": None, "follows_per_1k": None, "saves_per_1k": None, "account_median_views": None,
+            "outlier_score": None, "reward": None, "fetched_at": len(self.performance_feedback),
+        }  # fmt: skip
+        row.update(fields)
+        self.performance_feedback.append(row)
+        return row["id"]
+
+    def add_user(self, email: str, **fields) -> str:
+        row = {"id": str(uuid.uuid4()), "email": email, "display_name": None}
+        row.update(fields)
+        self.users[row["id"]] = row
+        return row["id"]
+
+    def add_member(self, workspace_id: str, user_id: str | None, role: str = "editor", email: str | None = None) -> None:
+        self.workspace_members.append({"workspace_id": workspace_id, "user_id": user_id, "role": role, "email": email})
 
     def add_subscription(self, workspace_id: str, plan_code: str = "starter", **fields) -> str:
         row = {"id": str(uuid.uuid4()), "workspace_id": workspace_id, "plan_code": plan_code, "status": "trialing"}
@@ -313,6 +368,9 @@ class FakeDB:
         handled = self._execute_phase4(sql, q, params)
         if handled is not None:
             return handled
+        handled = self._execute_phase5(sql, q, params)
+        if handled is not None:
+            return handled
         if q.startswith("select s.id, s.workspace_id"):
             sid = params[0]
             s = self.sources.get(sid)
@@ -323,7 +381,7 @@ class FakeDB:
             row = (
                 s["id"], s["workspace_id"], s["storage_key"], s["audio_key"], s["proxy_key"], s["sha256"], s["duration_s"],
                 s["width"], s["height"], s["fps"], s["expected_speakers"], s["brief"], s["status"], s["title"],
-                s["original_filename"], s["mime_type"], s["size_bytes"],
+                s["original_filename"], s["mime_type"], s["size_bytes"], s.get("brand_profile_id"),
                 p.get("asr_variant"), p.get("brand_vocab"), p.get("protected_terms"), p.get("country"), p.get("address"),
                 p.get("learned_weights"), w["tier"], w["allow_us_subprocessors"],
             )  # fmt: skip
@@ -427,6 +485,215 @@ class FakeDB:
             return self._delete_rows(q, params)
         return None
 
+    # -- Phase 5: Outbox, Webhooks, Publishing, Decision Log, Lernen, Wochenreport --------------
+    def _execute_phase5(self, sql: str, q: str, params: tuple):
+        # Outbox und Webhooks
+        if q.startswith("insert into outbox_events"):
+            row = self._insert_row(sql, params)
+            row["id"] = len(self.outbox_events) + 1
+            row.setdefault("processed_at", None)
+            row["created_at"] = _dt(len(self.outbox_events))
+            self.outbox_events.append(row)
+            return FakeCursor([(row["id"],)])
+        if q.startswith("select workspace_id, title, status_message from sources where id"):
+            src = self.sources.get(params[0])
+            return FakeCursor([(src["workspace_id"], src["title"], src.get("status_message"))] if src else [])
+        if q.startswith("select c.source_id, c.platform, c.duration_s, c.render_error, s.workspace_id, s.title from clips c"):
+            c = self.clips.get(params[0])
+            if c is None:
+                return FakeCursor([])
+            src = self.sources[c["source_id"]]
+            return FakeCursor([(c["source_id"], c["platform"], c.get("duration_s"), c.get("render_error"), src["workspace_id"], src["title"])])
+        if q.startswith("select id, workspace_id, event, entity, entity_id, payload, created_at from outbox_events"):
+            rows = [e for e in self.outbox_events if e.get("processed_at") is None][: int(params[0])]
+            return FakeCursor([(e["id"], e["workspace_id"], e["event"], e["entity"], e["entity_id"], e["payload"], e["created_at"]) for e in rows])
+        if q.startswith("update outbox_events set"):
+            for e in self.outbox_events:
+                if e["id"] == params[-1]:
+                    self._apply_update(sql, params, e)
+            return FakeCursor([], rowcount=1)
+        if q.startswith("select id, events from webhook_endpoints where workspace_id"):
+            rows = [e for e in self.webhook_endpoints.values() if e["workspace_id"] == params[0] and e["active"]]
+            return FakeCursor([(e["id"], e["events"]) for e in rows])
+        if q.startswith("insert into webhook_deliveries"):
+            row = self._insert_row(sql, params)
+            row.setdefault("response_code", None)
+            row.setdefault("error", None)
+            row.setdefault("delivered_at", None)
+            row["created_at"] = _dt(len(self.webhook_deliveries))
+            self.webhook_deliveries[row["id"]] = row
+            return FakeCursor([(row["id"],)])
+        if q.startswith("select d.id, d.endpoint_id, d.event, d.payload, d.attempt, d.status, d.created_at, e.url, e.secret, e.active, e.workspace_id from webhook_deliveries d"):
+            d = self.webhook_deliveries.get(params[0])
+            if d is None:
+                return FakeCursor([])
+            e = self.webhook_endpoints[d["endpoint_id"]]
+            return FakeCursor([(d["id"], d["endpoint_id"], d["event"], d["payload"], d["attempt"], d["status"], d["created_at"], e["url"], e["secret"], e["active"], e["workspace_id"])])
+        if q.startswith("select id from webhook_deliveries where status = 'pending' and next_attempt_at <= %s"):
+            rows = [d for d in self.webhook_deliveries.values() if d["status"] == "pending" and d["next_attempt_at"] <= params[0]]
+            rows.sort(key=lambda d: d["next_attempt_at"])
+            return FakeCursor([(d["id"],) for d in rows[: int(params[1])]])
+        if q.startswith("update webhook_deliveries set"):
+            d = self.webhook_deliveries.get(params[-1])
+            if d is not None:
+                self._apply_update(sql, params, d)
+            return FakeCursor([], rowcount=1)
+        # Publishing
+        if q.startswith("select p.id, coalesce(p.workspace_id, s.workspace_id), p.clip_id, p.connection_id"):
+            p = self.publications.get(params[0])
+            if p is None:
+                return FakeCursor([])
+            c = self.clips[p["clip_id"]]
+            src = self.sources[c["source_id"]]
+            return FakeCursor([(
+                p["id"], p.get("workspace_id") or src["workspace_id"], p["clip_id"], p.get("connection_id"), p["platform"], p["status"],
+                p.get("scheduled_for"), p.get("external_id"), p.get("external_url"), p.get("published_at"), p.get("metrics"), p.get("error"),
+                c["status"], c.get("candidate_id"), c.get("guest_approval_required", False), c["source_id"], src.get("brand_profile_id"),
+            )])  # fmt: skip
+        if q.startswith("select human_verdict from candidates where id"):
+            c = next((c for c in self.candidates if c["id"] == params[0]), None)
+            return FakeCursor([(c.get("human_verdict"),)] if c else [])
+        if q.startswith("select decision from guest_approvals where clip_id"):
+            rows = [g for g in self.guest_approvals if g["clip_id"] == params[0]]
+            return FakeCursor([(rows[-1].get("decision"),)] if rows else [])
+        if q.startswith("update publications set"):
+            p = self.publications.get(params[-1])
+            if p is not None:
+                self._apply_update(sql, params, p)
+            return FakeCursor([], rowcount=1)
+        if q.startswith("select id from performance_feedback where publication_id = %s and metric_window = %s"):
+            rows = [f for f in self.performance_feedback if f["publication_id"] == params[0] and f["metric_window"] == params[1]]
+            return FakeCursor([(f["id"],) for f in rows[:1]])
+        if q.startswith("insert into performance_feedback"):
+            row = self._insert_row(sql, params)
+            row.setdefault("fetched_at", len(self.performance_feedback))
+            self.performance_feedback.append(row)
+            return FakeCursor([(row["id"],)])
+        if q.startswith("update performance_feedback set"):
+            for f in self.performance_feedback:
+                if f["id"] == params[-1]:
+                    self._apply_update(sql, params, f)
+            return FakeCursor([], rowcount=1)
+        if q.startswith("select f.views, f.follows_per_1k, f.saves_per_1k from performance_feedback f join publications p"):
+            ws, platform, conn_id, pub_id, limit = params
+            rows = []
+            for f in self.performance_feedback:
+                p = self.publications.get(f["publication_id"]) if f.get("publication_id") else None
+                if f["workspace_id"] != ws or f["platform"] != platform or f["metric_window"] != "7d" or f["publication_id"] == pub_id:
+                    continue
+                if p is None or str(p.get("connection_id") or "") != conn_id:
+                    continue
+                rows.append(f)
+            rows.sort(key=lambda f: f["fetched_at"], reverse=True)
+            return FakeCursor([(f["views"], f["follows_per_1k"], f["saves_per_1k"]) for f in rows[: int(limit)]])
+        # Decision Log
+        if q.startswith("insert into decision_log"):
+            row = self._insert_row(sql, params)
+            row["created_at"] = _dt(len(self.decision_log))
+            self.decision_log.append(row)
+            return FakeCursor([(row["id"],)])
+        if q.startswith("select features from decision_log where candidate_id = %s and decision_type = 'candidate_scored'"):
+            rows = [d for d in self.decision_log if d.get("candidate_id") == params[0] and d["decision_type"] == "candidate_scored"]
+            return FakeCursor([(rows[-1]["features"],)] if rows else [])
+        if q.startswith("select chosen from decision_log where clip_id = %s and decision_type = 'hook_selected'"):
+            rows = [d for d in self.decision_log if d.get("clip_id") == params[0] and d["decision_type"] == "hook_selected"]
+            return FakeCursor([(rows[-1]["chosen"],)] if rows else [])
+        if q.startswith("select decision_type, features, chosen from decision_log where brand_profile_id"):
+            rows = [d for d in self.decision_log if d.get("brand_profile_id") == params[0] and d["decision_type"] in ("hook_variant_shown", "hook_selected")]
+            return FakeCursor([(d["decision_type"], d["features"], d["chosen"]) for d in rows])
+        # Lernen
+        if q.startswith("select c.id, c.rubric, c.human_verdict from candidates c join sources s"):
+            rows = [c for c in self.candidates if c.get("human_verdict") and (self.sources.get(c["source_id"]) or {}).get("brand_profile_id") == params[0]]
+            return FakeCursor([(c["id"], c.get("rubric"), c["human_verdict"]) for c in rows])
+        if q.startswith("select cl.candidate_id, max(f.reward) from performance_feedback f join clips cl"):
+            best: dict[str, float] = {}
+            for f in self.performance_feedback:
+                cl = self.clips.get(f.get("clip_id") or "")
+                if cl is None or f["metric_window"] != "7d" or f.get("reward") is None or not cl.get("candidate_id"):
+                    continue
+                if (self.sources.get(cl["source_id"]) or {}).get("brand_profile_id") != params[0]:
+                    continue
+                best[cl["candidate_id"]] = max(best.get(cl["candidate_id"], float("-inf")), float(f["reward"]))
+            return FakeCursor(list(best.items()))
+        if q.startswith("select f.clip_id, f.reward from performance_feedback f join clips cl"):
+            rows = []
+            for f in self.performance_feedback:
+                cl = self.clips.get(f.get("clip_id") or "")
+                if cl is None or f["metric_window"] != "7d" or f.get("reward") is None:
+                    continue
+                if (self.sources.get(cl["source_id"]) or {}).get("brand_profile_id") != params[0]:
+                    continue
+                rows.append((f["clip_id"], f["reward"]))
+            return FakeCursor(rows)
+        if q.startswith("select workspace_id from brand_profiles where id"):
+            p = self.brand_profiles.get(params[0])
+            return FakeCursor([(p["workspace_id"],)] if p else [])
+        if q.startswith("update brand_profiles set"):
+            p = self.brand_profiles.get(params[-1])
+            if p is not None:
+                self._apply_update(sql, params, p)
+            return FakeCursor([], rowcount=1)
+        if q.startswith("select shown, chosen, reward_sum, reward_n from hook_pattern_stats where brand_profile_id = %s and pattern = %s"):
+            r = self.hook_pattern_stats.get((params[0], params[1]))
+            return FakeCursor([(r["shown"], r["chosen"], r["reward_sum"], r["reward_n"])] if r else [])
+        if q.startswith("select pattern, shown, chosen, reward_sum, reward_n from hook_pattern_stats where brand_profile_id"):
+            rows = [r for (b, _p), r in self.hook_pattern_stats.items() if b == params[0]]
+            return FakeCursor([(r["pattern"], r["shown"], r["chosen"], r["reward_sum"], r["reward_n"]) for r in rows])
+        if q.startswith("insert into hook_pattern_stats"):
+            row = self._insert_row(sql, params)
+            self.hook_pattern_stats[(row["brand_profile_id"], row["pattern"])] = row
+            return FakeCursor([], rowcount=1)
+        if q.startswith("update hook_pattern_stats set"):
+            r = self.hook_pattern_stats.get((params[-2], params[-1]))
+            if r is not None:
+                self._apply_update(sql, params, r)
+            return FakeCursor([], rowcount=1)
+        if q.startswith("select pattern from hook_versions where clip_id"):
+            rows = sorted((r for r in self.hook_versions if r["clip_id"] == params[0]), key=lambda r: -r["version"])
+            return FakeCursor([(rows[0].get("pattern"),)] if rows else [])
+        if q.startswith("select distinct s.brand_profile_id from sources s join candidates c"):
+            ids = []
+            for c in self.candidates:
+                src = self.sources.get(c["source_id"]) or {}
+                if c.get("human_verdict") and src.get("brand_profile_id") and src["brand_profile_id"] not in ids:
+                    ids.append(src["brand_profile_id"])
+            return FakeCursor([(i,) for i in ids])
+        # Wochenreport
+        if q.startswith("select f.clip_id, f.publication_id, f.platform, f.views, f.follows_per_1k, f.saves_per_1k, f.reward from performance_feedback f"):
+            ws, start, end = params
+            rows = [f for f in self.performance_feedback if f["workspace_id"] == ws and f["metric_window"] == "7d" and f.get("clip_id") and _in_window(f["fetched_at"], start, end)]
+            return FakeCursor([(f["clip_id"], f["publication_id"], f["platform"], f["views"], f["follows_per_1k"], f["saves_per_1k"], f["reward"]) for f in rows])
+        if q.startswith("select c.title_card, c.platform, c.candidate_id, c.duration_s, s.title from clips c"):
+            c = self.clips.get(params[0])
+            if c is None:
+                return FakeCursor([])
+            src = self.sources[c["source_id"]]
+            return FakeCursor([(c.get("title_card"), c["platform"], c.get("candidate_id"), c.get("duration_s"), src["title"])])
+        if q.startswith("select id from weekly_reports where workspace_id = %s and week_start = %s"):
+            rows = [r for r in self.weekly_reports.values() if r["workspace_id"] == params[0] and r["week_start"] == params[1]]
+            return FakeCursor([(r["id"],) for r in rows[:1]])
+        if q.startswith("insert into weekly_reports"):
+            row = self._insert_row(sql, params)
+            row.setdefault("sent_at", None)
+            self.weekly_reports[row["id"]] = row
+            return FakeCursor([(row["id"],)])
+        if q.startswith("update weekly_reports set"):
+            r = self.weekly_reports.get(params[-1])
+            if r is not None:
+                self._apply_update(sql, params, r)
+            return FakeCursor([], rowcount=1)
+        if q.startswith("select coalesce(u.email, m.email) from workspace_members m"):
+            rows = []
+            for m in self.workspace_members:
+                if m["workspace_id"] != params[0] or m["role"] not in ("owner", "admin"):
+                    continue
+                u = self.users.get(m.get("user_id") or "")
+                rows.append(((u or {}).get("email") or m.get("email"),))
+            return FakeCursor(rows)
+        if q.startswith("select id, name from workspaces where weekly_report_enabled"):
+            return FakeCursor([(w["id"], w.get("name")) for w in self.workspaces.values() if w.get("weekly_report_enabled", True)])
+        return None
+
     @staticmethod
     def _delete_dict(table: dict, pred) -> FakeCursor:
         gone = [k for k, v in table.items() if pred(v)]
@@ -475,6 +742,22 @@ class FakeDB:
 
     def statuses(self, step: str) -> list[str]:
         return [e["status"] for e in self.events_for(step)]
+
+
+def _dt(n: int):
+    """Deterministischer Zeitstempel für Fake-Zeilen (Reihenfolge = Einfügereihenfolge)."""
+    from datetime import UTC, datetime, timedelta
+
+    return datetime(2026, 1, 1, tzinfo=UTC) + timedelta(seconds=n)
+
+
+def _in_window(value, start, end) -> bool:
+    """Fake-``fetched_at`` kann ein Zähler oder ein datetime sein; Zähler gelten als „in dieser Woche“."""
+    from datetime import datetime
+
+    if isinstance(value, datetime):
+        return start <= value < end
+    return True
 
 
 def _unwrap(v):

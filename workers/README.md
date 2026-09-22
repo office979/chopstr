@@ -8,8 +8,11 @@ Residency-Guard (`chopstr_worker/residency.py`) blockiert jeden anderen Aufruf, 
 Phase 0 (Fundament), Phase 1 („Deutsch hören"), Phase 2 („Story-Engine": Kandidaten mit Begründung,
 Gates, Story-Graph), Phase 3 („Render": Copy, Reframe, Captions, ffmpeg, Provenienz) und der Worker-Teil von
 Phase 4 (Lösch-Workflow mit Nachweis, Retention-Schedule, Verbrauch nach Stunden, Marken-Fonts und Logo im
-Render, Seed) sind umgesetzt. Verträge: `packages/schema/CLIPS.md` (`clips_v1`, `render_plan_v1`) und
-`packages/schema/PHASE4.md` (Abschnitte 5, 7, 8; Migration `0003_auth_billing.sql`).
+Render, Seed) sind umgesetzt, dazu der Worker-Teil von Phase 5 (Outbox und Webhooks, Publishing mit
+Metrik-Fenstern, Decision Log, Lernschleife, Wochenreport). Verträge: `packages/schema/CLIPS.md`
+(`clips_v1`, `render_plan_v1`), `packages/schema/PHASE4.md` (Abschnitte 5, 7, 8; Migration
+`0003_auth_billing.sql`) und `packages/schema/PHASE5.md` (5a, 5b, „Interne Schnittstelle Worker ↔ Web“;
+Migration `0005_phase5.sql`).
 
 ## Struktur
 
@@ -23,6 +26,10 @@ workers/
     residency.py       Provider- und Host-Allowlist, Deny-Liste, guarded_client()
     costlog.py         job_costs-Zeilen, Preistabelle per ENV, estimate_eur()
     usage.py           usage_periods: Quellminuten je Kalendermonat, Mehrverbrauch pro angefangener Stunde, Render- und Token-Zähler
+    outbox.py          outbox_events schreiben (source.ready, clip.rendered, ...), Hooks aus events.py
+    decision_log.py    decision_log-Zeilen (candidate_proposed, candidate_scored, hook_selected, reframe_strategy, publish)
+    learning.py        Ridge-Fit der Rubrik-Gewichte, hook_pattern_stats, Thompson-Reihenfolge
+    internal_api.py    Client für /api/internal/publish, /metrics, /mail (X-Internal-Secret)
     prompts.py         packages/prompts/<name>_v<N>.md laden, rendern, prompt_version
     providers_llm.py   LLM.structured() über bedrock-eu | mistral-eu | selfhost-eu | local-heuristic, Redis-Cache
     heuristic_llm.py   Heuristik-Provider ohne Netz (Entwicklung, Demo; kein Ersatz für ein Sprachmodell)
@@ -31,8 +38,12 @@ workers/
                        story_engine, fidelity, copy_engine, render_plan, reframe, captions_de, render, compliance)
     activities/        Temporal-Activities (probe_and_extract, transcribe_de, diarize, heatmap,
                        fuse_and_nlp, detect_candidates, render_pack, notify,
-                       delete_entity, find_expired, enqueue_deletion)
-    workflows/         ClipProjectWorkflow, RetentionWorkflow
+                       delete_entity, find_expired, enqueue_deletion,
+                       dispatch_outbox, find_due_deliveries, deliver_webhook, load_publication, publish_clip,
+                       fetch_metrics, cancel_publication, find_learning_profiles, learn_brand_profile,
+                       find_report_workspaces, build_weekly_report)
+    workflows/         ClipProjectWorkflow, DeletionWorkflow, RetentionWorkflow, OutboxWorkflow, PublishWorkflow,
+                       LearningWorkflow, WeeklyReportWorkflow
     worker.py          python -m chopstr_worker.worker --queues cpu,gpu [--ensure-schedules]
   fonts/               Inter-Bold (OFL) für drawtext und libass, siehe fonts/README.md
   scripts/             seed_dev.py (python -m scripts.seed_dev): Dev-Nutzer, Workspace, Markenprofil, Abo
@@ -101,7 +112,12 @@ Quelle: `.env.example` im Monorepo-Root. Der Worker liest zusätzlich die mit �
 | `YUNET_MODEL_PATH` (Worker) | YuNet-ONNX für Reframing; fehlt die Datei oder OpenCV, läuft Reframe `neutral` |
 | `RENDER_X264_PRESET`, `RENDER_FONTS_DIR` (Worker) | x264-Preset (Default `medium`, Tests `ultrafast`), Fontordner (Default `workers/fonts`) |
 | `C2PA_SIGN_CERT`, `C2PA_PRIVATE_KEY` | c2patool-Signatur; ohne c2patool ist `provenance.c2pa = "skipped"` |
-| `RETENTION_CRON`, `RETENTION_TIMEZONE` | Schedule `retention-daily` (Default `0 3 * * *`, `Europe/Vienna`), angelegt mit `--ensure-schedules` |
+| `RETENTION_CRON`, `RETENTION_TIMEZONE` | Schedule `retention-daily` (Default `0 3 * * *`, `Europe/Vienna`), angelegt mit `--ensure-schedules`; die Zeitzone gilt für alle Schedules |
+| `APP_INTERNAL_URL`, `INTERNAL_API_SECRET` | interne Endpunkte der Web-App (`/api/internal/*`, Header `X-Internal-Secret`); der Host steht automatisch auf der Residency-Allowlist |
+| `WEBHOOK_TIMEOUT_MS` | Timeout je Webhook-Zustellung (Default 8000) |
+| `OUTBOX_INTERVAL_S` | Intervall des Schedules `outbox-dispatch` (Default 30 s) |
+| `WEEKLY_REPORT_CRON` | Schedule `weekly-report` (Default `0 7 * * 1`, Montag 07:00) |
+| `LEARNING_CRON` (Worker) | Schedule `learning-nightly` (Default `0 4 * * *`) |
 
 Modell-IDs haben bewusst keine Defaults im Code. Fehlt `ASR_MODEL_DE`, schlägt `transcribe_de` mit einer
 klaren Meldung fehl („Kein ASR-Modell für Variante de konfiguriert (ASR_MODEL_DE setzen)").
@@ -123,7 +139,7 @@ klaren Meldung fehl („Kein ASR-Modell für Variante de konfiguriert (ASR_MODEL
 
 | Queue | Activities |
 |---|---|
-| `chopstr-cpu` | probe_and_extract, heatmap, fuse_and_nlp, detect_candidates, render_pack, notify, delete_entity, find_expired, enqueue_deletion, Workflows |
+| `chopstr-cpu` | probe_and_extract, heatmap, fuse_and_nlp, detect_candidates, render_pack, notify, delete_entity, find_expired, enqueue_deletion, dispatch_outbox, find_due_deliveries, deliver_webhook, load_publication, publish_clip, fetch_metrics, cancel_publication, find_learning_profiles, learn_brand_profile, find_report_workspaces, build_weekly_report, Workflows |
 | `chopstr-gpu` | transcribe_de, diarize |
 
 Ablauf `ClipProjectWorkflow`:
@@ -298,6 +314,139 @@ und die `usage_periods`-Zeile des aktuellen Monats. Der Passwort-Hash ist ein Ar
 (`$argon2id$v=19$m=65536,t=3,p=4$...`, 32 Byte Hash, 16 Byte Salt) über `argon2-cffi` (Extra `dev`); das sind
 die Standardparameter von `@node-rs/argon2` in der Web-App, `verify()` liest sie aus dem String.
 
+## Phase 5 (Worker): Outbox, Webhooks, Publishing, Decision Log, Lernschleife, Wochenreport
+
+Vertrag `packages/schema/PHASE5.md`, Migration `0005_phase5.sql`. Der Worker besitzt Zustellung, Zeitplanung,
+Retries und Metrik-Fenster; Provider-SDKs, OAuth und Mailversand bleiben in der Web-App.
+
+### Schedules (`--ensure-schedules`, alle idempotent, Zeitzone `RETENTION_TIMEZONE`, Overlap `SKIP`)
+
+| Schedule | Workflow | Takt |
+|---|---|---|
+| `retention-daily` | `RetentionWorkflow` | `RETENTION_CRON` |
+| `outbox-dispatch` | `OutboxWorkflow` | alle `OUTBOX_INTERVAL_S` Sekunden |
+| `learning-nightly` | `LearningWorkflow` | `LEARNING_CRON` (Default 04:00) |
+| `weekly-report` | `WeeklyReportWorkflow` | `WEEKLY_REPORT_CRON` (Default Montag 07:00) |
+
+### Outbox und Webhooks (`outbox.py`, `activities/webhooks.py`, `workflows/outbox.py`)
+
+`outbox.emit(conn, workspace_id, event, entity, entity_id, payload)` schreibt `outbox_events`. Der Worker
+schreibt automatisch: `source.ready` / `source.failed` (Hook in `events.set_source_status`), `candidates.ready`
+(`detect_candidates`), `clip.rendered` / `clip.failed` (Hook in `events.step` für den Schritt `render`: das
+`finished`-Payload trägt `clip_id`, bei Fehlern kommt die `clip_id` aus dem letzten `progress`-Zwischenstand),
+`publication.published` / `publication.failed` (`publish_clip`). Payloads enthalten IDs, Titel, Status, Zähler
+und externe URLs, nie Transkript- oder Hook-Texte. Ein Fehler im Outbox-Hook wird nur geloggt.
+
+`OutboxWorkflow`: `dispatch_outbox(limit)` legt je aktivem Endpunkt mit passendem Ereignis (oder `*`) eine
+`webhook_deliveries`-Zeile an und setzt `processed_at`; `find_due_deliveries(now)` liefert fällige Zeilen;
+`deliver_webhook(delivery_id)` sendet per POST:
+
+```
+Content-Type: application/json; charset=utf-8
+X-Chopstr-Event: clip.rendered
+X-Chopstr-Delivery: <delivery_id>
+X-Chopstr-Attempt: 1
+X-Chopstr-Signature: t=<unix>,v1=<hex(hmac_sha256(secret, "<t>.<body>"))>
+
+{"created_at":"...","data":{"clip_id":"...","status":"rendered",...},"event":"clip.rendered","id":"<delivery_id>"}
+```
+
+Der Body ist bei jedem Versuch identisch (sortierte Schlüssel), nur `t` und `X-Chopstr-Attempt` ändern sich.
+Empfänger prüfen wie `webhooks.verify()`: `t` innerhalb von 300 s, HMAC über `"<t>.<body>"`. Erfolg ist 2xx;
+sonst erster Versuch plus fünf Wiederholungen mit Backoff 1, 5, 30, 120, 720 Minuten über `next_attempt_at`,
+danach `failed`. Ziel-Hosts: nur https, kein privates oder lokales Netz (`residency.assert_webhook_host`,
+`residency.webhook_client` ohne Redirects); in `APP_ENV=development` sind http und lokale Hosts erlaubt.
+Kein EU-Zwang, weil keine Transkriptinhalte übertragen werden. Deaktivierte Endpunkte und gesperrte Hosts sind
+sofort `failed`.
+
+### Publishing (`internal_api.py`, `activities/publish.py`, `workflows/publish.py`)
+
+Die Web-App legt `publications` an und startet `PublishWorkflow(publication_id)` (Workflow-ID
+`publish-<id>`). Ablauf: `load_publication` → Timer bis `scheduled_for` → `publish_clip` → Timer 6 h, 48 h,
+7 d → `fetch_metrics`. Signale `cancel` (nur vor dem Publish; setzt `scheduled` auf `failed` mit Hinweis) und
+`reschedule(iso)`. Gates in `publish_clip`: Clip `rendered` (oder `exported`), Kandidat `accepted`,
+Gast-Freigabe `approved` falls `clips.guest_approval_required`; AVV und Plan prüft die Web-App beim Anlegen.
+Gesperrt oder vom Provider abgelehnt → `status = failed`, `error` deutsch, Outbox `publication.failed`; Erfolg →
+`published`, `external_id`, `external_url`, `published_at`, Outbox `publication.published`, Decision Log
+`publish` (actor `system`). Ist die Web-App nicht erreichbar, wird die Zeile `failed` mit Grund und die
+Ausnahme weitergereicht (Temporal wiederholt dreimal, jeder Versuch schreibt ein `publication.failed`).
+
+Interne Endpunkte (`APP_INTERNAL_URL`, Header `X-Internal-Secret`, über `residency.guarded_client`):
+
+| Aufruf | Body | Antwort |
+|---|---|---|
+| `POST /api/internal/publish` | `{ publication_id }` | `{ status: "published" \| "failed", external_id, external_url, error }` |
+| `POST /api/internal/metrics` | `{ publication_id, window: "6h" \| "48h" \| "7d" }` | `{ metrics: { views, likes, comments, shares, saves, follows, avg_watch_time_s, retention_curve } }`, nicht garantierte Felder `null` |
+| `POST /api/internal/mail` | `{ to: [], subject, text, html? }` | `{ ok }` |
+
+`fetch_metrics` schreibt `performance_feedback` (Upsert je Publikation und Fenster) und ergänzt
+`publications.metrics.at_<window>`. Reward (Master These 1): `follows_per_1k = follows / views * 1000`,
+`saves_per_1k` analog, `account_median_views` = Median der `views` der letzten 20 7d-Zeilen desselben Accounts
+(gleiche `connection_id`, sonst gleiche Plattform ohne Verbindung), `outlier_score = views / Median`.
+`reward = 0,5 * follows_norm + 0,3 * saves_norm + 0,2 * outlier_norm`; jede Kennzahl wird durch den
+Account-Median derselben Kennzahl geteilt und auf 3 gedeckelt, ohne Historie gilt 1,0 (neutral). Fehlende
+Metriken bleiben `null`, der Reward entsteht nur aus den vorhandenen Anteilen (Gewichte neu normiert), ohne
+jede Kennzahl ist er `null`.
+
+### Decision Log (`decision_log.py`, Grundsatz A3)
+
+`decision_log.record(conn, workspace_id, decision_type, features, alternatives, chosen, actor_type, ...)`.
+Geschrieben werden: `candidate_proposed` je Vorschlag (behalten oder verworfen mit Grund) und
+`candidate_scored` je Kandidat (Rubrik-Scores, Gewichte, Struktur, Länge, Plattform, Sprecherzahl, Gates,
+Flags) in `detect_candidates`; `hook_variant_shown` (Reihenfolge der fünf Muster) und `hook_selected`
+(gewählte Variante plus vier Alternativen) aus `copy_engine.write_copy` (liegen in `CopyResult.decisions`,
+Persistenz über `decision_log.record_copy_result`); `reframe_strategy` über
+`decision_log.record_reframe_strategy(conn, workspace_id, clip_id, plan, override)`; `publish` in
+`publish_clip`. `copy_engine.write_copy(..., pattern_order=learning.thompson_order(stats))` sortiert die
+Varianten nach der Lernschleife (`order_from_learning` im Merkmal, Exploration bleibt sichtbar).
+
+Noch einzuhängen in `activities/render.py` (Datei gehört Welle 5c): nach `_write_hook_version(...)` der Aufruf
+`decision_log.record_copy_result(conn, src["workspace_id"], clip_id, copy, brand_profile_id=src.get("brand_profile_id"), source_id=source_id, candidate_id=cand["id"], platform=destination)`
+und nach `render_plan.build_plan(...)` der Aufruf
+`decision_log.record_reframe_strategy(conn, src["workspace_id"], clip_id, plan, override=clip.get("reframe_override"), source_id=source_id, candidate_id=cand["id"], brand_profile_id=src.get("brand_profile_id"))`.
+Optional dazu `learning.update_hook_stats(conn, brand_profile_id, pattern, shown=1)` je Variante und
+`chosen=1` für die gewählte; die nächtliche Neuberechnung liefert dieselben Zahlen auch ohne diese Aufrufe.
+
+### Lernschleife (`learning.py`, `activities/learning.py`, `workflows/learning.py`)
+
+`fit_rubric_weights(rows) -> { weights, n, r2 }`: Ridge-Regression (numpy, λ = 1) der fünf Scores (0 bis 1
+skaliert) auf das Ziel `0,6 * Urteil + 0,4 * Reward` (accepted 1, rejected 0, edited 0,5; Reward auf 3
+gedeckelt; ohne Reward nur das Urteil). Gewichte auf [0,05, 0,5] begrenzt und per Water-Filling auf Summe 1
+normiert; unter 20 Entscheidungen `None`. `update_brand_weights(conn, brand_profile_id)` liest Kandidaten mit
+Urteil des Markenprofils plus den besten 7d-Reward ihrer Clips, schreibt `brand_profiles.learned_weights =
+{ weights, n, fitted_at, r2 }` (von `story_engine.resolve_weights` gelesen) und den Audit `learning.updated`.
+
+Hook-Muster: `update_hook_stats(conn, brand_profile_id, pattern, shown, chosen, reward)` zählt inkrementell,
+`rebuild_hook_stats` rechnet nächtlich aus `decision_log` (`hook_variant_shown`, `hook_selected`) und
+`performance_feedback` (7d-Reward über `clips` zur höchsten `hook_versions.pattern`) neu und ist idempotent.
+`thompson_order(stats, seed)` zieht je Muster Beta(chosen + 1, shown − chosen + 1), multipliziert mit dem
+Reward-Mittel (1,0 ohne Daten, auf 3 gedeckelt) und liefert die Reihenfolge der fünf Muster; ungezeigte Muster
+werden erkundet. `LearningWorkflow` läuft je Markenprofil mit mindestens einem Urteil
+(`find_learning_profiles` → `learn_brand_profile`).
+
+### Wochenreport (`activities/reports.py`, `workflows/reports.py`)
+
+`build_weekly_report(workspace_id, week_start)`: 7d-Zeilen aus `performance_feedback`, deren Fenster in der
+Woche [Montag, Montag + 7 Tage) abgeschlossen wurde (`fetched_at`); drei beste und drei schwächste Clips nach
+`follows_per_1k`, je Clip eine Ursache aus den Decision-Log-Merkmalen (Struktur, Hook-Muster, Länge,
+Plattform, Rubrik) und eine Änderung als deutscher Textbaustein (zu lang → kürzen; Hook unter 5 → stärkerer
+Einstieg als Variante B; Muster nicht unter den besten → Muster des besten Clips testen). Ohne Daten enthält der
+Bericht den Hinweis „keine Publikationen mit Metriken“. Gespeichert in `weekly_reports` (Upsert je Workspace
+und Woche), Mail an owner und admin (`workspace_members` plus `users.email`) über `/api/internal/mail`; ein
+Mailfehler verwirft den Bericht nicht (`sent_at` bleibt leer). `WeeklyReportWorkflow` läuft für alle
+Workspaces mit `weekly_report_enabled`, `week_start` ist der Montag der Vorwoche.
+
+Offene Punkte Phase 5 (Worker):
+
+- Kein DNS-Auflösen vor der Webhook-Zustellung: `assert_webhook_host` prüft Schema, IP-Literale und
+  Hostnamen, nicht die aufgelösten Adressen (DNS-Rebinding auf private Adressen bleibt möglich). Redirects
+  sind abgeschaltet.
+- `usage.threshold` (80 %, 100 %) und `guest_approval.decided` schreibt die Web-App in die Outbox; der Worker
+  verteilt sie nur.
+- Der Wochenreport bewertet die Woche über abgeschlossene 7d-Fenster, nicht über das Veröffentlichungsdatum.
+- `hook_pattern_stats` werden nur nächtlich aus dem Decision Log gefüllt, solange die Aufrufe in
+  `activities/render.py` (siehe oben) fehlen.
+
 ## Lokal gegen Temporal und MinIO
 
 ```bash
@@ -373,6 +522,11 @@ docker run --gpus all --env-file .env chopstr-worker-gpu --queues gpu
 | `activities/render.py` | `render_pack`: Copy, Reframe, Captions, Encode, Provenienz, Upload, DB, Marken-Font und Logo | verdrahtet |
 | `activities/deletion.py` | `delete_entity` mit Löschnachweis, `find_expired`, `enqueue_deletion` | verdrahtet |
 | `workflows/retention.py` | `RetentionWorkflow` über Schedule `retention-daily` | verdrahtet, Schedule per `--ensure-schedules` |
+| `outbox.py`, `activities/webhooks.py`, `workflows/outbox.py` | Outbox, Signatur, Backoff, Schedule `outbox-dispatch` | verdrahtet |
+| `internal_api.py`, `activities/publish.py`, `workflows/publish.py` | Publishing über die Web-App, Metrik-Fenster, Reward | verdrahtet, Web-Endpunkte müssen existieren |
+| `decision_log.py` | Decision Log aus Story-Engine, Copy-Engine, Publish | verdrahtet in `detect_candidates` und `publish_clip`; Copy und Reframe warten auf den Aufruf in `render.py` |
+| `learning.py`, `activities/learning.py`, `workflows/learning.py` | Ridge-Fit, Hook-Statistik, Thompson, Schedule `learning-nightly` | verdrahtet |
+| `activities/reports.py`, `workflows/reports.py` | Wochenreport, Schedule `weekly-report` | verdrahtet |
 | `usage.py` | `usage_periods` je Kalendermonat, Mehrverbrauch pro angefangener Stunde | verdrahtet in Ingest, Render, LLM-Sink |
 | `scripts/seed_dev.py` | Dev-Nutzer, Workspace, Markenprofil, Abo, Verbrauchsperiode | vorhanden |
 
@@ -395,3 +549,34 @@ Offene Punkte Phase 4 (Worker):
 - Keine Telemetrie mit Transkriptinhalten; Logs enthalten IDs, Dauern, Zähler.
 - Code-Bezeichner Englisch, Docstrings und Event-Meldungen Deutsch, keine Gedankenstriche in Nutzertexten.
 - Prompts nur über `prompts.load()`; jede Änderung ist eine neue Datei mit erhöhter Version.
+
+## Phase 5c: Folien-Crop, Schweizerdeutsch-Beta, Sovereign
+
+- **Folien-Crop** (`pipeline/reframe.py`): `detect_slide_region(video, segments)` sucht mit OpenCV (Extra
+  `vision`, kein Modell nötig) das größte Rechteck aus Rasterzellen mit geringer Bewegung und hoher Kantendichte,
+  stabil über mindestens 60 % der abgetasteten Frames, mindestens 25 % der Bildfläche. Strategie `slide_pip`:
+  Folie oben auf volle Breite (höchstens 55 % der Höhe), Sprecher unten als Bild-im-Bild nach der
+  Talking-Head-Regel, Captions und Overlays in der Sprecherfläche. Automatisch ab `confidence >= 0,6`, sonst
+  Fallback mit Hinweis; `clips.reframe_override` (`talking_head`, `two_speakers`, `neutral`, `slide_pip`) erzwingt
+  eine Strategie je Clip, `slide_pip` ohne erkannte Folie legt das ganze Quellbild oben ab. Render-Plan:
+  `reframe.slide_region {x, y, w, h, confidence}`, `reframe.pip {x, y, w, h}`, Shots mit `layout = "pip"`;
+  `pipeline/render.py` baut dafür `split`, zwei `crop`, `scale`/`pad`, `vstack`. Ohne OpenCV bleibt alles wie in
+  Phase 3; `activities/render.py` liest den Override tolerant (fehlt die Spalte, steht das in `notes`).
+- **Schweizerdeutsch-Beta** (`pipeline/dach_nlp.py`): `detect_dialect(words)` liefert `{variant, confidence,
+  markers}` über Lexika CH und AT (mindestens 2 gewichtete Treffer und 2 % Anteil, Sicherheit 1,0 ab 10 %,
+  schwache Marker wie „eh“ zählen halb). `normalize_ch(word, protected_terms)` kennt nur sichere Entsprechungen
+  (nöd, isch, chli, gsi, öppis, jetz, hät, wänn) und schreibt geschützte Begriffe nie um; `annotate(...,
+  dialect="de-CH")` ergänzt `text_norm`, `text` bleibt das Original (Entscheidung P2). `fuse_and_nlp` schreibt
+  `stats.dialect`, `stats.text_norm_count` und den Hinweis „Schweizerdeutsch erkannt, CH-Modell empfohlen (Beta)“
+  ins Event, wenn die Quelle mit dem DE-Modell lief. Captions (`build_cards`, `to_ass`, `to_srt`, `to_vtt`,
+  `cards_for`) nehmen `text_field="text" | "text_norm"` (Fallback `text`); der Render liest
+  `brand_profiles.caption_style.caption_text_field` (Default `text`) und trägt `captions.text_field` nur bei
+  `text_norm` in den Plan ein (Hashes bestehender Pläne bleiben stabil).
+- **Sovereign** (`infra/docker-compose.sovereign.yml`, `docs/SOVEREIGN.md`): Overlay mit `selfhost-eu` über
+  einen vLLM-Service (Modell nur aus `SELFHOST_LLM_MODEL`), `GLADIA_BASE_URL` aus der Umgebung, kein Bedrock,
+  getrennte Services `worker` (cpu) und `worker-gpu` (gpu, NVIDIA-Reservierung), Web mit `BILLING_PROVIDER=manual`
+  und `DEFAULT_TIER=sovereign`. `tests/test_sovereign_overlay.py` prüft, dass keine US-Hosts vorkommen und alle
+  Overlay-Hosts den Residency-Guard passieren.
+- Tests: `tests/test_slide_pip.py` (Rasterauswertung, Layout, Override-Pfade, Filtergraph, Medientest mit
+  `ffmpeg -f lavfi`: links Raster, rechts Bewegung; die echte Erkennung läuft nur mit OpenCV, sonst prüft der Test
+  den Override-Pfad), `tests/test_dialect_ch.py`, `tests/test_sovereign_overlay.py`.

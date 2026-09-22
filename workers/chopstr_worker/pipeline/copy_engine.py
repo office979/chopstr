@@ -88,6 +88,9 @@ class CopyResult:
     prompt_version: str
     post_caption_prompt_version: str = ""
     languagetool: dict[str, Any] | None = None
+    # Decision-Log-Einträge (hook_variant_shown, hook_selected); der Aufrufer persistiert sie
+    # über decision_log.record_copy_result (Phase 5b)
+    decisions: list[dict[str, Any]] = field(default_factory=list)
 
     def to_row(self) -> dict[str, Any]:
         return {
@@ -153,6 +156,48 @@ def generate_variants(llm, clip_text: str, brand: copy_de.BrandProfile) -> tuple
 def select_variant(variants: list[HookVariant]) -> HookVariant:
     """Erste Variante ohne Claim-Issues, sonst Variante 1 (mit Issues, die Issues bleiben sichtbar)."""
     return next((v for v in variants if not v.claim_issues), variants[0])
+
+
+def order_variants(variants: list[HookVariant], pattern_order: list[str] | None) -> list[HookVariant]:
+    """Varianten nach einer Muster-Reihenfolge (z. B. ``learning.thompson_order``) sortieren; unbekannte
+    Muster bleiben hinten in Originalreihenfolge. Ohne Reihenfolge unverändert."""
+    if not pattern_order:
+        return list(variants)
+    rank = {p: i for i, p in enumerate(pattern_order)}
+    return sorted(variants, key=lambda v: (rank.get(v.pattern, len(rank)), variants.index(v)))
+
+
+def _variant_summary(v: HookVariant) -> dict[str, Any]:
+    return {
+        "pattern": v.pattern, "spoken": v.spoken, "onscreen": v.onscreen,
+        "claim_issues": len(v.claim_issues), "lint_notes": len(v.lint_notes),
+    }  # fmt: skip
+
+
+def copy_decisions(variants: list[HookVariant], chosen: HookVariant, platform: str, explored: bool) -> list[dict[str, Any]]:
+    """``hook_variant_shown`` (Reihenfolge der fünf Muster) und ``hook_selected`` (Wahl plus vier Alternativen)."""
+    patterns = [v.pattern for v in variants]
+    shown = {
+        "decision_type": "hook_variant_shown",
+        "features": {"platform": platform, "patterns": patterns, "n": len(variants), "order_from_learning": explored},
+        "alternatives": [],
+        "chosen": {},
+        "actor_type": "ai",
+    }
+    selected = {
+        "decision_type": "hook_selected",
+        "features": {
+            "platform": platform,
+            "patterns": patterns,
+            "rule": "first_without_claim_issues",
+            "chosen_index": variants.index(chosen),
+            "claim_issues": len(chosen.claim_issues),
+        },
+        "alternatives": [_variant_summary(v) for v in variants if v is not chosen],
+        "chosen": _variant_summary(chosen),
+        "actor_type": "ai",
+    }
+    return [shown, selected]
 
 
 def generate_post_caption(llm, clip_text: str, brand: copy_de.BrandProfile, platform: str, hook_onscreen: str) -> tuple[str, str, list[str], list[str], str]:
@@ -222,10 +267,15 @@ def write_copy(
     brand: copy_de.BrandProfile,
     platforms: tuple[str, ...] | list[str] = PLATFORMS,
     s: config.Settings | None = None,
+    pattern_order: list[str] | None = None,
 ) -> CopyResult:
-    """Komplette Copy für einen Clip: Varianten, Auswahl, Post-Captions je Plattform, Linter, optional LanguageTool."""
+    """Komplette Copy für einen Clip: Varianten, Auswahl, Post-Captions je Plattform, Linter, optional LanguageTool.
+
+    ``pattern_order`` (aus ``learning.thompson_order``) sortiert die Varianten vor der Auswahl; die
+    Entscheidungen landen in ``CopyResult.decisions`` für das Decision Log."""
     s = s or config.settings()
     variants, hooks_version = generate_variants(llm, clip_text, brand)
+    variants = order_variants(variants, pattern_order)
     chosen = select_variant(variants)
 
     post_captions: dict[str, str] = {}
@@ -262,6 +312,7 @@ def write_copy(
         prompt_version=hooks_version,
         post_caption_prompt_version=caption_version,
         languagetool=lt_info,
+        decisions=copy_decisions(variants, chosen, brand.platform, bool(pattern_order)),
     )
 
 
@@ -276,10 +327,12 @@ __all__ = [
     "VARIANT_COUNT",
     "CopyResult",
     "HookVariant",
+    "copy_decisions",
     "generate_post_caption",
     "generate_variants",
     "languagetool_check",
     "limit_notes",
+    "order_variants",
     "select_variant",
     "word_count",
     "write_copy",

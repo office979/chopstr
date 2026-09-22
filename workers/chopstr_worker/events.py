@@ -11,7 +11,7 @@ import time
 from contextlib import contextmanager
 from typing import Any
 
-from . import db
+from . import db, outbox
 
 log = logging.getLogger("chopstr.events")
 
@@ -44,10 +44,21 @@ def emit(
 
 
 def set_source_status(conn: db.Connection, source_id: str, status: str, message: str | None = None) -> None:
-    """Statuswechsel in ``sources`` (mit optionaler ``status_message``)."""
+    """Statuswechsel in ``sources`` (mit optionaler ``status_message``).
+
+    ``ready`` und ``failed`` gehen zusätzlich als ``source.ready`` / ``source.failed`` in die Outbox (Phase 5);
+    ein Fehler dort wird nur geloggt, damit der Statuswechsel selbst nie daran scheitert."""
     if status not in SOURCE_STATUSES:
         raise ValueError(f"Ungültiger Quellstatus: {status}")
     db.update(conn, "sources", {"id": source_id}, status=status, status_message=message)
+    _outbox_hook(outbox.on_source_status, conn, source_id, status, message)
+
+
+def _outbox_hook(fn, conn: db.Connection, *args) -> None:
+    try:
+        fn(conn, *args)
+    except Exception as exc:  # Outbox darf die Pipeline nicht anhalten
+        log.warning("outbox hook failed fn=%s error=%s", getattr(fn, "__name__", fn), exc.__class__.__name__)
 
 
 def failure_message(step: str, exc: BaseException) -> str:
@@ -90,11 +101,13 @@ def step(
         emit(conn, source_id, name, "failed", msg, payload={"error_type": exc.__class__.__name__})
         if fail_status:
             set_source_status(conn, source_id, fail_status, msg)
+        _outbox_hook(outbox.on_step_failed, conn, source_id, name, dict(ctx.context), msg)
         raise
     else:
         payload = dict(ctx.payload)
         payload.setdefault("duration_s", round(time.monotonic() - ctx.t0, 3))
         emit(conn, source_id, name, "finished", ctx.message, progress=1.0, payload=payload)
+        _outbox_hook(outbox.on_step_finished, conn, source_id, name, payload)
 
 
 class StepContext:
@@ -103,8 +116,13 @@ class StepContext:
         self.t0 = time.monotonic()
         self.message: str | None = None
         self.payload: dict[str, Any] = {}
+        # Kontext aus Zwischenständen (z. B. clip_id im Render), damit ein Fehler zugeordnet werden kann
+        self.context: dict[str, Any] = {}
 
     def progress(self, fraction: float, message: str | None = None, **payload: Any) -> None:
+        for key in ("clip_id", "candidate_id"):
+            if payload.get(key):
+                self.context[key] = payload[key]
         emit(self.conn, self.source_id, self.name, "progress", message, progress=fraction, payload=payload or None)
 
     def finish(self, message: str | None = None, **payload: Any) -> None:

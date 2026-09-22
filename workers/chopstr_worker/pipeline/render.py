@@ -14,6 +14,11 @@ gemeldet; der Render selbst läuft durch. Dasselbe gilt für eine fehlende Font-
 Marke (Phase 4): ``font_path`` ersetzt Inter in ``drawtext`` (der ``Fontname`` in der ASS kommt aus
 ``write_captions(font_family=...)``, libass findet die Datei über ``fontsdir``). ``logo_path`` (PNG) wird bei
 ``plan.brand.watermark.enabled`` als Wasserzeichen unten rechts innerhalb der Safe Zone per ``overlay`` gelegt.
+
+Folien-Crop (Phase 5c): Shots mit ``layout = "pip"`` werden aus einem Input zweimal geschnitten (``split``):
+die Folie (``reframe.slide_region``) skaliert auf die volle Breite und die Höhe ``pip.y`` (Seitenverhältnis bleibt,
+Rest schwarz per ``pad``), der Sprecher-Crop des Shots auf ``pip.w x pip.h``; beide per ``vstack`` untereinander.
+Alle übrigen Schritte (concat, Untertitel, Overlays, Audio) bleiben unverändert.
 """
 
 from __future__ import annotations
@@ -103,7 +108,7 @@ def capabilities() -> dict[str, bool]:
     f = ffmpeg_filters()
     return {
         "subtitles": "subtitles" in f, "drawtext": "drawtext" in f, "loudnorm": "loudnorm" in f, "ebur128": "ebur128" in f,
-        "overlay": "overlay" in f,
+        "overlay": "overlay" in f, "vstack": "vstack" in f and "split" in f and "pad" in f,
     }  # fmt: skip
 
 
@@ -239,6 +244,28 @@ def watermark_filter(plan: dict, logo_index: int) -> str:
     )
 
 
+def pip_shot_filter(plan: dict, index: int, shot: dict) -> str:
+    """Filterkette eines ``pip``-Shots: Folie oben (``reframe.slide_region`` auf Breite x ``pip.y``, Rest schwarz),
+    Sprecher-Crop unten (``pip.w x pip.h``), ``vstack``. Endet in ``[v<index>]``."""
+    rf = plan.get("reframe") or {}
+    region, pip = rf.get("slide_region"), rf.get("pip")
+    if not region or not pip:
+        raise RenderError("Shot mit Layout pip, aber der Plan hat keine slide_region oder pip")
+    out_w = int(plan["output"]["width"])
+    slide_h = int(pip["y"])
+    if int(pip["x"]) != 0 or int(pip["w"]) != out_w or slide_h <= 0:
+        raise RenderError("Layout pip erwartet die Sprecherfläche über die volle Breite unter der Folie")
+    return (
+        f"[{index}:v]setpts=PTS-STARTPTS,split=2[s{index}][p{index}];"
+        f"[s{index}]crop={int(region['w'])}:{int(region['h'])}:{int(region['x'])}:{int(region['y'])},"
+        f"scale={out_w}:{slide_h}:force_original_aspect_ratio=decrease:flags=lanczos,"
+        f"pad={out_w}:{slide_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[sl{index}];"
+        f"[p{index}]crop={int(shot['crop_w'])}:{int(shot['crop_h'])}:{int(shot['crop_x'])}:{int(shot['crop_y'])},"
+        f"scale={int(pip['w'])}:{int(pip['h'])}:flags=lanczos,setsar=1[pp{index}];"
+        f"[sl{index}][pp{index}]vstack=inputs=2[v{index}];"
+    )
+
+
 def video_chain(
     plan: dict,
     ass_path: str | None,
@@ -247,15 +274,21 @@ def video_chain(
     fonts_dir: Path | None,
     logo_index: int | None = None,
 ) -> tuple[str, list[str], bool, bool, bool, bool]:
-    """Video: Shots croppen und skalieren, concat, Untertitel, Overlays, Wasserzeichen. Endet in ``[vout]``."""
+    """Video: Shots croppen und skalieren (``pip``: Folie plus Sprecher), concat, Untertitel, Overlays,
+    Wasserzeichen. Endet in ``[vout]``."""
     shots, _ = _inputs(plan)
     out_w, out_h = int(plan["output"]["width"]), int(plan["output"]["height"])
     parts, labels = [], []
     for i, s in enumerate(shots):
-        parts.append(
-            f"[{i}:v]setpts=PTS-STARTPTS,crop={int(s['crop_w'])}:{int(s['crop_h'])}:{int(s['crop_x'])}:{int(s['crop_y'])},"
-            f"scale={out_w}:{out_h}:flags=lanczos,setsar=1[v{i}];"
-        )
+        if s.get("layout") == "pip":
+            if not caps.get("vstack", True):
+                raise RenderError("ffmpeg ohne split/pad/vstack-Filter, Layout pip nicht möglich")
+            parts.append(pip_shot_filter(plan, i, s))
+        else:
+            parts.append(
+                f"[{i}:v]setpts=PTS-STARTPTS,crop={int(s['crop_w'])}:{int(s['crop_h'])}:{int(s['crop_x'])}:{int(s['crop_y'])},"
+                f"scale={out_w}:{out_h}:flags=lanczos,setsar=1[v{i}];"
+            )
         labels.append(f"[v{i}]")
     chain = "".join(parts) + "".join(labels) + f"concat=n={len(shots)}:v=1:a=0[vc];"
     filters: list[str] = []
@@ -462,9 +495,11 @@ def write_captions(
     directory: str | os.PathLike,
     basename: str,
     font_family: str | None = None,
+    text_field: str = "text",
 ) -> dict[str, str]:
     """Schreibt ASS (eingebrannt), SRT und VTT (Sidecars) auf die Ausgabe-Timeline. Gibt die Pfade zurück.
-    ``font_family`` setzt den ``Fontname`` der ASS (Marken-Font); ohne ihn gilt der Preset-Font."""
+    ``font_family`` setzt den ``Fontname`` der ASS (Marken-Font); ohne ihn gilt der Preset-Font.
+    ``text_field`` wählt ``text`` (Original) oder ``text_norm`` (normalisiert, Fallback auf ``text``)."""
     d = Path(directory)
     d.mkdir(parents=True, exist_ok=True)
     paths = {
@@ -472,9 +507,11 @@ def write_captions(
         "srt": d / f"{basename}.srt",
         "vtt": d / f"{basename}.vtt",
     }
-    paths["ass"].write_text(captions_de.to_ass(out_words, 0.0, preset, play_res, font_family=font_family), encoding="utf-8")
-    paths["srt"].write_text(captions_de.to_srt(out_words, 0.0, preset.max_chars), encoding="utf-8")
-    paths["vtt"].write_text(captions_de.to_vtt(out_words, 0.0, preset.max_chars), encoding="utf-8")
+    paths["ass"].write_text(
+        captions_de.to_ass(out_words, 0.0, preset, play_res, font_family=font_family, text_field=text_field), encoding="utf-8"
+    )
+    paths["srt"].write_text(captions_de.to_srt(out_words, 0.0, preset.max_chars, text_field=text_field), encoding="utf-8")
+    paths["vtt"].write_text(captions_de.to_vtt(out_words, 0.0, preset.max_chars, text_field=text_field), encoding="utf-8")
     return {k: str(v) for k, v in paths.items()}
 
 
@@ -508,6 +545,7 @@ __all__ = [
     "measure_loudnorm",
     "needs_compressor",
     "overlay_filters",
+    "pip_shot_filter",
     "regression_checks",
     "render_from_plan",
     "video_chain",

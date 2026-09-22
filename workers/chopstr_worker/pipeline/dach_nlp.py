@@ -9,6 +9,14 @@
 4) Füllwörter: äh/ähm raus; Modalpartikeln (halt, eigentlich, mal, ja, doch) BEHALTEN. Nur Vorschläge.
 5) Negations-Flags pro Wort (Caption-QA, Sinntreue, „nicht" nie allein in neue Zeile).
 6) Dezimalkomma für Zahlen in Captions („2.4" wird „2,4").
+7) Dialekterkennung (Phase 5c, Beta): ``detect_dialect`` zählt Lexikon-Marker für Schweizerdeutsch (CH) und
+   Österreichisch (AT) und liefert ``{variant, confidence, markers}``. Schwellen: mindestens
+   ``DIALECT_MIN_HITS`` gewichtete Treffer und ein Anteil von ``DIALECT_MIN_RATIO`` an den Wörtern; die
+   Sicherheit steigt linear bis ``DIALECT_FULL_RATIO`` (dann 1,0). Schwache Marker (auch im Standarddeutschen
+   üblich, z. B. „eh", „passt") zählen halb.
+8) Getrennte Dialektausgabe (Entscheidung P2): ``normalize_ch`` liefert nur bei sicherer Entsprechung aus
+   ``CH_NORMALIZATION`` eine Standardform, nie für ``protected_terms``; ``annotate`` schreibt sie nach
+   ``text_norm``, ``text`` bleibt das Original. Regionale Wörter ohne sichere Entsprechung werden nie umgeschrieben.
 """
 
 from __future__ import annotations
@@ -30,6 +38,20 @@ NEGATIONS = {
 OPEN_LOOP_END = {
     "aber", "deshalb", "deswegen", "nämlich", "und", "weil", "denn", "sondern", "also", "dass",
     "wobei", "trotzdem", "und zwar", "obwohl", "oder", "das heißt", "beziehungsweise", "bzw.",
+}  # fmt: skip
+
+# Dialektlexika (Phase 5c). Kleingeschrieben, ohne Satzzeichen; Abgleich über ``core_token``.
+CH_MARKERS = {"nöd", "isch", "chli", "gsi", "öppis", "hoi", "merci", "velo", "gäll", "jetz", "chum", "mer", "hät", "wänn"}
+AT_MARKERS = {"heuer", "jänner", "leiwand", "eh", "sackerl", "paradeiser", "semmel", "marille", "oida", "passt"}
+WEAK_MARKERS = {"eh", "passt", "mer", "jetz"}  # auch im Standarddeutschen oder als Verschleifung üblich: halbes Gewicht
+DIALECT_MIN_HITS = 2.0  # gewichtete Treffer
+DIALECT_MIN_RATIO = 0.02  # Anteil Marker an allen Wörtern (2 %)
+DIALECT_FULL_RATIO = 0.10  # ab 10 % Markeranteil Sicherheit 1,0
+DIALECT_VARIANTS = ("de", "de-AT", "de-CH")
+# Sichere Entsprechungen Schweizerdeutsch zu Standarddeutsch; nur diese werden nach ``text_norm`` geschrieben.
+CH_NORMALIZATION = {
+    "nöd": "nicht", "isch": "ist", "chli": "ein wenig", "gsi": "gewesen", "öppis": "etwas", "jetz": "jetzt",
+    "hät": "hat", "wänn": "wenn",
 }  # fmt: skip
 
 # Abkürzungen ohne Punkt, kleingeschrieben. Mehrteilige („z. B.") entstehen aus Einzelteilen.
@@ -221,37 +243,115 @@ def de_number(text: str) -> str:
     return re.sub(r"(\d)\s?(Prozent|%)", r"\1 %", text)
 
 
-def annotate(words: list[dict], min_pause_s: float = 0.7) -> list[dict]:
-    """Fügt jedem Wort ``filler``, ``negation`` und ``sentence_idx`` hinzu (in-place, gibt Liste zurück)."""
+def detect_dialect(words: list[dict]) -> dict:
+    """Dialektvariante aus Lexikon-Markern: ``{variant, confidence, markers, ratios, word_count}``.
+
+    ``variant`` ist ``de``, ``de-AT`` oder ``de-CH``; ``markers`` die gefundenen Markerwörter (nach Häufigkeit).
+    Beta: ein Lexikon erkennt nur, was drinsteht; die Abnahme ist ``eval/wer_eval.py`` je Dialekt."""
+    n = len(words)
+    hits: dict[str, dict[str, int]] = {"de-CH": {}, "de-AT": {}}
+    for w in words:
+        tok = core_token(str(w.get("text", "")))
+        if not tok:
+            continue
+        if tok in CH_MARKERS:
+            hits["de-CH"][tok] = hits["de-CH"].get(tok, 0) + 1
+        if tok in AT_MARKERS:
+            hits["de-AT"][tok] = hits["de-AT"].get(tok, 0) + 1
+
+    def weighted(counts: dict[str, int]) -> float:
+        return sum(c * (0.5 if tok in WEAK_MARKERS else 1.0) for tok, c in counts.items())
+
+    scores = {v: weighted(c) for v, c in hits.items()}
+    ratios = {v: round(sc / n, 4) if n else 0.0 for v, sc in scores.items()}
+    variant, confidence = "de", 0.0
+    if n:
+        best = max(scores, key=lambda v: (scores[v], v))
+        if scores[best] >= DIALECT_MIN_HITS and ratios[best] >= DIALECT_MIN_RATIO:
+            variant = best
+            confidence = round(min(1.0, ratios[best] / DIALECT_FULL_RATIO), 3)
+    markers = sorted(hits[variant], key=lambda t: (-hits[variant][t], t)) if variant != "de" else []
+    return {"variant": variant, "confidence": confidence, "markers": markers, "ratios": ratios, "word_count": n}
+
+
+def _is_protected(token: str, protected: set[str]) -> bool:
+    return bool(token) and token in protected
+
+
+def normalize_ch(word: str, protected_terms: list[str] | None = None) -> str | None:
+    """Standarddeutsche Form eines Schweizerdeutsch-Wortes, nur bei sicherer Entsprechung (``CH_NORMALIZATION``).
+    Geschützte Begriffe (``protected_terms``) werden nie umgeschrieben. Großschreibung am Wortanfang und
+    anhängende Satzzeichen bleiben erhalten. ``None`` heißt: nicht normalisieren."""
+    raw = str(word or "").strip()
+    tok = core_token(raw)
+    if not tok:
+        return None
+    protected = {core_token(t) for t in (protected_terms or []) if t}
+    if _is_protected(tok, protected):
+        return None
+    target = CH_NORMALIZATION.get(tok)
+    if target is None:
+        return None
+    if raw[:1].isupper():
+        target = target[:1].upper() + target[1:]
+    trailing = re.findall(r"[.,!?;:…]+$", raw)
+    return target + (trailing[0] if trailing else "")
+
+
+def annotate(
+    words: list[dict],
+    min_pause_s: float = 0.7,
+    protected_terms: list[str] | None = None,
+    dialect: str | None = None,
+) -> list[dict]:
+    """Fügt jedem Wort ``filler``, ``negation`` und ``sentence_idx`` hinzu (in-place, gibt Liste zurück).
+
+    ``dialect = "de-CH"`` (erkannt oder per ``asr_variant``) ergänzt ``text_norm`` bei sicherer Entsprechung
+    (``normalize_ch``); ``text`` bleibt unverändert, geschützte Begriffe werden nie normalisiert."""
     classify_fillers(words)
     idx = 0
     for i, w in enumerate(words):
         w["sentence_idx"] = idx
         if is_sentence_end(words, i, min_pause_s):
             idx += 1
+    if dialect == "de-CH":
+        for w in words:
+            norm = normalize_ch(str(w.get("text", "")), protected_terms)
+            if norm is not None:
+                w["text_norm"] = norm
     return words
 
 
 __all__ = [
     "ABBREVIATIONS",
+    "AT_MARKERS",
     "BACKCHANNEL",
+    "CH_MARKERS",
+    "CH_NORMALIZATION",
+    "DIALECT_FULL_RATIO",
+    "DIALECT_MIN_HITS",
+    "DIALECT_MIN_RATIO",
+    "DIALECT_VARIANTS",
     "HARD_FILLERS",
     "MODAL_PARTICLES",
     "NEGATIONS",
     "OPEN_LOOP_END",
     "SOFT_FILLERS",
+    "WEAK_MARKERS",
     "annotate",
     "auto_remove_ranges",
     "classify_fillers",
     "core_token",
     "cut_is_legal",
     "de_number",
+    "detect_dialect",
     "ends_with_open_loop",
     "forbidden_cut_ranges",
     "is_abbreviation",
     "is_ordinal",
     "is_sentence_end",
     "nlp",
+    "normalize_ch",
     "sentence_boundaries",
     "verb_bracket_available",
 ]

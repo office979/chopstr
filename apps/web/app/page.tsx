@@ -68,8 +68,8 @@ export default async function ProjectsPage() {
 
   return (
     <PageShell width="wide">
-      <section className="relative mb-8 overflow-hidden rounded-card bg-[linear-gradient(135deg,#020cf5_0%,#1422ff_45%,#1b1a62_100%)] p-6 sm:p-8">
-        <div aria-hidden="true" className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
+      <section className="relative mb-8 overflow-hidden rounded-card border border-white/10 bg-[linear-gradient(135deg,rgba(2,12,245,0.42)_0%,rgba(20,34,255,0.22)_45%,rgba(27,26,98,0.35)_100%)] p-6 sm:p-8">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-brand/25 blur-3xl" />
         <div className="relative flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-[var(--tracking-display)] text-white sm:text-4xl">Projekte</h1>
@@ -191,7 +191,7 @@ export default async function ProjectsPage() {
 
 function Stat({ label, value, hint }: { label: string; value: number; hint: string }) {
   return (
-    <div className="rounded-inner bg-[#07071a]/80 p-4 backdrop-blur-sm sm:p-5">
+    <div className="rounded-inner bg-black/45 p-4 backdrop-blur-sm sm:p-5">
       <dt className="text-sm text-text-2">{label}</dt>
       <dd className="mt-2 font-mono text-3xl font-medium tabular-nums text-text">{String(value).padStart(2, "0")}</dd>
       <dd className="mt-1 text-xs text-text-3">{hint}</dd>

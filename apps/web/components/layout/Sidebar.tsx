@@ -67,7 +67,7 @@ export function Sidebar({ user }: { user: NavUser | null }) {
       {user?.canUpload && (
         <Link
           href="/upload"
-          className="transition-soft flex h-11 items-center justify-center gap-2 rounded-inner bg-brand text-sm font-medium text-white hover:bg-[#1a24ff] hover:shadow-[0_0_32px_rgba(2,12,245,0.55)]"
+          className="transition-soft flex h-11 items-center justify-center gap-2 rounded-inner border border-brand/60 bg-brand/35 text-sm font-medium text-white hover:bg-brand/50"
         >
           <IconPlus />
           Neues Projekt
@@ -150,7 +150,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
       aria-current={active ? "page" : undefined}
       className={cn(
         "transition-soft relative flex h-11 items-center gap-3 rounded-inner px-3 text-sm font-medium",
-        active ? "bg-brand/20 text-text ring-1 ring-inset ring-brand/50" : "text-text-2 hover:bg-white/5 hover:text-text",
+        active ? "bg-brand/15 text-text ring-1 ring-inset ring-brand/35" : "text-text-2 hover:bg-white/5 hover:text-text",
       )}
     >
       {active && <span aria-hidden="true" className="absolute inset-y-2.5 left-0 w-[3px] rounded-r-full bg-brand" />}
@@ -213,7 +213,7 @@ function ProfileMenu({ user, pathname }: { user: NavUser; pathname: string }) {
           active ? "bg-white/10" : "hover:bg-white/5",
         )}
       >
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-semibold text-white">{initials || "?"}</span>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand/40 text-xs font-semibold text-white">{initials || "?"}</span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-text">{user.name}</span>
           <span className="block truncate text-xs text-text-3">

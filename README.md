@@ -110,6 +110,26 @@ dauert etwa so lange wie das Video, Sprechertrennung braucht `HF_TOKEN` plus `py
 Sprecher mit Hinweis), Kandidaten kommen aus dem Heuristik-Provider (kein Sprachmodell), Reframe neutral ohne
 YuNet, kein C2PA ohne c2patool. Stoppen: `scripts/local-stack.sh stop`.
 
+**Ohne Browser prüfen.** Zwei Werkzeuge nehmen die Oberfläche aus der Kette, wenn nur der Worker
+interessiert. Sie schreiben dasselbe wie die App, der laufende Worker macht den Rest:
+
+```bash
+cd workers && source scripts/local_env.sh
+python -m scripts.ingest_local ~/Downloads/video.mp4 --title "Testlauf"   # wie der Upload
+python -m scripts.accept_local --source <quellen-id> --platform tiktok    # Moment annehmen, Clip anlegen
+python -m scripts.accept_local --source <quellen-id> --platform tiktok --original-format
+```
+
+`--original-format` entspricht dem ausgeschalteten Hochformat-Schalter: der Clip behält das Format der
+Quelle, es wird nichts beschnitten und es gibt keinen Push-in.
+
+Gemessen auf einem Mac mit M-Chip, Quelle 4K/70 s: Analyse rund 30 s, Render rund 6 s.
+
+**ffmpeg mit libass.** Das Homebrew-ffmpeg kann keine Untertitel einbrennen. `scripts/local_env.sh`
+verlinkt deshalb das statische ffmpeg aus `imageio-ffmpeg` (Extra `dev`) nach `workers/.local/bin` und
+stellt es im `PATH` nach vorn. Ohne das rendert der Worker ohne Overlays und meldet
+`captions_burned = false`.
+
 ## Umgebungsvariablen
 
 Alle Variablen mit Erklärung stehen in [`.env.example`](.env.example). Die wichtigsten:

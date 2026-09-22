@@ -518,7 +518,7 @@ Keine Tour, kein Assistent, kein Zwangsdialog. Eure Design-Grundsätze sprechen 
 
 Vier Etappen. Jede einzeln abnehmbar, jede bringt für sich schon etwas.
 
-### Etappe 1: Sprache
+### Etappe 1: Sprache (umgesetzt am 23.09.2026)
 
 Nur Texte. Kein Struktureingriff, kein Risiko.
 
@@ -563,11 +563,24 @@ Kein Push auf main ohne dein Kommando.
 
 ---
 
+## 12b. Was seit der Fassung vom 23.09.2026 dazugekommen ist
+
+Nicht Teil der vier Etappen, aber in derselben Nacht gebaut und am echten Video geprüft:
+
+- **Hochformat-Schalter** beim Annehmen eines Moments, standardmäßig an. Aus behält der Clip das
+  Format der Quelle, ohne Beschnitt und ohne Push-in. Ersetzt teilweise die offene Frage 1: nicht
+  "nur 9:16", sondern "9:16, wenn du nichts anderes sagst".
+- **One-Word-Untertitel** als Standard für TikTok, Reels und Shorts (Presets `*_words`).
+  LinkedIn bleibt mehrwortig und ruhig. Der SRT/VTT-Beiwagen bleibt bewusst gruppiert.
+- **Langsamer Push-in** je Einstellung (8 Prozent), nur wenn umgerahmt wird.
+- **Zwei Entwicklerwerkzeuge** (`ingest_local.py`, `accept_local.py`), damit die Kette ohne
+  Browser prüfbar ist.
+
 ## 13. Offene Fragen an Ferdi
 
-1. **Hochformat als Voreinstellung.** Einverstanden, dass ein angenommener Moment
-   zunächst nur 9:16 erzeugt und LinkedIn ein Zusatz auf Anfrage ist? Das ist die
-   wirksamste Einzelmaßnahme, hat aber Folgen für Renderkosten und Abrechnungslogik.
+1. **Hochformat als Voreinstellung.** Teilweise erledigt: Der Schalter steht, Standard ist Hochformat.
+   Offen bleibt, ob ein angenommener Moment weiterhin alle vier Plattformen auf einmal rendert oder
+   nur die Standard-Plattform, und der Rest auf Anfrage. Das betrifft Renderkosten und Abrechnung.
 
 2. **Briefing verschieben.** Die fünf Felder des Redaktions-Briefings sollen vom
    Upload nach Schritt 3 wandern. Die Story-Engine nutzt das Briefing heute aber

@@ -39,14 +39,7 @@ export default async function ClipsPage({ params }: Props) {
   const previewFont = await previewFontFor(repo, brand);
   const pub = getPublishingRepo();
   const clipIds = clips.map((c) => c.id);
-  const [connections, seriesList, publications, feedback, extrasList, workspace] = await Promise.all([
-    pub.listConnections(),
-    pub.listSeries(),
-    pub.listPublicationsForClips(clipIds),
-    pub.listFeedbackForClips(clipIds),
-    pub.getClipExtras(clipIds),
-    repo.getWorkspace(),
-  ]);
+  const [seriesList, extrasList] = await Promise.all([pub.listSeries(), pub.getClipExtras(clipIds)]);
 
   if (clips.length === 0) {
     return (
@@ -54,13 +47,10 @@ export default async function ClipsPage({ params }: Props) {
         <GlassCard padding="lg" className="text-center">
           <p className="text-lg font-medium">Noch keine Clips</p>
           <p className="mx-auto mt-2 max-w-md text-text-2">
-            Clips entstehen, sobald du einen Vorschlag nimmst. Für jede Plattform, die du wählst, wird einer erstellt.
+            Clips entstehen von selbst, sobald der Computer dein Video durchgesehen hat.
           </p>
-          <div className="mt-6 flex justify-center gap-2">
-            <ButtonLink href={`/projekte/${source.id}`} variant="ghost">
-              Zum Video
-            </ButtonLink>
-            <ButtonLink href={`/projekte/${source.id}/review`}>Clips auswählen</ButtonLink>
+          <div className="mt-6 flex justify-center">
+            <ButtonLink href={`/projekte/${source.id}`}>Zum Video</ButtonLink>
           </div>
         </GlassCard>
       </PageShell>
@@ -71,30 +61,14 @@ export default async function ClipsPage({ params }: Props) {
 
   return (
     <PageShell width="wide" backgroundWord="Clips">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-sm text-text-2">
-            <Link href={`/projekte/${source.id}`} className="hover:text-text hover:underline">
-              {source.title}
-            </Link>
-          </p>
-          <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Clips</h1>
-          <p className="mt-1 text-sm text-text-2">Ansehen, herunterladen oder direkt posten.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <ButtonLink href="/serien" variant="ghost" size="sm">
-            Serien
-          </ButtonLink>
-          <ButtonLink href="/experimente" variant="ghost" size="sm">
-            Experimente
-          </ButtonLink>
-          <ButtonLink href={`/projekte/${source.id}/review`} variant="ghost" size="sm">
-            Auswahl
-          </ButtonLink>
-          <ButtonLink href={`/projekte/${source.id}`} variant="ghost" size="sm">
-            Video
-          </ButtonLink>
-        </div>
+      <div className="mb-6">
+        <p className="text-sm text-text-2">
+          <Link href={`/projekte/${source.id}`} className="hover:text-text hover:underline">
+            {source.title}
+          </Link>
+        </p>
+        <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Clips</h1>
+        <p className="mt-1 text-sm text-text-2">Ansehen, herunterladen oder ändern.</p>
       </div>
       <ClipBoard
         sourceId={source.id}
@@ -112,16 +86,9 @@ export default async function ClipsPage({ params }: Props) {
         canDelete={can(session.role, "source.delete")}
         previewFont={previewFont}
         publishing={{
-          connections: connections.filter((c) => c.status === "connected"),
           series: seriesList.filter((s) => s.active),
-          publications,
-          feedback,
           extras: Object.fromEntries(extrasList.map((e) => [e.id, e])),
-          dpaSigned: Boolean(workspace.dpa_signed_at),
-          plan: quota.plan ? { name: quota.plan.name, features: quota.plan.features } : null,
-          canPublish: canExt(session.role, "publishing.publish"),
           canSeries: canExt(session.role, "series.manage"),
-          canRender: can(session.role, "clip.render"),
         }}
       />
     </PageShell>

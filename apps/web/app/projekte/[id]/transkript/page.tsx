@@ -65,7 +65,7 @@ export default async function TranscriptPage({ params }: Props) {
           <ButtonLink href={`/projekte/${source.id}`} variant="ghost" size="sm">
             Zum Video
           </ButtonLink>
-          {hasCandidates && <ButtonLink href={`/projekte/${source.id}/review`} size="sm">Clips auswählen</ButtonLink>}
+          {hasCandidates && <ButtonLink href={`/projekte/${source.id}/clips`} size="sm">Zu den Clips</ButtonLink>}
         </div>
       </div>
       <TranscriptEditor

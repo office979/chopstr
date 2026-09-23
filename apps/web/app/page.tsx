@@ -182,15 +182,12 @@ export default async function ProjectsPage() {
                           Fertige Clips
                         </ButtonLink>
                       )}
+                      {/* Der Auswahlschritt ist entfallen: Clips entstehen von selbst. Von hier
+                          führt der Weg zu den Clips (Knopf darüber) oder in den Text. */}
                       {s.status === "ready" && hasCandidates ? (
-                        <>
-                          <ButtonLink href={`/projekte/${s.id}/transkript`} size="sm" variant="ghost">
-                            Text
-                          </ButtonLink>
-                          <ButtonLink href={`/projekte/${s.id}/review`} size="sm">
-                            Momente auswählen
-                          </ButtonLink>
-                        </>
+                        <ButtonLink href={`/projekte/${s.id}/transkript`} size="sm" variant="ghost">
+                          Text
+                        </ButtonLink>
                       ) : s.status === "ready" ? (
                         <ButtonLink href={`/projekte/${s.id}/transkript`} size="sm">
                           Text öffnen

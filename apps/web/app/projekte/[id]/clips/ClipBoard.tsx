@@ -1,16 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Badge } from "@/components/ui/Badge";
-import { Button, ButtonLink } from "@/components/ui/Button";
+import { Button } from "@/components/ui/Button";
 import { StatusCheck, type StatusCheckState } from "@/components/ui/StatusCheck";
 import { cn } from "@/components/ui/cn";
 import { SilentPreview, type PreviewFont } from "@/components/clips/SilentPreview";
-import { GuestApprovalDialog } from "@/components/clips/GuestApprovalDialog";
 import { Modal } from "@/components/ui/Modal";
-import { ProDetails, ProRow } from "@/components/ui/ProDetails";
+import { ClipApproval } from "./ClipApproval";
 import type { Aspect, Candidate, CaptionVersion, Clip, GuestApproval, HookVersion, PipelineEvent } from "@/lib/repo/types";
 import { EXPORT_BLOCKED_MESSAGE, exportBlocked, latestByClip } from "@/lib/guest/approval";
 import { structureLabel } from "@/lib/candidates/labels";
@@ -18,32 +17,20 @@ import {
   CLIP_STATUS_LABELS,
   ASPECT_LABELS,
   PLATFORM_LABELS,
-  RENDER_STAGES,
-  RENDER_STAGE_LABELS,
   formatClipDuration,
-  formatLoudness,
-  loudnessPlain,
   mediaUrl,
 } from "@/lib/clips/labels";
 import { RENDER_STEP } from "@/lib/pipeline";
 import { compositionDuration } from "@/lib/clips/render-demo";
 import { PLATFORM_DEFAULT_PRESET } from "@/lib/clips/presets";
-import { publishGates } from "@/lib/publishing/gates";
-import type { ClipExtras, PerformanceFeedback, PlatformConnection, Publication, Series } from "@/lib/repo/types-publishing";
-import { ClipPublishing } from "./ClipPublishing";
+import type { ClipExtras, Series } from "@/lib/repo/types-publishing";
+import { ClipSeries } from "./ClipSeries";
 
-/* Publishing, Serien und Reframe-Override je Clip (Phase 5b, 5c) */
+/* Serien-Zuordnung je Clip. Posten, Bildausschnitt und Experimente stehen nicht mehr auf der Karte. */
 export interface ClipBoardPublishing {
-  connections: PlatformConnection[];
   series: Series[];
-  publications: Publication[];
-  feedback: PerformanceFeedback[];
   extras: Record<string, ClipExtras>;
-  dpaSigned: boolean;
-  plan: { name: string; features: Record<string, unknown> } | null;
-  canPublish: boolean;
   canSeries: boolean;
-  canRender: boolean;
 }
 
 interface Props {
@@ -152,9 +139,7 @@ export function ClipBoard({
   const [deleting, setDeleting] = useState(false);
   const [events, setEvents] = useState<PipelineEvent[]>(initialEvents);
   const [connection, setConnection] = useState<"idle" | "live" | "closed" | "error">("idle");
-  const [streamKey, setStreamKey] = useState(0);
   const [glitchGroups, setGlitchGroups] = useState<Set<string>>(new Set());
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [details, setDetails] = useState<Record<string, ClipDetail>>({});
   const clipsRef = useRef<Clip[]>(initialClips);
@@ -169,7 +154,6 @@ export function ClipBoard({
       candidateId,
       candidate: candidates.find((k) => k.id === candidateId) ?? null,
       clips: list,
-      rendered: list.filter(isDone).length,
     }));
   }, [clips, candidates]);
 
@@ -192,7 +176,7 @@ export function ClipBoard({
     }, 1000);
   }, []);
 
-  /* SSE: nur solange ein Clip nicht abgeschlossen ist; streamKey erzwingt einen Neustart nach „Neu rendern“ */
+  /* SSE: nur solange ein Clip nicht abgeschlossen ist */
   useEffect(() => {
     if (clips.every(isSettled)) return undefined;
     const lastId = events.reduce((max, e) => Math.max(max, e.id), 0);
@@ -217,46 +201,14 @@ export function ClipBoard({
     return () => es.close();
     /* events bewusst nicht als Abhängigkeit: der Stream läuft weiter, bis alle Clips abgeschlossen sind */
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceId, streamKey, applyClips, clips.every(isSettled)]);
+  }, [sourceId, applyClips, clips.every(isSettled)]);
 
   const latest = useMemo(() => latestEventByClip(events), [events]);
   const allSettled = clips.every(isSettled);
   const live = connection === "live" && !allSettled;
 
-  const rerender = useCallback(
-    async (clip: Clip) => {
-      setBusyId(clip.id);
-      setMessage(null);
-      try {
-        const res = await fetch(`/api/projects/${sourceId}/clips/${clip.id}/render`, { method: "POST" });
-        const data = (await res.json()) as ApiError & { clip?: Clip; signaled?: boolean; demo?: boolean };
-        if (!res.ok || !data.clip) throw new Error(data.error ?? "Render konnte nicht angestoßen werden");
-        applyClips(clipsRef.current.map((c) => (c.id === clip.id ? { ...data.clip!, status: "rendering" } : c)));
-        setDetails((prev) => {
-          const copy = { ...prev };
-          delete copy[clip.id];
-          return copy;
-        });
-        setStreamKey((k) => k + 1);
-        setMessage({
-          tone: "ok",
-          text: data.signaled
-            ? `Render für ${PLATFORM_LABELS[clip.platform]} angestoßen.`
-            : data.demo
-              ? `Demo-Render für ${PLATFORM_LABELS[clip.platform]} läuft.`
-              : `Render für ${PLATFORM_LABELS[clip.platform]} eingeplant, lokaler Worker holt ab.`,
-        });
-      } catch (err) {
-        setMessage({ tone: "error", text: err instanceof Error ? err.message : "Render konnte nicht angestoßen werden" });
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [sourceId, applyClips],
-  );
-
-  /* „Größer ansehen“: Fenster auf und, falls noch nicht geschehen, Hook und Untertitel nachladen.
-   * Die werden für die Attrappe gebraucht, wenn der Clip noch nicht gebaut ist. */
+  /* Klick auf die kleine Vorschau: Fenster auf und, falls noch nicht geschehen, Hook und Untertitel
+   * nachladen. Die werden für die Attrappe gebraucht, wenn der Clip noch nicht gebaut ist. */
   const openZoom = useCallback(
     async (clip: Clip) => {
       setZoomClip(clip);
@@ -320,7 +272,7 @@ export function ClipBoard({
 
   return (
     <div className="flex flex-col gap-5">
-      <Modal open={deleteTarget != null} onClose={() => !deleting && setDeleteTarget(null)} title="Clip löschen" description="Video, Captions, Poster und Hook-Versionen dieses Clips werden gelöscht. Der Löschnachweis bleibt im Audit-Log.">
+      <Modal open={deleteTarget != null} onClose={() => !deleting && setDeleteTarget(null)} title="Clip löschen" description="Video, Untertitel, Poster und Textversionen dieses Clips werden gelöscht. Der Löschnachweis bleibt im Audit-Log.">
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleting}>
             Abbrechen
@@ -332,7 +284,7 @@ export function ClipBoard({
       </Modal>
 
       {/* Clip groß ansehen: eigenes Fenster mit den Steuerelementen des Browsers, also Ton,
-          Lautstärke und Spulen. Ersetzt den früheren zweiten Vorschau-Player unter der Karte. */}
+          Lautstärke und Spulen. Geht jetzt mit einem Klick auf die kleine Vorschau auf. */}
       <Modal
         open={zoomClip != null}
         onClose={() => setZoomClip(null)}
@@ -406,22 +358,10 @@ export function ClipBoard({
 
       {groups.map((g, gi) => (
         <GlassCard key={g.candidateId} padding="lg" className={cn("flex flex-col gap-5", glitchGroups.has(g.candidateId) && "spectrum-glitch")}>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-xs uppercase tracking-wide text-text-2">Clip {gi + 1}</p>
-              <h2 className="mt-1 text-lg font-medium">{g.candidate ? structureLabel(g.candidate.structure) : "Clip gelöscht"}</h2>
-              {g.candidate && <p className="mt-1 line-clamp-2 text-sm text-text-2">{snippet(g.candidate.rubric.text)}</p>}
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-sm tabular-nums text-text">
-                {g.rendered} von {g.clips.length} fertig
-              </span>
-              {g.candidate && (
-                <Link href={`/projekte/${sourceId}/review`} className="text-sm text-text-2 hover:text-text hover:underline">
-                  Clip ansehen
-                </Link>
-              )}
-            </div>
+          <div className="min-w-0">
+            <p className="text-xs uppercase tracking-wide text-text-2">Clip {gi + 1}</p>
+            <h2 className="mt-1 text-lg font-medium">{g.candidate ? structureLabel(g.candidate.structure) : "Clip gelöscht"}</h2>
+            {g.candidate && <p className="mt-1 line-clamp-2 text-sm text-text-2">{snippet(g.candidate.rubric.text)}</p>}
           </div>
 
           {/* Eine Reihe je Clip statt vier Spalten: die Karten sind nicht mehr aneinander
@@ -432,13 +372,9 @@ export function ClipBoard({
               const ev = latest.get(clip.id);
               const state = checkState(clip);
               const progress = clip.status === "rendering" ? (ev?.progress ?? 0) : isDone(clip) ? 1 : 0;
-              const stage = ev?.payload && typeof ev.payload.stage === "string" ? ev.payload.stage : null;
               const approval = approvals.get(clip.id);
               const blocked = exportBlocked(clip, approval);
-              const dl = (kind: "mp4" | "srt" | "vtt", key: string | null) => (key && mediaBase ? `/api/projects/${sourceId}/clips/${clip.id}/download?kind=${kind}` : null);
-              const mp4 = dl("mp4", clip.file_key);
-              const srt = dl("srt", clip.srt_key);
-              const vtt = dl("vtt", clip.vtt_key);
+              const mp4 = clip.file_key && mediaBase ? `/api/projects/${sourceId}/clips/${clip.id}/download?kind=mp4` : null;
               /* Warum ein Download gerade nicht geht. Gleiche Reihenfolge wie bisher: fehlende
                  Gastfreigabe zuerst, dann Testmodus, dann die Datei selbst. */
               const lockedTitle = blocked
@@ -451,28 +387,26 @@ export function ClipBoard({
               const poster = mediaUrl(mediaBase, clip.poster_key);
               /* Gerendertes MP4 direkt aus der Medien-URL (lokal /api/media, sonst CDN oder MinIO) */
               const video = isDone(clip) ? mediaUrl(mediaBase, clip.file_key) : null;
-              const neutral = clip.render_plan?.reframe.strategy === "neutral";
               const duration = clip.duration_s ?? compositionDuration(clip);
-              const c2pa = clip.provenance?.c2pa;
               const clipExtras = extras[clip.id] ?? { id: clip.id, experiment_id: null, variant: null, series_id: null, series_index: null, reframe_override: null };
-              const gates = publishing
-                ? publishGates({ clip, candidate: g.candidate, approval, workspace: { dpa_signed_at: publishing.dpaSigned ? "ja" : null }, plan: publishing.plan })
-                : [];
               return (
                 <li key={clip.id} className="flex min-w-0 flex-col gap-4 rounded-inner border border-line p-4 sm:flex-row sm:items-stretch">
                   {/* Vorschau links, klein und mit fester Breite. Die Höhe folgt dem Seitenverhältnis.
-                      Feste Breite statt Höhe plus w-auto: greift eine der Klassen nicht, wuchs das
-                      Video vorher auf die volle Spaltenbreite mal 1,78 in der Höhe. */}
-                  <div className="flex shrink-0 flex-col gap-2">
-                  <div
-                    className="relative w-[132px] overflow-hidden rounded-[12px] border border-line bg-black"
+                      Ein Klick öffnet die große Vorschau; als Knopf ist sie mit Tab erreichbar und
+                      reagiert auf Enter und Leertaste. */}
+                  <button
+                    type="button"
+                    onClick={() => void openZoom(clip)}
+                    title="Groß ansehen"
+                    aria-label={`${PLATFORM_LABELS[clip.platform]} groß ansehen`}
+                    className="transition-soft group relative w-[132px] shrink-0 self-start overflow-hidden rounded-[12px] border border-line bg-black hover:border-white/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
                     style={{ aspectRatio: ASPECT_RATIO_CSS[clip.aspect] }}
                   >
                     {video ? (
-                      <ClipVideo src={video} poster={poster} label={`${PLATFORM_LABELS[clip.platform]} ${clip.aspect}`} />
+                      <video src={video} poster={poster ?? undefined} muted playsInline preload="metadata" className="pointer-events-none h-full w-full object-cover" />
                     ) : poster ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={poster} alt={`Poster ${PLATFORM_LABELS[clip.platform]}`} className="h-full w-full object-cover" />
+                      <img src={poster} alt="" className="h-full w-full object-cover" />
                     ) : (
                       <div
                         aria-hidden="true"
@@ -480,18 +414,18 @@ export function ClipBoard({
                         style={{
                           background: "radial-gradient(ellipse at 50% 30%, rgba(91,140,255,0.22) 0%, rgba(27,26,98,0.3) 40%, rgba(0,0,0,0) 75%), #0a0a13",
                         }}
-                      >
-                        <span className="font-mono text-[11px] text-text-3">{clip.width && clip.height ? `${clip.width}×${clip.height}` : "Poster folgt"}</span>
-                        <span className="font-mono text-[11px] text-text-3">{clip.fps ? `${clip.fps} fps` : ""}</span>
-                      </div>
+                      />
                     )}
-                  </div>
-                    <Button size="sm" variant="ghost" onClick={() => void openZoom(clip)} className="w-[132px]">
-                      {video ? "Größer ansehen" : "Vorschau"}
-                    </Button>
-                  </div>
+                    <span aria-hidden="true" className="transition-soft absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/35">
+                      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-text text-black">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M4.5 2.8v10.4c0 .8.9 1.3 1.6.9l8-5.2c.6-.4.6-1.4 0-1.8l-8-5.2c-.7-.4-1.6.1-1.6.9z" />
+                        </svg>
+                      </span>
+                    </span>
+                  </button>
 
-                  {/* Mitte: Zustand, Hinweise, Bearbeiten. Unten die Downloads. */}
+                  {/* Mitte: Zustand, kurze Zeichen, Handlungen. */}
                   <div className="flex min-w-0 flex-1 flex-col gap-3">
                   <div className="flex items-start gap-3">
                     <StatusCheck state={state} size={28} label={`${CLIP_STATUS_LABELS[clip.status]}`} />
@@ -499,10 +433,6 @@ export function ClipBoard({
                       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                         <p className={cn("text-sm font-medium", state === "error" ? "text-attention" : "text-text")}>{CLIP_STATUS_LABELS[clip.status]}</p>
                         <Badge tone="ok" className="h-6 px-2.5 text-[11px]">{PLATFORM_LABELS[clip.platform]}</Badge>
-                        <Badge className="h-6 px-2 text-[11px]" title={clip.aspect}>{ASPECT_LABELS[clip.aspect]}</Badge>
-                        {clipExtras?.variant && (
-                          <Badge tone="ai" className="h-6 px-2 font-mono text-[11px]" title="Hook-A/B-Variante">{clipExtras.variant}</Badge>
-                        )}
                         <span className="font-mono text-xs tabular-nums text-text-2">{formatClipDuration(duration)}</span>
                       </div>
                       {clip.status === "rendering" && (
@@ -518,34 +448,14 @@ export function ClipBoard({
                           >
                             <div className="transition-soft h-full rounded-pill bg-ai-soft" style={{ width: `${Math.max(4, Math.round(progress * 100))}%` }} />
                           </div>
-                          <ol className="mt-2 flex flex-wrap gap-x-2 gap-y-0.5 font-mono text-[11px]">
-                            {RENDER_STAGES.map((s) => {
-                              const idx = RENDER_STAGES.indexOf(s);
-                              const cur = stage ? RENDER_STAGES.indexOf(stage as (typeof RENDER_STAGES)[number]) : -1;
-                              return (
-                                <li key={s} className={cn(idx < cur ? "text-text" : idx === cur ? "text-ai-soft" : "text-text-3")}>
-                                  {RENDER_STAGE_LABELS[s]}
-                                </li>
-                              );
-                            })}
-                          </ol>
                         </>
                       )}
                       {clip.status === "failed" && <p className="mt-0.5 text-sm text-attention">{clip.render_error ?? "Das Erstellen hat nicht geklappt. Bitte nochmal versuchen."}</p>}
                       {clip.status === "draft" && <p className="mt-0.5 text-sm text-text-2">Wird gleich erstellt.</p>}
-                      {isDone(clip) && clip.loudness && (
-                        <p
-                          className="mt-0.5 text-xs text-text-2"
-                          title={formatLoudness(clip.loudness.integrated_lufs, clip.loudness.true_peak_dbtp)}
-                        >
-                          {loudnessPlain(clip.loudness.integrated_lufs, clip.loudness.true_peak_dbtp)}
-                        </p>
-                      )}
                     </div>
                   </div>
 
-                  {/* Sichtbar bleibt nur, was rechtlich am Clip hängt. Der C2PA-Zustand ist Klasse C
-                      (Serverzustand, nichts zu tun) und steht jetzt in den Profi-Details. */}
+                  {/* Sichtbar bleibt nur, was rechtlich am Clip hängt. */}
                   {isDone(clip) && (clip.ad_label || clip.provenance.source_credit) && (
                     <div className="flex flex-wrap gap-1.5">
                       {clip.ad_label && <Badge>Werbelabel: {clip.ad_label}</Badge>}
@@ -553,41 +463,24 @@ export function ClipBoard({
                     </div>
                   )}
 
-                  {/* Klasse B (Bedienkonzept, Abschnitt 7): der Nutzer kann etwas tun, muss aber nicht.
-                      Deshalb neutral statt orange, dafür mit dem Hinweis, wo es sich ändern lässt. */}
-                  {isDone(clip) && neutral && (
-                    <p className="text-xs text-text-2">
-                      Bildausschnitt: Mitte. Schau in der Vorschau, ob alles Wichtige im Bild ist. Ändern kannst du ihn rechts.
-                    </p>
-                  )}
-
-                  {clipExtras.experiment_id && (
-                    <p className="text-xs text-text-2">
-                      Hook-A/B, Variante {clipExtras.variant ?? "?"}.{" "}
-                      <Link href={`/experimente/${clipExtras.experiment_id}`} className="text-text underline-offset-4 hover:underline">
-                        Experiment öffnen
-                      </Link>
-                    </p>
-                  )}
-
+                  {/* Kurzes Zeichen statt Erklärsatz: das ist ein echtes Problem am Clip, der volle
+                      Wortlaut steht im Titel. */}
                   {clip.cps_warnings.length > 0 && (
-                    <p className="text-xs text-text-2" title={clip.cps_warnings.join("\n")}>
-                      {clip.cps_warnings.length === 1
-                        ? "Ein Untertitel läuft schnell durch."
-                        : `${clip.cps_warnings.length} Untertitel laufen schnell durch.`}{" "}
-                      Zum Mitlesen eventuell zu schnell.
+                    <p className="flex items-center gap-1.5 text-xs text-text-2" title={clip.cps_warnings.join("\n")}>
+                      <IconWarn />
+                      Untertitel laufen schnell durch
                     </p>
                   )}
 
                   {blocked && (
-                    <p className="rounded-[12px] border border-attention/50 bg-attention/10 px-3 py-2 text-xs text-text">
-                      <span className="font-medium text-attention">{EXPORT_BLOCKED_MESSAGE}</span> Video und Untertitel werden freigeschaltet, sobald der Gast zustimmt.
+                    <p className="flex items-center gap-1.5 rounded-[12px] border border-attention/50 bg-attention/10 px-3 py-2 text-xs text-text">
+                      <IconWarn className="text-attention" />
+                      {EXPORT_BLOCKED_MESSAGE}
                     </p>
                   )}
 
-                  {/* Herunterladen ist der Grund, warum jemand hier ist: ein einziger hervorgehobener
-                      Knopf, ganz vorn in der Aktionszeile. Bearbeiten steht daneben und ist ruhig.
-                      Die Untertiteldateien liegen in den Profi-Details (Bedienkonzept, Abschnitt 9). */}
+                  {/* Drei Handlungen je Clip: Herunterladen bleibt hervorgehoben, Bearbeiten und
+                      Löschen sind reine Zeichen mit Titel und Beschriftung für Screenreader. */}
                   <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
                     {mp4 && !blocked ? (
                       <a
@@ -595,10 +488,8 @@ export function ClipBoard({
                         download
                         className="transition-soft inline-flex h-9 items-center gap-2 rounded-pill bg-text px-4 text-sm font-medium text-black hover:bg-white"
                       >
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                          <path d="M8 2v8m0 0 3-3M8 10 5 7M3 13h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                        Video herunterladen
+                        <IconDownload />
+                        Herunterladen
                       </a>
                     ) : (
                       <span
@@ -609,113 +500,26 @@ export function ClipBoard({
                           blocked ? "border-attention/40 text-attention/70" : "border-line text-text-3",
                         )}
                       >
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                          <path d="M8 2v8m0 0 3-3M8 10 5 7M3 13h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                        Video herunterladen
+                        <IconDownload />
+                        Herunterladen
                       </span>
                     )}
-                    <ButtonLink size="sm" variant="ghost" href={`/projekte/${sourceId}/clips/${clip.id}/hooks`}>
-                      Text oder Bild ändern
-                    </ButtonLink>
-                    <Button size="sm" variant="ghost" onClick={() => rerender(clip)} disabled={busyId === clip.id || clip.status === "rendering"}>
-                      Änderungen übernehmen
-                    </Button>
+                    <IconLink href={`/projekte/${sourceId}/clips/${clip.id}`} label="Bearbeiten">
+                      <IconPencil />
+                    </IconLink>
                     {canDelete && (
-                      <Button size="sm" variant="danger" onClick={() => setDeleteTarget(clip)} disabled={clip.status === "rendering"}>
-                        Löschen
-                      </Button>
+                      <IconButton label="Löschen" tone="danger" onClick={() => setDeleteTarget(clip)} disabled={clip.status === "rendering"}>
+                        <IconTrash />
+                      </IconButton>
                     )}
                   </div>
-
-                  {/* Die Vorschau liegt jetzt im Fenster „Größer ansehen“, nicht mehr aufgeklappt
-                      unter der Karte. Ein zweiter Player unter dem ersten war überflüssig. */}
-
-                  <ProDetails className="mt-auto">
-                    {/* Untertiteldateien braucht kein Laie. Wer sie braucht, findet sie auf jeder
-                        Karte an derselben Stelle (Bedienkonzept, Abschnitt 9). */}
-                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
-                      <span className="text-text-3">Untertiteldateien</span>
-                      <span className="flex flex-wrap items-center gap-2">
-                        {(
-                          [
-                            ["SRT", srt],
-                            ["VTT", vtt],
-                          ] as const
-                        ).map(([kind, href]) =>
-                          href && !blocked ? (
-                            <a
-                              key={kind}
-                              href={href}
-                              download
-                              className="transition-soft inline-flex h-8 items-center gap-1.5 rounded-pill border border-line-strong px-3 text-xs text-text hover:border-white/40 hover:bg-white/5"
-                            >
-                              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                <path d="M8 2v8m0 0 3-3M8 10 5 7M3 13h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                              Untertitel <span className="font-mono text-text-3">{kind}</span>
-                            </a>
-                          ) : (
-                            <span
-                              key={kind}
-                              aria-disabled="true"
-                              title={lockedTitle}
-                              className={cn(
-                                "inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-pill border px-3 text-xs",
-                                blocked ? "border-attention/40 text-attention/70" : "border-line text-text-3",
-                              )}
-                            >
-                              Untertitel <span className="font-mono">{kind}</span>
-                            </span>
-                          ),
-                        )}
-                      </span>
-                    </div>
-                    {isDone(clip) && (
-                      <>
-                        {clip.loudness && (
-                          <ProRow label="Lautheit">
-                            {formatLoudness(clip.loudness.integrated_lufs, clip.loudness.true_peak_dbtp)}
-                          </ProRow>
-                        )}
-                        {clip.width && clip.height && (
-                          <ProRow label="Auflösung">
-                            {clip.width}×{clip.height}
-                            {clip.fps ? `, ${clip.fps} fps` : ""}
-                          </ProRow>
-                        )}
-                        <ProRow label="Echtheitssiegel (C2PA)">
-                          {c2pa === "signed" ? "signiert" : `nicht gesetzt${clip.provenance.reason ? `: ${clip.provenance.reason}` : ""}`}
-                        </ProRow>
-                        {clip.render_plan && (
-                          <>
-                            <ProRow label="Bildausschnitt">
-                              {clip.render_plan.reframe.strategy}
-                              {clip.render_plan.reframe.detector ? ` (${clip.render_plan.reframe.detector})` : ""}
-                            </ProRow>
-                            <ProRow label="Untertitel-Preset">{clip.render_plan.captions.preset}</ProRow>
-                          </>
-                        )}
-                        {clip.cps_warnings.length > 0 && (
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-text-3">Schnelle Untertitel</span>
-                            <ul className="flex flex-col gap-0.5 font-mono">
-                              {clip.cps_warnings.map((w, i) => (
-                                <li key={i}>{w}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </ProDetails>
                   </div>
 
                   {/* Rechte Spalte: oben die Freigabe (hat mit dem Rest nichts zu tun),
-                      unten das Posten. Dazwischen Luft, damit beides an seinem Platz bleibt. */}
+                      unten die Serie. Dazwischen Luft, damit beides an seinem Platz bleibt. */}
                   <div className="flex w-full shrink-0 flex-col justify-between gap-4 border-t border-line pt-3 sm:w-[300px] sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
                     <div className="flex flex-col gap-1">
-                      <GuestApprovalDialog
+                      <ClipApproval
                         sourceId={sourceId}
                         clipId={clip.id}
                         clipLabel={`${PLATFORM_LABELS[clip.platform]} ${ASPECT_LABELS[clip.aspect]}`}
@@ -733,21 +537,12 @@ export function ClipBoard({
                       )}
                     </div>
 
-                    {publishing && (
-                      <ClipPublishing
-                        sourceId={sourceId}
-                        clip={clip}
+                    {publishing?.canSeries && (
+                      <ClipSeries
+                        clipId={clip.id}
                         extras={clipExtras}
-                        gates={gates}
-                        connections={publishing.connections}
                         series={publishing.series}
-                        initialPublications={publishing.publications.filter((p) => p.clip_id === clip.id)}
-                        initialFeedback={publishing.feedback.filter((f) => f.clip_id === clip.id)}
-                        canPublish={publishing.canPublish}
-                        canSeries={publishing.canSeries}
-                        canRender={publishing.canRender}
                         onExtras={(next) => setExtras((prev) => ({ ...prev, [next.id]: next }))}
-                        onRerender={() => rerender(clip)}
                       />
                     )}
                   </div>
@@ -761,38 +556,92 @@ export function ClipBoard({
   );
 }
 
-/* Karten-Vorschau: Poster, Klick spielt das gerenderte MP4 ab (mit Ton), zweiter Klick pausiert */
-function ClipVideo({ src, poster, label }: { src: string; poster: string | null; label: string }) {
-  const ref = useRef<HTMLVideoElement | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const toggle = () => {
-    const el = ref.current;
-    if (!el) return;
-    if (el.paused) void el.play().catch(() => undefined);
-    else el.pause();
-  };
+/* Zeichen im Stil der Seitenleiste: 20 px, 1,75 px Strich, currentColor, keine Füllung */
+function Svg({ size = 20, className, children }: { size?: number; className?: string; children: ReactNode }) {
   return (
-    <button type="button" onClick={toggle} aria-label={playing ? `${label} pausieren` : `${label} abspielen`} aria-pressed={playing} className="group relative block h-full w-full">
-      <video
-        ref={ref}
-        src={src}
-        poster={poster ?? undefined}
-        playsInline
-        preload="metadata"
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
-        className="h-full w-full object-cover"
-      />
-      {!playing && (
-        <span aria-hidden="true" className="transition-soft absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/35">
-          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-text text-black">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M4.5 2.8v10.4c0 .8.9 1.3 1.6.9l8-5.2c.6-.4.6-1.4 0-1.8l-8-5.2c-.7-.4-1.6.1-1.6.9z" />
-            </svg>
-          </span>
-        </span>
-      )}
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      {children}
+    </svg>
+  );
+}
+
+const IconDownload = () => (
+  <Svg size={18}>
+    <path d="M12 3v12" />
+    <path d="m7 11 5 5 5-5" />
+    <path d="M4 20h16" />
+  </Svg>
+);
+const IconPencil = () => (
+  <Svg size={18}>
+    <path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z" />
+    <path d="m14 6 4 4" />
+  </Svg>
+);
+const IconTrash = () => (
+  <Svg size={18}>
+    <path d="M4 7h16" />
+    <path d="M9 7V4h6v3" />
+    <path d="M6 7l1 13h10l1-13" />
+    <path d="M10 11v5" />
+    <path d="M14 11v5" />
+  </Svg>
+);
+const IconWarn = ({ className }: { className?: string }) => (
+  <Svg size={14} className={cn("shrink-0", className)}>
+    <path d="M10.3 3.9 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+    <path d="M12 9v4" />
+    <path d="M12 17h.01" />
+  </Svg>
+);
+
+const ICON_ACTION =
+  "transition-soft inline-flex h-9 w-9 items-center justify-center rounded-pill border border-line-strong text-text-2 hover:border-white/40 hover:bg-white/5 hover:text-text";
+
+/* Reines Zeichen als Knopf. Titel für die Maus, aria-label für Screenreader. */
+function IconButton({
+  label,
+  onClick,
+  disabled,
+  tone,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  tone?: "danger";
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      className={cn(ICON_ACTION, tone === "danger" && "hover:border-danger/60 hover:bg-danger/10 hover:text-danger", disabled && "cursor-not-allowed opacity-40 hover:border-line-strong hover:bg-transparent")}
+    >
+      {children}
     </button>
+  );
+}
+
+/* Reines Zeichen als Verweis, sonst gleich wie IconButton. */
+function IconLink({ href, label, children }: { href: string; label: string; children: ReactNode }) {
+  return (
+    <Link href={href} title={label} aria-label={label} className={ICON_ACTION}>
+      {children}
+    </Link>
   );
 }

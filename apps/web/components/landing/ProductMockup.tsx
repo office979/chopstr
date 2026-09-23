@@ -16,7 +16,7 @@ export function ProductMockup() {
         <div className="grid gap-4 p-4 sm:p-6 md:grid-cols-[1fr_220px] md:gap-6">
           <div className="flex min-w-0 flex-col gap-3">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-text">Podcast Folge 12 · 6 gute Momente gefunden</p>
+              <p className="text-sm font-medium text-text">Podcast Folge 12 · 6 gute Clips gefunden</p>
               <span className="hidden rounded-md bg-white/[0.06] px-2 py-1 text-[11px] text-text-2 sm:block">1:02:00</span>
             </div>
 
@@ -41,7 +41,7 @@ export function ProductMockup() {
               </div>
             </div>
 
-            {/* Weitere Momente */}
+            {/* Weitere Clips */}
             {["Warum Stellenanzeigen niemand liest", "Der teuerste Fehler im Bewerbungsgespräch"].map((t, i) => (
               <div key={t} className="flex items-center justify-between gap-3 rounded-[14px] border border-white/10 bg-white/[0.03] px-4 py-3">
                 <p className="truncate text-[13px] text-text-2">{t}</p>

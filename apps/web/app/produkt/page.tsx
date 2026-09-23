@@ -40,6 +40,7 @@ export default function LandingPage() {
           <ul className="hidden flex-1 items-center justify-center gap-8 text-sm text-text-2 md:flex">
             <li><a href="#so-gehts" className="transition-soft hover:text-text">So geht&apos;s</a></li>
             <li><a href="#funktionen" className="transition-soft hover:text-text">Funktionen</a></li>
+            <li><a href="#teams" className="transition-soft hover:text-text">Für Teams</a></li>
             <li><a href="#fragen" className="transition-soft hover:text-text">Fragen</a></li>
           </ul>
           <div className="ml-auto flex items-center gap-2 md:ml-0">
@@ -56,13 +57,13 @@ export default function LandingPage() {
         <section className="mx-auto max-w-[1200px] px-4 pb-16 pt-16 text-center sm:px-8 sm:pt-24">
           <p className="mx-auto inline-flex items-center gap-2 rounded-md bg-white/[0.06] px-3 py-1.5 text-sm text-text-2">
             <span className="h-1.5 w-1.5 rounded-full bg-ai-soft" aria-hidden="true" />
-            Für Podcasts, Interviews und Vorträge auf Deutsch
+            Für alle, die auf Deutsch reden und zu wenig Zeit zum Schneiden haben
           </p>
           <h1 className="mx-auto mt-6 max-w-[900px] text-4xl font-semibold leading-[1.05] tracking-[var(--tracking-display)] text-text sm:text-6xl lg:text-7xl">
             Aus einem langen Video werden Clips, die Sinn ergeben
           </h1>
           <p className="mx-auto mt-6 max-w-[640px] text-lg leading-relaxed text-text-2 sm:text-xl">
-            chopstr findet die besten Momente, schneidet sie mitten im Gedanken nie ab und macht sie fertig für TikTok, Reels, Shorts und LinkedIn. Du schaust drüber und gibst frei.
+            chopstr sucht die Stellen, die für sich allein funktionieren, schneidet sie nie mitten im Gedanken ab und macht sie fertig für TikTok, Reels, Shorts und LinkedIn. Du schaust drüber und gibst frei.
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <PrimaryCta>Kostenlos testen</PrimaryCta>
@@ -100,7 +101,7 @@ export default function LandingPage() {
         {/* Problem */}
         <Section eyebrow="Das Problem" title="Clips schneiden frisst deinen Tag">
           <div className="grid gap-4 md:grid-cols-3">
-            <ProblemCard title="Stundenlang suchen" text="Du scrollst durch eine ganze Folge, um die drei Minuten zu finden, die sich lohnen. Jede Woche aufs Neue." />
+            <ProblemCard title="Stundenlang suchen" text="Du scrollst durch eine ganze Folge, um die drei Minuten zu finden, die sich lohnen. Nächste Woche wieder." />
             <ProblemCard title="Mitten im Satz abgeschnitten" text="Automatische Tools schneiden, wo es gerade passt. Dann fehlt das „nicht“ und die Aussage ist plötzlich falsch." />
             <ProblemCard title="Untertitel voller Fehler" text="Namen, Fachwörter und Österreichisch werden verhunzt. Aus Jänner wird Januar, aus dem Firmennamen Kauderwelsch." />
           </div>
@@ -115,7 +116,7 @@ export default function LandingPage() {
                 <p className="rounded-md bg-ai/10 px-3 py-2 text-text">„Das funktioniert <span className="text-ai-soft">nicht</span>, solange niemand zuhört.“</p>
               </div>
             </Feature>
-            <Feature className="md:col-span-2" title="Jede Auswahl erklärt" text="Zu jedem Moment steht, warum er gut ist. Du entscheidest in Sekunden statt Minuten." />
+            <Feature className="md:col-span-2" title="Jede Auswahl erklärt" text="Zu jedem Clip steht, warum die Stelle trägt. Du entscheidest in Sekunden statt in Minuten." />
             <Feature className="md:col-span-2" title="Untertitel, die dich kennen" text="Trag Namen und Lieblingswörter einmal ein. Jänner bleibt Jänner, Marille bleibt Marille." />
             <Feature className="md:col-span-2" title="Automatisch im Hochformat" text="Das Gesicht bleibt im Bild, Folien werden eingeblendet. Fertig für jedes Handy." />
             <Feature className="md:col-span-2" title="Texte ohne KI-Blabla" text="Hook und Beitragstext klingen nach dir. Floskeln wie „Game Changer“ sperrst du einfach." />
@@ -126,11 +127,26 @@ export default function LandingPage() {
         <Section id="so-gehts" eyebrow="So geht's" title="In drei Schritten zum fertigen Clip">
           <ol className="grid gap-4 md:grid-cols-3">
             <Step n={1} title="Video hochladen" text="Podcast, Interview oder Vortrag reinziehen. Bis 5 GB, der Upload läuft auch nach einer Pause weiter." />
-            <Step n={2} title="Momente auswählen" text="chopstr zeigt dir die besten Stellen mit Begründung. Du nimmst, was passt, oder machst es länger oder kürzer." />
+            <Step n={2} title="Clips auswählen" text="chopstr zeigt dir die Vorschläge und schreibt dazu, warum die Stelle trägt. Du nimmst, was passt, oder ziehst den Anfang und das Ende zurecht." />
             <Step n={3} title="Clips herunterladen" text="Mit Untertiteln, Hook und Beitragstext. Fertig zum Posten auf TikTok, Reels, Shorts oder LinkedIn." />
           </ol>
           <div className="mt-10 flex justify-center">
             <PrimaryCta>Erstes Video kostenlos testen</PrimaryCta>
+          </div>
+        </Section>
+
+        {/* Für Teams: zweite Tiefe. Oben spricht die Seite die Einzelperson an, hier kommen die
+            Argumente, die erst zählen, wenn mehrere Leute und Kunden im Spiel sind. */}
+        <Section id="teams" eyebrow="Für Teams" title="Wenn nicht nur du mitredest">
+          <p className="mx-auto -mt-2 mb-8 max-w-[720px] text-center text-[17px] leading-relaxed text-text-2">
+            Sobald Kolleginnen, Kunden oder eine Rechtsabteilung mitreden, wird aus Schneiden ein Prozess.
+            chopstr kennt den Teil auch.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Feature title="Freigabe per Link" text="Schick den Clip an die Kundin. Sie sieht ihn im Browser, sagt Ja oder wünscht Änderungen. Kein Konto, kein Download, kein Mailanhang." />
+            <Feature title="Rollen statt Zugriff für alle" text="Wer hochladen darf, wer freigibt, wer nur zuschaut. Gäste sehen genau einen Clip und sonst nichts." />
+            <Feature title="Ein Branding je Kunde" text="Farben, Logo, Schrift, Wörterbuch und Untertitel-Stil pro Marke. Wer für drei Kunden arbeitet, mischt sie nicht mehr." />
+            <Feature title="Der Papierkram ist erledigt" text="Auftragsverarbeitungsvertrag, Subprozessoren und Löschnachweise liegen bereit. Jede Aktion steht im Protokoll." />
           </div>
         </Section>
 
@@ -163,7 +179,7 @@ export default function LandingPage() {
               Österreichisches Deutsch ist voll unterstützt. Schweizerdeutsch läuft als Beta: chopstr markiert Stellen, bei denen es unsicher ist, damit du sie prüfen kannst.
             </Faq>
             <Faq q="Was kostet chopstr?">
-              Testen ist kostenlos. Danach zahlst du nach Stunden Video, nicht nach undurchsichtigen Credits.
+              Testen ist kostenlos. Danach zahlst du nach Stunden Video. Keine Credits, keine Punkte, keine Umrechnerei: eine Stunde Material ist eine Stunde.
             </Faq>
           </div>
         </Section>
@@ -173,9 +189,9 @@ export default function LandingPage() {
           <div className="relative overflow-hidden rounded-card border border-white/10 bg-[linear-gradient(135deg,rgba(2,12,245,0.42)_0%,rgba(20,34,255,0.22)_45%,rgba(27,26,98,0.35)_100%)] px-6 py-14 text-center sm:px-12 sm:py-20">
             <div aria-hidden="true" className="pointer-events-none absolute -right-20 -top-20 h-72 w-72 rounded-full bg-brand/25 blur-3xl" />
             <h2 className="relative mx-auto max-w-[720px] text-3xl font-semibold tracking-[var(--tracking-display)] text-white sm:text-5xl">
-              Wie viele gute Momente liegen in deinem letzten Video?
+              Wie viele gute Clips stecken in deinem letzten Video?
             </h2>
-            <p className="relative mx-auto mt-4 max-w-[520px] text-lg text-white/75">Lad es hoch und find es heraus. chopstr zeigt dir die Stellen, du entscheidest.</p>
+            <p className="relative mx-auto mt-4 max-w-[520px] text-lg text-white/75">Lad es hoch und schau nach. chopstr macht die Vorschläge, du entscheidest.</p>
             <div className="relative mt-8 flex justify-center">
               <PrimaryCta>Kostenlos testen</PrimaryCta>
             </div>

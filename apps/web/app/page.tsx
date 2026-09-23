@@ -60,6 +60,16 @@ export default async function ProjectsPage() {
     await Promise.all(sources.filter((s) => s.status === "ready").map(async (s) => [s.id, await repo.countClips(s.id)] as const)),
   );
 
+  /* Vertragshinweis nur hier und am Clip, nicht mehr über jeder Seite (Bedienkonzept, Abschnitt 7) */
+  let dpaMissing = false;
+  if (can(session.role, "dpa.accept")) {
+    try {
+      dpaMissing = !(await repo.getWorkspace()).dpa_signed_at;
+    } catch {
+      /* ohne Workspace kein Hinweis */
+    }
+  }
+
   const readyCount = sources.filter((s) => s.status === "ready").length;
   const failedCount = sources.filter((s) => s.status === "failed").length;
   const activeCount = sources.filter((s) => checkState(s.status) === "active").length;
@@ -85,6 +95,18 @@ export default async function ProjectsPage() {
           <Stat label="Fertige Clips" value={renderedClips} hint={failedCount > 0 ? `bei ${failedCount} Video(s) ging etwas schief` : "bereit zum Posten"} />
         </dl>
       </section>
+
+      {dpaMissing && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-inner border border-attention/40 px-4 py-3 text-sm">
+          <span className="text-text-2">
+            <span className="text-attention">Ein Vertrag fehlt noch.</span> Hochladen und Clips bauen geht schon. Zum Posten
+            brauchst du ihn.
+          </span>
+          <Link href="/rechtliches/avv" className="text-text underline-offset-4 hover:underline">
+            Vertrag lesen und annehmen
+          </Link>
+        </div>
+      )}
 
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-medium">Alle Videos</h2>

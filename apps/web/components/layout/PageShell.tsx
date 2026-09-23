@@ -44,13 +44,17 @@ export async function PageShell({ children, lightTone = "brand", width = "defaul
       ? { name: user.displayName, email: user.email, workspaceName: null, role: null, demo: user.demo, canUpload: false, canBrand: false, canAudit: false, canBilling: false }
       : null;
 
-  /* Banner nur für owner/admin: AVV noch nicht angenommen, Workspace-Löschung eingeplant (Mensch muss prüfen) */
-  let dpaBanner = false;
+  /* Nur die geplante Workspace-Löschung steht hier: sie betrifft alles und läuft ab.
+   *
+   * Der Vertragshinweis (AVV) stand früher ebenfalls hier und damit über jeder Seite, dauerhaft und
+   * nie erledigt. Er hat Nutzer darauf trainiert, orange zu übersehen, und entwertete damit die
+   * Hinweise, bei denen wirklich etwas zu tun ist (docs/BEDIENKONZEPT.md, Abschnitt 7). Er erscheint
+   * jetzt an den zwei Stellen, an denen er Folgen hat: als Karte auf der Startseite und als Punkt in
+   * der Liste „Noch nicht bereit zum Posten“ am Clip. */
   let deletionBanner: string | null = null;
-  if (session && (can(session.role, "dpa.accept") || can(session.role, "workspace.delete"))) {
+  if (session && can(session.role, "workspace.delete")) {
     try {
       const ws = await getRepo().getWorkspace();
-      dpaBanner = can(session.role, "dpa.accept") && !ws.dpa_signed_at;
       deletionBanner = ws.deletion_scheduled_for ? formatDate(ws.deletion_scheduled_for) : null;
     } catch {
       /* ohne Workspace kein Banner */
@@ -63,28 +67,16 @@ export async function PageShell({ children, lightTone = "brand", width = "defaul
       <Sidebar user={navUser} />
       <div className="relative z-10 flex min-h-dvh flex-col lg:pl-[264px]">
         <main className={cn("mx-auto w-full flex-1 px-4 pb-16 pt-8 sm:px-8 lg:pt-12", widths[width], className)}>
-          {(dpaBanner || deletionBanner) && (
-            <div className="print:hidden mb-6 flex flex-col gap-2">
-              {deletionBanner && (
-                <p role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-inner border border-attention/50 bg-attention/10 px-4 py-2.5 text-sm text-text">
-                  <span>
-                    <span className="font-medium text-attention">Löschung des Workspace eingeplant</span> für {deletionBanner}. Bis dahin kannst du sie zurücknehmen.
-                  </span>
-                  <Link href="/einstellungen/loeschung" className="text-text underline-offset-4 hover:underline">
-                    Zur Löschung
-                  </Link>
-                </p>
-              )}
-              {dpaBanner && (
-                <p role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-inner border border-attention/40 px-4 py-2.5 text-sm text-text-2">
-                  <span>
-                    <span className="text-attention">Ein Vertrag fehlt noch.</span> Hochladen geht schon, zum Posten brauchst du ihn.
-                  </span>
-                  <Link href="/rechtliches/avv" className="text-text underline-offset-4 hover:underline">
-                    Vertrag lesen und annehmen
-                  </Link>
-                </p>
-              )}
+          {deletionBanner && (
+            <div className="print:hidden mb-6">
+              <p role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-inner border border-attention/50 bg-attention/10 px-4 py-2.5 text-sm text-text">
+                <span>
+                  <span className="font-medium text-attention">Löschung des Workspace eingeplant</span> für {deletionBanner}. Bis dahin kannst du sie zurücknehmen.
+                </span>
+                <Link href="/einstellungen/loeschung" className="text-text underline-offset-4 hover:underline">
+                  Zur Löschung
+                </Link>
+              </p>
             </div>
           )}
           {children}

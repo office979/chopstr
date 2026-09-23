@@ -307,14 +307,14 @@ export function TranscriptEditor({ sourceId, title, durationS, videoSrc, transcr
             <div className="flex items-center gap-2">
               {/* Modellname ist Profi-Information (docs/BEDIENKONZEPT.md, Abschnitt 9): nur noch im Tooltip. */}
               <Badge title={transcript.asr_model_id ?? undefined}>Vom Computer mitgeschrieben</Badge>
+              {/* Klasse B (Bedienkonzept, Abschnitt 7): du kannst etwas tun, musst aber nicht.
+                  Deshalb neutral. Orange ist für Dinge reserviert, die wirklich blockieren. */}
               {lowCount > 0 && (
-                <Badge tone="attention">
-                  {lowCount === 1 ? "1 Wort war unsicher" : `${lowCount} Wörter waren unsicher`}
-                </Badge>
+                <Badge>{lowCount === 1 ? "1 Wort unsicher" : `${lowCount} Wörter unsicher`}</Badge>
               )}
             </div>
             <p className="text-xs text-text-2">
-              Orange unterstrichen: Konfidenz unter {Math.round(LOW_CONFIDENCE * 100)} %
+              Unterstrichene Wörter hat der Computer schlecht verstanden. Klick sie an, wenn sie falsch sind.
             </p>
           </div>
 

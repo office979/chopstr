@@ -32,8 +32,11 @@ LOW_CONF_THRESHOLD = 0.5
 _DEFAULT_DIARIZER = "pyannote/speaker-diarization-community-1"  # TODO: per DIARIZER_MODEL bestätigen
 DIARIZER_NONE = "none"  # Fallback ohne pyannote: ein Sprecher für die ganze Datei
 FALLBACK_SPEAKER = "SPEAKER_00"
-HINT_DIARIZATION_SKIPPED = "Sprechertrennung übersprungen: HF_TOKEN fehlt (pyannote)"
-HINT_PYANNOTE_MISSING = "Sprechertrennung übersprungen: pyannote.audio nicht installiert"
+# Klasse C (docs/BEDIENKONZEPT.md, Abschnitt 7): Serverzustand, an dem der Nutzer nichts ändern kann.
+# Der Text sagt deshalb, was das für ihn bedeutet, nicht welche Umgebungsvariable fehlt. Der genaue
+# Grund steht weiterhin im Serverlog.
+HINT_DIARIZATION_SKIPPED = "Alle Wörter einem Sprecher zugeordnet, die Sprechertrennung ist hier nicht eingerichtet"
+HINT_PYANNOTE_MISSING = "Alle Wörter einem Sprecher zugeordnet, die Sprechertrennung ist hier nicht eingerichtet"
 HINT_GENERIC_WHISPER = "Standard-Whisper statt deutschem Fine-Tune"
 
 

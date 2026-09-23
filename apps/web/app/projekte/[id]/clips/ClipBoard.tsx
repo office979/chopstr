@@ -10,6 +10,7 @@ import { cn } from "@/components/ui/cn";
 import { SilentPreview, type PreviewFont } from "@/components/clips/SilentPreview";
 import { GuestApprovalDialog } from "@/components/clips/GuestApprovalDialog";
 import { Modal } from "@/components/ui/Modal";
+import { ProDetails, ProRow } from "@/components/ui/ProDetails";
 import type { Aspect, Candidate, CaptionVersion, Clip, GuestApproval, HookVersion, PipelineEvent } from "@/lib/repo/types";
 import { EXPORT_BLOCKED_MESSAGE, exportBlocked, latestByClip } from "@/lib/guest/approval";
 import { structureLabel } from "@/lib/candidates/labels";
@@ -534,28 +535,20 @@ export function ClipBoard({
                     </div>
                   </div>
 
-                  {isDone(clip) && (
+                  {/* Sichtbar bleibt nur, was rechtlich am Clip hängt. Der C2PA-Zustand ist Klasse C
+                      (Serverzustand, nichts zu tun) und steht jetzt in den Profi-Details. */}
+                  {isDone(clip) && (clip.ad_label || clip.provenance.source_credit) && (
                     <div className="flex flex-wrap gap-1.5">
-                      {c2pa === "signed" && <Badge tone="ok">Echtheitssiegel gesetzt</Badge>}
-                      {/* Klasse C (docs/BEDIENKONZEPT.md, Abschnitt 7): Serverzustand, der Nutzer kann nichts tun.
-                          Wandert in Etappe 2 nach „Details für Profis“. Bis dahin neutral statt orange. */}
-                      {c2pa === "skipped" && (
-                        <Badge title={clip.provenance.reason ?? undefined}>Ohne Echtheitssiegel</Badge>
-                      )}
-                      {c2pa === "failed" && <Badge title={clip.provenance.reason ?? undefined}>Ohne Echtheitssiegel</Badge>}
                       {clip.ad_label && <Badge>Werbelabel: {clip.ad_label}</Badge>}
                       {clip.provenance.source_credit && <Badge>{clip.provenance.source_credit}</Badge>}
                     </div>
                   )}
 
+                  {/* Klasse B (Bedienkonzept, Abschnitt 7): der Nutzer kann etwas tun, muss aber nicht.
+                      Deshalb neutral statt orange, dafür mit dem Hinweis, wo es sich ändern lässt. */}
                   {isDone(clip) && neutral && (
-                    <p className="rounded-[12px] border border-attention/50 bg-attention/10 px-3 py-2 text-xs text-text">
-                      <span className="font-medium text-attention">Bildausschnitt: Mitte.</span> Schau in der Vorschau nach, ob alles Wichtige im Bild ist.
-                    </p>
-                  )}
-                  {isDone(clip) && clip.render_plan && !neutral && (
                     <p className="text-xs text-text-2">
-                      Bildausschnitt: {clip.render_plan.reframe.strategy === "talking_head" ? "auf einen Sprecher" : "auf zwei Sprecher"}
+                      Bildausschnitt: Mitte. Schau in der Vorschau, ob alles Wichtige im Bild ist. Ändern kannst du ihn rechts.
                     </p>
                   )}
 
@@ -637,6 +630,44 @@ export function ClipBoard({
 
                   {/* Die Vorschau liegt jetzt im Fenster „Größer ansehen“, nicht mehr aufgeklappt
                       unter der Karte. Ein zweiter Player unter dem ersten war überflüssig. */}
+
+                  {isDone(clip) && (
+                    <ProDetails className="mt-auto">
+                      {clip.loudness && (
+                        <ProRow label="Lautheit">
+                          {formatLoudness(clip.loudness.integrated_lufs, clip.loudness.true_peak_dbtp)}
+                        </ProRow>
+                      )}
+                      {clip.width && clip.height && (
+                        <ProRow label="Auflösung">
+                          {clip.width}×{clip.height}
+                          {clip.fps ? `, ${clip.fps} fps` : ""}
+                        </ProRow>
+                      )}
+                      <ProRow label="Echtheitssiegel (C2PA)">
+                        {c2pa === "signed" ? "signiert" : `nicht gesetzt${clip.provenance.reason ? `: ${clip.provenance.reason}` : ""}`}
+                      </ProRow>
+                      {clip.render_plan && (
+                        <>
+                          <ProRow label="Bildausschnitt">
+                            {clip.render_plan.reframe.strategy}
+                            {clip.render_plan.reframe.detector ? ` (${clip.render_plan.reframe.detector})` : ""}
+                          </ProRow>
+                          <ProRow label="Untertitel-Preset">{clip.render_plan.captions.preset}</ProRow>
+                        </>
+                      )}
+                      {clip.cps_warnings.length > 0 && (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-text-3">Schnelle Untertitel</span>
+                          <ul className="flex flex-col gap-0.5 font-mono">
+                            {clip.cps_warnings.map((w, i) => (
+                              <li key={i}>{w}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </ProDetails>
+                  )}
                   </div>
 
                   {/* Rechte Spalte: oben die Freigabe (hat mit dem Rest nichts zu tun),

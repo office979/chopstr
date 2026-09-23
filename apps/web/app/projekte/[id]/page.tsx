@@ -11,7 +11,8 @@ import { can } from "@/lib/auth/permissions";
 import { STATUS_LABELS, isTerminalStatus } from "@/lib/pipeline";
 import { isDemoMode, temporalConfigured } from "@/lib/env";
 import { DeleteSourceButton } from "@/components/projects/DeleteSourceButton";
-import { formatBytes, formatDate, shortHash } from "@/lib/format";
+import { formatBytes, formatDate } from "@/lib/format";
+import { ProDetails, ProRow } from "@/components/ui/ProDetails";
 import { PipelineLive } from "./PipelineLive";
 
 export const dynamic = "force-dynamic";
@@ -131,15 +132,6 @@ export default async function ProjectPage({ params }: Props) {
                 )}
               </Meta>
               <Meta label="Größe">{formatBytes(source.size_bytes)}</Meta>
-              <Meta label="Löschfrist">{formatDate(source.delete_after)}</Meta>
-              <div className="col-span-2">
-                <Meta label="SHA-256">
-                  <span className="font-mono text-sm" title={source.sha256 ?? undefined}>
-                    {shortHash(source.sha256)}
-                  </span>
-                </Meta>
-              </div>
-              <Meta label="Rechte">{RIGHTS_LABEL[source.rights_status]}</Meta>
               <Meta label="Sprecher erwartet">{source.expected_speakers ?? "unbekannt"}</Meta>
               {source.rights_status === "third_party" && (
                 <div className="col-span-2">
@@ -162,6 +154,18 @@ export default async function ProjectPage({ params }: Props) {
                 </Meta>
               </div>
             </dl>
+
+            {/* Prüfsumme, Löschfrist und Rechtestatus lösen keine Entscheidung aus; sie stehen
+                hier, statt die Hauptansicht zu füllen (Bedienkonzept, Abschnitt 9). */}
+            <ProDetails className="mt-5">
+              <ProRow label="SHA-256">{source.sha256 ?? "wird ermittelt"}</ProRow>
+              <ProRow label="Löschfrist">{formatDate(source.delete_after)}</ProRow>
+              <ProRow label="Rechtestatus">{RIGHTS_LABEL[source.rights_status]}</ProRow>
+              {source.mime_type && <ProRow label="Dateityp">{source.mime_type}</ProRow>}
+              {source.original_filename && <ProRow label="Dateiname">{source.original_filename}</ProRow>}
+              {transcript?.asr_model_id && <ProRow label="Spracherkennung">{transcript.asr_model_id}</ProRow>}
+              {transcript?.diarizer_id && <ProRow label="Sprechertrennung">{transcript.diarizer_id}</ProRow>}
+            </ProDetails>
           </GlassCard>
 
           {(source.brief.audience || source.brief.wanted || source.brief.exclude) && (

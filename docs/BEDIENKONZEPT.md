@@ -1,6 +1,6 @@
 # Bedienkonzept
 
-Stand: 23.09.2026. Status: Entwurf zur Abstimmung. Noch nichts umgesetzt.
+Stand: 23.09.2026. Etappen 1 und 2 sind umgesetzt, Etappen 3 und 4 stehen aus.
 
 Dieses Dokument legt fest, wie chopstr bedient wird. Es steht über der bestehenden
 Oberfläche: wo die heutige App abweicht, wird die App geändert, nicht dieses Dokument.
@@ -529,12 +529,12 @@ Nur Texte. Kein Struktureingriff, kein Risiko.
 
 Danach ist die App verständlich, aber noch unübersichtlich.
 
-### Etappe 2: Warnungen und Details
+### Etappe 2: Warnungen und Details (umgesetzt)
 
-- Die drei Warnklassen aus Abschnitt 7 einführen
-- Klasse C konsequent in "Details für Profis" verschieben
-- AVV-Banner auf zwei Stellen reduzieren
-- Einheitlichen Profi-Bereich bauen und befüllen
+- Die drei Warnklassen aus Abschnitt 7 eingeführt
+- Klasse C in "Details für Profis" verschoben (C2PA, Prüfsumme, Modellnamen, Messwerte)
+- Vertragshinweis von allen Seiten auf zwei Stellen reduziert
+- Einheitlicher Profi-Bereich als `components/ui/ProDetails.tsx`, überall gleich beschriftet
 
 Danach wirkt die App fertig, auch wenn die Wege noch nicht stimmen.
 

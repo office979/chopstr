@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
@@ -11,7 +10,7 @@ import { PIPELINE_STEPS, STATUS_LABELS, isTerminalStatus } from "@/lib/pipeline"
 import { playDoneSound } from "@/lib/sound";
 import type { CandidateCount, PipelineEvent, PipelineStep, SourceStatus } from "@/lib/repo/types";
 
-/* So lange bleibt „Fertig“ stehen, bevor die Auswahl aufgeht: lang genug, dass man den Haken sieht,
+/* So lange bleibt „Fertig“ stehen, bevor die Clips aufgehen: lang genug, dass man den Haken sieht,
  * kurz genug, dass es nicht nach Hängen aussieht. */
 const DONE_HANDOFF_MS = 1400;
 
@@ -20,7 +19,6 @@ interface Props {
   initialStatus: SourceStatus;
   initialStatusMessage: string | null;
   initialEvents: PipelineEvent[];
-  hasTranscript: boolean;
   candidateCount: CandidateCount;
   /* Lokaler Testmodus ohne Temporal: der Worker (python -m chopstr_worker.local_worker) holt die Quelle per Polling ab */
   localWorker?: boolean;
@@ -99,7 +97,7 @@ function remainingLabel(events: PipelineEvent[], steps: Record<PipelineStep, Ste
 }
 
 /* Pipeline-Schritte als Live-Ansicht über Server-Sent Events */
-export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, initialEvents, hasTranscript, candidateCount, localWorker = false }: Props) {
+export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, initialEvents, candidateCount, localWorker = false }: Props) {
   const [events, setEvents] = useState<PipelineEvent[]>(initialEvents);
   const [status, setStatus] = useState<SourceStatus>(initialStatus);
   const [statusMessage, setStatusMessage] = useState<string | null>(initialStatusMessage);
@@ -138,9 +136,9 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
     return () => es.close();
   }, [sourceId, initialStatus, initialEvents]);
 
-  /* Wenn die Analyse fertig wird, während diese Seite offen ist: kurzer Klang, dann weiter zur
-   * Auswahl. Nur beim Übergang, nicht beim Öffnen eines längst fertigen Videos, sonst käme man
-   * auf der Projektseite nie zur Ruhe. Ohne gefundene Clips bleibt man hier. */
+  /* Wenn die Analyse fertig wird, während diese Seite offen ist: kurzer Klang, dann weiter zu den
+   * Clips. Nur beim Übergang, nicht beim Öffnen eines längst fertigen Videos, sonst käme man
+   * auf der Projektseite nie zur Ruhe. Ohne gefundene Stellen bleibt man hier. */
   const router = useRouter();
   const startedUnfinished = useRef(!isTerminalStatus(initialStatus));
   const announced = useRef(false);
@@ -155,13 +153,14 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
     if (status === "ready") playDoneSound();
   }, [status]);
 
-  /* Weiter zur Auswahl, sobald feststeht, dass es Clips gibt. Nur beim Übergang, nicht beim Öffnen
-   * eines längst fertigen Videos, sonst käme man auf der Projektseite nie zur Ruhe. */
+  /* Weiter zu den Clips, sobald feststeht, dass es welche gibt. Der Auswahlschritt entfällt, die
+   * Clips entstehen von selbst. Nur beim Übergang, nicht beim Öffnen eines längst fertigen Videos,
+   * sonst käme man auf der Projektseite nie zur Ruhe. */
   useEffect(() => {
     if (!startedUnfinished.current || handedOff.current) return;
     if (status !== "ready" || counts.total === 0) return;
     handedOff.current = true;
-    const t = window.setTimeout(() => router.push(`/projekte/${sourceId}/review`), DONE_HANDOFF_MS);
+    const t = window.setTimeout(() => router.push(`/projekte/${sourceId}/clips`), DONE_HANDOFF_MS);
     return () => window.clearTimeout(t);
   }, [status, counts.total, router, sourceId]);
 
@@ -321,40 +320,15 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
         </div>
       )}
 
+      {/* Keine Knöpfe mehr: bei Funden geht es von selbst weiter zu den Clips, ohne Funde gibt es
+       * nichts zu öffnen. Ein Knopf wäre hier nur eine zweite Möglichkeit, dasselbe zu tun. */}
       {status === "ready" && (
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
+        <div className="mt-6 border-t border-line pt-5">
           <p className="text-sm text-text-2">
             {hasCandidates
-              ? `${counts.total === 1 ? "Ein Moment" : `${counts.total} Momente`} gefunden, ${counts.gate_passed} davon vollständig geprüft.${
-                  counts.accepted > 0 ? ` ${counts.accepted} schon genommen.` : ""
-                }`
-              : hasTranscript
-                ? "Der Text ist fertig. Schau dir die unsicheren Wörter und die Namen an."
-                : (statusMessage ?? "Fertig.")}
+              ? `${counts.total === 1 ? "Eine gute Stelle" : `${counts.total} gute Stellen`} gefunden. Deine Clips gehen gleich auf.`
+              : "In diesem Video hat der Computer keine gute Stelle gefunden. Das passiert bei sehr kurzen Videos und wenn wenig gesprochen wird. Versuch es mit einem anderen Video."}
           </p>
-          <div className="flex flex-wrap gap-2">
-            {hasTranscript && (
-              <Link
-                href={`/projekte/${sourceId}/transkript`}
-                className={cn(
-                  "transition-soft inline-flex h-10 items-center rounded-pill px-5 text-sm font-medium",
-                  hasCandidates
-                    ? "border border-line-strong text-text hover:border-white/40 hover:bg-white/5"
-                    : "bg-text text-black hover:bg-white",
-                )}
-              >
-                Text öffnen
-              </Link>
-            )}
-            {hasCandidates && (
-              <Link
-                href={`/projekte/${sourceId}/review`}
-                className="transition-soft inline-flex h-10 items-center rounded-pill bg-text px-5 text-sm font-medium text-black hover:bg-white"
-              >
-                Momente auswählen
-              </Link>
-            )}
-          </div>
         </div>
       )}
     </GlassCard>

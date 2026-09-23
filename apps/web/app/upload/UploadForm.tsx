@@ -3,13 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
-import { Field, Input, Select, Textarea, Checkbox } from "@/components/ui/Field";
+import { Field, Input, Select, Checkbox } from "@/components/ui/Field";
 import { Button } from "@/components/ui/Button";
-import { StatusCheck, type StatusCheckState } from "@/components/ui/StatusCheck";
-import { Badge } from "@/components/ui/Badge";
+import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/components/ui/cn";
 import { formatBytes } from "@/lib/format";
-import { PIPELINE_STEPS } from "@/lib/pipeline";
 import type { Platform, RightsStatus } from "@/lib/repo/types";
 import { createDemoProject } from "./actions";
 
@@ -20,8 +18,6 @@ interface Props {
   demoUpload: boolean;
   /* direct: POST /api/uploads/direct (lokaler Testmodus ohne tusd), tus: fortsetzbarer tus-Upload */
   uploadMode?: "tus" | "direct";
-  /* Ohne Temporal holt der lokale Worker die Quelle per Polling ab */
-  localWorker?: boolean;
 }
 
 type Phase = "form" | "uploading" | "finishing" | "done" | "error";
@@ -30,22 +26,29 @@ class UploadTokenError extends Error {}
 /* Fehler der direkten Route (Kontingent, Rolle, Validierung): anzeigen, nicht simulieren */
 class DirectUploadError extends Error {}
 
-const RIGHTS_TEXT =
-  "Ich bestätige: Ich darf dieses Video bearbeiten und veröffentlichen.";
+const RIGHTS_TEXT = "Ich darf dieses Video bearbeiten und veröffentlichen.";
 
 const ACCEPT = "video/mp4,video/quicktime,video/x-matroska,video/webm,audio/mpeg,audio/wav,audio/x-m4a,.mp4,.mov,.mkv,.webm,.mp3,.wav,.m4a";
 
-export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, uploadMode = "tus", localWorker = false }: Props) {
+/* Eine Box, vier Dinge: Name, Stil, Video, Haken. Alles andere (wem das Video gehört, Quellenangabe)
+ * liegt hinter „Mehr anzeigen“ — es betrifft wenige und darf den Weg nicht verlängern.
+ *
+ * Die Felder aus dem Fenster laufen über React-State, nicht über FormData: der Dialog hängt per
+ * Portal an document.body und gehört damit nicht mehr zum <form>. */
+export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, uploadMode = "tus" }: Props) {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [rights, setRights] = useState<RightsStatus>("own");
+  const [sourceOwner, setSourceOwner] = useState("");
+  const [sourceTitle, setSourceTitle] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [phase, setPhase] = useState<Phase>("form");
   const [progress, setProgress] = useState(0);
   const [note, setNote] = useState<string>("");
-  const [simulated, setSimulated] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<{ abort: () => void } | null>(null);
 
@@ -76,29 +79,20 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
     const errs: Record<string, string> = {};
     if (!String(fd.get("title") ?? "").trim()) errs.title = "Gib dem Video einen Namen.";
     if (!file) errs.file = "Wähle eine Datei aus.";
-    if (!confirmed) errs.rights_confirmed = "Setz unten den Haken, sonst geht es nicht weiter.";
-    if (rights === "third_party" && !String(fd.get("source_owner") ?? "").trim()) {
+    if (!confirmed) errs.rights_confirmed = "Setz den Haken, sonst geht es nicht weiter.";
+    if (rights === "third_party" && !sourceOwner.trim()) {
       errs.source_owner = "Schreib dazu, von wem das Video ist.";
     }
     return errs;
   };
 
-  const collect = (fd: FormData) => {
-    const platform = String(fd.get("platform") ?? "") as Platform | "";
-    const expectedRaw = Number(fd.get("expected_speakers"));
-    return {
-      title: String(fd.get("title") ?? "").trim(),
-      brand_profile_id: String(fd.get("brand_profile_id") ?? "") || null,
-      expected_speakers: Number.isFinite(expectedRaw) && expectedRaw > 0 ? Math.round(expectedRaw) : null,
-      brief_audience: String(fd.get("brief_audience") ?? "").trim(),
-      brief_wanted: String(fd.get("brief_wanted") ?? "").trim(),
-      brief_exclude: String(fd.get("brief_exclude") ?? "").trim(),
-      platform,
-      source_owner: String(fd.get("source_owner") ?? "").trim(),
-      source_title: String(fd.get("source_title") ?? "").trim(),
-      source_url: String(fd.get("source_url") ?? "").trim(),
-    };
-  };
+  const collect = (fd: FormData) => ({
+    title: String(fd.get("title") ?? "").trim(),
+    brand_profile_id: String(fd.get("brand_profile_id") ?? "") || null,
+    source_owner: sourceOwner.trim(),
+    source_title: sourceTitle.trim(),
+    source_url: sourceUrl.trim(),
+  });
 
   const finishDemo = async (data: ReturnType<typeof collect>) => {
     if (!file) return;
@@ -121,8 +115,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
   };
 
   const simulateUpload = async (data: ReturnType<typeof collect>) => {
-    setSimulated(true);
-    setNote("Demo-Modus: Der Upload wird simuliert, es wird keine Datei übertragen.");
+    setNote("Zum Ausprobieren: Dein Video wird nicht wirklich gespeichert.");
     let cancelled = false;
     abortRef.current = { abort: () => (cancelled = true) };
     for (let p = 0; p <= 100 && !cancelled; p += 4) {
@@ -150,6 +143,8 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
     if (!file) return;
     const uploadToken = await fetchUploadToken(data.brand_profile_id);
     const { Upload } = await import("tus-js-client");
+    /* Zielgruppe, Wünsche, Plattform und Sprecherzahl werden nicht mehr erhoben. Der Server
+     * behandelt sie als optional: fehlende Felder werden zu null beziehungsweise undefined. */
     const metadata: Record<string, string> = {
       upload_token: uploadToken,
       brand_profile_id: data.brand_profile_id ?? "",
@@ -158,11 +153,6 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
       filetype: file.type || "application/octet-stream",
       rights_status: rights,
       rights_confirmed: "true",
-      expected_speakers: data.expected_speakers != null ? String(data.expected_speakers) : "",
-      brief_audience: data.brief_audience,
-      brief_wanted: data.brief_wanted,
-      brief_exclude: data.brief_exclude,
-      platform: data.platform,
       client_ref: clientRef,
     };
     if (rights === "third_party") {
@@ -195,11 +185,6 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
     fd.append("title", data.title);
     fd.append("rights_status", rights);
     fd.append("rights_confirmed", "true");
-    fd.append("expected_speakers", data.expected_speakers != null ? String(data.expected_speakers) : "");
-    fd.append("brief_audience", data.brief_audience);
-    fd.append("brief_wanted", data.brief_wanted);
-    fd.append("brief_exclude", data.brief_exclude);
-    fd.append("platform", data.platform);
     if (rights === "third_party") {
       fd.append("source_owner", data.source_owner);
       fd.append("source_title", data.source_title);
@@ -235,6 +220,9 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
     const fd = new FormData(e.currentTarget);
     const errs = validate(fd);
     setErrors(errs);
+    /* Fehlt die Quellenangabe, steht sie hinter „Mehr anzeigen“ — dann geht das Fenster auf, sonst
+     * sucht jemand einen Fehler, den er gar nicht sehen kann. */
+    if (errs.source_owner) setDetailsOpen(true);
     if (Object.keys(errs).length > 0 || !file) return;
 
     const data = collect(fd);
@@ -279,33 +267,27 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
   };
 
   const busy = phase === "uploading" || phase === "finishing" || phase === "done";
-  const uploadState: StatusCheckState = phase === "error" ? "error" : phase === "done" || phase === "finishing" ? "done" : phase === "uploading" ? "active" : "idle";
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-5" noValidate aria-busy={busy}>
-      <GlassCard padding="lg" className="flex flex-col gap-5">
-        <h2 className="text-lg font-medium">Dein Video</h2>
-        <Field label="Wie soll es heißen?" htmlFor="title" required error={errors.title}>
-          <Input id="title" name="title" placeholder="z. B. Podcast Folge 13: Preise im Handwerk" required disabled={busy} />
-        </Field>
-        <Field label="Aussehen" htmlFor="brand_profile_id" hint="Bestimmt Farben, Schrift und wie die Untertitel aussehen.">
-          <Select id="brand_profile_id" name="brand_profile_id" defaultValue={profiles[0]?.id ?? ""} disabled={busy}>
-            {profiles.length === 0 && <option value="">Noch keines angelegt</option>}
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
+    <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate aria-busy={busy}>
+      <GlassCard padding="lg" className="flex flex-col gap-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Name" htmlFor="title" required error={errors.title}>
+            <Input id="title" name="title" placeholder="z. B. Podcast Folge 13" required disabled={busy} />
+          </Field>
+          <Field label="Stil" htmlFor="brand_profile_id">
+            <Select id="brand_profile_id" name="brand_profile_id" defaultValue={profiles[0]?.id ?? ""} disabled={busy}>
+              {profiles.length === 0 && <option value="">Noch keiner angelegt</option>}
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
 
-        <Field
-          label="Datei"
-          htmlFor="file"
-          required
-          error={errors.file}
-          hint={`Video oder Audio, maximal ${formatBytes(maxBytes)}. ${uploadMode === "direct" ? "Der Upload läuft in einem Stück." : "Der Upload ist fortsetzbar."}`}
-        >
+        <Field label="Video" htmlFor="file" required error={errors.file} hint={`Video oder Audio, maximal ${formatBytes(maxBytes)}.`}>
           <div
             onDragOver={(e) => {
               e.preventDefault();
@@ -314,7 +296,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
             onDragLeave={() => setDragging(false)}
             onDrop={busy ? undefined : onDrop}
             className={cn(
-              "transition-soft flex flex-col items-center justify-center gap-3 rounded-inner border border-dashed px-6 py-8 text-center",
+              "transition-soft flex flex-col items-center justify-center gap-2 rounded-inner border border-dashed px-6 py-6 text-center",
               dragging ? "border-white/70 bg-white/5" : "border-line-strong",
               file && "border-solid",
             )}
@@ -332,143 +314,72 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
             {file ? (
               <>
                 <p className="font-medium text-text">{file.name}</p>
-                <p className="text-sm text-text-2">
-                  {formatBytes(file.size)} · {file.type || "Typ unbekannt"}
-                </p>
+                <p className="text-sm text-text-2">{formatBytes(file.size)}</p>
               </>
             ) : (
-              <>
-                <p className="text-text">Datei hierher ziehen</p>
-                <p className="text-sm text-text-2">oder</p>
-              </>
+              <p className="text-text">Datei hierher ziehen</p>
             )}
             <Button type="button" variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()} disabled={busy}>
               {file ? "Andere Datei wählen" : "Datei auswählen"}
             </Button>
           </div>
         </Field>
-      </GlassCard>
 
-      <GlassCard padding="lg" className="flex flex-col gap-5">
-        <h2 className="text-lg font-medium">Darfst du das Video verwenden?</h2>
-        <Field label="Wem gehört das Video?" htmlFor="rights_status">
-          <Select id="rights_status" name="rights_status" value={rights} onChange={(e) => setRights(e.target.value as RightsStatus)} disabled={busy}>
-            <option value="own">Mir selbst</option>
-            <option value="licensed">Jemand anderem, ich habe die Erlaubnis</option>
-            <option value="third_party">Jemand anderem, ich zitiere nur daraus</option>
-          </Select>
-        </Field>
-        {rights === "third_party" && (
-          <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Urheber oder Quelle" htmlFor="source_owner" required error={errors.source_owner}>
-              <Input id="source_owner" name="source_owner" disabled={busy} />
-            </Field>
-            <Field label="Titel des Originals" htmlFor="source_title">
-              <Input id="source_title" name="source_title" disabled={busy} />
-            </Field>
-            <Field label="URL" htmlFor="source_url" className="sm:col-span-2">
-              <Input id="source_url" name="source_url" type="url" placeholder="https://" disabled={busy} />
-            </Field>
-          </div>
-        )}
-        <div className="flex flex-col gap-2">
-          <label className="flex cursor-pointer items-start gap-3">
-            <Checkbox
-              id="rights_confirmed"
-              name="rights_confirmed"
-              checked={confirmed}
-              onChange={(e) => setConfirmed(e.target.checked)}
+        <div className="flex flex-col gap-1">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+            <label className="flex cursor-pointer items-start gap-3">
+              <Checkbox
+                id="rights_confirmed"
+                name="rights_confirmed"
+                checked={confirmed}
+                onChange={(e) => setConfirmed(e.target.checked)}
+                disabled={busy}
+                required
+              />
+              <span className="text-sm text-text">{RIGHTS_TEXT}</span>
+            </label>
+            <button
+              type="button"
+              onClick={() => setDetailsOpen(true)}
               disabled={busy}
-              aria-describedby="rights_confirmed_hint"
-              required
-            />
-            <span className="text-[15px] text-text">{RIGHTS_TEXT}</span>
-          </label>
-          {errors.rights_confirmed ? (
+              className="transition-soft text-sm text-text-2 underline-offset-4 hover:text-text hover:underline disabled:opacity-60"
+            >
+              Mehr anzeigen
+            </button>
+          </div>
+          {errors.rights_confirmed && (
             <p className="text-sm text-attention" role="alert">
               {errors.rights_confirmed}
             </p>
-          ) : (
-            <p id="rights_confirmed_hint" className="text-sm text-text-2">
-              Die Bestätigung wird mit Zeitstempel im Audit-Log gespeichert.
-            </p>
           )}
         </div>
-      </GlassCard>
 
-      <GlassCard padding="lg" className="flex flex-col gap-5">
-        <h2 className="text-lg font-medium">Wünsche</h2>
-        <p className="-mt-2 text-sm text-text-2">
-          Kannst du leer lassen. Wenn du etwas einträgst, sucht der Computer gezielter.
-        </p>
-        <div className="grid gap-5 sm:grid-cols-2">
-          <Field label="Wie viele Personen sprechen?" htmlFor="expected_speakers" hint="Hilft beim Auseinanderhalten der Stimmen.">
-            <Input id="expected_speakers" name="expected_speakers" type="number" min={1} max={12} defaultValue={2} disabled={busy} />
-          </Field>
-          <Field label="Wo soll es hin?" htmlFor="platform">
-            <Select id="platform" name="platform" defaultValue={profiles[0]?.platform ?? "linkedin"} disabled={busy}>
-              <option value="linkedin">LinkedIn</option>
-              <option value="tiktok">TikTok</option>
-              <option value="reels">Instagram Reels</option>
-              <option value="shorts">YouTube Shorts</option>
-            </Select>
-          </Field>
-        </div>
-        <Field label="Wer soll das sehen?" htmlFor="brief_audience">
-          <Input id="brief_audience" name="brief_audience" placeholder="z. B. Geschäftsführung im Mittelstand" disabled={busy} />
-        </Field>
-        <Field label="Was muss unbedingt rein?" htmlFor="brief_wanted">
-          <Textarea id="brief_wanted" name="brief_wanted" placeholder="z. B. Zahlen zu Vakanzkosten, klare Thesen" disabled={busy} />
-        </Field>
-        <Field label="Was soll auf keinen Fall rein?" htmlFor="brief_exclude">
-          <Textarea id="brief_exclude" name="brief_exclude" placeholder="z. B. Smalltalk am Anfang, Werbeblock" disabled={busy} />
-        </Field>
-      </GlassCard>
-
-      {phase !== "form" && (
-        <GlassCard padding="lg" selected={phase === "uploading"} aria-live="polite">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-medium">Fortschritt</h2>
-            {simulated && <Badge tone="ai">Demo</Badge>}
+        {/* Beim Absenden nur der eine Balken. Was danach kommt, steht auf der nächsten Seite; hier
+         * wäre es eine Liste mit Dingen, die noch gar nicht laufen. */}
+        {phase !== "form" && (
+          <div aria-live="polite" className="flex flex-col gap-2 border-t border-line pt-4">
+            <div className="flex justify-between text-sm">
+              <span className="font-medium text-text">
+                {phase === "finishing" || phase === "done" ? "Fast fertig" : phase === "error" ? "Es hat nicht geklappt" : "Wird hochgeladen"}
+              </span>
+              <span className="font-mono text-text-2">{progress} %</span>
+            </div>
+            <div
+              className="h-1 w-full overflow-hidden rounded-pill bg-white/10"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={progress}
+              aria-label="Upload"
+            >
+              <div className="transition-soft h-full rounded-pill bg-text" style={{ width: `${progress}%` }} />
+            </div>
+            {note && <p className={cn("text-sm", phase === "error" ? "text-attention" : "text-text-2")}>{note}</p>}
           </div>
-          <ol className="flex flex-col gap-4">
-            <li className="flex items-center gap-4">
-              <StatusCheck state={uploadState} size={32} />
-              <div className="flex-1">
-                <div className="flex justify-between text-sm">
-                  <span className="font-medium text-text">Upload</span>
-                  <span className="font-mono text-text-2">{progress} %</span>
-                </div>
-                <div className="mt-2 h-1 w-full overflow-hidden rounded-pill bg-white/10" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} aria-label="Upload-Fortschritt">
-                  <div className="transition-soft h-full rounded-pill bg-text" style={{ width: `${progress}%` }} />
-                </div>
-              </div>
-            </li>
-            {PIPELINE_STEPS.map((step) => (
-              <li key={step.key} className={cn("flex items-center gap-4", step.phase === 2 && "opacity-50")}>
-                <StatusCheck state="idle" size={32} />
-                <div className="text-sm">
-                  <span className="font-medium text-text">{step.label}</span>
-                  <span className="ml-2 text-text-2">
-                    {localWorker && !demoUpload ? "läuft gleich" : "startet nach dem Hochladen"}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ol>
-          {note && <p className={cn("mt-4 text-sm", phase === "error" ? "text-attention" : "text-text-2")}>{note}</p>}
-          {phase === "finishing" && (
-            <p className="mt-4 text-sm text-text-2">
-              {uploadMode === "direct" ? "Datei ist da, wird gerade geprüft und angelegt" : "Wird angelegt"}
-            </p>
-          )}
-        </GlassCard>
-      )}
+        )}
+      </GlassCard>
 
       <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-        {/* Hier stand, wie der Server eingerichtet ist (tusd, Temporal, Zieladresse). Das hilft beim
-         * Einrichten, nicht beim Hochladen, und ist für alle anderen nur Lärm. Übrig bleibt der eine
-         * Satz, der wirklich etwas über das eigene Video sagt: zum Ausprobieren wird nichts gespeichert. */}
         <p className="text-sm text-text-2">
           {demoUpload ? "Zum Ausprobieren: Dein Video wird nicht wirklich gespeichert." : ""}
         </p>
@@ -491,6 +402,41 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
           </Button>
         </div>
       </div>
+
+      <Modal
+        open={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+        title="Wem gehört das Video?"
+        description="Voreingestellt ist: es ist deins. Nur wenn du daraus zitierst, brauchen wir eine Quelle."
+      >
+        <div className="flex flex-col gap-5">
+          <Field label="Wem gehört das Video?" htmlFor="rights_status">
+            <Select id="rights_status" value={rights} onChange={(e) => setRights(e.target.value as RightsStatus)} disabled={busy}>
+              <option value="own">Mir selbst</option>
+              <option value="licensed">Jemand anderem, ich habe die Erlaubnis</option>
+              <option value="third_party">Jemand anderem, ich zitiere nur daraus</option>
+            </Select>
+          </Field>
+          {rights === "third_party" && (
+            <>
+              <Field label="Urheber oder Quelle" htmlFor="source_owner" required error={errors.source_owner}>
+                <Input id="source_owner" value={sourceOwner} onChange={(e) => setSourceOwner(e.target.value)} disabled={busy} />
+              </Field>
+              <Field label="Titel des Originals" htmlFor="source_title">
+                <Input id="source_title" value={sourceTitle} onChange={(e) => setSourceTitle(e.target.value)} disabled={busy} />
+              </Field>
+              <Field label="URL" htmlFor="source_url">
+                <Input id="source_url" type="url" placeholder="https://" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} disabled={busy} />
+              </Field>
+            </>
+          )}
+          <div className="flex justify-end">
+            <Button type="button" onClick={() => setDetailsOpen(false)}>
+              Übernehmen
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </form>
   );
 }

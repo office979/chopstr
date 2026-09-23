@@ -15,11 +15,13 @@ export interface DemoUploadInput {
   size_bytes: number;
   rights_status: RightsStatus;
   rights_confirmed: boolean;
-  expected_speakers: number | null;
-  brief_audience: string;
-  brief_wanted: string;
-  brief_exclude: string;
-  platform: Platform | "";
+  /* Das Formular erhebt Zielgruppe, Wünsche, Plattform und Sprecherzahl nicht mehr. Die Felder
+   * bleiben optional, damit ältere Aufrufer (API, Tests) weiterhin gültig sind. */
+  expected_speakers?: number | null;
+  brief_audience?: string;
+  brief_wanted?: string;
+  brief_exclude?: string;
+  platform?: Platform | "";
   source_owner?: string;
   source_title?: string;
   source_url?: string;
@@ -56,7 +58,7 @@ export async function createDemoProject(input: DemoUploadInput): Promise<{ id: s
     source_owner: input.rights_status === "third_party" ? input.source_owner ?? null : null,
     source_title: input.rights_status === "third_party" ? input.source_title ?? null : null,
     source_url: input.rights_status === "third_party" ? input.source_url ?? null : null,
-    expected_speakers: input.expected_speakers,
+    expected_speakers: input.expected_speakers ?? null,
     brief: {
       audience: input.brief_audience || undefined,
       wanted: input.brief_wanted || undefined,

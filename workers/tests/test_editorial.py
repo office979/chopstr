@@ -282,3 +282,74 @@ def test_klang_wirkt_in_beide_richtungen(policy):
     w = float(policy.audio["gewicht"])
     assert hoch == pytest.approx(neutral * (1 + w), abs=0.02)
     assert tief == pytest.approx(neutral * (1 - w), abs=0.02)
+
+
+# -- Hook vorziehen --------------------------------------------------------------------------------
+def _sents(texte, ab=0.0, laenge=3.0):
+    from chopstr_worker.pipeline.segment import Sentence
+
+    out, t = [], ab
+    for i, x in enumerate(texte):
+        out.append(Sentence(idx=i, text=x, start=t, end=t + laenge, speaker="S0", word_range=(i, i)))
+        t += laenge
+    return out
+
+
+def test_teaserlaenge_stimmt_mit_dem_zusammensetzen_ueberein(policy):
+    """Die Grundlage darf keinen Teaser erlauben, den compose.validate danach ablehnt."""
+    from chopstr_worker.pipeline import compose
+
+    assert float(policy.hook_vorziehen["max_teaser_s"]) == pytest.approx(compose.MAX_TEASER_S)
+
+
+def test_starker_satz_aus_der_mitte_wird_vorgezogen(policy):
+    from chopstr_worker.pipeline import story_engine
+
+    s = _sents([
+        "Wir haben lange darueber nachgedacht wie man das angehen koennte.",
+        "Alle sagen man muesse frueh aufstehen. Das ist falsch.",
+        "Deswegen haben wir es anders gemacht.",
+        "Am Ende kam etwas Brauchbares heraus.",
+    ])
+    assert story_engine.teaser_satz(s, 0, 3, policy, None) == 1
+
+
+def test_satz_mit_rueckverweis_wird_nie_teaser(policy):
+    """Vorgezogen haette er nichts, worauf er sich bezieht."""
+    from chopstr_worker.pipeline import story_engine
+
+    s = _sents([
+        "Wir haben lange darueber nachgedacht wie man das angehen koennte.",
+        "Deswegen haben wir 40 Prozent eingespart und alle sagen das ist falsch.",
+        "Am Ende kam etwas Brauchbares heraus.",
+        "Und so blieb es dann auch.",
+    ])
+    assert story_engine.satz_staerke(s[1], policy, None) == -1.0
+    assert story_engine.teaser_satz(s, 0, 3, policy, None) != 1
+
+
+def test_ohne_deutlichen_vorsprung_bleibt_die_reihenfolge(policy):
+    from chopstr_worker.pipeline import story_engine
+
+    s = _sents(["Ein ruhiger Satz.", "Noch ein ruhiger Satz.", "Und ein dritter.", "Und ein vierter."])
+    assert story_engine.teaser_satz(s, 0, 3, policy, None) is None
+
+
+def test_aus_dem_letzten_teil_wird_nichts_vorgezogen(policy):
+    """Sonst nimmt der Teaser die Aufloesung vorweg."""
+    from chopstr_worker.pipeline import story_engine
+
+    s = _sents([
+        "Wir haben lange darueber nachgedacht.",
+        "Ein ruhiger Satz.",
+        "Noch ein ruhiger Satz.",
+        "Alle sagen das ist falsch und in wahrheit ist es ganz anders.",
+    ])
+    assert story_engine.teaser_satz(s, 0, 3, policy, None) is None
+
+
+def test_zu_kurze_spanne_bekommt_keinen_teaser(policy):
+    from chopstr_worker.pipeline import story_engine
+
+    s = _sents(["Alle sagen das ist falsch.", "Und dann kam es anders."])
+    assert story_engine.teaser_satz(s, 0, 1, policy, None) is None

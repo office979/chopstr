@@ -114,6 +114,19 @@ bewertung:
 # [M] Modul 10.1. Die Erkennungszeichen stammen wörtlich aus dem Masterfile und sind hier als
 # Suchmuster ausformuliert. Ein Moment, der auf keinen Typ passt, ist damit nicht schlecht, aber
 # er hat keinen erkennbaren Hebel.
+#
+# GEMESSENE GRENZE, bitte vor dem Aufblähen der Listen lesen:
+# Über drei echte Transkripte (Wagenknecht, Linke, BP, zusammen 1891 Sätze) greifen diese Marker
+# auf nur 2,4 bis 6,2 Prozent der Sätze. „contrarian" löst in einem einstündigen Streitgespräch
+# ein bis drei Mal aus, in einem Format, das aus Widerspruch besteht.
+#
+# Der Grund ist nicht eine zu kurze Liste, sondern die Sache selbst: Echte Rede sagt nicht „das
+# ist falsch", sie sagt „ja aber wenn man sich das anschaut, dann sieht man doch". Einen
+# Widerspruch zu erkennen verlangt Verstehen, nicht Zeichenkettenvergleich. Längere Listen
+# erzeugen vor allem Fehlalarme.
+#
+# Die Marker bleiben deshalb eng. Sie sind ein Bonus, wenn sie greifen, und kein Auswahlkriterium.
+# Die eigentliche Erkennung ist Aufgabe des Sprachmodells, sobald es angeschlossen ist.
 moment_typen:
   - schluessel: contrarian
     name: "Widerspruch zur Erwartung"
@@ -279,7 +292,9 @@ hook_vorziehen:
   # Nur wenn der beste Satz deutlich stärker ist als der erste, sonst bleibt die Reihenfolge.
   mindest_vorsprung: 2.0
   # Der vorgezogene Teil darf nicht länger sein als das, sonst ist es keine Zuspitzung mehr.
-  max_teaser_s: 8.0
+  # Muss mit compose.MAX_TEASER_S übereinstimmen: dort wird es beim Zusammensetzen hart geprüft,
+  # ein längerer Teaser würde also stillschweigend verworfen. Ein Test hält beide zusammen.
+  max_teaser_s: 6.0
   # Nie aus dem letzten Viertel vorziehen, das nimmt die Auflösung vorweg.
   nicht_aus_letztem_anteil: 0.25
 

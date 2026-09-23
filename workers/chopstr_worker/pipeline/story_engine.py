@@ -26,14 +26,17 @@ from typing import Any
 
 from .. import editorial, prompts
 from ..providers_llm import LLM
-from . import dach_nlp, fidelity, story_graph, story_score
+from . import compose, dach_nlp, fidelity, story_graph, story_score
 from .segment import Sentence, chapterize, numbered, sentences_from_words
 
 CONTRACT = "candidates_v1"
-# v2: Die Bewertung kommt aus der redaktionellen Grundlage (sieben Kriterien statt fuenf),
-# traegt den Laengenabzug und den Klanganteil. Ergebnisse aus v1 sind damit nicht mehr
-# vergleichbar; der Wert steckt im Idempotenz-Schluessel und erzwingt eine Neuberechnung.
-ENGINE_VERSION = "story_engine_v2"
+# v2: Bewertung aus der redaktionellen Grundlage (sieben Kriterien statt fuenf), mit
+#     Laengenabzug und Klanganteil.
+# v3: Hook vorziehen. Der staerkste Satz aus der Mitte kann als Teaser vorangestellt
+#     werden; die Laengenbewertung rechnet dann mit der Abspieldauer, nicht der Quellspanne.
+# Der Wert steckt im Idempotenz-Schluessel und erzwingt eine Neuberechnung. Ohne ihn
+# kaeme das alte Ergebnis aus dem Zwischenspeicher und die Aenderung waere unsichtbar.
+ENGINE_VERSION = "story_engine_v3"
 MIN_LEN_S = 12.0
 MAX_LEN_S = 90.0
 MAX_CANDIDATES = 20
@@ -196,6 +199,72 @@ def audio_wert(heat_payload: dict[str, Any] | None, start_s: float, end_s: float
     else:
         anstieg = 0.5
     return round(max(0.0, min(1.0, 0.5 * niveau + 0.5 * anstieg)), 3)
+
+
+def satz_staerke(s: Sentence, pol: editorial.Policy, heat_payload: dict[str, Any] | None) -> float:
+    """Wie stark traegt dieser einzelne Satz, wenn man ihn allein hoert?
+
+    Zwei Quellen, beide schon vorhanden: die Moment-Typen der Grundlage mit ihren Markern, und der
+    Klang des Satzes. Ein Satz, bei dem die Stimme hochgeht, traegt anders als einer im Plauderton.
+
+    Ein Satz, der mit einem Rueckverweis beginnt, ist als Teaser disqualifiziert, egal wie stark er
+    sonst waere: an den Anfang gezogen haette er nichts, worauf er sich bezieht. Genau diesen Fehler
+    machen mehrere der schlechten Beispielclips.
+    """
+    text = str(s.text or "").strip()
+    if not text:
+        return -1.0
+    woerter = text.split()
+    erstes = dach_nlp.core_token(woerter[0]) if woerter else ""
+    if erstes in set(pol.einstieg.get("pronomen", ())) or erstes in dach_nlp.OPEN_LOOP_END:
+        return -1.0
+
+    klein = text.lower()
+    wert = sum(t.bonus for t in pol.moment_typen if not t.braucht_audio and t.trifft(klein))
+    klang = audio_wert(heat_payload, s.start, s.end)
+    if klang is not None:
+        wert += (klang - 0.5) * 4.0  # -2 bis +2
+    return round(wert, 3)
+
+
+def teaser_satz(
+    sents: list[Sentence],
+    first: int,
+    last: int,
+    pol: editorial.Policy,
+    heat_payload: dict[str, Any] | None,
+) -> int | None:
+    """Index des Satzes, der nach vorn gezogen werden soll, oder None.
+
+    Masterclass 10.3: „Die staerkste Aussage, oft aus der Mitte, an den Anfang stellen, dann
+    zurueckspringen." Drei Bedingungen aus der Grundlage:
+
+      * Der Satz muss deutlich staerker sein als der bisherige Anfang (``mindest_vorsprung``).
+        Ohne diesen Abstand waere das Umstellen Selbstzweck und nur Unruhe.
+      * Er darf nicht aus dem letzten Teil stammen (``nicht_aus_letztem_anteil``), sonst nimmt der
+        Teaser die Aufloesung vorweg und der Clip ist nach drei Sekunden erzaehlt.
+      * Er muss in die Teaserlaenge passen (``max_teaser_s``).
+    """
+    cfg = pol.hook_vorziehen
+    if not cfg.get("aktiv"):
+        return None
+    n = last - first + 1
+    if n < 3:
+        return None
+
+    anteil = float(cfg.get("nicht_aus_letztem_anteil", 0.25) or 0.0)
+    grenze = last - int(n * anteil)
+    max_s = float(cfg.get("max_teaser_s", 6.0))
+    kandidaten = [i for i in range(first + 1, grenze + 1) if (sents[i].end - sents[i].start) <= max_s]
+    if not kandidaten:
+        return None
+
+    staerken = {i: satz_staerke(sents[i], pol, heat_payload) for i in kandidaten}
+    bester = max(staerken, key=lambda i: staerken[i])
+    vorsprung = staerken[bester] - satz_staerke(sents[first], pol, heat_payload)
+    if vorsprung < float(cfg.get("mindest_vorsprung", 2.0)):
+        return None
+    return bester
 
 
 def policy_total(
@@ -483,6 +552,26 @@ def evaluate_span(
     span = sents[first : last + 1]
     clip_text = " ".join(s.text for s in span)
     klang = audio_wert(heat_payload, sents[first].start, sents[last].end)
+
+    # Hook vorziehen (Masterclass 10.3). Der Teaser wiederholt sich im Body, die Abspieldauer ist
+    # deshalb laenger als die Quellspanne. Genau damit muss die Laengenbewertung rechnen, sonst
+    # schoebe das Vorziehen jeden Clip unbemerkt aus dem guten Fenster.
+    pol_ = editorial.load()
+    segmente = [{"start": round(sents[first].start, 3), "end": round(sents[last].end, 3), "role": "body"}]
+    struktur = str(proposal.get("structure") or "hook_build_payoff")
+    teaser_idx = teaser_satz(sents, first, last, pol_, heat_payload)
+    abspiel_dauer = dur
+    if teaser_idx is not None:
+        t = sents[teaser_idx]
+        comp = compose.with_teaser(compose.Composition.from_json(segmente), round(t.start, 3), round(t.end, 3))
+        maengel = comp.validate(words)
+        if maengel:
+            # Lieber ohne Teaser als mit einem, den das Zusammensetzen spaeter ablehnt.
+            teaser_idx = None
+        else:
+            segmente = comp.to_json()
+            abspiel_dauer = comp.duration
+            struktur = "payoff_first"
     scores = {k: int(max(0, min(10, int(r.get(k, 0) or 0)))) for k in SCORE_KEYS}
     gates = deterministic_gates(words, sents, first, last, r)
     flags = later_qualifications(sents, first, last, llm)
@@ -500,7 +589,9 @@ def evaluate_span(
         # nachvollziehen, wie ein Gesamtwert zustande kam, weil "scores" nur die alten fuenf zeigt.
         "rubric_points": dict(r.get("rubric_points") or {}),
         "policy_version": str(r.get("policy_version") or ""),
-        "laenge_abzug": round(editorial.load().laenge_abzug(dur), 3),
+        "laenge_abzug": round(pol_.laenge_abzug(abspiel_dauer), 3),
+        "abspiel_dauer_s": round(abspiel_dauer, 2),
+        "teaser_satz": teaser_idx,
         # Klanganteil, 0,5 ist Durchschnitt. null heisst: keine Heatmap mit Audioanteil vorhanden.
         "klang": klang,
         "unresolved_references": [str(x) for x in (r.get("unresolved_references") or [])],
@@ -521,18 +612,18 @@ def evaluate_span(
     gate_passed = all(bool(g["passed"]) for g in gates.values())
     platform = str(brief.get("platform") or "linkedin")
     return CandidateResult(
-        segments=[{"start": round(sents[first].start, 3), "end": round(sents[last].end, 3), "role": "body"}],
+        segments=segmente,
         start_s=round(sents[first].start, 3),
         end_s=round(sents[last].end, 3),
         first_sent=first,
         last_sent=last,
-        structure=str(proposal.get("structure") or "hook_build_payoff"),
+        structure=struktur,
         rubric=rubric,
         gates=gates,
         story_graph_flags=flags,
         risk_flags=risk_flags_for(r, clip_text, heuristic),
         # Die Grundlage entscheidet, nicht mehr die alten fuenf Kriterien ohne Laengenabzug.
-        total=policy_total(r, dur, audio=klang),
+        total=policy_total(r, abspiel_dauer, pol=pol_, audio=klang),
         gate_passed=gate_passed,
         why=build_why(scores, r, gates, flags, dur, platform, heuristic),
         model_id=str(r.get("model_id") or llm.model()),
@@ -666,6 +757,8 @@ __all__ = [
     "run",
     "select_best",
     "audio_wert",
+    "satz_staerke",
+    "teaser_satz",
     "policy_total",
     "weighted_total",
 ]

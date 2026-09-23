@@ -174,3 +174,37 @@ def test_gleiche_dateinamen_in_verschiedenen_ordnern_kollidieren_nicht():
     b = Path("/x/Negative Beispiele/Download (2).mp4")
     assert schluessel(a) != schluessel(b)
     assert "Positive" in schluessel(a) and "Negative" in schluessel(b)
+
+
+# -- Eigenstaendige Clips: die Faelle aus den schlechten Beispielen ---------------------------------
+def test_eigenstaendiger_clip_mit_kleinem_anfangswort_beginnt_mitten_im_satz():
+    """Aus den negativen Beispielen: „auf einen Ausschnitt von Friedrich Merz reagieren".
+
+    Bei einer fertigen Clipdatei gibt es kein Wort davor. Die alte Pruefung meldete deshalb fuer
+    JEDEN eigenstaendigen Clip „Satzanfang: ja" und war damit wertlos.
+    """
+    words = satz(["auf", "einen", "Ausschnitt", "von", "Friedrich", "Merz", "reagieren."])
+    cand = {"start_s": words[0]["start"], "end_s": words[-1]["end"]}
+    assert clip_eval.check_boundaries(cand, words)["satzanfang"] is False
+
+
+def test_eigenstaendiger_clip_mit_grossem_anfangswort_ist_sauber():
+    words = satz(["Ich", "bin", "für", "eine", "komplette", "Arbeiterkontrolle."])
+    cand = {"start_s": words[0]["start"], "end_s": words[-1]["end"]}
+    assert clip_eval.check_boundaries(cand, words)["satzanfang"] is True
+
+
+def test_personalpronomen_am_anfang_ist_ein_rueckverweis():
+    """Aus den negativen Beispielen: „Er ist ja offensichtlich kein unintelligenter Mensch"."""
+    words = satz(["Er", "ist", "ja", "offensichtlich", "kein", "unintelligenter", "Mensch."])
+    assert clip_eval.check_boundaries({"start_s": words[0]["start"], "end_s": words[-1]["end"]}, words)[
+        "beginnt_mit_rueckverweis"
+    ] is True
+
+
+def test_es_am_anfang_ist_kein_rueckverweis():
+    """„Es sollte keine Milliardäre geben" ist eine These, kein Verweis. „es" ist hier Platzhalter."""
+    words = satz(["Es", "sollte", "keine", "Milliardäre", "geben."])
+    assert clip_eval.check_boundaries({"start_s": words[0]["start"], "end_s": words[-1]["end"]}, words)[
+        "beginnt_mit_rueckverweis"
+    ] is False

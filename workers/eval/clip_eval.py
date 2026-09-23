@@ -54,6 +54,14 @@ BACKREF_AMBIGUOUS = {"das", "dies", "dieses", "diese", "dieser", "diesem", "dem"
 BACKREF_POS_TAGS = {"PDS", "PDAT"}  # substituierend („das ist") und attribuierend („dieser Punkt")
 BACKREF_PHRASES = {"wie gesagt", "wie eben", "wie vorhin", "wie erwähnt", "das heißt", "und zwar"}
 
+# Personalpronomen der dritten Person. Wer einen Clip mit „Er ist ja offensichtlich kein
+# unintelligenter Mensch" beginnt, setzt voraus, dass der Zuschauer weiss, wer gemeint ist. Genau
+# dieser Fehler steckt in mehreren der schlechten Beispiele.
+#
+# „es" fehlt hier bewusst: es ist im Deutschen meistens ein Platzhalter ohne Bezug („es gibt",
+# „es sollte keine Milliardäre geben") und waere eine dauernde Fehlmeldung.
+BACKREF_PRONOMEN = {"er", "sie", "ihn", "ihm", "ihr", "ihnen", "dessen", "deren"}
+
 # So viele Wörter am Rand gelten als „am Rand". Eine Verneinung, die hier steht, verliert leicht
 # ihren Bezug, wenn davor oder danach geschnitten wird.
 EDGE_WORDS = 3
@@ -164,6 +172,12 @@ def starts_with_backref(words: list[dict], i_start: int, i_ende: int) -> bool | 
     zwei = " ".join(first_token(w.get("text")) for w in words[i_start : i_start + 2])
     if erstes in BACKREF_CLEAR or zwei in BACKREF_PHRASES:
         return True
+    # Personalpronomen ohne Bezug. Ausnahme: das höfliche „Sie", erkennbar an der Grossschreibung
+    # mitten im Satz, meint den Gesprächspartner und ist im Clip verständlich.
+    if erstes in BACKREF_PRONOMEN:
+        roh = str(words[i_start].get("text", "")).strip()
+        hoeflich = erstes == "sie" and roh[:1].isupper() and i_start > 0
+        return not hoeflich
     if erstes not in BACKREF_AMBIGUOUS:
         return False
 
@@ -197,8 +211,20 @@ def check_boundaries(cand: dict, words: list[dict]) -> dict[str, Any]:
             "hinweis": "Grenzen liegen außerhalb des Transkripts",
         }
 
-    # Satzanfang: das Wort davor beendet einen Satz, oder der Clip beginnt am Anfang der Aufnahme.
-    satzanfang = i_start == 0 or dach_nlp.is_sentence_end(words, i_start - 1)
+    # Satzanfang. Zwei Fälle, die auseinandergehalten werden müssen:
+    #
+    # Liegt ein Wort davor, entscheidet es: beendet es einen Satz, ist der Anfang sauber.
+    #
+    # Liegt keines davor, ist der Clip eigenständig (eine fertige Datei ohne Umgebung). Dann sagt
+    # „kein Wort davor" gar nichts. Hier hilft die deutsche Rechtschreibung: Ein Satz beginnt gross.
+    # Ein kleingeschriebenes erstes Wort heisst, der Schnitt liegt mitten im Satz. Genau so fängt
+    # eines der schlechten Beispiele an: „auf einen Ausschnitt von Friedrich Merz reagieren".
+    # Ohne diese Unterscheidung meldet die Messung für jeden eigenständigen Clip „Satzanfang: ja".
+    if i_start > 0:
+        satzanfang = dach_nlp.is_sentence_end(words, i_start - 1)
+    else:
+        erstes_roh = str(words[0].get("text", "")).lstrip("\"'„»(-– ")
+        satzanfang = bool(erstes_roh[:1].isupper())
     # Satzende: das letzte Wort des Clips beendet einen Satz.
     satzende = dach_nlp.is_sentence_end(words, i_ende)
 

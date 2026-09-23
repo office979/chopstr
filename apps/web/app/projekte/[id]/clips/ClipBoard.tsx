@@ -146,6 +146,8 @@ export function ClipBoard({
   const [extras, setExtras] = useState<Record<string, ClipExtras>>(publishing?.extras ?? {});
   const [approvals, setApprovals] = useState<Map<string, GuestApproval>>(() => latestByClip(guestApprovals));
   const [deleteTarget, setDeleteTarget] = useState<Clip | null>(null);
+  /* Clip, der gerade groß in einem Fenster läuft. Nicht Vollbild: das Fenster bleibt Teil der Seite. */
+  const [zoomClip, setZoomClip] = useState<Clip | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [events, setEvents] = useState<PipelineEvent[]>(initialEvents);
   const [connection, setConnection] = useState<"idle" | "live" | "closed" | "error">("idle");
@@ -153,7 +155,6 @@ export function ClipBoard({
   const [glitchGroups, setGlitchGroups] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
-  const [previewId, setPreviewId] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, ClipDetail>>({});
   const clipsRef = useRef<Clip[]>(initialClips);
 
@@ -253,13 +254,11 @@ export function ClipBoard({
     [sourceId, applyClips],
   );
 
-  const togglePreview = useCallback(
+  /* „Größer ansehen“: Fenster auf und, falls noch nicht geschehen, Hook und Untertitel nachladen.
+   * Die werden für die Attrappe gebraucht, wenn der Clip noch nicht gebaut ist. */
+  const openZoom = useCallback(
     async (clip: Clip) => {
-      if (previewId === clip.id) {
-        setPreviewId(null);
-        return;
-      }
-      setPreviewId(clip.id);
+      setZoomClip(clip);
       if (details[clip.id]) return;
       try {
         const res = await fetch(`/api/projects/${sourceId}/clips/${clip.id}`);
@@ -274,7 +273,7 @@ export function ClipBoard({
         setMessage({ tone: "error", text: err instanceof Error ? err.message : "Clip konnte nicht geladen werden" });
       }
     },
-    [sourceId, previewId, details],
+    [sourceId, details],
   );
 
   const onRequested = useCallback((approval: GuestApproval) => {
@@ -330,6 +329,54 @@ export function ClipBoard({
           </Button>
         </div>
       </Modal>
+
+      {/* Clip groß ansehen: eigenes Fenster mit den Steuerelementen des Browsers, also Ton,
+          Lautstärke und Spulen. Ersetzt den früheren zweiten Vorschau-Player unter der Karte. */}
+      <Modal
+        open={zoomClip != null}
+        onClose={() => setZoomClip(null)}
+        title={zoomClip ? `${PLATFORM_LABELS[zoomClip.platform]}, ${ASPECT_LABELS[zoomClip.aspect]}` : "Clip"}
+        description="Ton, Lautstärke und Spulen über die Steuerung im Player."
+        className="max-w-[min(92vw,720px)]"
+      >
+        {zoomClip &&
+          (mediaUrl(mediaBase, zoomClip.file_key) ? (
+            <video
+              src={mediaUrl(mediaBase, zoomClip.file_key) ?? undefined}
+              poster={mediaUrl(mediaBase, zoomClip.poster_key) ?? undefined}
+              controls
+              autoPlay
+              playsInline
+              preload="metadata"
+              aria-label={`${PLATFORM_LABELS[zoomClip.platform]} abspielen`}
+              className="mx-auto max-h-[70dvh] w-auto rounded-inner border border-line-strong bg-black"
+              style={{ aspectRatio: ASPECT_RATIO_CSS[zoomClip.aspect] }}
+            />
+          ) : details[zoomClip.id] ? (
+            /* Noch nicht gebaut: Attrappe aus Hook, Untertiteln und Markenfarben */
+            <div className="mx-auto max-w-[360px]">
+              <SilentPreview
+                aspect={zoomClip.aspect}
+                preset={details[zoomClip.id].captions?.preset ?? zoomClip.render_plan?.captions.preset ?? PLATFORM_DEFAULT_PRESET[zoomClip.platform]}
+                durationS={zoomClip.duration_s ?? compositionDuration(zoomClip)}
+                cards={details[zoomClip.id].captions?.cards ?? []}
+                hookText={details[zoomClip.id].hook?.onscreen_hook ?? null}
+                titleCard={zoomClip.title_card}
+                highlightColor={highlightColor}
+                lowerThird={lowerThird}
+                font={previewFont}
+              />
+              {!details[zoomClip.id].captions && (
+                <p className="mt-2 text-center text-xs text-text-2">Noch keine Untertitel. Sie entstehen beim Bauen.</p>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-text-2" role="status">
+              Vorschau wird geladen
+            </p>
+          ))}
+      </Modal>
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-text-2">
           {groups.length} {groups.length === 1 ? "Clip" : "Clips"}, {clips.filter(isDone).length} von {clips.length} Clips fertig.
@@ -396,17 +443,19 @@ export function ClipBoard({
               const video = isDone(clip) ? mediaUrl(mediaBase, clip.file_key) : null;
               const neutral = clip.render_plan?.reframe.strategy === "neutral";
               const duration = clip.duration_s ?? compositionDuration(clip);
-              const detail = details[clip.id];
-              const open = previewId === clip.id;
               const c2pa = clip.provenance?.c2pa;
               const clipExtras = extras[clip.id] ?? { id: clip.id, experiment_id: null, variant: null, series_id: null, series_index: null, reframe_override: null };
               const gates = publishing
                 ? publishGates({ clip, candidate: g.candidate, approval, workspace: { dpa_signed_at: publishing.dpaSigned ? "ja" : null }, plan: publishing.plan })
                 : [];
               return (
-                <li key={clip.id} className="flex min-w-0 flex-col gap-4 rounded-inner border border-line p-4 lg:flex-row lg:items-start">
+                <li key={clip.id} className="flex min-w-0 flex-col gap-4 rounded-inner border border-line p-4 sm:flex-row sm:items-stretch">
+                  {/* Vorschau links, klein und mit fester Breite. Die Höhe folgt dem Seitenverhältnis.
+                      Feste Breite statt Höhe plus w-auto: greift eine der Klassen nicht, wuchs das
+                      Video vorher auf die volle Spaltenbreite mal 1,78 in der Höhe. */}
+                  <div className="flex shrink-0 flex-col gap-2">
                   <div
-                    className="relative mx-auto w-full max-w-[280px] shrink-0 overflow-hidden rounded-[12px] border border-line bg-black lg:mx-0 lg:h-[340px] lg:w-auto lg:max-w-[600px]"
+                    className="relative w-[132px] overflow-hidden rounded-[12px] border border-line bg-black"
                     style={{ aspectRatio: ASPECT_RATIO_CSS[clip.aspect] }}
                   >
                     {video ? (
@@ -426,27 +475,24 @@ export function ClipBoard({
                         <span className="font-mono text-[11px] text-text-3">{clip.fps ? `${clip.fps} fps` : ""}</span>
                       </div>
                     )}
-                    <div className="absolute left-3 top-3 flex gap-1.5">
-                      <Badge tone="ok" className="h-6 bg-black/60 px-2.5 text-[11px]">
-                        {PLATFORM_LABELS[clip.platform]}
-                      </Badge>
-                      <Badge className="h-6 bg-black/60 px-2 text-[11px]" title={clip.aspect}>{ASPECT_LABELS[clip.aspect]}</Badge>
-                      {clipExtras?.variant && (
-                        <Badge tone="ai" className="h-6 bg-black/60 px-2 font-mono text-[11px]" title="Hook-A/B-Variante">
-                          {clipExtras.variant}
-                        </Badge>
-                      )}
-                    </div>
+                  </div>
+                    <Button size="sm" variant="ghost" onClick={() => void openZoom(clip)} className="w-[132px]">
+                      {video ? "Größer ansehen" : "Vorschau"}
+                    </Button>
                   </div>
 
-                  {/* Rechte Spalte: Zustand, Hinweise, Bedienung. Nimmt den Platz nach rechts,
-                      statt alles unter die Vorschau zu stapeln. */}
+                  {/* Mitte: Zustand, Hinweise, Bearbeiten. Unten die Downloads. */}
                   <div className="flex min-w-0 flex-1 flex-col gap-3">
                   <div className="flex items-start gap-3">
                     <StatusCheck state={state} size={28} label={`${CLIP_STATUS_LABELS[clip.status]}`} />
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                         <p className={cn("text-sm font-medium", state === "error" ? "text-attention" : "text-text")}>{CLIP_STATUS_LABELS[clip.status]}</p>
+                        <Badge tone="ok" className="h-6 px-2.5 text-[11px]">{PLATFORM_LABELS[clip.platform]}</Badge>
+                        <Badge className="h-6 px-2 text-[11px]" title={clip.aspect}>{ASPECT_LABELS[clip.aspect]}</Badge>
+                        {clipExtras?.variant && (
+                          <Badge tone="ai" className="h-6 px-2 font-mono text-[11px]" title="Hook-A/B-Variante">{clipExtras.variant}</Badge>
+                        )}
                         <span className="font-mono text-xs tabular-nums text-text-2">{formatClipDuration(duration)}</span>
                       </div>
                       {clip.status === "rendering" && (
@@ -531,25 +577,6 @@ export function ClipBoard({
                     </p>
                   )}
 
-                  <div className="border-t border-line pt-3">
-                    <GuestApprovalDialog
-                      sourceId={sourceId}
-                      clipId={clip.id}
-                      clipLabel={`${PLATFORM_LABELS[clip.platform]} ${clip.aspect}`}
-                      guestApprovalRequired={clip.guest_approval_required}
-                      current={approval ?? null}
-                      canRequest={canRequestGuest}
-                      planAllows={planAllowsGuest}
-                      planName={planName}
-                      onRequested={onRequested}
-                    />
-                    {clip.guest_approval_required && !approval?.decision && (
-                      <button type="button" onClick={() => refreshApproval(clip)} className="mt-1 text-xs text-text-2 underline-offset-4 hover:text-text hover:underline">
-                        Status aktualisieren
-                      </button>
-                    )}
-                  </div>
-
                   {blocked && (
                     <p className="rounded-[12px] border border-attention/50 bg-attention/10 px-3 py-2 text-xs text-text">
                       <span className="font-medium text-attention">{EXPORT_BLOCKED_MESSAGE}</span> MP4, SRT und VTT werden freigeschaltet, sobald der Gast zustimmt.
@@ -601,9 +628,6 @@ export function ClipBoard({
                     <Button size="sm" variant="ghost" onClick={() => rerender(clip)} disabled={busyId === clip.id || clip.status === "rendering"}>
                       Änderungen übernehmen
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => togglePreview(clip)} aria-expanded={open}>
-                      {open ? "Ton-Vorschau schließen" : "Mit Ton ansehen"}
-                    </Button>
                     {canDelete && (
                       <Button size="sm" variant="danger" onClick={() => setDeleteTarget(clip)} disabled={clip.status === "rendering"}>
                         Löschen
@@ -611,65 +635,49 @@ export function ClipBoard({
                     )}
                   </div>
 
-                  {publishing && (
-                    <ClipPublishing
-                      sourceId={sourceId}
-                      clip={clip}
-                      extras={clipExtras}
-                      gates={gates}
-                      connections={publishing.connections}
-                      series={publishing.series}
-                      initialPublications={publishing.publications.filter((p) => p.clip_id === clip.id)}
-                      initialFeedback={publishing.feedback.filter((f) => f.clip_id === clip.id)}
-                      canPublish={publishing.canPublish}
-                      canSeries={publishing.canSeries}
-                      canRender={publishing.canRender}
-                      onExtras={(next) => setExtras((prev) => ({ ...prev, [next.id]: next }))}
-                      onRerender={() => rerender(clip)}
-                    />
-                  )}
+                  {/* Die Vorschau liegt jetzt im Fenster „Größer ansehen“, nicht mehr aufgeklappt
+                      unter der Karte. Ein zweiter Player unter dem ersten war überflüssig. */}
+                  </div>
 
-                  {open && (
-                    <div className="border-t border-line pt-4">
-                      {video ? (
-                        <div className="flex flex-col gap-2">
-                          <video
-                            src={video}
-                            poster={poster ?? undefined}
-                            muted
-                            autoPlay
-                            loop
-                            playsInline
-                            controls
-                            preload="metadata"
-                            aria-label={`Vorschau, ${PLATFORM_LABELS[clip.platform]}`}
-                            className="mx-auto w-full max-w-[420px] rounded-inner border border-line-strong bg-black"
-                            style={{ aspectRatio: ASPECT_RATIO_CSS[clip.aspect] }}
-                          />
-                          <p className="text-center text-xs text-text-2">Startet stumm. Ton über die Steuerung im Player.</p>
-                        </div>
-                      ) : detail ? (
-                        <SilentPreview
-                          aspect={clip.aspect}
-                          preset={detail.captions?.preset ?? clip.render_plan?.captions.preset ?? PLATFORM_DEFAULT_PRESET[clip.platform]}
-                          durationS={duration}
-                          cards={detail.captions?.cards ?? []}
-                          hookText={detail.hook?.onscreen_hook ?? null}
-                          titleCard={clip.title_card}
-                          highlightColor={highlightColor}
-                          lowerThird={lowerThird}
-                          font={previewFont}
-                        />
-                      ) : (
-                        <p className="text-sm text-text-2" role="status">
-                          Vorschau wird geladen
-                        </p>
-                      )}
-                      {!video && detail && !detail.captions && (
-                        <p className="mt-2 text-center text-xs text-text-2">Noch keine Untertitel. Sie entstehen beim Bauen.</p>
+                  {/* Rechte Spalte: oben die Freigabe (hat mit dem Rest nichts zu tun),
+                      unten das Posten. Dazwischen Luft, damit beides an seinem Platz bleibt. */}
+                  <div className="flex w-full shrink-0 flex-col justify-between gap-4 border-t border-line pt-3 sm:w-[300px] sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+                    <div className="flex flex-col gap-1">
+                      <GuestApprovalDialog
+                        sourceId={sourceId}
+                        clipId={clip.id}
+                        clipLabel={`${PLATFORM_LABELS[clip.platform]} ${ASPECT_LABELS[clip.aspect]}`}
+                        guestApprovalRequired={clip.guest_approval_required}
+                        current={approval ?? null}
+                        canRequest={canRequestGuest}
+                        planAllows={planAllowsGuest}
+                        planName={planName}
+                        onRequested={onRequested}
+                      />
+                      {clip.guest_approval_required && !approval?.decision && (
+                        <button type="button" onClick={() => refreshApproval(clip)} className="self-start text-xs text-text-2 underline-offset-4 hover:text-text hover:underline">
+                          Status aktualisieren
+                        </button>
                       )}
                     </div>
-                  )}
+
+                    {publishing && (
+                      <ClipPublishing
+                        sourceId={sourceId}
+                        clip={clip}
+                        extras={clipExtras}
+                        gates={gates}
+                        connections={publishing.connections}
+                        series={publishing.series}
+                        initialPublications={publishing.publications.filter((p) => p.clip_id === clip.id)}
+                        initialFeedback={publishing.feedback.filter((f) => f.clip_id === clip.id)}
+                        canPublish={publishing.canPublish}
+                        canSeries={publishing.canSeries}
+                        canRender={publishing.canRender}
+                        onExtras={(next) => setExtras((prev) => ({ ...prev, [next.id]: next }))}
+                        onRerender={() => rerender(clip)}
+                      />
+                    )}
                   </div>
                 </li>
               );

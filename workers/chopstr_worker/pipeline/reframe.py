@@ -24,10 +24,13 @@ from __future__ import annotations
 import os
 from dataclasses import asdict, dataclass, field
 
+from . import tracking
+
 SAMPLE_FPS = 5
 MIN_SHOT_S = 1.2  # kürzer wirkt hektisch
 EYE_LINE = 0.37  # Gesichtsmitte bei 37 % der Ausgabehöhe (Augen im oberen Drittel)
 REFRAME_VERSION = "reframe_v1"
+
 STRATEGIES = ("talking_head", "two_speakers", "neutral", "slide_pip")
 DEFAULT_YUNET_MODEL = "models/face_detection_yunet_2023mar.onnx"
 ASPECTS = {"9:16": (9, 16), "4:5": (4, 5), "1:1": (1, 1), "16:9": (16, 9)}
@@ -208,6 +211,75 @@ def detect_faces(video_path: str, t0: float, t1: float) -> list[tuple[float, lis
         _, faces = det.detect(frame)
         boxes = [tuple(map(int, f[:4])) for f in (faces if faces is not None else [])]
         out.append((t, boxes))
+        t += 1 / SAMPLE_FPS
+    cap.release()
+    return out
+
+
+def abtasten(video_path: str, t0: float, t1: float) -> list[tracking.Abtastung]:
+    """Ein Durchlauf über den Abschnitt: Gesichter, Bildwechsel und Mundbewegung zugleich.
+
+    Drei Messungen in einem Durchgang, weil jedes Aufsetzen der Leseposition teuer ist:
+
+    GESICHTER wie bisher über YuNet.
+
+    BILDWECHSEL als Abstand der Farbverteilung zum vorigen Abtastpunkt. Ein Kameraschnitt ändert
+    das Histogramm sprunghaft, eine Bewegung im Bild nicht. Das ist das Signal, an dem Einstellungen
+    getrennt werden; ohne es werden Gesichter aus unvereinbaren Einstellungen vermischt.
+
+    MUNDBEWEGUNG als Änderung im unteren Teil jeder Gesichtsbox. Wer spricht, bewegt dort etwas.
+    Verglichen wird mit demselben Bildbereich des vorigen Abtastpunkts, deshalb ist der Wert
+    unmittelbar nach einem Schnitt bedeutungslos und wird verworfen.
+    """
+    import cv2
+    import numpy as np
+
+    model = yunet_model_path()
+    if not os.path.isfile(model):
+        raise FileNotFoundError(f"YuNet-Modell fehlt: {model}")
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    det = cv2.FaceDetectorYN.create(model, "", (w, h), 0.7)
+
+    out: list[tracking.Abtastung] = []
+    vor_hist = None
+    vor_grau = None
+    t = t0
+    while t < t1:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(t * fps))
+        ok, frame = cap.read()
+        if not ok:
+            break
+        _, faces = det.detect(frame)
+        boxen = [tuple(map(int, f[:4])) for f in (faces if faces is not None else [])]
+
+        klein = cv2.resize(frame, (160, 90))
+        hist = cv2.calcHist([klein], [0, 1, 2], None, [8, 8, 8], [0, 256] * 3)
+        cv2.normalize(hist, hist)
+        wechsel = None if vor_hist is None else float(1.0 - cv2.compareHist(vor_hist, hist, cv2.HISTCMP_CORREL))
+
+        grau = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        munde: list[float] = []
+        if vor_grau is not None and (wechsel is None or wechsel < tracking.SCHNITT_SCHWELLE):
+            for x, y, bw, bh in boxen:
+                # Unteres Drittel der Box, waagerecht auf die Mitte beschränkt: dort liegt der Mund.
+                mx0 = max(0, x + int(bw * 0.2))
+                mx1 = min(grau.shape[1], x + int(bw * 0.8))
+                my0 = max(0, y + int(bh * 0.55))
+                my1 = min(grau.shape[0], y + bh)
+                if mx1 <= mx0 or my1 <= my0:
+                    munde.append(0.0)
+                    continue
+                a = grau[my0:my1, mx0:mx1].astype("float32")
+                b = vor_grau[my0:my1, mx0:mx1].astype("float32")
+                munde.append(float(np.abs(a - b).mean()))
+        else:
+            munde = [0.0] * len(boxen)
+
+        out.append(tracking.Abtastung(t=t, boxen=boxen, bildwechsel=wechsel, mundbewegung=munde))
+        vor_hist, vor_grau = hist, grau
         t += 1 / SAMPLE_FPS
     cap.release()
     return out
@@ -718,6 +790,7 @@ __all__ = [
     "cluster_positions",
     "crop_geometry",
     "crop_origin",
+    "abtasten",
     "detect_faces",
     "detect_slide_region",
     "detector_available",

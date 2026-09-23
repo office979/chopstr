@@ -32,9 +32,10 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
-from . import config, db, events
+from . import config, db, editorial, events
 from .activities import analyze, common, deletion, ingest, nlp, publish, transcribe, webhooks
 from .activities.render import run_render_pack
+from .pipeline import story_engine
 
 log = logging.getLogger("chopstr.local_worker")
 
@@ -112,6 +113,16 @@ class LocalWorker:
 
     def run_forever(self) -> None:
         log.info("local worker start interval=%.1fs outbox_every=%.0fs", self.interval_s, self.outbox_every_s)
+        # Welcher Stand ist geladen? Python liest Module beim Start, ein laufender Worker arbeitet
+        # also mit dem Code von damals. Ohne diese Zeile sieht ein Lauf mit veraltetem Code genauso
+        # aus wie ein richtiger, und man sucht den Fehler stundenlang in den Daten.
+        log.info(
+            "geladener Stand: engine=%s policy=%s prompts=%s signals=%s",
+            story_engine.ENGINE_VERSION,
+            editorial.policy_version(),
+            ",".join(story_engine.prompt_versions()),
+            analyze.SIGNALS_VERSION,
+        )
         while not self.stop_requested:
             try:
                 counts = self.run_once()

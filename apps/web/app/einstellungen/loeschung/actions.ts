@@ -24,7 +24,7 @@ export async function requestWorkspaceDeletionAction(_prev: FormState, formData:
   const ws = await repo.getWorkspace();
   if (ws.deletion_scheduled_for) return { ok: false, message: "Die Löschung ist bereits eingeplant.", errors: {} };
   const confirm = field(formData, "confirm_name", 120);
-  if (confirm !== ws.name.trim()) return { ok: false, message: "Bitte den Namen des Workspace genau eingeben.", errors: { confirm_name: `Erwartet: ${ws.name}` } };
+  if (confirm !== ws.name.trim()) return { ok: false, message: "Bitte den Namen des Teams genau eingeben.", errors: { confirm_name: `Erwartet: ${ws.name}` } };
 
   const scheduledFor = new Date(Date.now() + WORKSPACE_DELETION_GRACE_DAYS * 86_400_000).toISOString();
   const updated = await repo.requestWorkspaceDeletion(scheduledFor);
@@ -33,11 +33,11 @@ export async function requestWorkspaceDeletionAction(_prev: FormState, formData:
   const when = new Date(scheduledFor).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric" });
   const mail = await sendMail({
     to: session.email,
-    subject: `Löschung des Workspace „${ws.name}“ eingeplant für ${when}`,
+    subject: `Löschung des Teams „${ws.name}“ eingeplant für ${when}`,
     text: [
       `Hallo ${session.displayName},`,
       "",
-      `du hast die Löschung des Workspace „${ws.name}“ angefordert. Sie wird am ${when} ausgeführt: alle Quellen, Clips, Transkripte und CI-Assets werden aus Objektspeicher und Datenbank entfernt, der Löschnachweis bleibt im Audit-Log.`,
+      `du hast die Löschung des Teams „${ws.name}“ angefordert. Sie wird am ${when} ausgeführt: alle Quellen, Clips, Transkripte und CI-Assets werden aus Objektspeicher und Datenbank entfernt, der Löschnachweis bleibt im Audit-Log.`,
       "",
       `Bis dahin kannst du die Löschung zurücknehmen: ${link}`,
       "",
@@ -73,5 +73,5 @@ export async function cancelWorkspaceDeletionAction(): Promise<FormState> {
   const updated = await repo.cancelWorkspaceDeletion();
   await repo.audit({ action: "workspace.delete_canceled", entity: "workspaces", entity_id: updated.id, payload: { was_scheduled_for: ws.deletion_scheduled_for } });
   revalidatePath("/einstellungen/loeschung");
-  return { ok: true, message: "Löschung zurückgenommen. Der Workspace bleibt bestehen.", errors: {} };
+  return { ok: true, message: "Löschung zurückgenommen. Das Team bleibt bestehen.", errors: {} };
 }

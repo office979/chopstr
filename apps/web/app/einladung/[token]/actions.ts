@@ -19,7 +19,7 @@ export async function acceptInviteAction(_prev: FormState, formData: FormData): 
   const invite = await repo.getInvite(token);
   if (!invite) return { ok: false, message: "Diese Einladung gibt es nicht mehr.", errors: {} };
   const existing = await repo.getMembership(me.userId, invite.workspace_id);
-  if (existing?.role === "owner") return { ok: false, message: "Du bist Inhaber dieses Workspaces, die Einladung ist für ein anderes Konto gedacht.", errors: {} };
+  if (existing?.role === "owner") return { ok: false, message: "Du bist Inhaber dieses Teams, die Einladung ist für ein anderes Konto gedacht.", errors: {} };
   const accepted = await repo.acceptInvite(token, me.userId);
   if (!accepted) return { ok: false, message: "Die Einladung ist abgelaufen oder wurde schon angenommen.", errors: {} };
   if (me.sessionId) await repo.setSessionWorkspace(me.sessionId, invite.workspace_id);

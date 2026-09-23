@@ -15,7 +15,7 @@ export function BrandList({ profiles, activeId, isNew }: { profiles: BrandProfil
     <GlassCard padding="md" className="mb-5 flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-medium">Deine Brandings</h2>
+          <h2 className="text-lg font-medium">Dein Aussehen</h2>
           <p className="mt-0.5 text-sm text-text-2">
             Jedes Video nutzt eines davon. Es steuert Anrede, Farben, Schrift und Untertitel-Stil.
           </p>
@@ -27,7 +27,7 @@ export function BrandList({ profiles, activeId, isNew }: { profiles: BrandProfil
             isNew ? "bg-text text-black" : "border border-line-strong text-text hover:border-white/40 hover:bg-white/5",
           )}
         >
-          Neues Branding
+          Neues Aussehen
         </Link>
       </div>
 

@@ -30,7 +30,7 @@ export default function ErrorPage({ error, reset }: { error: Error & { digest?: 
             <p className="mt-6 text-sm text-text-2">
               Falsche Rolle?{" "}
               <Link href="/workspaces" className="text-text hover:underline">
-                Workspace wechseln
+                Team wechseln
               </Link>
             </p>
           )}

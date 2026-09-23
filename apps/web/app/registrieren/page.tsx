@@ -13,8 +13,8 @@ export default async function RegisterPage() {
   if (!demo && (await getAuthUser())) redirect("/");
   return (
     <AuthShell
-      title="Workspace anlegen"
-      description="Ein Konto für dich, ein Workspace für deine Firma. Mitglieder lädst du danach ein."
+      title="Konto anlegen"
+      description="Ein Konto für dich, ein Team für deine Firma. Mitglieder lädst du danach ein."
       backgroundWord="Start"
       demo={demo}
       footer={

@@ -16,7 +16,7 @@ export async function GET() {
   const files: Record<string, Uint8Array> = {
     "README.txt": strToU8(
       [
-        `chopstr Datenexport, Workspace ${data.workspace.name} (${data.workspace.id})`,
+        `chopstr Datenexport, Team ${data.workspace.name} (${data.workspace.id})`,
         `Erstellt ${stamp} von ${auth.email}`,
         "",
         "Eine JSON-Datei je Tabelle. media-keys.json listet die Objektspeicher-Keys (Rohmaterial, Proxys, Renderings, Captions, CI-Assets);",

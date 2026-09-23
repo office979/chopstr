@@ -20,7 +20,7 @@ export function RegisterForm({ demo }: { demo: boolean }) {
       <Field label="Passwort" htmlFor="password" required error={state.errors.password} hint="Mindestens 10 Zeichen, Buchstaben und eine Ziffer.">
         <Input id="password" name="password" type="password" autoComplete="new-password" required disabled={demo} />
       </Field>
-      <Field label="Firma oder Agentur" htmlFor="company" required error={state.errors.company} hint="Wird der Name deines Workspaces.">
+      <Field label="Firma oder Agentur" htmlFor="company" required error={state.errors.company} hint="Wird der Name deines Teams.">
         <Input id="company" name="company" autoComplete="organization" placeholder="z. B. PLACEMedia" required disabled={demo} />
       </Field>
       <FormNotice state={state} />
@@ -29,7 +29,7 @@ export function RegisterForm({ demo }: { demo: boolean }) {
       </p>
       <div>
         <Button type="submit" disabled={pending || demo}>
-          {pending ? "Wird angelegt" : "Workspace anlegen"}
+          {pending ? "Wird angelegt" : "Konto anlegen"}
         </Button>
       </div>
     </form>

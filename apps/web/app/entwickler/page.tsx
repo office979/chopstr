@@ -106,7 +106,7 @@ def verify(secret: str, body: bytes, header: str, tolerance_s: int = 300) -> boo
   return (
     <PageShell backgroundWord="API" lightTone="ai">
       <PageHeader
-        eyebrow={`Workspace · ${session.workspaceName}`}
+        eyebrow={`Team · ${session.workspaceName}`}
         title="Entwickler"
         description="Öffentliche API, Webhooks und MCP-Server. Die KI schlägt vor, ein Mensch gibt frei: jede schreibende Aktion braucht einen Schlüssel mit passendem Scope, und nichts wird ohne Freigabe veröffentlicht."
         actions={

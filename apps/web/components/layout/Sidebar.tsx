@@ -46,7 +46,7 @@ export function Sidebar({ user }: { user: NavUser | null }) {
   const main: NavItem[] = [
     { href: "/", label: "Meine Videos", icon: <IconGrid />, match: (p) => p === "/" || p.startsWith("/projekte") },
   ];
-  if (user?.canBrand) main.push({ href: "/marke", label: "Branding", icon: <IconBrand />, match: (p) => p.startsWith("/marke") });
+  if (user?.canBrand) main.push({ href: "/marke", label: "Aussehen", icon: <IconBrand />, match: (p) => p.startsWith("/marke") });
 
   const publishing: NavItem[] = [];
   if (canExt(user?.role, "series.manage")) publishing.push({ href: "/serien", label: "Serien", icon: <IconStack />, match: (p) => p.startsWith("/serien") });
@@ -76,7 +76,9 @@ export function Sidebar({ user }: { user: NavUser | null }) {
 
       <nav aria-label="Hauptnavigation" className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
         <NavGroup items={main} pathname={pathname} />
-        {publishing.length > 0 && <NavGroup title="Publishing" items={publishing} pathname={pathname} />}
+        {/* „Auswertung“ statt „Publishing“: so heißt die Gruppe im Bedienkonzept (Abschnitt 4) und
+            sie enthält genau das, was dort steht — Serien, Tests, Berichte. */}
+        {publishing.length > 0 && <NavGroup title="Auswertung" items={publishing} pathname={pathname} />}
         {tools.length > 0 && <NavGroup title="Werkzeuge" items={tools} pathname={pathname} />}
       </nav>
 
@@ -187,7 +189,7 @@ function ProfileMenu({ user, pathname }: { user: NavUser; pathname: string }) {
       {open && (
         <div role="menu" className="absolute bottom-[calc(100%+8px)] left-0 right-0 rounded-inner border border-line bg-raised p-1.5 text-sm">
           <MenuLink href="/profil">Profil</MenuLink>
-          <MenuLink href="/workspaces">Workspace wechseln</MenuLink>
+          <MenuLink href="/workspaces">Team wechseln</MenuLink>
           {user.canBilling && <MenuLink href="/einstellungen/abrechnung">Abrechnung</MenuLink>}
           {user.canAudit && <MenuLink href="/einstellungen/audit">Audit-Log</MenuLink>}
           <MenuLink href="/rechtliches/avv">Rechtliches</MenuLink>

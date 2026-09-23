@@ -124,7 +124,7 @@ export function AssetsCard({ profileId, assets: initialAssets, ci, canUpload }: 
       </div>
 
       {!profileId ? (
-        <p className="text-sm text-text-2">Bitte das Markenprofil zuerst speichern, dann kannst du Dateien hochladen.</p>
+        <p className="text-sm text-text-2">Bitte das Aussehen zuerst speichern, dann kannst du Dateien hochladen.</p>
       ) : canUpload ? (
         <div className="flex flex-col gap-4 rounded-inner border border-line p-4">
           <div className="grid gap-4 sm:grid-cols-[200px_minmax(0,1fr)]">

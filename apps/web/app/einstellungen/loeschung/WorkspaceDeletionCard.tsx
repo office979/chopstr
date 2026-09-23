@@ -28,7 +28,7 @@ export function WorkspaceDeletionCard({ workspace, canDelete, demo }: Props) {
     <GlassCard padding="lg" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-medium">Workspace löschen</h2>
+          <h2 className="text-lg font-medium">Team löschen</h2>
           <p className="mt-1 max-w-xl text-sm text-text-2">
             Nach 30 Tagen Karenz werden alle Quellen, Clips, Transkripte, Mitgliedschaften und CI-Assets gelöscht. Der Löschnachweis bleibt im Audit-Log, die Rechnungsdaten
             bleiben für die gesetzliche Aufbewahrung.
@@ -65,7 +65,7 @@ export function WorkspaceDeletionCard({ workspace, canDelete, demo }: Props) {
           </div>
         </form>
       ) : (
-        <p className="text-sm text-text-2">Nur der Inhaber kann den Workspace löschen.</p>
+        <p className="text-sm text-text-2">Nur der Inhaber kann das Team löschen.</p>
       )}
     </GlassCard>
   );

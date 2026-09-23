@@ -76,9 +76,9 @@ export default async function DpaPage() {
     </>
   ) : (
     <GlassCard padding="lg" className="flex flex-col gap-2">
-      <h2 className="text-lg font-medium">Für deinen Workspace</h2>
+      <h2 className="text-lg font-medium">Für dein Team</h2>
       <p className="text-sm text-text-2">
-        Nach der <Link href="/anmelden?next=/rechtliches/avv" className="text-text hover:underline">Anmeldung</Link> werden Firma, Vertreter und Löschfristen aus dem Workspace eingesetzt und Inhaber können den Vertrag annehmen.
+        Nach der <Link href="/anmelden?next=/rechtliches/avv" className="text-text hover:underline">Anmeldung</Link> werden Firma, Vertreter und Löschfristen aus deinem Team eingesetzt und Inhaber können den Vertrag annehmen.
       </p>
     </GlassCard>
   );

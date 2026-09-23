@@ -38,7 +38,7 @@ export function SettingsShell({ session, tab, title, description, actions, child
   const tabs = TABS.filter((t) => !t.action || can(session.role, t.action));
   return (
     <PageShell width="default" backgroundWord="EU">
-      <PageHeader eyebrow={`Workspace · ${session.workspaceName}`} title={title} description={description} actions={actions} />
+      <PageHeader eyebrow={`Team · ${session.workspaceName}`} title={title} description={description} actions={actions} />
       <nav aria-label="Einstellungen" className="mb-6 flex flex-wrap gap-1">
         {tabs.map((t) => (
           <Link

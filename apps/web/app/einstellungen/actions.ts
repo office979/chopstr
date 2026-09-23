@@ -45,7 +45,7 @@ export async function updateWorkspaceAction(_prev: FormState, formData: FormData
     payload: { name, data_region: dataRegion, retention_days: retention, render_retention_days: renderRetention },
   });
   revalidatePath("/einstellungen");
-  return { ok: true, message: isDemoMode() ? "Gespeichert (Demo, nur im Speicher)." : "Workspace gespeichert.", errors: {} };
+  return { ok: true, message: isDemoMode() ? "Gespeichert (Demo, nur im Speicher)." : "Team gespeichert.", errors: {} };
 }
 
 /* Mitglieder: Einladung per E-Mail mit Rolle und optional Marke (client: Pflicht) */
@@ -67,7 +67,7 @@ export async function inviteMemberAction(_prev: FormState, formData: FormData): 
   const role = roleRaw as Exclude<Role, "owner">;
   let brandProfileId: string | null = null;
   if (brandRaw) {
-    if (!UUID_RE.test(brandRaw)) errors.brand_profile_id = "Markenprofil ungültig.";
+    if (!UUID_RE.test(brandRaw)) errors.brand_profile_id = "Dieses Aussehen gibt es nicht.";
     else brandProfileId = brandRaw;
   }
   if (role === "client" && !brandProfileId) errors.brand_profile_id = "Kunden brauchen eine Marke.";
@@ -75,11 +75,11 @@ export async function inviteMemberAction(_prev: FormState, formData: FormData): 
 
   const repo = getRepo();
   if (brandProfileId && !(await repo.getBrandProfile(brandProfileId))) {
-    return { ok: false, message: "Markenprofil nicht gefunden.", errors: { brand_profile_id: "Bitte ein Markenprofil dieses Workspaces wählen." } };
+    return { ok: false, message: "Dieses Aussehen gibt es nicht.", errors: { brand_profile_id: "Bitte ein Aussehen aus deinem Team wählen." } };
   }
   const members = await repo.listMembers();
   if (members.some((m) => m.email.toLowerCase() === email)) {
-    return { ok: false, message: "Diese Person ist bereits Mitglied.", errors: { email: "Bereits im Workspace." } };
+    return { ok: false, message: "Diese Person ist bereits Mitglied.", errors: { email: "Bereits im Team." } };
   }
   const invite = await repo.createInvite({
     email,

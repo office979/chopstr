@@ -13,7 +13,7 @@ export async function switchWorkspaceAction(_prev: FormState, formData: FormData
   if (isDemoMode() || !me.sessionId) redirect("/");
   const repo = getRepo();
   const membership = await repo.getMembership(me.userId, workspaceId);
-  if (!membership) return { ok: false, message: "Du bist in diesem Workspace kein Mitglied.", errors: {} };
+  if (!membership) return { ok: false, message: "Du bist in diesem Team kein Mitglied.", errors: {} };
   await repo.setSessionWorkspace(me.sessionId, workspaceId);
   await repo.auditAs({ workspace_id: workspaceId, actor_id: me.userId }, { action: "auth.workspace_switched", entity: "workspaces", entity_id: workspaceId });
   redirect("/");

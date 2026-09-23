@@ -145,7 +145,7 @@ export default function LandingPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Feature title="Freigabe per Link" text="Schick den Clip an die Kundin. Sie sieht ihn im Browser, sagt Ja oder wünscht Änderungen. Kein Konto, kein Download, kein Mailanhang." />
             <Feature title="Rollen statt Zugriff für alle" text="Wer hochladen darf, wer freigibt, wer nur zuschaut. Gäste sehen genau einen Clip und sonst nichts." />
-            <Feature title="Ein Branding je Kunde" text="Farben, Logo, Schrift, Wörterbuch und Untertitel-Stil pro Marke. Wer für drei Kunden arbeitet, mischt sie nicht mehr." />
+            <Feature title="Ein eigenes Aussehen je Kunde" text="Farben, Logo, Schrift, Wörterbuch und Untertitel-Stil pro Marke. Wer für drei Kunden arbeitet, mischt sie nicht mehr." />
             <Feature title="Der Papierkram ist erledigt" text="Auftragsverarbeitungsvertrag, Subprozessoren und Löschnachweise liegen bereit. Jede Aktion steht im Protokoll." />
           </div>
         </Section>

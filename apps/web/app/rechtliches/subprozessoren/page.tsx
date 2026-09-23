@@ -27,7 +27,7 @@ export default async function SubprocessorsPage({ searchParams }: { searchParams
       <h2 className="text-lg font-medium">Tarif</h2>
       {workspace && (
         <p className="text-sm text-text-2">
-          Dein Workspace läuft im Tarif <Badge className="ml-1">{workspace.tier === "sovereign" ? "Sovereign" : "Standard"}</Badge>
+          Dein Team läuft im Tarif <Badge className="ml-1">{workspace.tier === "sovereign" ? "Sovereign" : "Standard"}</Badge>
         </p>
       )}
       <div className="flex flex-wrap gap-2 text-sm">

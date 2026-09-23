@@ -159,7 +159,7 @@ export async function sendInvite(input: InviteMailInput): Promise<MailResult & {
   const result = await sendMail({
     to: input.email,
     subject: `${input.invitedBy} lädt dich zu ${input.workspaceName} bei chopstr ein`,
-    text: `Hallo,\n\n${input.invitedBy} hat dich als ${input.role} in den Workspace „${input.workspaceName}“ eingeladen.\nEinladung annehmen (${days} Tage gültig):\n${link}${SIGNATURE}`,
+    text: `Hallo,\n\n${input.invitedBy} hat dich als ${input.role} in das Team „${input.workspaceName}“ eingeladen.\nEinladung annehmen (${days} Tage gültig):\n${link}${SIGNATURE}`,
     link,
   });
   return { ...result, link };

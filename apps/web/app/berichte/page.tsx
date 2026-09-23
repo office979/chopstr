@@ -49,7 +49,7 @@ export default async function ReportsPage() {
 
   return (
     <PageShell width="default" backgroundWord="Woche">
-      <PageHeader eyebrow={`Workspace · ${session.workspaceName}`} title="Berichte" description="Jeden Montag: drei beste und drei schwächste Clips nach Folgequote, je eine Ursache und eine Änderung." />
+      <PageHeader eyebrow={`Team · ${session.workspaceName}`} title="Berichte" description="Jeden Montag: drei beste und drei schwächste Clips nach Folgequote, je eine Ursache und eine Änderung." />
       <GlassCard padding="md" className="mb-5">
         <ReportSettings enabled={enabled} canManage={canManage} />
       </GlassCard>

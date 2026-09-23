@@ -24,7 +24,7 @@ export default async function MembersPage() {
       session={session}
       tab="mitglieder"
       title="Mitglieder"
-      description={canManage ? "Lade Kolleginnen, Reviewer oder Kunden ein. Kunden sind immer an eine Marke gebunden." : "Wer in diesem Workspace arbeitet. Einladen dürfen Inhaber und Admins."}
+      description={canManage ? "Lade Kolleginnen, Reviewer oder Kunden ein. Kunden sind immer an eine Marke gebunden." : "Wer in diesem Team arbeitet. Einladen dürfen Inhaber und Admins."}
     >
       <MembersPanel
         members={members}

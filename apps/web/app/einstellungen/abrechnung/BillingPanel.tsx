@@ -262,7 +262,7 @@ export function BillingPanel({ provider, subscription, plan, plans, usage, histo
                 <ul className="flex flex-col gap-1 text-sm text-text-2">
                   <li>{formatHoursLong(p.included_hours * 60)} Quellmaterial</li>
                   <li>{formatEur(p.overage_eur_per_hour)} je weitere Stunde</li>
-                  <li>{p.max_brand_profiles == null ? "Unbegrenzt Markenprofile" : `${p.max_brand_profiles} ${p.max_brand_profiles === 1 ? "Markenprofil" : "Markenprofile"}`}</li>
+                  <li>{p.max_brand_profiles == null ? "Unbegrenzt viele Aussehen" : `${p.max_brand_profiles} ${p.max_brand_profiles === 1 ? "Aussehen" : "verschiedene Aussehen"}`}</li>
                   <li>{p.max_members == null ? "Unbegrenzt Mitglieder" : `${p.max_members} Mitglieder`}</li>
                   <li className={p.features?.guest_approval ? "text-text" : ""}>{p.features?.guest_approval ? "Gast-Freigabe" : "Keine Gast-Freigabe"}</li>
                   {Boolean(p.features?.white_label) && <li className="text-text">White-Label</li>}
@@ -272,7 +272,7 @@ export function BillingPanel({ provider, subscription, plan, plans, usage, histo
                   {current && status !== "trialing" && !subscription?.cancel_at_period_end ? (
                     <span className="text-xs text-text-2">Dein Tarif</span>
                   ) : gated ? (
-                    <span className="text-xs text-text-2">Nur für Sovereign-Workspaces (Umstellung über den Support)</span>
+                    <span className="text-xs text-text-2">Nur für Sovereign-Teams (Umstellung über den Support)</span>
                   ) : (
                     <Button size="sm" variant={current ? "primary" : "ghost"} onClick={() => setConfirmPlan(p)} disabled={busy != null}>
                       {current ? "Jetzt buchen" : plan && p.monthly_eur > plan.monthly_eur ? "Upgrade" : "Wechseln"}

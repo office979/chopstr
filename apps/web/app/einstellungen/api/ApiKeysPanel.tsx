@@ -71,7 +71,7 @@ export function ApiKeysPanel({ keys, demo }: Props) {
           </fieldset>
           {!state.secret && <FormNotice state={state} />}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-text-2">{demo ? "Demo: Schlüssel gelten nur, solange der Serverprozess läuft." : "Schlüssel gelten für diesen Workspace und laufen auf dein Konto."}</p>
+            <p className="text-sm text-text-2">{demo ? "Demo: Schlüssel gelten nur, solange der Serverprozess läuft." : "Schlüssel gelten für dieses Team und laufen auf dein Konto."}</p>
             <Button type="submit" disabled={creating}>
               {creating ? "Wird angelegt" : "Schlüssel anlegen"}
             </Button>

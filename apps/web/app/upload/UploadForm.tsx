@@ -288,7 +288,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
         <Field label="Wie soll es heißen?" htmlFor="title" required error={errors.title}>
           <Input id="title" name="title" placeholder="z. B. Podcast Folge 13: Preise im Handwerk" required disabled={busy} />
         </Field>
-        <Field label="Branding" htmlFor="brand_profile_id" hint="Bestimmt Farben, Schrift und wie die Untertitel aussehen.">
+        <Field label="Aussehen" htmlFor="brand_profile_id" hint="Bestimmt Farben, Schrift und wie die Untertitel aussehen.">
           <Select id="brand_profile_id" name="brand_profile_id" defaultValue={profiles[0]?.id ?? ""} disabled={busy}>
             {profiles.length === 0 && <option value="">Noch keines angelegt</option>}
             {profiles.map((p) => (
@@ -466,12 +466,11 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
       )}
 
       <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* Hier stand, wie der Server eingerichtet ist (tusd, Temporal, Zieladresse). Das hilft beim
+         * Einrichten, nicht beim Hochladen, und ist für alle anderen nur Lärm. Übrig bleibt der eine
+         * Satz, der wirklich etwas über das eigene Video sagt: zum Ausprobieren wird nichts gespeichert. */}
         <p className="text-sm text-text-2">
-          {demoUpload
-            ? "Demo-Modus aktiv: kein tusd, kein Temporal. Das Projekt entsteht im Speicher."
-            : uploadMode === "direct"
-              ? `Lokaler Testmodus: direkter Upload nach /api/uploads/direct${localWorker ? ", der lokale Worker holt die Quelle ab" : ""}.`
-              : "Ziel: " + tusEndpoint}
+          {demoUpload ? "Zum Ausprobieren: Dein Video wird nicht wirklich gespeichert." : ""}
         </p>
         <div className="flex gap-2">
           {phase === "uploading" && (

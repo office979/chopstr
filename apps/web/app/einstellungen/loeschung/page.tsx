@@ -12,8 +12,8 @@ import { WorkspaceDeletionCard } from "./WorkspaceDeletionCard";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Löschung und Export" };
 
-const ENTITY_LABELS: Record<DeletionJob["entity"], string> = { source: "Quelle", clip: "Clip", brand_profile: "Markenprofil", workspace: "Workspace" };
-const REASON_LABELS: Record<DeletionJob["reason"], string> = { user_request: "Nutzeranfrage", retention: "Löschfrist", workspace_deleted: "Workspace gelöscht", gdpr_request: "DSGVO-Anfrage" };
+const ENTITY_LABELS: Record<DeletionJob["entity"], string> = { source: "Quelle", clip: "Clip", brand_profile: "Aussehen", workspace: "Team" };
+const REASON_LABELS: Record<DeletionJob["reason"], string> = { user_request: "Nutzeranfrage", retention: "Löschfrist", workspace_deleted: "Team gelöscht", gdpr_request: "DSGVO-Anfrage" };
 const STATUS: Record<DeletionJob["status"], { label: string; tone: "neutral" | "attention" | "ok" | "ai" | "danger" }> = {
   queued: { label: "Eingeplant", tone: "attention" },
   running: { label: "Läuft", tone: "ai" },
@@ -47,7 +47,7 @@ export default async function DeletionPage() {
             <div>
               <h2 className="text-lg font-medium">Datenexport</h2>
               <p className="mt-1 max-w-xl text-sm text-text-2">
-                ZIP mit einer JSON-Datei je Tabelle deines Workspace (Art. 15 und 20 DSGVO) und der Liste aller Medien-Keys. Videos liegen im Objektspeicher und sind nicht enthalten.
+                ZIP mit einer JSON-Datei je Tabelle deines Teams (Art. 15 und 20 DSGVO) und der Liste aller Medien-Keys. Videos liegen im Objektspeicher und sind nicht enthalten.
               </p>
             </div>
             <ButtonLink href="/api/export" prefetch={false}>

@@ -24,7 +24,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <>
           <span>Noch kein Konto?</span>
           <Link href="/registrieren" className="text-text hover:underline">
-            Workspace anlegen
+            Konto anlegen
           </Link>
         </>
       }

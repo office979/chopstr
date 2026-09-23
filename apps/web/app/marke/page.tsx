@@ -9,7 +9,7 @@ import { BrandList } from "./BrandList";
 import { HistoryCard } from "./HistoryCard";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Branding" };
+export const metadata = { title: "Aussehen" };
 
 type Props = { searchParams: Promise<{ p?: string }> };
 
@@ -30,11 +30,11 @@ export default async function BrandPage({ searchParams }: Props) {
   const history = profile ? buildHistory(versions, profile) : [];
 
   return (
-    <PageShell backgroundWord="Brand">
+    <PageShell backgroundWord="Marke">
       <PageHeader
-        eyebrow="Brand Brain"
-        title="Branding"
-        description="Anrede, Land und Wörterbuch steuern Transkription, Untertitel und Hooks. Alles bleibt in deinem Workspace."
+        eyebrow="Deine Marke"
+        title="Aussehen"
+        description="Farben, Logo, Schrift und Wörterbuch. Sie bestimmen, wie deine Clips aussehen und klingen. Alles bleibt in deinem Team."
       />
       <BrandList profiles={profiles} activeId={profile?.id ?? null} isNew={isNew} />
       {/* key erzwingt ein frisches Formular beim Wechsel; sonst blieben die Eingaben des vorigen stehen */}

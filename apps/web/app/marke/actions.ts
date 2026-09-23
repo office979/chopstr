@@ -156,5 +156,5 @@ export async function saveBrandProfileAction(_prev: BrandFormState, formData: Fo
   });
   revalidatePath("/marke");
   revalidatePath("/upload");
-  return { ok: true, message: `Markenprofil gespeichert (Version ${saved.version}).`, errors: {} };
+  return { ok: true, message: `Aussehen gespeichert (Version ${saved.version}).`, errors: {} };
 }

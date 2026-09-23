@@ -8,7 +8,7 @@ import { SettingsShell } from "./SettingsShell";
 import { GeneralForm } from "./GeneralForm";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Workspace" };
+export const metadata = { title: "Team" };
 
 function Row({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
@@ -26,7 +26,7 @@ export default async function SettingsPage() {
   const editable = can(session.role, "workspace.update");
 
   return (
-    <SettingsShell session={session} tab="allgemein" title="Einstellungen" description="Name, Region und Aufbewahrung des Workspaces. Tarif und Slug sind fest.">
+    <SettingsShell session={session} tab="allgemein" title="Einstellungen" description="Name, Region und Aufbewahrung deines Teams. Tarif und Slug sind fest.">
       <div className="flex flex-col gap-5">
         <GeneralForm workspace={ws} planName={quota.plan?.name ?? ws.plan} editable={editable} />
         <GlassCard padding="lg">
@@ -40,7 +40,7 @@ export default async function SettingsPage() {
             <Row label="US-Subprozessoren erlaubt" value={ws.allow_us_subprocessors ? "ja" : "nein"} />
             <Row label="Training mit Kundendaten" value={ws.training_opt_in ? "an" : "aus"} />
             <Row label="AV-Vertrag angenommen" value={ws.dpa_signed_at ? formatDate(ws.dpa_signed_at) : "noch nicht"} />
-            <Row label="Workspace-ID" value={ws.id} mono />
+            <Row label="Team-ID" value={ws.id} mono />
           </dl>
         </GlassCard>
         <p className="text-sm text-text-2">

@@ -257,7 +257,7 @@ export function TranscriptEditor({ sourceId, title, durationS, videoSrc, transcr
                   <Badge tone={hint.tone}>{hint.text}</Badge>
                   {hint.detail && <p className="text-xs text-text-2">{hint.detail}</p>}
                   {hint.tone === "attention" && (
-                    <p className="text-xs text-text-2">Im Markenprofil die ASR-Variante de-CH wählen und neu transkribieren. Geschützte Begriffe bleiben immer im Original.</p>
+                    <p className="text-xs text-text-2">Unter „Aussehen“ die ASR-Variante de-CH wählen und neu transkribieren. Geschützte Begriffe bleiben immer im Original.</p>
                   )}
                 </div>
               )}

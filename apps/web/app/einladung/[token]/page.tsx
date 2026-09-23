@@ -29,7 +29,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
     <span>
       Angemeldet als {me.email}.{" "}
       <Link href="/workspaces" className="text-text hover:underline">
-        Workspaces
+        Deine Teams
       </Link>
     </span>
   ) : (

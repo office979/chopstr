@@ -23,7 +23,7 @@ export default async function ExperimentsPage() {
 
   return (
     <PageShell width="default" backgroundWord="A/B">
-      <PageHeader eyebrow={`Workspace · ${session.workspaceName}`} title="Experimente" description="Zwei Hooks, gleiche Komposition. Entscheidung erst nach 48 Stunden und Mindestexposure, mit Konfidenz über die Folgequote." />
+      <PageHeader eyebrow={`Team · ${session.workspaceName}`} title="Experimente" description="Zwei Hooks, gleiche Komposition. Entscheidung erst nach 48 Stunden und Mindestexposure, mit Konfidenz über die Folgequote." />
       {experiments.length === 0 ? (
         <GlassCard padding="lg" className="text-center">
           <p className="text-lg font-medium">Noch kein Experiment</p>

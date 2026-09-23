@@ -71,7 +71,7 @@ export async function PageShell({ children, lightTone = "brand", width = "defaul
             <div className="print:hidden mb-6">
               <p role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-inner border border-attention/50 bg-attention/10 px-4 py-2.5 text-sm text-text">
                 <span>
-                  <span className="font-medium text-attention">Löschung des Workspace eingeplant</span> für {deletionBanner}. Bis dahin kannst du sie zurücknehmen.
+                  <span className="font-medium text-attention">Löschung des Teams eingeplant</span> für {deletionBanner}. Bis dahin kannst du sie zurücknehmen.
                 </span>
                 <Link href="/einstellungen/loeschung" className="text-text underline-offset-4 hover:underline">
                   Zur Löschung

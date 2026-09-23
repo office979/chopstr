@@ -144,7 +144,7 @@ export default async function ProjectPage({ params }: Props) {
                 </div>
               )}
               <div className="col-span-2">
-                <Meta label="Branding">{brand?.name ?? <span className="text-text-2">keines</span>}</Meta>
+                <Meta label="Aussehen">{brand?.name ?? <span className="text-text-2">keines</span>}</Meta>
               </div>
               <div className="col-span-2">
                 <Meta label="Status">

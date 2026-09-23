@@ -17,7 +17,7 @@ export const IMAGE_MAX_BYTES = 2 * 1024 * 1024;
 export const FONT_EXTENSIONS = ["ttf", "otf", "woff2"] as const;
 export const IMAGE_EXTENSIONS = ["svg", "png"] as const;
 
-export const LICENSE_TEXT = "Ich bestätige, dass ich die Lizenz für diese Datei besitze und sie für Renderings in diesem Workspace nutzen darf.";
+export const LICENSE_TEXT = "Ich bestätige, dass ich die Lizenz für diese Datei besitze und sie für Renderings in diesem Team nutzen darf.";
 
 export function isAssetKind(v: unknown): v is BrandAssetKind {
   return typeof v === "string" && (ASSET_KINDS as string[]).includes(v);

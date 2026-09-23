@@ -10,7 +10,7 @@ import { ROLE_LABELS } from "@/lib/auth/permissions";
 import { switchWorkspaceAction } from "./actions";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Workspaces" };
+export const metadata = { title: "Teams" };
 
 export default async function WorkspacesPage() {
   const me = await requireAuthUser();
@@ -20,18 +20,18 @@ export default async function WorkspacesPage() {
     <PageShell width="narrow" backgroundWord="Team" allowWithoutWorkspace>
       <PageHeader
         eyebrow="Konto"
-        title="Workspaces"
+        title="Deine Teams"
         description="Jede Mitgliedschaft hat ihre eigene Rolle. Der Wechsel gilt für diese Sitzung."
       />
       {memberships.length === 0 ? (
         <GlassCard padding="lg" className="text-center">
-          <p className="text-lg font-medium">Du bist in keinem Workspace</p>
+          <p className="text-lg font-medium">Du bist in keinem Team</p>
           <p className="mx-auto mt-2 max-w-md text-text-2">
-            Bitte jemanden um eine Einladung oder lege einen eigenen Workspace an.
+            Bitte jemanden um eine Einladung oder leg dein eigenes Team an.
           </p>
           <div className="mt-6 flex justify-center gap-3">
             <Link href="/registrieren" className="text-text hover:underline">
-              Workspace anlegen
+              Team anlegen
             </Link>
           </div>
         </GlassCard>

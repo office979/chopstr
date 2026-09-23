@@ -88,9 +88,9 @@ export const ROLE_LABELS: Record<Role, string> = {
 };
 
 export const ROLE_DESCRIPTIONS: Record<Role, string> = {
-  owner: "Alles, inklusive Workspace löschen.",
+  owner: "Alles, inklusive Team löschen.",
   admin: "Mitglieder, Abrechnung, AVV, Audit-Log, alle Inhalte.",
-  editor: "Upload, Transkript, Kandidaten, Hook-Studio, Markenprofil.",
+  editor: "Upload, Transkript, Kandidaten, Hook-Studio, Aussehen.",
   reviewer: "Kandidaten annehmen oder ablehnen, sonst nur lesen.",
   client: "Nur die eigene Marke: Kandidaten freigeben, Clips ansehen.",
 };
@@ -107,11 +107,11 @@ export const ACTION_DENIED: Record<Action, string> = {
   "clip.render": "Renders dürfen nur Editoren, Admins und Inhaber anstoßen.",
   "export.read": "Der Datenexport ist Inhabern und Admins vorbehalten.",
   "guest_approval.request": "Gast-Freigaben dürfen nur Editoren, Admins und Inhaber anfordern.",
-  "brand.edit": "Das Markenprofil dürfen nur Editoren, Admins und Inhaber ändern.",
+  "brand.edit": "Das Aussehen dürfen nur Editoren, Admins und Inhaber ändern.",
   "brand.assets": "CI-Assets dürfen nur Editoren, Admins und Inhaber hochladen.",
   "members.manage": "Mitglieder verwalten dürfen nur Inhaber und Admins.",
-  "workspace.update": "Workspace-Einstellungen dürfen nur Inhaber und Admins ändern.",
-  "workspace.delete": "Nur der Inhaber kann den Workspace löschen.",
+  "workspace.update": "Team-Einstellungen dürfen nur Inhaber und Admins ändern.",
+  "workspace.delete": "Nur der Inhaber kann das Team löschen.",
   "billing.manage": "Abrechnung und Plan sind Inhabern und Admins vorbehalten.",
   "dpa.accept": "Den AV-Vertrag dürfen nur Inhaber und Admins annehmen.",
   "audit.read": "Das Audit-Log ist Inhabern und Admins vorbehalten.",

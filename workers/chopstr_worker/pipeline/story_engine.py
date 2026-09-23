@@ -24,7 +24,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
-from .. import prompts
+from .. import editorial, prompts
 from ..providers_llm import LLM
 from . import dach_nlp, fidelity, story_graph, story_score
 from .segment import Sentence, chapterize, numbered, sentences_from_words
@@ -147,7 +147,37 @@ def resolve_weights(learned: dict[str, Any] | None, default: dict[str, float] | 
 
 
 def weighted_total(scores: dict[str, Any], weights: dict[str, float]) -> float:
+    """Alte Rechnung über die fünf Schlüssel auf der Skala 0 bis 10.
+
+    Bleibt erhalten, weil die gelernten Gewichte aus ``brand_profiles.learned_weights`` darauf
+    aufbauen und weil Bestandszeilen vergleichbar bleiben sollen. Über die Rangfolge entscheidet
+    sie nicht mehr, siehe ``policy_total``.
+    """
     return round(sum(float(scores.get(k, 0) or 0) * weights[k] for k in SCORE_KEYS), 2)
+
+
+def policy_total(r: dict[str, Any], dauer_s: float, pol: editorial.Policy | None = None) -> float:
+    """Gesamtwert nach der redaktionellen Grundlage, mit Längenabzug.
+
+    Zwei Dinge fehlten der alten Rechnung, und beide sind genau das, was die Auswertung der
+    Beispielclips als Schwäche gezeigt hat:
+
+    Erstens kannte sie nur fünf Kriterien. ``standalone`` und ``emotion`` kamen mit der Grundlage
+    neu dazu und hätten ohne diese Änderung keine Wirkung auf die Rangfolge gehabt; sie wären
+    berechnet und danach verworfen worden.
+
+    Zweitens wirkte die Länge gar nicht auf den Gesamtwert. Sie ist der grösste gemessene
+    Unterschied zur Referenz: 19,3 s im Median bei uns gegen 41,3 s bei 105 guten Beispielclips.
+
+    Fehlen die sieben Punkte (alte Antwort, kaputter Provider), fällt der Wert auf null statt auf
+    einen geratenen Mittelwert. Ein unbewertbarer Moment soll nach hinten rutschen, nicht zufällig
+    nach vorn.
+    """
+    pol = pol or editorial.load()
+    punkte = r.get("rubric_points") or {}
+    if not punkte:
+        return 0.0
+    return round(pol.gesamtwert(punkte) * (1.0 - pol.laenge_abzug(dauer_s)), 2)
 
 
 # -- Kapitel und Seeds ---------------------------------------------------------------------------
@@ -409,6 +439,11 @@ def evaluate_span(
             k: {"value": scores[k], "weight": round(weights[k], 4), "evidence": str(r.get(f"{k}_evidence", "") or "")}
             for k in SCORE_KEYS
         },
+        # Die sieben Kriterien der Grundlage und ihre Fassung: ohne sie laesst sich spaeter nicht
+        # nachvollziehen, wie ein Gesamtwert zustande kam, weil "scores" nur die alten fuenf zeigt.
+        "rubric_points": dict(r.get("rubric_points") or {}),
+        "policy_version": str(r.get("policy_version") or ""),
+        "laenge_abzug": round(editorial.load().laenge_abzug(dur), 3),
         "unresolved_references": [str(x) for x in (r.get("unresolved_references") or [])],
         "needs_earlier_context": bool(r.get("needs_earlier_context")),
         "ends_before_answer": bool(r.get("ends_before_answer")),
@@ -437,7 +472,8 @@ def evaluate_span(
         gates=gates,
         story_graph_flags=flags,
         risk_flags=risk_flags_for(r, clip_text, heuristic),
-        total=weighted_total(scores, weights),
+        # Die Grundlage entscheidet, nicht mehr die alten fuenf Kriterien ohne Laengenabzug.
+        total=policy_total(r, dur),
         gate_passed=gate_passed,
         why=build_why(scores, r, gates, flags, dur, platform, heuristic),
         model_id=str(r.get("model_id") or llm.model()),
@@ -570,5 +606,6 @@ __all__ = [
     "risk_flags_for",
     "run",
     "select_best",
+    "policy_total",
     "weighted_total",
 ]

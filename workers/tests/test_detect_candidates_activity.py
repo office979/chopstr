@@ -43,7 +43,7 @@ def test_writes_rows_events_and_status(fake_db, fake_context, source):
     assert row["segments"][0]["role"] == "body" and row["start_s"] < row["end_s"]
     assert row["rubric"]["contract"] == "candidates_v1"
     assert set(row["gates"]) == {"standalone", "fidelity", "sentence_boundaries", "verb_bracket", "no_open_loop"}
-    assert row["model_id"] == "heuristic-v1" and row["prompt_version"] == "score_clip_v1"
+    assert row["model_id"] == "heuristic-v1" and row["prompt_version"] == "score_clip_v2"
     assert "heuristic_only" in row["risk_flags"]
     assert isinstance(row["why"], str) and row["why"].endswith(".")
 
@@ -55,7 +55,7 @@ def test_writes_rows_events_and_status(fake_db, fake_context, source):
     fin = fake_db.events_for("detect_candidates")[-1]["payload"]
     assert fin["candidates"] == len(ids) and fin["chapters"] == 1 and fin["provider"] == "local-heuristic"
     assert fin["model_id"] == "heuristic-v1" and fin["cached"] is False
-    assert fin["prompt_versions"] == ["propose_moments_v1", "score_clip_v1", "story_graph_confirm_v1"]
+    assert fin["prompt_versions"] == ["propose_moments_v1", "score_clip_v2", "story_graph_confirm_v1"]
     assert 0 <= fin["gate_passed"] <= fin["candidates"]
 
     assert [s for _sid, s in fake_db.status_history] == ["scoring", "ready"]

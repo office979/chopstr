@@ -6,14 +6,19 @@ import importlib.util
 
 import pytest
 
-from chopstr_worker import config, heuristic_llm
-from chopstr_worker.pipeline import segment, story_engine
+from chopstr_worker import config, editorial, heuristic_llm
+from chopstr_worker.pipeline import segment, story_engine, story_score
 from chopstr_worker.providers_llm import LLM
 from chopstr_worker.residency import Tenant
 from tests.transcript_fixtures import demo_words, long_script, make_words
 
 BRIEF = {"audience": "Gründer im DACH-Raum", "wanted": "Fehler, Zahlen", "exclude": "Werbung", "platform": "linkedin"}
-DEFAULT_TOTAL = 8 * 0.30 + 7 * 0.25 + 9 * 0.20 + 6 * 0.15 + 7 * 0.10  # 7.55
+# Die Gewichte stehen nicht mehr im Test, sondern in der redaktionellen Grundlage. Der erwartete
+# Gesamtwert rechnet sich daraus, sonst müsste dieser Test bei jeder Änderung an der Grundlage
+# nachgezogen werden, obwohl er gar nicht die Gewichte prüft.
+DEFAULT_SCORES = {"hook": 8, "payoff": 7, "specificity": 9, "tension": 6, "audience_fit": 7}
+DEFAULT_WEIGHTS = story_score.weights()
+DEFAULT_TOTAL = round(sum(DEFAULT_SCORES[k] * DEFAULT_WEIGHTS[k] for k in DEFAULT_SCORES), 2)
 
 
 def default_rubric(sents: list[dict]) -> dict:
@@ -22,11 +27,8 @@ def default_rubric(sents: list[dict]) -> dict:
         "unresolved_references": [],
         "needs_earlier_context": False,
         "ends_before_answer": False,
-        "hook": 8, "hook_evidence": first,
-        "payoff": 7, "payoff_evidence": first,
-        "specificity": 9, "specificity_evidence": first,
-        "tension": 6, "tension_evidence": first,
-        "audience_fit": 7, "audience_fit_evidence": first,
+        **{k: v for k, v in DEFAULT_SCORES.items()},
+        **{f"{k}_evidence": first for k in DEFAULT_SCORES},
         "is_humor": False,
         "sensitive_topic": False,
         "suggested_title_card": "",
@@ -84,7 +86,7 @@ def test_full_flow_row_matches_contract(brain, llm):
     words = demo_words()
     report = story_engine.run(words, BRIEF, {"country": "AT"}, {"seeds": [3]}, llm)
     assert report.chapters == 1 and report.chapters_with_seeds == 1 and report.proposals == 1
-    assert report.prompt_versions == ["propose_moments_v1", "score_clip_v1", "story_graph_confirm_v1"]
+    assert report.prompt_versions == ["propose_moments_v1", "score_clip_v2", "story_graph_confirm_v1"]
     assert len(report.candidates) == 1
     c = report.candidates[0]
     sents = segment.sentences_from_words(words)
@@ -92,14 +94,24 @@ def test_full_flow_row_matches_contract(brain, llm):
     assert c.segments == [{"start": sents[0].start, "end": sents[3].end, "role": "body"}]
     assert c.start_s == sents[0].start and c.end_s == sents[3].end
     assert c.structure == "tension_first"
-    assert c.model_id == "test-model" and c.prompt_version == "score_clip_v1"
-    assert c.total == pytest.approx(DEFAULT_TOTAL)
+    assert c.model_id == "test-model" and c.prompt_version == "score_clip_v2"
+    # Die Gesamtwertung kommt jetzt aus der redaktionellen Grundlage, nicht mehr aus den alten
+    # fuenf Kriterien: sie traegt alle sieben und den Laengenabzug.
+    pol = editorial.load()
+    assert c.rubric["policy_version"] == editorial.policy_version()
+    assert set(c.rubric["rubric_points"]) == {k.schluessel for k in pol.kriterien}
+    assert c.total == pytest.approx(story_engine.policy_total({"rubric_points": c.rubric["rubric_points"]}, c.duration_s))
+    assert 0.0 <= c.total <= pol.punkte_gesamt
     assert c.gate_passed is True
 
     r = c.rubric
     assert r["contract"] == "candidates_v1"
     assert set(r["scores"]) == {"hook", "payoff", "specificity", "tension", "audience_fit"}
-    assert r["scores"]["hook"] == {"value": 8, "weight": 0.3, "evidence": "Ehrlich gesagt war das der"}
+    assert r["scores"]["hook"] == {
+        "value": 8,
+        "weight": round(DEFAULT_WEIGHTS["hook"], 4),
+        "evidence": "Ehrlich gesagt war das der",
+    }
     assert r["speakers"] == ["SPEAKER_00"] and r["duration_s"] == pytest.approx(c.duration_s)
     assert r["text"].startswith("[0] (SPEAKER_00) Ehrlich gesagt")
     assert r["repair"] == {"rounds": 0, "expanded_front": 0, "expanded_back": 0, "failed": False}
@@ -244,12 +256,19 @@ def test_learned_weights_override_when_valid(brain, llm):
     brain.confirm = {"misleading_without": False, "reason": "-", "repair": "none"}
     only_hook = {"hook": 1.0, "payoff": 0.0, "specificity": 0.0, "tension": 0.0, "audience_fit": 0.0}
     c = story_engine.detect(demo_words(), BRIEF, {"learned_weights": only_hook}, None, llm)[0]
-    assert c.total == 8.0
+    # Gelernte Gewichte wirken weiterhin auf die angezeigten Gewichte der alten fuenf Kriterien.
     assert c.rubric["scores"]["hook"]["weight"] == 1.0 and c.rubric["scores"]["payoff"]["weight"] == 0.0
 
     invalid = {"hook": 0.9, "payoff": 0.9, "specificity": 0.1, "tension": 0.1, "audience_fit": 0.1}
     c2 = story_engine.detect(demo_words(), BRIEF, {"learned_weights": invalid}, None, llm)[0]
-    assert c2.total == pytest.approx(DEFAULT_TOTAL)
+    assert c2.rubric["scores"]["hook"]["weight"] != 0.9  # ungueltig, Vorgabe greift
+
+    # ABER: auf die Gesamtwertung wirken sie seit der redaktionellen Grundlage NICHT mehr. Die
+    # Rangfolge entscheidet policy_total ueber die sieben Kriterien der Grundlage. Das ist eine
+    # bewusste Folge und keine Panne: Die Lernschleife zieht ihr Signal aus angenommenen gegen
+    # abgelehnte Kandidaten, und seit der Auswahlschritt entfaellt, gibt es keine Ablehnungen mehr.
+    # Solange das so ist, waere ein gelerntes Gewicht ein Gewicht aus dem Nichts.
+    assert c.total == pytest.approx(c2.total)
     incomplete = {"hook": 0.5, "payoff": 0.5}
     assert story_engine.resolve_weights(incomplete) == story_engine.resolve_weights(None)
     assert story_engine.resolve_weights("kaputt") == story_engine.resolve_weights(None)

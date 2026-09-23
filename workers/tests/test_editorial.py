@@ -197,3 +197,33 @@ def test_entscheidung_sortieren_statt_sperren_ist_wirksam(policy):
     """Entscheidung vom 24.09.2026: kein Moment wird unterdrückt, nur sortiert."""
     assert policy.modus == "sortieren"
     assert policy.sperrt is False
+
+
+# -- Wirkung auf die Rangfolge ---------------------------------------------------------------------
+def test_laengenabzug_entscheidet_zwischen_gleichwertigen_momenten(policy):
+    """Der Kern der Umstellung: zwei inhaltlich gleiche Momente, nur die Laenge unterscheidet sie.
+
+    Vor der Grundlage wirkte die Laenge gar nicht auf den Gesamtwert. Genau deshalb lieferte die
+    Pipeline 19,3 s im Median, waehrend 105 gute Beispielclips bei 41,3 s liegen.
+    """
+    from chopstr_worker.pipeline import story_engine
+
+    punkte = {k.schluessel: policy.skala_max for k in policy.kriterien}
+    r = {"rubric_points": punkte}
+
+    im_fenster = story_engine.policy_total(r, 41.0)
+    zu_kurz = story_engine.policy_total(r, 19.3)
+    zu_lang = story_engine.policy_total(r, 124.2)
+
+    assert im_fenster > zu_kurz, "Ein Moment im guten Fenster muss einen zu kurzen schlagen"
+    assert im_fenster > zu_lang, "Ein Moment im guten Fenster muss einen zu langen schlagen"
+    assert im_fenster == pytest.approx(policy.punkte_gesamt)
+    assert zu_lang == 0.0, "124 s war das zweitschlechteste Beispiel der Redaktion"
+
+
+def test_ohne_bewertung_faellt_der_wert_auf_null(policy):
+    """Ein unbewertbarer Moment rutscht nach hinten, nicht zufaellig nach vorn."""
+    from chopstr_worker.pipeline import story_engine
+
+    assert story_engine.policy_total({}, 41.0) == 0.0
+    assert story_engine.policy_total({"rubric_points": {}}, 41.0) == 0.0

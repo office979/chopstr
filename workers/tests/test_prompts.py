@@ -6,20 +6,28 @@ from chopstr_worker import prompts
 
 
 def test_all_repo_prompts_load():
+    """``load`` ohne Version nimmt die höchste vorhandene; ``score_clip`` steht auf 2."""
     expected = {
-        "system_editor": None,
-        "propose_moments": "propose_moments",
-        "score_clip": "score_clip",
-        "story_graph_confirm": "confirm_qualification",
-        "hooks": "write_hooks",
-        "post_caption": "write_post_caption",
+        "system_editor": (None, 1),
+        "propose_moments": ("propose_moments", 1),
+        "score_clip": ("score_clip", 2),
+        "story_graph_confirm": ("confirm_qualification", 1),
+        "hooks": ("write_hooks", 1),
+        "post_caption": ("write_post_caption", 1),
     }
-    for name, tool in expected.items():
+    for name, (tool, version) in expected.items():
         p = prompts.load(name)
         assert p.name == name
-        assert p.version == 1
+        assert p.version == version
         assert p.tool == tool
-        assert p.prompt_version == f"{name}_v1"
+        assert p.prompt_version == f"{name}_v{version}"
+
+
+def test_bestandsfassung_score_clip_v1_bleibt_ladbar():
+    """``candidates.prompt_version`` in der Datenbank zeigt auf v1. Die Datei muss bleiben."""
+    p = prompts.load("score_clip", 1)
+    assert p.prompt_version == "score_clip_v1"
+    assert p.inputs == ["audience", "platform", "candidate_numbered"]
 
 
 def test_render_replaces_inputs_and_joins_lists():
@@ -57,9 +65,17 @@ def test_load_specific_and_latest_version(tmp_path, monkeypatch):
     prompts.clear_cache()
 
 
-def test_score_clip_weights_from_frontmatter():
+def test_score_clip_weights_kommen_aus_der_grundlage_nicht_aus_dem_frontmatter():
+    """Bis Fassung 1 standen die Gewichte im Frontmatter. Jetzt gewinnt die Grundlage.
+
+    Die ausführlichen Tests dazu stehen in ``test_score_policy.py``; hier bleibt nur die Wache
+    dagegen, dass jemand die Gewichte wieder aus dem Prompt zieht.
+    """
+    from chopstr_worker import editorial
     from chopstr_worker.pipeline import story_score
 
     w = story_score.weights()
-    assert w["hook"] == pytest.approx(0.30)
     assert sum(w.values()) == pytest.approx(1.0)
+    assert story_score.policy_weights() == editorial.load().gewichte
+    alt = prompts.load("score_clip", 1).meta["weights"]
+    assert w["hook"] != pytest.approx(alt["hook"])  # 0,3077 aus der Grundlage statt 0,30 aus v1

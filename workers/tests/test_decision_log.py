@@ -44,7 +44,7 @@ def test_detect_candidates_logs_proposals_and_scores(fake_db, fake_context, monk
     assert set(d["features"]["gates"]) == {"standalone", "fidelity", "sentence_boundaries", "verb_bracket", "no_open_loop"}
     assert d["features"]["platform"] == "tiktok" and d["features"]["duration_s"] > 0 and d["features"]["structure"]
     assert "heuristic_only" in d["features"]["risk_flags"] and abs(sum(d["features"]["weights"].values()) - 1) < 0.01
-    assert d["model_id"] == "heuristic-v1" and d["prompt_version"] == "score_clip_v1"
+    assert d["model_id"] == "heuristic-v1" and d["prompt_version"] == "score_clip_v2"
     assert d["chosen"]["candidate_id"] == d["candidate_id"]
     kept = [p for p in proposed if p["chosen"]["kept"]]
     assert len(kept) == len(ids) and all(p["candidate_id"] for p in kept)

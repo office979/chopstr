@@ -1,0 +1,302 @@
+# chopstr · Redaktionelle Grundlage für die Clip-Auswahl · Fassung 1
+#
+# Diese Datei ist die EINZIGE Quelle für die Frage, was einen guten Clip ausmacht. Sie wird von
+# beiden Bewertungswegen gelesen: von der Heuristik (chopstr_worker/heuristic_llm.py), die heute
+# läuft, und vom Sprachmodell (packages/prompts/score_clip_v1.md), das später kommt. Wer eine Regel
+# ändern will, ändert sie hier und nirgends sonst.
+#
+# Jeder Kandidat schreibt mit, nach welcher Fassung er entstanden ist (candidates.policy_version).
+# Nur so lassen sich zwei Läufe vergleichen, wenn hier etwas geändert wurde.
+#
+# HERKUNFT DER REGELN, damit später nachvollziehbar ist, warum etwas so dasteht:
+#   [M]  Masterclass „Die Psychologie hinter Content & Clips", Modul 10, Ferdi, Sep 2026
+#   [E]  Eigene Messung an 105 guten und 12 schlechten Beispielclips der Redaktion
+#   [R]  Recherche: NPR Training, Ira Glass, Rhapsody-Paper (arXiv 2505.19429), Socialinsider
+#
+# Wo [M] und [R] sich widersprechen, gilt [M]. Begründung steht jeweils dabei.
+
+version: 1
+stand: "2026-09-24"
+
+# ------------------------------------------------------------------------------------------------
+# Länge
+# ------------------------------------------------------------------------------------------------
+# [E] 105 gute Beispielclips: Median 41,3 s, 61 % zwischen 30 und 45 s, Spanne 20,7 bis 64,8 s.
+#     Die 12 schlechten liegen im Median bei 57,5 s, mit Ausreißern bei 124 und 277 s.
+#     Das Fenster hält über zwei verschiedene Themenwelten und zwei verschiedene Sprecher.
+# [M] Skript-Template: Auflösung bei 40 bis 50 s, CTA bis 60 s.
+# [R] Socialinsider (6 Mio. Reels): 45 bis 60 s höchste Interaktionsrate. Vorsicht, das ist über
+#     alle Inhaltsarten gemittelt und nicht podcastspezifisch.
+#
+# ACHTUNG: Unsere Pipeline lag beim ersten Messlauf bei 19,3 s im Median. Das ist der grösste
+# gemessene Einzelunterschied zur Referenz.
+laenge:
+  ziel_s: 41
+  gut_von_s: 30
+  gut_bis_s: 55
+  # Ausserhalb dieser Grenzen ist ein Moment als Clip unbrauchbar, egal wie gut sein Inhalt ist.
+  # Kein Verwerfen (siehe bewertung.modus), sondern starker Abzug.
+  hart_min_s: 18
+  hart_max_s: 70
+
+# ------------------------------------------------------------------------------------------------
+# Rubrik
+# ------------------------------------------------------------------------------------------------
+# [M] Modul 10.2, sieben Kriterien mit je 0 bis 2 Punkten, 14 Punkte möglich.
+#
+# Unsere bisherige Rubrik hatte fünf Kriterien (hook, payoff, specificity, tension, audience_fit)
+# auf einer Skala von 0 bis 10. Zwei kamen dazu: standalone war vorher nur eine Ja/Nein-Sperre,
+# emotion fehlte ganz. „offene_frage" ersetzt das alte „tension" und ist schärfer gefasst.
+rubrik:
+  skala_max: 2
+  kriterien:
+    - schluessel: standalone
+      frage: "Versteht man es ohne Vorwissen?"
+      null_punkte: "Braucht Kontext, der im Clip nicht vorkommt"
+      zwei_punkte: "Sofort klar, auch für jemanden, der die Folge nicht kennt"
+      gewicht: 0.20
+      herkunft: "[M] 10.2; [R] Vorlese-Test: ersten Satz ohne Kontext laut lesen"
+    - schluessel: hook
+      frage: "Gibt es einen Satz, der in drei Sekunden stoppt?"
+      null_punkte: "Kein Satz, der für sich allein anhält"
+      zwei_punkte: "Der erste Satz stoppt, im Originalton, ohne Overlay"
+      gewicht: 0.20
+      herkunft: "[M] 10.2 und Modul 3"
+    - schluessel: offene_frage
+      frage: "Entsteht eine Neugierlücke?"
+      null_punkte: "Alles gesagt, nichts offen"
+      zwei_punkte: "Die Frage löst sich erst am Ende"
+      gewicht: 0.15
+      herkunft: "[M] 10.2; Zeigarnik-Effekt, Modul 4"
+    - schluessel: spezifitaet
+      frage: "Gibt es Zahlen, Namen, Bilder?"
+      null_punkte: "Abstrakt, austauschbar"
+      zwei_punkte: "Konkret, nachprüfbar"
+      gewicht: 0.15
+      herkunft: "[M] 10.1 und 10.2"
+      hinweis: >
+        [R] NPR rät bei Radio-Originaltönen ausdrücklich von Zahlen ab, sie erzeugten keine
+        Emotion. Wir folgen trotzdem [M], weil unsere Clips Untertitel einbrennen: eine
+        eingeblendete Zahl trägt, eine nur gesprochene verpufft. Fällt das Einbrennen weg, ist
+        dieses Gewicht neu zu prüfen.
+    - schluessel: emotion
+      frage: "Trägt der Moment eine klare Emotion?"
+      null_punkte: "Neutral, sachlich, unbeteiligt"
+      zwei_punkte: "Stark und eindeutig"
+      gewicht: 0.15
+      herkunft: "[M] 10.2; [R] NPR: starke Originaltöne sind emotional, nicht faktisch"
+    - schluessel: aufloesung
+      frage: "Endet es auf einem Hochpunkt?"
+      null_punkte: "Verpufft, bricht ab, läuft aus"
+      zwei_punkte: "Pointe, Merksatz oder Schlussfolgerung"
+      gewicht: 0.10
+      herkunft: "[M] 10.2 und Auswahlfehler 2; [R] Button-Konzept aus Comedy und Radio"
+    - schluessel: zielgruppe
+      frage: "Trifft es die Bewusstseinsstufe des Zuschauers?"
+      null_punkte: "Falsche Stufe, etwa ein Angebot an ein kaltes Publikum"
+      zwei_punkte: "Passt genau"
+      gewicht: 0.05
+      herkunft: "[M] 10.2 und Modul 2 (Schwartz)"
+
+# [M] Faustregel: ab 10 von 14 schneiden, unter 7 verwerfen, dazwischen umbauen.
+# Entscheidung Ferdi, 24.09.2026: NICHT sperren, nur sortieren. Die Schwellen bleiben als Anzeige
+# erhalten, damit man sieht, wo ein Clip steht, aber kein Moment wird unterdrückt. Begründung:
+# solange die Heuristik bewertet und nicht ein Sprachmodell, ist eine harte Sperre zu riskant.
+bewertung:
+  modus: sortieren   # sortieren | sperren
+  schwelle_schneiden: 10
+  schwelle_verwerfen: 7
+  punkte_gesamt: 14
+
+# ------------------------------------------------------------------------------------------------
+# Moment-Typen
+# ------------------------------------------------------------------------------------------------
+# [M] Modul 10.1. Die Erkennungszeichen stammen wörtlich aus dem Masterfile und sind hier als
+# Suchmuster ausformuliert. Ein Moment, der auf keinen Typ passt, ist damit nicht schlecht, aber
+# er hat keinen erkennbaren Hebel.
+moment_typen:
+  - schluessel: contrarian
+    name: "Widerspruch zur Erwartung"
+    hebel: "Kontrast, Erwartungsbruch"
+    marker:
+      - "das ist falsch"
+      - "alle sagen"
+      - "die meisten glauben"
+      - "das gegenteil"
+      - "in wahrheit"
+      - "stimmt nicht"
+      - "irrtum"
+    bonus: 2.0
+  - schluessel: zahl
+    name: "Konkrete Zahl oder Ergebnis"
+    hebel: "Spezifität, Beweis"
+    marker_regex: '\b\d+([.,]\d+)?\s*(prozent|%|euro|eur|jahre|monate|wochen|tage|stunden|kilo|mal)\b'
+    bonus: 1.5
+  - schluessel: ministory
+    name: "Kleine Geschichte mit Wendepunkt"
+    hebel: "Spannungsbogen, Zeigarnik"
+    marker:
+      - "und dann"
+      - "plötzlich"
+      - "ich dachte"
+      - "auf einmal"
+      - "bis ich"
+      - "in dem moment"
+    bonus: 2.0
+  - schluessel: gestaendnis
+    name: "Geständnis oder Fehler"
+    hebel: "Verletzlichkeit, Sympathie"
+    marker:
+      - "mein größter fehler"
+      - "ich hab mich geirrt"
+      - "ich habe mich geirrt"
+      - "das war ein fehler"
+      - "ich lag falsch"
+      - "jahrelang falsch"
+    bonus: 2.0
+  - schluessel: konflikt
+    name: "Konflikt oder Debatte"
+    hebel: "Emotion, Parteinahme"
+    marker:
+      - "da widerspreche ich"
+      - "das sehe ich anders"
+      - "nein, das"
+      - "quatsch"
+    # [M] nennt als Erkennungszeichen ausdrücklich die „lauter werdende Stimme". Siehe audio.
+    braucht_audio: true
+    bonus: 2.0
+  - schluessel: merksatz
+    name: "Klarer Merksatz oder Bauplan"
+    hebel: "Nutzen, Speicherwert"
+    marker:
+      - "die regel ist"
+      - "drei schritte"
+      - "zwei dinge"
+      - "merk dir"
+      - "das prinzip"
+      - "faustregel"
+    bonus: 1.5
+
+# ------------------------------------------------------------------------------------------------
+# Einstieg
+# ------------------------------------------------------------------------------------------------
+einstieg:
+  # [E] Im Material gefunden: ein schlechter Clip beginnt mit „auf den Ausschnitt von Friedrich
+  # Merz reagiert" und schneidet damit mitten in eine Selbstkorrektur. Zwölf Wörter davor stand
+  # „Krankschreibungen werden in Deutschland massiv missbraucht", ein vollständiger Aufschlag.
+  nie_mitten_im_satz: true
+  nie_in_selbstkorrektur: true
+
+  # [E] „Er ist ja offensichtlich kein unintelligenter Mann" und „Sie haben 30.000 investiert":
+  # beide setzen voraus, dass der Zuschauer weiss, wer gemeint ist.
+  # „es" ist ausgenommen, es ist meist Platzhalter ohne Bezug.
+  keine_pronomen_ohne_bezug: true
+  pronomen: [er, sie, ihn, ihm, ihr, ihnen, dessen, deren]
+
+  # [R] Mehrfach belegt: die Frage des Gastgebers ist Anlauf, nicht Inhalt.
+  # [E] ABER: 45,7 % der guten Clips beginnen mit einer Frage. Der Unterschied ist, WER fragt.
+  # Die rhetorische Frage des Sprechers ist ein Hook ([M] Hook-Bank, Typ „Frage").
+  # Deshalb: nur die Frage eines ANDEREN Sprechers am Anfang ist ein Fehler.
+  keine_gastgeberfrage: true
+
+  # [M] 10.3 „Einleitungen radikal kappen": „Also, ich würde sagen, dass…" fliegt raus.
+  einleitungen_kappen: true
+  einleitungsfloskeln:
+    - "also ich würde sagen"
+    - "ja also"
+    - "ich meine"
+    - "wie gesagt"
+    - "also gut"
+    - "gute frage"
+    - "das ist eine gute frage"
+
+# ------------------------------------------------------------------------------------------------
+# Ausstieg
+# ------------------------------------------------------------------------------------------------
+ausstieg:
+  # [M] Auswahlfehler 2: „Der Clip hört auf, wo der Sprecher Luft holt, nicht wo die Pointe sitzt."
+  # [E] Belegt am schlechten AfD-Clip: er endet bei „ist die Macht, die dadurch entsteht" und das
+  # nächste Wort in der Quelle ist „grenzenlos". Die Pointe liegt einen Schritt ausserhalb.
+  satz_zu_ende: true
+  verbklammer_nicht_trennen: true
+
+  # [R] Button-Konzept: Der Clip endet, wo ein Gedanke geschlossen ist UND danach eine
+  # Einschränkung, Relativierung oder ein Themenwechsel folgt. Vor der Abschwächung aufhören.
+  # [E] Belegt am guten Clip: der Cutter liess einen starken Satz liegen, weil danach ein neues
+  # Thema begann.
+  vor_der_abschwaechung: true
+  abschwaechung_marker:
+    - "gleichzeitig"
+    - "auf der anderen seite"
+    - "andererseits"
+    - "wobei"
+    - "allerdings"
+    - "aber natürlich"
+    - "um fair zu sein"
+
+# ------------------------------------------------------------------------------------------------
+# Zusammenhang
+# ------------------------------------------------------------------------------------------------
+# [E] Der schlechteste Clip im Material (277 s) spannt sich über die Wörter 805 bis 7935 eines
+# Transkripts mit 9593 Wörtern und enthält davon nur 839. Das ist kein Moment, sondern eine
+# Collage aus dem halben Gespräch.
+# [M] Auswahlfehler 3: „Zu viele Gedanken. Zwei Punkte in 40 Sekunden, keiner bleibt hängen."
+zusammenhang:
+  ein_zusammenhaengender_abschnitt: true
+  # Verhältnis von tatsächlichem Inhalt zur überspannten Strecke. Darunter ist es eine Collage.
+  mindest_dichte: 0.6
+  max_gedanken: 1
+
+# ------------------------------------------------------------------------------------------------
+# Audiosignal
+# ------------------------------------------------------------------------------------------------
+# [M] 10.5, wörtlich: die Kriterien lassen sich als Signale erkennen, darunter „Stimmlage".
+#     10.1 nennt beim Typ Konflikt ausdrücklich die „lauter werdende Stimme".
+# [R] Rhapsody-Paper: Modelle mit Sprachsignal UND Transkript schlagen reine Textauswahl deutlich;
+#     GPT-4o und Gemini scheitern an der Aufgabe im Zero-Shot.
+# [E] Befund im eigenen Code: Wir berechnen RMS-Energie, Spectral Flux, Lachen und Applaus im
+#     heatmap-Schritt und benutzen sie nur zur Auswahl der Suchstartpunkte. In der Bewertung
+#     (story_score.py) kommt kein Audiomerkmal vor. Das Signal liegt vor und wird weggeworfen.
+audio:
+  in_bewertung_verwenden: true
+  gewicht: 0.15
+  merkmale:
+    energie_anstieg: true      # lauter werdende Stimme, Marker für Konflikt und Nachdruck
+    lachen: true               # externer Hook, bereits erkannt
+    applaus: true
+    pause_vor_aussage: true    # eine Pause davor betont, was danach kommt
+
+# ------------------------------------------------------------------------------------------------
+# Hook vorziehen
+# ------------------------------------------------------------------------------------------------
+# [M] 10.3: „Die stärkste Aussage, oft aus der Mitte, an den Anfang stellen, dann zurückspringen."
+# Entscheidung Ferdi, 24.09.2026: bauen.
+#
+# Das Datenmodell trägt das bereits: candidates.structure kennt den Wert payoff_first, und
+# clips.composition ist als Abfolge von Abschnitten in Abspielreihenfolge definiert.
+hook_vorziehen:
+  aktiv: true
+  # Nur wenn der beste Satz deutlich stärker ist als der erste, sonst bleibt die Reihenfolge.
+  mindest_vorsprung: 2.0
+  # Der vorgezogene Teil darf nicht länger sein als das, sonst ist es keine Zuspitzung mehr.
+  max_teaser_s: 8.0
+  # Nie aus dem letzten Viertel vorziehen, das nimmt die Auflösung vorweg.
+  nicht_aus_letztem_anteil: 0.25
+
+# ------------------------------------------------------------------------------------------------
+# Was nie ein Clip wird
+# ------------------------------------------------------------------------------------------------
+# [M] 10.4 Auswahlfehler 1 und 5.
+# [R] NPR: schwach ist die Beschreibung eines Vorgangs, stark ist die Ich-Erfahrung mit Wendepunkt.
+# [E] Im Material: „Wo liegt das ungefähr? Eine Stunde von Göteborg entfernt." Reine Logistik.
+ausschluss:
+  organisatorisches_gespraech: true
+  organisations_marker:
+    - "wo liegt das"
+    - "wie lange dauert"
+    - "wann treffen wir"
+    - "können wir kurz"
+    - "test test"
+    - "hörst du mich"
+  begruessung_und_abschied: true
+  insiderwitz_ohne_kontext: true

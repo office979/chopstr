@@ -118,7 +118,13 @@ export const SCHEMAS: Record<string, JsonSchema> = {
       gender_mode: { type: "string", enum: ["neutral", "paarform", "doppelpunkt", "stern", "keine"], default: "neutral" },
       asr_variant: { type: "string", enum: ["de", "de-CH"], default: "de" },
       default_platform: { type: "string", enum: PLATFORMS, default: "linkedin" },
-      caption_preset: { type: "string", enum: ["tiktok_bold", "reels_clean", "shorts_clean", "linkedin_static", "corporate_third"], default: "linkedin_static" },
+      /* Ohne Angabe (oder null) entscheidet das Format über den Untertitel-Stil (Migration 0007) */
+      caption_preset: {
+        type: "string",
+        nullable: true,
+        enum: ["tiktok_bold", "reels_clean", "shorts_clean", "tiktok_words", "reels_words", "shorts_words", "linkedin_static", "corporate_third"],
+        description: "Untertitel-Stil. Ohne Angabe entscheidet das Format: hochkant wortweise, quer ruhig.",
+      },
       tone_adjectives: { type: "array", items: { type: "string", maxLength: 40 }, maxItems: 3 },
       brand_vocab: { type: "array", items: { type: "string", maxLength: 80 }, maxItems: 500 },
       protected_terms: { type: "array", items: { type: "string", maxLength: 80 }, maxItems: 500 },

@@ -11,7 +11,7 @@ import type {
 import { DEFAULT_LINT_PROFILE, type LintProfile } from "@/lib/copy/lint";
 import { demoHookVariants, demoPostCaptions } from "@/lib/copy/hooks";
 import { buildCaptionCards, wordsFromText, wordsOnOutputTimeline } from "@/lib/clips/captions";
-import { ASPECT_SIZE, PLATFORM_DEFAULT_PRESET, layoutFor, presetFor } from "@/lib/clips/presets";
+import { ASPECT_SIZE, captionPresetFor, layoutFor, presetFor } from "@/lib/clips/presets";
 import { AD_LABELS, PLATFORMS } from "@/lib/clips/labels";
 
 /* Demo-Render: deterministische Ergebnisse in Vertragsform (packages/schema/CLIPS.md), ohne ffmpeg.
@@ -71,8 +71,7 @@ export function buildDemoHookV1(candidate: Candidate, source: Source, brand: Bra
 export type CaptionFields = Omit<CaptionVersion, "id" | "clip_id" | "version" | "created_by" | "created_at">;
 
 export function buildDemoCaptions(clip: Clip, candidate: Candidate, words: TranscriptWord[] | null, brand: BrandProfile | null): CaptionFields {
-  const presetName = clip.platform === "linkedin" && brand?.caption_preset ? brand.caption_preset : PLATFORM_DEFAULT_PRESET[clip.platform];
-  const preset = presetFor(presetName);
+  const preset = presetFor(captionPresetFor(clip.platform, clip.aspect, brand));
   const layout = layoutFor(preset, clip.aspect);
   const timed = words && words.length
     ? wordsOnOutputTimeline(words, clip.composition)

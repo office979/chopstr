@@ -105,13 +105,22 @@ export function BrandForm({ profile, assets, canUploadAssets }: { profile: Brand
               <option value="text_norm">Standard (text_norm)</option>
             </Select>
           </Field>
-          <Field label="Caption-Preset" htmlFor="caption_preset">
-            <Select id="caption_preset" name="caption_preset" defaultValue={profile?.caption_preset ?? "linkedin_static"}>
-              <option value="linkedin_static">LinkedIn statisch</option>
-              <option value="tiktok_bold">TikTok fett</option>
-              <option value="reels_clean">Reels clean</option>
-              <option value="shorts_clean">Shorts clean</option>
-              <option value="corporate_third">Corporate Bauchbinde</option>
+          <Field
+            label="Untertitel-Stil"
+            htmlFor="caption_preset"
+            hint="Automatisch heißt: im Hochformat kommt ein Wort nach dem anderen, im Querformat bleiben die Untertitel ruhig mit zwei Zeilen. Wähle nur dann selbst, wenn du für alle Clips denselben Stil willst."
+          >
+            {/* Leerer Wert = NULL in der Datenbank = keine ausdrückliche Wahl (Migration 0007) */}
+            <Select id="caption_preset" name="caption_preset" defaultValue={profile?.caption_preset ?? ""}>
+              <option value="">Automatisch, passend zum Format</option>
+              <option value="tiktok_words">Ein Wort nach dem anderen, sehr groß (TikTok)</option>
+              <option value="reels_words">Ein Wort nach dem anderen, groß (Reels)</option>
+              <option value="shorts_words">Ein Wort nach dem anderen, groß (Shorts)</option>
+              <option value="tiktok_bold">Zwei Zeilen, fett mit Rand (TikTok)</option>
+              <option value="reels_clean">Zwei Zeilen, schlicht (Reels)</option>
+              <option value="shorts_clean">Zwei Zeilen, schlicht (Shorts)</option>
+              <option value="linkedin_static">Zwei Zeilen, ruhig auf Fläche (LinkedIn)</option>
+              <option value="corporate_third">Bauchbinde unten, ruhig und klein</option>
             </Select>
           </Field>
         </div>

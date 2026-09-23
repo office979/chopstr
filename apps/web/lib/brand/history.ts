@@ -13,7 +13,7 @@ const FIELD_LABELS: Record<string, string> = {
   banned_phrases: "Gesperrte Phrasen",
   tone_adjectives: "Ton-Adjektive",
   default_platform: "Plattform",
-  caption_preset: "Caption-Preset",
+  caption_preset: "Untertitel-Stil",
   "ci.colors": "Farben",
   "ci.fonts": "Fonts",
   "ci.logo_asset_id": "Logo",

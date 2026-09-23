@@ -29,7 +29,8 @@ export const POST = apiRoute("write", async (request: NextRequest, { auth }) => 
     gender_mode: body.gender_mode ?? "neutral",
     asr_variant: body.asr_variant ?? "de",
     default_platform: body.default_platform ?? "linkedin",
-    caption_preset: body.caption_preset ?? "linkedin_static",
+    /* Ohne Angabe bleibt es NULL: keine ausdrückliche Wahl, das Format entscheidet (Migration 0007) */
+    caption_preset: body.caption_preset ?? null,
     tone_adjectives: tags(body.tone_adjectives).slice(0, 3),
     brand_vocab: tags(body.brand_vocab),
     protected_terms: tags(body.protected_terms),

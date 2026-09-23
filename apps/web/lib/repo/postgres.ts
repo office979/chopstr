@@ -103,7 +103,8 @@ function toBrand(r: Row): BrandProfile {
     banned_phrases: (r.banned_phrases as string[]) ?? [],
     tone_adjectives: (r.tone_adjectives as string[]) ?? [],
     default_platform: r.default_platform as BrandProfile["default_platform"],
-    caption_preset: r.caption_preset as BrandProfile["caption_preset"],
+    /* NULL bleibt NULL: keine ausdrückliche Wahl, das Format entscheidet (Migration 0007) */
+    caption_preset: (r.caption_preset as BrandProfile["caption_preset"]) ?? null,
     ci: jsonValue<BrandProfile["ci"]>(r.ci, {}),
     caption_style: jsonValue<BrandProfile["caption_style"]>(r.caption_style, {}),
     created_at: isoOrNull(r.created_at) ?? "",
@@ -613,7 +614,7 @@ export const postgresRepo: Repo = {
             banned_phrases = ${input.banned_phrases},
             tone_adjectives = ${input.tone_adjectives},
             default_platform = ${input.default_platform},
-            caption_preset = ${input.caption_preset},
+            caption_preset = ${input.caption_preset ?? null},
             ci = ${tx.json((input.ci ?? {}) as never)},
             caption_style = ${tx.json((input.caption_style ?? {}) as never)},
             version = version + 1
@@ -628,7 +629,7 @@ export const postgresRepo: Repo = {
         ) values (
           ${session.workspaceId}, ${input.name}, ${input.address}, ${input.country}, ${input.gender_mode},
           ${input.asr_variant}, ${input.brand_vocab}, ${input.protected_terms}, ${input.banned_phrases},
-          ${input.tone_adjectives}, ${input.default_platform}, ${input.caption_preset},
+          ${input.tone_adjectives}, ${input.default_platform}, ${input.caption_preset ?? null},
           ${tx.json((input.ci ?? {}) as never)}, ${tx.json((input.caption_style ?? {}) as never)}
         ) returning *`;
       return toBrand(rows[0] as Row);
@@ -1787,7 +1788,7 @@ export const postgresRepo: Repo = {
           banned_phrases = ${snap.banned_phrases},
           tone_adjectives = ${snap.tone_adjectives},
           default_platform = ${snap.default_platform},
-          caption_preset = ${snap.caption_preset},
+          caption_preset = ${snap.caption_preset ?? null},
           ci = ${tx.json((snap.ci ?? {}) as never)},
           caption_style = ${tx.json((snap.caption_style ?? {}) as never)},
           version = version + 1

@@ -75,7 +75,10 @@ export interface BrandProfile {
   banned_phrases: string[];
   tone_adjectives: string[];
   default_platform: Platform;
-  caption_preset: CaptionPreset;
+  /* null = keine ausdrückliche Wahl. Dann entscheidet das Format: hochkant wortweise, quer ruhig
+   * (Migration 0007, activities/render.caption_preset_for). Ein gesetzter Wert gewinnt auf der
+   * Standardplattform. */
+  caption_preset: CaptionPreset | null;
   /* CI (jsonb): Farben, Fonts, Logo, Bauchbinde */
   ci: BrandCI;
   /* Caption-Stil (jsonb): Highlight-Farbe, Hook-Overlay je Plattform */

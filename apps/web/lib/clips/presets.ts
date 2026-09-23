@@ -152,6 +152,29 @@ export const PLATFORM_DEFAULT_PRESET: Record<Platform, CaptionPreset> = {
   linkedin: "linkedin_static",
 };
 
+/* Hochkant heißt wortweise, auch wenn die Zielplattform LinkedIn ist.
+ * Spiegel von PORTRAIT_WORD_PRESET in workers/chopstr_worker/activities/render.py. */
+export const PORTRAIT_WORD_PRESET: Record<Platform, CaptionPreset> = {
+  tiktok: "tiktok_words",
+  reels: "reels_words",
+  shorts: "shorts_words",
+  linkedin: "reels_words",
+};
+
+/* Untertitel-Stil für einen Clip. Spiegel von caption_preset_for in activities/render.py:
+ * eine ausdrückliche Wahl im Markenprofil schlägt alles, aber nur auf der Standardplattform.
+ * Sonst entscheidet das Format: hochkant wortweise, quer der Plattform-Default.
+ * NULL im Markenprofil heißt: keine Wahl getroffen (Migration 0007). */
+export function captionPresetFor(
+  platform: Platform,
+  aspect: Aspect,
+  brand: { default_platform?: Platform; caption_preset?: CaptionPreset | null } | null,
+): CaptionPreset {
+  if (brand?.caption_preset && brand.default_platform === platform && brand.caption_preset in PRESETS) return brand.caption_preset;
+  if (aspect === "9:16") return PORTRAIT_WORD_PRESET[platform] ?? "reels_words";
+  return PLATFORM_DEFAULT_PRESET[platform] ?? "linkedin_static";
+}
+
 export const PLATFORM_ASPECT: Record<Platform, Aspect> = {
   tiktok: "9:16",
   reels: "9:16",

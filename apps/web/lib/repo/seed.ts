@@ -74,7 +74,8 @@ export const seedBrandProfile: BrandProfile = {
   banned_phrases: ["Game Changer", "revolutionär"],
   tone_adjectives: ["ruhig", "konkret", "belegt"],
   default_platform: "linkedin",
-  caption_preset: "linkedin_static",
+  /* Nicht gesetzt: das Format entscheidet über den Untertitel-Stil (Migration 0007) */
+  caption_preset: null,
   ci: {
     colors: { primary: "#020cf5", secondary: "#0a0a13", accent: "#f4f5fe" },
     fonts: { primary_asset_id: null, secondary_asset_id: null, fallback: "Inter" },

@@ -29,12 +29,28 @@ const COUNTRY: Country[] = ["DE", "AT", "CH"];
 const GENDER: GenderMode[] = ["neutral", "paarform", "doppelpunkt", "stern", "keine"];
 const ASR: AsrVariant[] = ["de", "de-CH"];
 const PLATFORM: Platform[] = ["tiktok", "reels", "shorts", "linkedin"];
-const PRESET: CaptionPreset[] = ["tiktok_bold", "reels_clean", "shorts_clean", "linkedin_static", "corporate_third"];
+/* Leere Auswahl im Formular bleibt leer und wird zu NULL: keine ausdrückliche Wahl (Migration 0007) */
+const PRESET: CaptionPreset[] = [
+  "tiktok_bold",
+  "reels_clean",
+  "shorts_clean",
+  "tiktok_words",
+  "reels_words",
+  "shorts_words",
+  "linkedin_static",
+  "corporate_third",
+];
 const CAPTION_TEXT: CaptionTextField[] = ["text", "text_norm"];
 
 function pick<T extends string>(value: FormDataEntryValue | null, allowed: T[], fallback: T): T {
   const v = typeof value === "string" ? value : "";
   return (allowed as string[]).includes(v) ? (v as T) : fallback;
+}
+
+/* Auswahl ohne Vorgabe: leer oder unbekannt wird null, nicht ein leerer Text und nicht ein Ersatzwert */
+function optionalPick<T extends string>(value: FormDataEntryValue | null, allowed: T[]): T | null {
+  const v = typeof value === "string" ? value.trim() : "";
+  return (allowed as string[]).includes(v) ? (v as T) : null;
 }
 
 function tags(formData: FormData, name: string, max?: number): string[] {
@@ -125,7 +141,7 @@ export async function saveBrandProfileAction(_prev: BrandFormState, formData: Fo
     gender_mode: pick(formData.get("gender_mode"), GENDER, "neutral"),
     asr_variant: pick(formData.get("asr_variant"), ASR, "de"),
     default_platform: pick(formData.get("default_platform"), PLATFORM, "linkedin"),
-    caption_preset: pick(formData.get("caption_preset"), PRESET, "linkedin_static"),
+    caption_preset: optionalPick(formData.get("caption_preset"), PRESET),
     tone_adjectives: toneAdjectives.slice(0, 3),
     brand_vocab: tags(formData, "brand_vocab"),
     protected_terms: tags(formData, "protected_terms"),

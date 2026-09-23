@@ -35,14 +35,28 @@ export function Modal({ open, onClose, title, description, children, className }
   /* Portale gibt es erst im Browser; beim Server-Rendern bleibt der Dialog aus. */
   const isBrowser = useIsBrowser();
 
+  /* onClose wird an jeder Aufrufstelle als neue Pfeilfunktion übergeben und wechselt darum bei
+   * jedem Rendern der umgebenden Komponente seine Identität. Stünde es in der Abhängigkeitsliste
+   * des Effekts, liefe der Effekt nach jedem getippten Zeichen neu: das Aufräumen gibt den Fokus
+   * an das Element zurück, aus dem der Dialog geöffnet wurde, der neue Lauf setzt ihn auf das
+   * erste Bedienelement im Dialog. Der Cursor springt also aus dem Textfeld. Deshalb liegt der
+   * Rückruf in einer Ref und der Effekt hängt nur am Öffnen und Schließen. */
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
     const previous = document.activeElement as HTMLElement | null;
-    const first = panelRef.current?.querySelector<HTMLElement>("input, textarea, select, button");
+    const panel = panelRef.current;
+    /* Erst das Eingabefeld, sonst das erste Bedienelement. In der DOM-Reihenfolge stünde sonst
+     * immer der Schließen-Knopf aus der Kopfzeile vorn. */
+    const first = panel?.querySelector<HTMLElement>("input, textarea, select") ?? panel?.querySelector<HTMLElement>("button");
     first?.focus();
     const { overflow } = document.body.style;
     document.body.style.overflow = "hidden";
@@ -51,7 +65,7 @@ export function Modal({ open, onClose, title, description, children, className }
       document.body.style.overflow = overflow;
       previous?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open || !isBrowser) return null;
   return createPortal(

@@ -62,7 +62,7 @@ export default async function GuestApprovalPage({ params }: { params: Promise<{ 
             }}
           />
         )}
-        <p className="mt-8 text-center text-xs text-text-3">chopstr · EU-verarbeitet · Mensch gibt frei. Deine Entscheidung wird mit Zeitpunkt im Audit-Log des Teams gespeichert.</p>
+        <p className="mt-8 text-center text-xs text-text-3">chopstr · EU-verarbeitet. Deine Entscheidung wird mit Zeitpunkt im Audit-Log des Teams gespeichert.</p>
       </main>
     </div>
   );

@@ -108,7 +108,7 @@ def verify(secret: str, body: bytes, header: str, tolerance_s: int = 300) -> boo
       <PageHeader
         eyebrow={`Team · ${session.workspaceName}`}
         title="Entwickler"
-        description="Öffentliche API, Webhooks und MCP-Server. Die KI schlägt vor, ein Mensch gibt frei: jede schreibende Aktion braucht einen Schlüssel mit passendem Scope, und nichts wird ohne Freigabe veröffentlicht."
+        description="Öffentliche API, Webhooks und MCP-Server. Jede schreibende Aktion braucht einen Schlüssel mit passendem Scope."
         actions={
           <>
             <ButtonLink href="/einstellungen/api" variant="primary" size="sm">

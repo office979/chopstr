@@ -82,7 +82,7 @@ export async function PageShell({ children, lightTone = "brand", width = "defaul
           {children}
         </main>
         <footer className="mx-auto flex w-full max-w-[1440px] items-center justify-between gap-3 px-4 pb-6 text-xs text-text-3 sm:px-8 print:hidden">
-          <span>chopstr · EU-verarbeitet · Mensch gibt frei</span>
+          <span>chopstr · EU-verarbeitet</span>
           <span className="font-mono">v{process.env.APP_VERSION ?? "0.1.0"}</span>
         </footer>
       </div>

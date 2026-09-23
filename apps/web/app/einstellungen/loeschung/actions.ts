@@ -41,7 +41,7 @@ export async function requestWorkspaceDeletionAction(_prev: FormState, formData:
       "",
       `Bis dahin kannst du die Löschung zurücknehmen: ${link}`,
       "",
-      "chopstr · EU-verarbeitet · Mensch gibt frei",
+      "chopstr · EU-verarbeitet",
     ].join("\n"),
     link,
   });

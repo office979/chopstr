@@ -24,7 +24,7 @@ export async function sendGuestApprovalMail(args: {
     "",
     `Der Link ist bis ${until} gültig. Du brauchst kein Konto.`,
     "",
-    "chopstr · EU-verarbeitet · Mensch gibt frei",
+    "chopstr · EU-verarbeitet",
   ]
     .filter((l) => l != null)
     .join("\n");

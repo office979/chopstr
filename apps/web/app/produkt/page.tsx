@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     "chopstr macht aus Podcasts, Interviews und Vorträgen auf Deutsch fertige Clips für TikTok, Reels, Shorts und LinkedIn. Sauber geschnitten, jede Auswahl erklärt, in der EU verarbeitet.",
   openGraph: {
     title: "chopstr · Clips aus langen Videos, die Sinn ergeben",
-    description: "Aus einem langen Video werden fertige Clips für TikTok, Reels, Shorts und LinkedIn. Du gibst frei, bevor etwas online geht.",
+    description: "Aus einem langen Video werden fertige Clips für TikTok, Reels, Shorts und LinkedIn.",
     locale: "de_AT",
     type: "website",
   },
@@ -63,7 +63,7 @@ export default function LandingPage() {
             Aus einem langen Video werden Clips, die Sinn ergeben
           </h1>
           <p className="mx-auto mt-6 max-w-[640px] text-lg leading-relaxed text-text-2 sm:text-xl">
-            chopstr sucht die Stellen, die für sich allein funktionieren, schneidet sie nie mitten im Gedanken ab und macht sie fertig für TikTok, Reels, Shorts und LinkedIn. Du schaust drüber und gibst frei.
+            chopstr sucht die Stellen, die für sich allein funktionieren, schneidet sie nie mitten im Gedanken ab und macht sie fertig für TikTok, Reels, Shorts und LinkedIn.
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <PrimaryCta>Kostenlos testen</PrimaryCta>
@@ -77,7 +77,6 @@ export default function LandingPage() {
           <ul className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-text-3">
             <Check>Ohne Kreditkarte</Check>
             <Check>Daten bleiben in der EU</Check>
-            <Check>Nichts geht ohne dich online</Check>
           </ul>
 
           <div className="mt-16 sm:mt-20">
@@ -152,10 +151,9 @@ export default function LandingPage() {
 
         {/* Belege und Sicherheit */}
         <Section eyebrow="Warum chopstr" title="Gebaut für den DACH-Raum, nicht übersetzt">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Proof value="DE · AT · CH" label="Versteht Deutsch, Österreichisch und Schweizerdeutsch (Beta)" />
             <Proof value="EU" label="Verarbeitung und Speicherung nur in der EU, Auftragsverarbeitungsvertrag inklusive" />
-            <Proof value="100 %" label="Freigabe durch dich. chopstr schlägt vor, veröffentlicht aber nie von allein" />
             <Proof value="-16 LUFS" label="Ton nach Sendestandard, jeder Clip gleich laut" />
           </div>
         </Section>
@@ -168,9 +166,6 @@ export default function LandingPage() {
             </Faq>
             <Faq q="Welche Videos funktionieren?">
               Alles, wo Menschen sprechen: Podcasts, Interviews, Vorträge, Webinare, Diskussionen. Video oder nur Audio, bis 5 GB pro Datei.
-            </Faq>
-            <Faq q="Postet chopstr automatisch?">
-              Nein. Ohne deine Freigabe geht nichts online. Du lädst die Clips herunter oder veröffentlichst sie nach der Freigabe über ein verbundenes Konto.
             </Faq>
             <Faq q="Wo landen meine Videos?">
               Nur auf Servern in der EU. Du bekommst einen Auftragsverarbeitungsvertrag, jede Datei hat eine feste Löschfrist und deine Inhalte werden nie zum Trainieren von Modellen verwendet.
@@ -191,7 +186,7 @@ export default function LandingPage() {
             <h2 className="relative mx-auto max-w-[720px] text-3xl font-semibold tracking-[var(--tracking-display)] text-white sm:text-5xl">
               Wie viele gute Clips stecken in deinem letzten Video?
             </h2>
-            <p className="relative mx-auto mt-4 max-w-[520px] text-lg text-white/75">Lad es hoch und schau nach. chopstr macht die Vorschläge, du entscheidest.</p>
+            <p className="relative mx-auto mt-4 max-w-[520px] text-lg text-white/75">Lad es hoch und schau nach.</p>
             <div className="relative mt-8 flex justify-center">
               <PrimaryCta>Kostenlos testen</PrimaryCta>
             </div>
@@ -202,7 +197,7 @@ export default function LandingPage() {
 
       <footer className="relative z-10 border-t border-white/[0.06]">
         <div className="mx-auto flex max-w-[1200px] flex-col gap-4 px-4 py-8 text-sm text-text-3 sm:flex-row sm:items-center sm:justify-between sm:px-8">
-          <span>chopstr · EU-verarbeitet · Mensch gibt frei</span>
+          <span>chopstr · EU-verarbeitet</span>
           <ul className="flex flex-wrap gap-5">
             <li><Link href="/rechtliches/avv" className="hover:text-text-2">AVV</Link></li>
             <li><Link href="/rechtliches/subprozessoren" className="hover:text-text-2">Subprozessoren</Link></li>

@@ -39,7 +39,7 @@ export function AuthShell({ title, description, children, footer, demo }: AuthSh
         {footer && <div className="mt-6 flex flex-wrap items-center justify-between gap-3 text-sm text-text-2">{footer}</div>}
       </main>
       <footer className="relative z-10 mx-auto flex w-full max-w-[520px] px-4 pb-8 text-xs text-text-3 sm:px-6">
-        chopstr · EU-verarbeitet · Mensch gibt frei
+        chopstr · EU-verarbeitet
       </footer>
     </div>
   );

@@ -1,10 +1,9 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
-import { Field, Input } from "@/components/ui/Field";
 
 interface Props {
   sourceId: string;
@@ -20,17 +19,18 @@ interface ApiResponse {
   message?: string;
 }
 
-/* „Löschen“ mit Bestätigungsdialog: der Titel muss exakt eingegeben werden. Löschung läuft über deletion_jobs
- * und den Worker; die Quelle verschwindet sofort aus den Listen. */
+/* „Löschen“ mit kurzer Rückfrage: Frage, ein Satz, Löschen oder Abbrechen. Die Löschung läuft über
+ * deletion_jobs und den Worker; das Video verschwindet sofort aus den Listen.
+ *
+ * Die Schnittstelle verlangt weiterhin den Titel als Bestätigung, damit ein Programm nicht aus
+ * Versehen löscht. In der Oberfläche ist die Rückfrage der Dialog selbst, darum schickt der Knopf
+ * den Titel direkt mit. Die öffentliche API macht es in app/api/v1/sources/[id] genauso. */
 export function DeleteSourceButton({ sourceId, title, size = "sm", redirectTo }: Props) {
   const [open, setOpen] = useState(false);
-  const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const router = useRouter();
-  const id = useId();
-  const matches = confirm.trim() === title.trim();
 
   const run = async () => {
     setBusy(true);
@@ -39,7 +39,7 @@ export function DeleteSourceButton({ sourceId, title, size = "sm", redirectTo }:
       const res = await fetch(`/api/projects/${sourceId}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirm_title: confirm }),
+        body: JSON.stringify({ confirm_title: title }),
       });
       const data = (await res.json()) as ApiResponse;
       if (!res.ok) throw new Error(data.error ?? "Löschen fehlgeschlagen");
@@ -63,25 +63,15 @@ export function DeleteSourceButton({ sourceId, title, size = "sm", redirectTo }:
       <Modal
         open={open}
         onClose={() => !busy && setOpen(false)}
-        title="Projekt löschen"
-        description="Original, Proxy, Transkript, Kandidaten und alle Clips werden aus dem Objektspeicher und der Datenbank entfernt. Der Löschnachweis bleibt im Audit-Log."
+        title={`„${title}“ löschen?`}
+        description="Das Video und alle Clips daraus verschwinden. Das kannst du nicht rückgängig machen."
       >
         {done ? (
           <p role="status" className="text-sm text-text">
             {done}
           </p>
         ) : (
-          <form
-            className="flex flex-col gap-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (matches) void run();
-            }}
-            noValidate
-          >
-            <Field label={`Zur Bestätigung den Titel eingeben: ${title}`} htmlFor={id} required>
-              <Input id={id} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" placeholder={title} />
-            </Field>
+          <div className="flex flex-col gap-4">
             {error && (
               <p role="alert" className="text-sm text-attention">
                 {error}
@@ -91,11 +81,11 @@ export function DeleteSourceButton({ sourceId, title, size = "sm", redirectTo }:
               <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
                 Abbrechen
               </Button>
-              <Button type="submit" variant="danger" disabled={!matches || busy} className="border border-danger/50">
-                {busy ? "Wird gelöscht" : "Endgültig löschen"}
+              <Button type="button" variant="danger" onClick={() => void run()} disabled={busy} className="border border-danger/50">
+                {busy ? "Wird gelöscht" : "Löschen"}
               </Button>
             </div>
-          </form>
+          </div>
         )}
       </Modal>
     </>

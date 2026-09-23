@@ -55,6 +55,35 @@ export function priceForPlan(code: string): string | null {
   return process.env[`STRIPE_PRICE_${code.toUpperCase()}`] || null;
 }
 
+export interface StripeConfigStatus {
+  /* BILLING_PROVIDER=stripe gesetzt, egal ob die Schlüssel stimmen */
+  requested: boolean;
+  secretKey: boolean;
+  webhookSecret: boolean;
+  /* Tarife ohne hinterlegten Preis: Checkout schlägt für sie fehl */
+  missingPrices: string[];
+  /* Testschlüssel erkannt (sk_test_): Zahlungen sind nicht echt */
+  testMode: boolean;
+  ready: boolean;
+}
+
+/* Was fehlt, damit Stripe wirklich funktioniert. Ohne diese Prüfung merkt man eine vergessene
+ * Variable erst, wenn ein zahlender Kunde im Checkout hängt: BILLING_PROVIDER ohne Schlüssel fällt
+ * still auf "manual" zurück, und ein fehlender Preis wirft erst beim Klick auf den Tarif. */
+export function stripeConfigStatus(): StripeConfigStatus {
+  const secret = process.env.STRIPE_SECRET_KEY ?? "";
+  const requested = (process.env.BILLING_PROVIDER ?? "").toLowerCase() === "stripe";
+  const missingPrices = PLAN_CODES.filter((code) => !priceForPlan(code));
+  return {
+    requested,
+    secretKey: Boolean(secret),
+    webhookSecret: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
+    missingPrices: [...missingPrices],
+    testMode: secret.startsWith("sk_test_"),
+    ready: requested && Boolean(secret) && Boolean(process.env.STRIPE_WEBHOOK_SECRET) && missingPrices.length === 0,
+  };
+}
+
 type Obj = Record<string, unknown>;
 
 function obj(v: unknown): Obj {

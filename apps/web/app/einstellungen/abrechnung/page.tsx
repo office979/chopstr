@@ -2,6 +2,8 @@ import { getRepo } from "@/lib/repo";
 import { requirePageRole } from "@/lib/session";
 import { getQuota } from "@/lib/billing/quota";
 import { billingProviderKind } from "@/lib/billing/provider";
+import { stripeConfigStatus } from "@/lib/billing/stripe";
+import { StripeSetupNotice } from "./StripeSetupNotice";
 import { SettingsShell } from "../SettingsShell";
 import { BillingPanel } from "./BillingPanel";
 
@@ -35,6 +37,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
       title="Abrechnung"
       description="Abgerechnet werden Stunden Quellmaterial pro Monat. Kein Credit-System, keine versteckten Kosten."
     >
+      <StripeSetupNotice status={stripeConfigStatus()} />
       <BillingPanel
         provider={billingProviderKind()}
         subscription={quota.subscription}

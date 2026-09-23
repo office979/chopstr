@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
+import { playDoneSound } from "@/lib/sound";
 import type { Candidate, Clip, Platform, ReviseCandidateInput } from "@/lib/repo/types";
 import { PLATFORM_LABELS } from "@/lib/clips/labels";
 import type { Sentence } from "@/lib/transcript/sentences";
@@ -14,6 +16,10 @@ import { VideoStage } from "../transkript/VideoStage";
 import { CandidateCard } from "./CandidateCard";
 import { CandidateDetail } from "./CandidateDetail";
 import { ClipText } from "./ClipText";
+
+/* So lange bleibt die Erfolgsmeldung stehen, bevor es zu den Clips geht. Gleiche Zeit wie am Ende
+ * der Analyse (PipelineLive), damit sich beide Übergänge gleich anfühlen. */
+const HANDOFF_MS = 1400;
 
 interface Props {
   sourceId: string;
@@ -80,6 +86,7 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string; href?: string; hrefLabel?: string } | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
+  const router = useRouter();
   const [acceptOpen, setAcceptOpen] = useState(false);
   const [clips, setClips] = useState<Clip[]>(initialClips);
   /* Ende der 8-Sekunden-Vorschau (Sekunden im Original); null = keine Vorschau aktiv */
@@ -165,6 +172,13 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
   const replace = (id: string, next: Candidate) =>
     setCandidates((prev) => prev.map((c) => (c.id === id ? next : c)));
 
+  /* setVerdict haengt nur an sourceId, sieht die Liste also veraltet. Ueber diese Referenz kommt es
+   * an den aktuellen Stand, ohne bei jeder Aenderung neu gebaut zu werden. */
+  const candidatesRef = useRef(candidates);
+  useEffect(() => {
+    candidatesRef.current = candidates;
+  }, [candidates]);
+
   const setVerdict = useCallback(
     async (c: Candidate, verdict: "accepted" | "rejected", reason?: string, platforms?: Platform[], keepSourceAspect = false) => {
       const before = c;
@@ -214,12 +228,25 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
               }
             : { tone: "ok", text: "Abgelehnt. Der Grund fließt als Lernsignal ein." },
         );
+
+        /* Der Weg darf hier nicht abreißen. Ist noch etwas offen, springt die Auswahl zum nächsten
+         * unentschiedenen Moment — das ist der Takt, in dem jemand zwanzig Stück durchgeht. Ist
+         * nichts mehr offen, ist der Schritt zu Ende: Klang und weiter zu den fertigen Clips,
+         * genau wie nach der Analyse. Wer nach dem ersten Annehmen hinausgeworfen wird, kann
+         * nicht im Stapel arbeiten; wer nie hinausgeführt wird, findet seine Clips nicht. */
+        const offen = candidatesRef.current.filter((k) => k.id !== c.id && k.human_verdict == null);
+        if (offen.length > 0) {
+          select(offen[0].id);
+        } else if (verdict === "accepted" && created.length > 0) {
+          playDoneSound();
+          window.setTimeout(() => router.push(`/projekte/${sourceId}/clips`), HANDOFF_MS);
+        }
       } catch (err) {
         replace(c.id, before);
         setMessage({ tone: "error", text: err instanceof Error ? err.message : "Urteil konnte nicht gespeichert werden" });
       }
     },
-    [sourceId],
+    [sourceId, select, router],
   );
 
   const revise = useCallback(
@@ -267,10 +294,14 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
         e.preventDefault();
         step(-1);
       } else if (key === "a") {
+        /* Nimmt sofort an, mit der Standard-Plattform. Vorher klappte „A" nur ein Feld auf, und der
+         * Knopf darin bekam keinen Fokus — der häufigste Handgriff war damit der einzige, den man
+         * nicht mit der Tastatur zu Ende bringen konnte. */
         if (selected && selected.human_verdict !== "accepted" && busyId == null) {
           e.preventDefault();
           setRejectOpen(false);
-          setAcceptOpen(true);
+          setAcceptOpen(false);
+          void setVerdict(selected, "accepted", undefined, [defaultPlatform], false);
         }
       } else if (key === "r") {
         if (selected && selected.human_verdict !== "rejected") {
@@ -294,7 +325,7 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("keyup", onKeyUp);
     };
-  }, [step, selected, busyId, setVerdict, togglePreview]);
+  }, [step, selected, busyId, setVerdict, togglePreview, defaultPlatform]);
 
   const previewActive = playing && previewEnd != null && currentTime < previewEnd;
   const previewLeft = previewActive ? Math.max(0, previewEnd - currentTime) : PREVIEW_SECONDS;

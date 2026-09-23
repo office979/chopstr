@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
+import { Button, ButtonLink } from "@/components/ui/Button";
 import { StatusCheck, type StatusCheckState } from "@/components/ui/StatusCheck";
 import { cn } from "@/components/ui/cn";
 import { SilentPreview, type PreviewFont } from "@/components/clips/SilentPreview";
@@ -439,6 +439,15 @@ export function ClipBoard({
               const mp4 = dl("mp4", clip.file_key);
               const srt = dl("srt", clip.srt_key);
               const vtt = dl("vtt", clip.vtt_key);
+              /* Warum ein Download gerade nicht geht. Gleiche Reihenfolge wie bisher: fehlende
+                 Gastfreigabe zuerst, dann Testmodus, dann die Datei selbst. */
+              const lockedTitle = blocked
+                ? EXPORT_BLOCKED_MESSAGE
+                : demo
+                  ? "Im Testmodus gibt es keine Dateien"
+                  : isDone(clip)
+                    ? "Datei noch nicht verfügbar"
+                    : "Erst wenn der Clip fertig ist";
               const poster = mediaUrl(mediaBase, clip.poster_key);
               /* Gerendertes MP4 direkt aus der Medien-URL (lokal /api/media, sonst CDN oder MinIO) */
               const video = isDone(clip) ? mediaUrl(mediaBase, clip.file_key) : null;
@@ -572,52 +581,43 @@ export function ClipBoard({
 
                   {blocked && (
                     <p className="rounded-[12px] border border-attention/50 bg-attention/10 px-3 py-2 text-xs text-text">
-                      <span className="font-medium text-attention">{EXPORT_BLOCKED_MESSAGE}</span> MP4, SRT und VTT werden freigeschaltet, sobald der Gast zustimmt.
+                      <span className="font-medium text-attention">{EXPORT_BLOCKED_MESSAGE}</span> Video und Untertitel werden freigeschaltet, sobald der Gast zustimmt.
                     </p>
                   )}
 
-                  {/* Downloads mit Beschriftung. Vorher standen hier nur „MP4 SRT VTT“; dass das
-                      Downloads sind, ließ sich nur durch Draufklicken herausfinden. */}
+                  {/* Herunterladen ist der Grund, warum jemand hier ist: ein einziger hervorgehobener
+                      Knopf, ganz vorn in der Aktionszeile. Bearbeiten steht daneben und ist ruhig.
+                      Die Untertiteldateien liegen in den Profi-Details (Bedienkonzept, Abschnitt 9). */}
                   <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-                    <span className="text-xs text-text-2">Herunterladen:</span>
-                    {(
-                      [
-                        ["Video", "MP4", mp4],
-                        ["Untertitel", "SRT", srt],
-                        ["Untertitel", "VTT", vtt],
-                      ] as const
-                    ).map(([label, kind, href]) =>
-                      href && !blocked ? (
-                        <a
-                          key={kind}
-                          href={href}
-                          download
-                          className="transition-soft inline-flex h-8 items-center gap-1.5 rounded-pill border border-line-strong px-3 text-xs text-text hover:border-white/40 hover:bg-white/5"
-                        >
-                          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                            <path d="M8 2v8m0 0 3-3M8 10 5 7M3 13h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                          {label} <span className="font-mono text-text-3">{kind}</span>
-                        </a>
-                      ) : (
-                        <span
-                          key={kind}
-                          aria-disabled="true"
-                          title={blocked ? EXPORT_BLOCKED_MESSAGE : demo ? "Im Demo-Modus gibt es keine Dateien" : isDone(clip) ? "Datei noch nicht verfügbar" : "Erst wenn der Clip fertig ist"}
-                          className={cn("inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-pill border px-3 text-xs", blocked ? "border-attention/40 text-attention/70" : "border-line text-text-3")}
-                        >
-                          {label} <span className="font-mono">{kind}</span>
-                        </span>
-                      ),
+                    {mp4 && !blocked ? (
+                      <a
+                        href={mp4}
+                        download
+                        className="transition-soft inline-flex h-9 items-center gap-2 rounded-pill bg-text px-4 text-sm font-medium text-black hover:bg-white"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path d="M8 2v8m0 0 3-3M8 10 5 7M3 13h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        Video herunterladen
+                      </a>
+                    ) : (
+                      <span
+                        aria-disabled="true"
+                        title={lockedTitle}
+                        className={cn(
+                          "inline-flex h-9 cursor-not-allowed items-center gap-2 rounded-pill border px-4 text-sm font-medium",
+                          blocked ? "border-attention/40 text-attention/70" : "border-line text-text-3",
+                        )}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path d="M8 2v8m0 0 3-3M8 10 5 7M3 13h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        Video herunterladen
+                      </span>
                     )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Link
-                      href={`/projekte/${sourceId}/clips/${clip.id}/hooks`}
-                      className="transition-soft inline-flex h-9 items-center rounded-pill bg-text px-4 text-sm font-medium text-black hover:bg-white"
-                    >
+                    <ButtonLink size="sm" variant="ghost" href={`/projekte/${sourceId}/clips/${clip.id}/hooks`}>
                       Text oder Bild ändern
-                    </Link>
+                    </ButtonLink>
                     <Button size="sm" variant="ghost" onClick={() => rerender(clip)} disabled={busyId === clip.id || clip.status === "rendering"}>
                       Änderungen übernehmen
                     </Button>
@@ -631,43 +631,84 @@ export function ClipBoard({
                   {/* Die Vorschau liegt jetzt im Fenster „Größer ansehen“, nicht mehr aufgeklappt
                       unter der Karte. Ein zweiter Player unter dem ersten war überflüssig. */}
 
-                  {isDone(clip) && (
-                    <ProDetails className="mt-auto">
-                      {clip.loudness && (
-                        <ProRow label="Lautheit">
-                          {formatLoudness(clip.loudness.integrated_lufs, clip.loudness.true_peak_dbtp)}
-                        </ProRow>
-                      )}
-                      {clip.width && clip.height && (
-                        <ProRow label="Auflösung">
-                          {clip.width}×{clip.height}
-                          {clip.fps ? `, ${clip.fps} fps` : ""}
-                        </ProRow>
-                      )}
-                      <ProRow label="Echtheitssiegel (C2PA)">
-                        {c2pa === "signed" ? "signiert" : `nicht gesetzt${clip.provenance.reason ? `: ${clip.provenance.reason}` : ""}`}
-                      </ProRow>
-                      {clip.render_plan && (
-                        <>
-                          <ProRow label="Bildausschnitt">
-                            {clip.render_plan.reframe.strategy}
-                            {clip.render_plan.reframe.detector ? ` (${clip.render_plan.reframe.detector})` : ""}
+                  <ProDetails className="mt-auto">
+                    {/* Untertiteldateien braucht kein Laie. Wer sie braucht, findet sie auf jeder
+                        Karte an derselben Stelle (Bedienkonzept, Abschnitt 9). */}
+                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
+                      <span className="text-text-3">Untertiteldateien</span>
+                      <span className="flex flex-wrap items-center gap-2">
+                        {(
+                          [
+                            ["SRT", srt],
+                            ["VTT", vtt],
+                          ] as const
+                        ).map(([kind, href]) =>
+                          href && !blocked ? (
+                            <a
+                              key={kind}
+                              href={href}
+                              download
+                              className="transition-soft inline-flex h-8 items-center gap-1.5 rounded-pill border border-line-strong px-3 text-xs text-text hover:border-white/40 hover:bg-white/5"
+                            >
+                              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                <path d="M8 2v8m0 0 3-3M8 10 5 7M3 13h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                              Untertitel <span className="font-mono text-text-3">{kind}</span>
+                            </a>
+                          ) : (
+                            <span
+                              key={kind}
+                              aria-disabled="true"
+                              title={lockedTitle}
+                              className={cn(
+                                "inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-pill border px-3 text-xs",
+                                blocked ? "border-attention/40 text-attention/70" : "border-line text-text-3",
+                              )}
+                            >
+                              Untertitel <span className="font-mono">{kind}</span>
+                            </span>
+                          ),
+                        )}
+                      </span>
+                    </div>
+                    {isDone(clip) && (
+                      <>
+                        {clip.loudness && (
+                          <ProRow label="Lautheit">
+                            {formatLoudness(clip.loudness.integrated_lufs, clip.loudness.true_peak_dbtp)}
                           </ProRow>
-                          <ProRow label="Untertitel-Preset">{clip.render_plan.captions.preset}</ProRow>
-                        </>
-                      )}
-                      {clip.cps_warnings.length > 0 && (
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-text-3">Schnelle Untertitel</span>
-                          <ul className="flex flex-col gap-0.5 font-mono">
-                            {clip.cps_warnings.map((w, i) => (
-                              <li key={i}>{w}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </ProDetails>
-                  )}
+                        )}
+                        {clip.width && clip.height && (
+                          <ProRow label="Auflösung">
+                            {clip.width}×{clip.height}
+                            {clip.fps ? `, ${clip.fps} fps` : ""}
+                          </ProRow>
+                        )}
+                        <ProRow label="Echtheitssiegel (C2PA)">
+                          {c2pa === "signed" ? "signiert" : `nicht gesetzt${clip.provenance.reason ? `: ${clip.provenance.reason}` : ""}`}
+                        </ProRow>
+                        {clip.render_plan && (
+                          <>
+                            <ProRow label="Bildausschnitt">
+                              {clip.render_plan.reframe.strategy}
+                              {clip.render_plan.reframe.detector ? ` (${clip.render_plan.reframe.detector})` : ""}
+                            </ProRow>
+                            <ProRow label="Untertitel-Preset">{clip.render_plan.captions.preset}</ProRow>
+                          </>
+                        )}
+                        {clip.cps_warnings.length > 0 && (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-text-3">Schnelle Untertitel</span>
+                            <ul className="flex flex-col gap-0.5 font-mono">
+                              {clip.cps_warnings.map((w, i) => (
+                                <li key={i}>{w}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </ProDetails>
                   </div>
 
                   {/* Rechte Spalte: oben die Freigabe (hat mit dem Rest nichts zu tun),

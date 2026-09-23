@@ -85,6 +85,10 @@ export function CandidateDetail({
     if (targets.length === 0) return;
     onAccept(PLATFORMS.filter((p) => targets.includes(p)), !portrait);
   };
+  /* Ein Klick, ohne Rückfrage: Standard-Plattform aus dem Aussehen, Hochformat an. Das ist der Weg,
+   * den die allermeisten gehen. Wer etwas anderes will, klappt darunter „Woanders hin?" auf — die
+   * Wahl bleibt vollständig erhalten, sie steht nur nicht mehr im Weg. */
+  const acceptDefault = () => onAccept([defaultPlatform], false);
 
   const first = c.first_sent ?? 0;
   const last = c.last_sent ?? 0;
@@ -239,8 +243,8 @@ export function CandidateDetail({
 
       <section className="border-t border-line pt-6">
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => onAcceptOpen(!acceptOpen)} disabled={busy || c.human_verdict === "accepted"} aria-expanded={acceptOpen} aria-controls={targetsId}>
-            Annehmen
+          <Button onClick={acceptDefault} disabled={busy || c.human_verdict === "accepted"}>
+            Nehmen
           </Button>
           <Button variant="ghost" onClick={() => onRejectOpen(!rejectOpen)} disabled={busy || c.human_verdict === "rejected"} aria-expanded={rejectOpen}>
             Ablehnen
@@ -270,6 +274,22 @@ export function CandidateDetail({
             </span>
           )}
         </div>
+
+        {c.human_verdict !== "accepted" && (
+          <p className="mt-3 text-sm text-text-2">
+            Geht als <span className="text-text">{PLATFORM_LABELS[defaultPlatform]}</span> im Hochformat raus.{" "}
+            <button
+              type="button"
+              onClick={() => onAcceptOpen(!acceptOpen)}
+              disabled={busy}
+              aria-expanded={acceptOpen}
+              aria-controls={targetsId}
+              className="text-text underline-offset-4 hover:underline disabled:opacity-60"
+            >
+              Woanders hin?
+            </button>
+          </p>
+        )}
 
         {clips.length > 0 && (
           <p className="mt-3 text-sm text-text-2">

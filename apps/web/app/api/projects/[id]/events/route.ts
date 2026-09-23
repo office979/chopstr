@@ -64,7 +64,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           if (current) {
             send("status", { status: current.status, status_message: current.status_message, updated_at: current.updated_at });
             if (isTerminalStatus(current.status)) {
-              send("done", { status: current.status });
+              /* Die Kandidatenzahl muss mit: Der Client kennt nur den Stand vom Seitenaufbau, und der war
+               * null, solange die Analyse lief. Ohne diese Zahl weiß er nicht, ob es etwas zu zeigen gibt,
+               * und bleibt stehen. Nur einmal am Schluss, nicht bei jedem Takt. */
+              const candidates = await repo.countCandidates(id);
+              send("done", { status: current.status, candidates });
               finish();
               return;
             }

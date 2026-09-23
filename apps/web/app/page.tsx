@@ -49,6 +49,7 @@ function progressOf(status: Source["status"]): number {
 export default async function ProjectsPage() {
   const session = await requireSession();
   const canDelete = can(session.role, "source.delete");
+  const canUpload = can(session.role, "source.upload");
   const repo = getRepo();
   const sources = await repo.listSources();
   const counts = new Map(
@@ -87,13 +88,20 @@ export default async function ProjectsPage() {
               Hallo {session.displayName.split(/\s+/)[0]}. Langes Video rein, kurze Clips raus.
             </p>
           </div>
+          {/* Der Weg zum Hochladen gehört auf die Seite selbst. In der Seitenleiste liegt er auf dem
+           * Handy hinter dem Menü und ist damit unsichtbar. */}
+          {canUpload && <ButtonLink href="/upload">Neues Video</ButtonLink>}
         </div>
-        <dl className="relative mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Stat label="Videos" value={sources.length} hint={`${readyCount} fertig analysiert`} />
-          <Stat label="Gerade in Arbeit" value={activeCount} hint={activeCount > 0 ? "der Computer rechnet" : "nichts in der Warteschlange"} />
-          <Stat label="Clips zu prüfen" value={openCandidates} hint="warten auf deine Entscheidung" />
-          <Stat label="Fertige Clips" value={renderedClips} hint={failedCount > 0 ? `bei ${failedCount} Video(s) ging etwas schief` : "bereit zum Posten"} />
-        </dl>
+        {/* Zahlen erst, wenn es etwas zu zählen gibt. Vier Nullen sind für jemanden, der gerade
+         * anfängt, das größte Element der Seite und sagen nichts. */}
+        {sources.length > 0 && (
+          <dl className="relative mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Stat label="Videos" value={sources.length} hint={`${readyCount} fertig analysiert`} />
+            <Stat label="Gerade in Arbeit" value={activeCount} hint={activeCount > 0 ? "der Computer rechnet" : "nichts in der Warteschlange"} />
+            <Stat label="Momente zu prüfen" value={openCandidates} hint="warten auf deine Entscheidung" />
+            <Stat label="Fertige Clips" value={renderedClips} hint={failedCount > 0 ? `bei ${failedCount} Video(s) ging etwas schief` : "bereit zum Posten"} />
+          </dl>
+        )}
       </section>
 
       {dpaMissing && (
@@ -159,7 +167,7 @@ export default async function ProjectsPage() {
                       </Badge>
                       {hasCandidates && count && (
                         <Badge tone="ok">
-                          {count.total} {count.total === 1 ? "Clip" : "Clips"} gefunden
+                          {count.total} {count.total === 1 ? "Moment" : "Momente"} gefunden
                         </Badge>
                       )}
                       {clipCount && clipCount.total > 0 && (
@@ -171,7 +179,7 @@ export default async function ProjectsPage() {
                       )}
                       {clipCount && clipCount.total > 0 && (
                         <ButtonLink href={`/projekte/${s.id}/clips`} size="sm" variant="ghost">
-                          Clips
+                          Fertige Clips
                         </ButtonLink>
                       )}
                       {s.status === "ready" && hasCandidates ? (
@@ -180,7 +188,7 @@ export default async function ProjectsPage() {
                             Text
                           </ButtonLink>
                           <ButtonLink href={`/projekte/${s.id}/review`} size="sm">
-                            Clips auswählen
+                            Momente auswählen
                           </ButtonLink>
                         </>
                       ) : s.status === "ready" ? (

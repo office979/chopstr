@@ -323,7 +323,7 @@ export function ClipBoard({
       </Modal>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-text-2">
-          {groups.length} {groups.length === 1 ? "Moment" : "Momente"}, {clips.filter(isDone).length} von {clips.length} Clips fertig.
+          {groups.length} {groups.length === 1 ? "Clip" : "Clips"}, {clips.filter(isDone).length} von {clips.length} Clips fertig.
         </p>
         <div className="flex items-center gap-2 text-xs">
           {live && (
@@ -351,8 +351,8 @@ export function ClipBoard({
         <GlassCard key={g.candidateId} padding="lg" className={cn("flex flex-col gap-5", glitchGroups.has(g.candidateId) && "spectrum-glitch")}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs uppercase tracking-wide text-text-2">Moment {gi + 1}</p>
-              <h2 className="mt-1 text-lg font-medium">{g.candidate ? structureLabel(g.candidate.structure) : "Moment gelöscht"}</h2>
+              <p className="text-xs uppercase tracking-wide text-text-2">Clip {gi + 1}</p>
+              <h2 className="mt-1 text-lg font-medium">{g.candidate ? structureLabel(g.candidate.structure) : "Clip gelöscht"}</h2>
               {g.candidate && <p className="mt-1 line-clamp-2 text-sm text-text-2">{snippet(g.candidate.rubric.text)}</p>}
             </div>
             <div className="flex items-center gap-2">
@@ -361,13 +361,13 @@ export function ClipBoard({
               </span>
               {g.candidate && (
                 <Link href={`/projekte/${sourceId}/review`} className="text-sm text-text-2 hover:text-text hover:underline">
-                  Moment ansehen
+                  Clip ansehen
                 </Link>
               )}
             </div>
           </div>
 
-          <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label={`Clips zu Moment ${gi + 1}`}>
+          <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label={`Clips zu Vorschlag ${gi + 1}`}>
             {g.clips.map((clip) => {
               const ev = latest.get(clip.id);
               const state = checkState(clip);

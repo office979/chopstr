@@ -40,7 +40,6 @@ export default async function DeletionPage() {
       tab="loeschung"
       title="Löschung und Export"
       description="Jede Löschung hinterlässt einen Nachweis: welche Objektspeicher-Keys und welche Zeilen entfernt wurden."
-      width="default"
     >
       <div className="flex flex-col gap-5">
         {canExport && (

@@ -70,7 +70,7 @@ export default async function ProjectPage({ params }: Props) {
                 Text öffnen
               </ButtonLink>
             )}
-            {hasCandidates && <ButtonLink href={`/projekte/${source.id}/review`}>Momente auswählen</ButtonLink>}
+            {hasCandidates && <ButtonLink href={`/projekte/${source.id}/review`}>Clips auswählen</ButtonLink>}
             {clipCount.total > 0 && (
               <ButtonLink href={`/projekte/${source.id}/clips`} variant="ghost">
                 Clips
@@ -169,7 +169,7 @@ export default async function ProjectPage({ params }: Props) {
               <h2 className="mb-4 text-lg font-medium">Deine Wünsche</h2>
               <dl className="flex flex-col gap-4">
                 {source.brief.audience && <Meta label="Zielgruppe">{source.brief.audience}</Meta>}
-                {source.brief.wanted && <Meta label="Gewünschte Momente">{source.brief.wanted}</Meta>}
+                {source.brief.wanted && <Meta label="Gewünschte Clips">{source.brief.wanted}</Meta>}
                 {source.brief.exclude && <Meta label="Ausschlüsse">{source.brief.exclude}</Meta>}
                 {source.brief.platform && <Meta label="Plattform">{source.brief.platform}</Meta>}
               </dl>

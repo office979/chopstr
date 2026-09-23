@@ -34,7 +34,6 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
       tab="abrechnung"
       title="Abrechnung"
       description="Abgerechnet werden Stunden Quellmaterial pro Monat. Kein Credit-System, keine versteckten Kosten."
-      width="default"
     >
       <BillingPanel
         provider={billingProviderKind()}

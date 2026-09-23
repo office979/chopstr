@@ -51,16 +51,18 @@ export async function POST(request: NextRequest, { params }: Params) {
     return Response.json({ error: "Dieser Kandidat wurde durch eine neue Version ersetzt" }, { status: 409 });
   }
 
-  /* Ziele: Standard alle vier; die Standard-Plattform des Markenprofils ist immer dabei */
+  /* Ziele: genau die gewählten. Die Standard-Plattform des Markenprofils ist in der Oberfläche
+   * vorausgewählt, aber abwählbar; sie wird hier nicht mehr erzwungen. Ohne Angabe gilt der
+   * Standard des Markenprofils, nicht mehr alle vier. */
   const brand = source.brand_profile_id ? await repo.getBrandProfile(source.brand_profile_id) : null;
   const defaultPlatform: Platform = brand?.default_platform ?? source.brief.platform ?? "linkedin";
-  let platforms: Platform[] = PLATFORMS;
+  let platforms: Platform[] = [defaultPlatform];
   if (Array.isArray(body.platforms)) {
     const requested = body.platforms.filter(isPlatform);
     if (requested.length === 0) {
       return Response.json({ error: "Mindestens ein Ziel wählen" }, { status: 400 });
     }
-    platforms = PLATFORMS.filter((p) => requested.includes(p) || p === defaultPlatform);
+    platforms = PLATFORMS.filter((p) => requested.includes(p));
   }
 
   const keepSourceAspect = body.keep_source_aspect === true;

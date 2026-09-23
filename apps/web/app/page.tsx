@@ -81,7 +81,7 @@ export default async function ProjectsPage() {
         <dl className="relative mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Stat label="Videos" value={sources.length} hint={`${readyCount} fertig analysiert`} />
           <Stat label="Gerade in Arbeit" value={activeCount} hint={activeCount > 0 ? "der Computer rechnet" : "nichts in der Warteschlange"} />
-          <Stat label="Momente zu prüfen" value={openCandidates} hint="warten auf deine Entscheidung" />
+          <Stat label="Clips zu prüfen" value={openCandidates} hint="warten auf deine Entscheidung" />
           <Stat label="Fertige Clips" value={renderedClips} hint={failedCount > 0 ? `bei ${failedCount} Video(s) ging etwas schief` : "bereit zum Posten"} />
         </dl>
       </section>
@@ -137,7 +137,7 @@ export default async function ProjectsPage() {
                       </Badge>
                       {hasCandidates && count && (
                         <Badge tone="ok">
-                          {count.total} {count.total === 1 ? "Moment" : "Momente"} gefunden
+                          {count.total} {count.total === 1 ? "Clip" : "Clips"} gefunden
                         </Badge>
                       )}
                       {clipCount && clipCount.total > 0 && (
@@ -158,7 +158,7 @@ export default async function ProjectsPage() {
                             Text
                           </ButtonLink>
                           <ButtonLink href={`/projekte/${s.id}/review`} size="sm">
-                            Momente auswählen
+                            Clips auswählen
                           </ButtonLink>
                         </>
                       ) : s.status === "ready" ? (

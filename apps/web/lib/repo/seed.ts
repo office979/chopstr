@@ -203,7 +203,7 @@ export const seedPodcastEvents: Omit<PipelineEvent, "id">[] = [
     step: "detect_candidates",
     status: "finished",
     progress: 1,
-    message: "6 Momente gefunden, 3 davon vollständig geprüft",
+    message: "6 Clips gefunden, 3 davon vollständig geprüft",
     payload: {
       candidates: 6,
       gate_passed: 3,

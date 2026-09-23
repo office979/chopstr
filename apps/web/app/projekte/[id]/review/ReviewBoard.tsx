@@ -309,7 +309,7 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
           title={title}
           player={player}
           activeSpeaker={null}
-          hint="Tastatur: J und K blättern · A nimmt den Moment · R lehnt ihn ab · Leertaste spielt 8 Sekunden"
+          hint="Tastatur: J und K blättern · A nimmt den Clip · R lehnt ihn ab · Leertaste spielt 8 Sekunden"
         />
         {selected && (
           <ClipText
@@ -332,7 +332,7 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
 
       {/* Liste */}
       <div className="flex flex-col gap-4 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Momente filtern">
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Clips filtern">
           {FILTERS.map((f) => {
             const active = filter === f.key;
             return (
@@ -374,10 +374,10 @@ export function ReviewBoard({ sourceId, title, durationS, videoSrc, initialCandi
         {visible.length === 0 ? (
           <GlassCard padding="lg" className="text-center">
             <p className="font-medium">Hier ist gerade nichts</p>
-            <p className="mt-1 text-sm text-text-2">Klick auf „Alle“, um wieder alle Momente zu sehen.</p>
+            <p className="mt-1 text-sm text-text-2">Klick auf „Alle“, um wieder alle Clips zu sehen.</p>
           </GlassCard>
         ) : (
-          <ul className="flex flex-col gap-3 lg:max-h-[calc(100dvh-14rem)] lg:overflow-y-auto lg:pr-1 lg:pb-8" aria-label="Momente">
+          <ul className="flex flex-col gap-3 lg:max-h-[calc(100dvh-14rem)] lg:overflow-y-auto lg:pr-1 lg:pb-8" aria-label="Clips">
             {visible.map((c, i) => (
               <li key={c.id}>
                 <CandidateCard

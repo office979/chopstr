@@ -4,11 +4,9 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Badge } from "@/components/ui/Badge";
 import { ButtonLink } from "@/components/ui/Button";
-import { PublishingNav } from "@/components/publishing/PublishingNav";
 import { getRepo } from "@/lib/repo";
 import { getPublishingRepo } from "@/lib/repo/publishing";
 import { requirePublishingPage } from "@/lib/publishing/auth";
-import { canExt } from "@/lib/auth/permissions-publishing";
 import { decisionCheck, posteriorAOverB, successMetricLabel, variantStats } from "@/lib/experiments/stats";
 import { CLIP_STATUS_LABELS, PLATFORM_LABELS, patternLabel } from "@/lib/clips/labels";
 import { PUBLICATION_STATUS_LABELS } from "@/lib/publishing/platforms";
@@ -32,7 +30,7 @@ function n(v: number | null | undefined, digits = 0): string {
 /* Detail eines Experiments: beide Clips, Metriken je Variante, Bedingungen, Konfidenz, Gewinner setzen */
 export default async function ExperimentPage({ params }: Props) {
   const { id } = await params;
-  const session = await requirePublishingPage("experiments.manage");
+  await requirePublishingPage("experiments.manage");
   const pub = getPublishingRepo();
   const experiment = await pub.getExperiment(id);
   if (!experiment) notFound();
@@ -71,7 +69,6 @@ export default async function ExperimentPage({ params }: Props) {
           </>
         }
       />
-      <PublishingNav current="experimente" showConnections={canExt(session.role, "publishing.manage")} />
 
       <div className="grid gap-5 md:grid-cols-2">
         {(

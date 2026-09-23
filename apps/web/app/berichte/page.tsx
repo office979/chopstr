@@ -3,7 +3,6 @@ import { PageShell } from "@/components/layout/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Badge } from "@/components/ui/Badge";
-import { PublishingNav } from "@/components/publishing/PublishingNav";
 import { getPublishingRepo } from "@/lib/repo/publishing";
 import { requireSession } from "@/lib/session";
 import { canExt } from "@/lib/auth/permissions-publishing";
@@ -51,7 +50,6 @@ export default async function ReportsPage() {
   return (
     <PageShell width="default" backgroundWord="Woche">
       <PageHeader eyebrow={`Workspace · ${session.workspaceName}`} title="Berichte" description="Jeden Montag: drei beste und drei schwächste Clips nach Folgequote, je eine Ursache und eine Änderung." />
-      <PublishingNav current="berichte" showConnections={canManage} />
       <GlassCard padding="md" className="mb-5">
         <ReportSettings enabled={enabled} canManage={canManage} />
       </GlassCard>

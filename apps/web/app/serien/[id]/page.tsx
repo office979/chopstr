@@ -6,11 +6,9 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import { Badge } from "@/components/ui/Badge";
 import { ButtonLink } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
-import { PublishingNav } from "@/components/publishing/PublishingNav";
 import { getRepo } from "@/lib/repo";
 import { getPublishingRepo } from "@/lib/repo/publishing";
 import { requirePublishingPage } from "@/lib/publishing/auth";
-import { canExt } from "@/lib/auth/permissions-publishing";
 import { CADENCE_LABELS, calendarSlots } from "@/lib/series/variation";
 import { CLIP_STATUS_LABELS, PLATFORM_LABELS, formatClipDuration, patternLabel } from "@/lib/clips/labels";
 import { STRUCTURE_LABELS } from "@/lib/candidates/labels";
@@ -29,7 +27,7 @@ export async function generateMetadata({ params }: Props) {
 /* Serie: Regeln, Kalender (8 Slots zurück, 8 voraus, Lücken orange), zugeordnete Clips */
 export default async function SeriesDetailPage({ params }: Props) {
   const { id } = await params;
-  const session = await requirePublishingPage("series.manage");
+  await requirePublishingPage("series.manage");
   const pub = getPublishingRepo();
   const series = await pub.getSeries(id);
   if (!series) notFound();
@@ -53,7 +51,6 @@ export default async function SeriesDetailPage({ params }: Props) {
         }
         description={`${CADENCE_LABELS[series.cadence]} · ${series.brand_profile_name ?? "alle Marken"} · seit ${formatDate(series.created_at)}${series.description ? ` · ${series.description}` : ""}`}
       />
-      <PublishingNav current="serien" showConnections={canExt(session.role, "publishing.manage")} />
 
       <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
         <GlassCard padding="lg">

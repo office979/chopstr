@@ -27,15 +27,17 @@ interface Props {
   title: string;
   description?: ReactNode;
   actions?: ReactNode;
-  width?: "narrow" | "default" | "wide";
   children: ReactNode;
 }
 
-/* Rahmen der Workspace-Einstellungen mit Reitern. Block B ergänzt hier Abrechnung und Rechtliches. */
-export function SettingsShell({ session, tab, title, description, actions, width = "narrow", children }: Props) {
+/* Rahmen der Workspace-Einstellungen mit Reitern. Block B ergänzt hier Abrechnung und Rechtliches.
+ *
+ * Alle Reiter teilen dieselbe Breite. Vorher setzten Abrechnung, Audit-Log, Löschung, Webhooks und
+ * Verbindungen "default", der Rest blieb auf "narrow"; beim Reiterwechsel sprang das Layout. */
+export function SettingsShell({ session, tab, title, description, actions, children }: Props) {
   const tabs = TABS.filter((t) => !t.action || can(session.role, t.action));
   return (
-    <PageShell width={width} backgroundWord="EU">
+    <PageShell width="default" backgroundWord="EU">
       <PageHeader eyebrow={`Workspace · ${session.workspaceName}`} title={title} description={description} actions={actions} />
       <nav aria-label="Einstellungen" className="mb-6 flex flex-wrap gap-1">
         {tabs.map((t) => (

@@ -255,12 +255,12 @@ const SIM_PHASES: SimPhase[] = [
   { step: "transcribe_de", status: "transcribing", duration: 70, startMessage: "whisper-large-v3-turbo-german", endMessage: "Transkription abgeschlossen" },
   { step: "diarize", status: "analyzing", duration: 25, startMessage: "Sprecher werden getrennt", endMessage: "Sprecher erkannt" },
   { step: "fuse_and_nlp", status: "analyzing", duration: 18, startMessage: "dach_nlp", endMessage: "Sätze, Füllwörter und Verneinungen markiert" },
-  { step: "detect_candidates", status: "scoring", duration: 20, startMessage: "Gute Stellen werden gesucht", endMessage: "Momente gefunden" },
+  { step: "detect_candidates", status: "scoring", duration: 20, startMessage: "Gute Stellen werden gesucht", endMessage: "Clips gefunden" },
 ];
 
 /* Demo: am Ende der Simulation bekommt ein hochgeladenes Video dieselbe Textgrundlage wie das
  * Beispielprojekt. Ohne das endete der Weg nach der Analyse im Nichts: Status „Fertig“, aber kein
- * Transkript und keine Momente, also nichts zum Auswählen und nichts zum Rendern.
+ * Transkript und keine Clips, also nichts zum Auswählen und nichts zum Rendern.
  * Echte Transkription und echte Dateien liefert nur der lokale Stack (README, „Lokaler Testmodus“). */
 function attachDemoAnalysis(s: DemoState, source: Source) {
   if (s.transcripts.some((t) => t.source_id === source.id)) return;
@@ -339,7 +339,7 @@ function advanceSimulation(sourceId: string) {
     attachDemoAnalysis(s, source);
     const found = s.candidates.filter((c) => c.source_id === sourceId).length;
     source.status = "ready";
-    source.status_message = found === 1 ? "Ein Moment gefunden" : `${found} Momente gefunden`;
+    source.status_message = found === 1 ? "Ein Clip gefunden" : `${found} Clips gefunden`;
     source.updated_at = nowIso();
     s.simulations.delete(sourceId);
   }

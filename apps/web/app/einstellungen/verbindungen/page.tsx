@@ -42,7 +42,6 @@ export default async function ConnectionsPage({ searchParams }: { searchParams: 
       tab={"verbindungen" as SettingsTab}
       title="Verbindungen"
       description="Plattform-Konten für das Veröffentlichen. Kein Autopublishing: jede Publikation ist eine bestätigte Nutzeraktion."
-      width="default"
     >
       <ConnectionsPanel
         initialConnections={connections}

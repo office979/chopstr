@@ -1,7 +1,18 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "./cn";
+
+/* false beim Server-Rendern, true im Browser. So steht fest, ob es ein document.body zum
+ * Hineinportalen gibt, ohne setState in einem Effect. */
+const subscribe = () => () => {};
+const useIsBrowser = () =>
+  useSyncExternalStore(
+    subscribe,
+    () => true,
+    () => false,
+  );
 
 interface ModalProps {
   open: boolean;
@@ -12,10 +23,17 @@ interface ModalProps {
   className?: string;
 }
 
-/* Dialog aus Glas über abgedunkeltem Raum. Escape und Klick auf den Hintergrund schließen, der Fokus springt ins Feld. */
+/* Dialog aus Glas über abgedunkeltem Raum. Escape und Klick auf den Hintergrund schließen, der Fokus springt ins Feld.
+ *
+ * Der Dialog wird per Portal an document.body gehängt, nicht dort gerendert, wo er im JSX steht.
+ * Grund: `.glass` setzt `backdrop-filter`, und ein Element mit backdrop-filter wird zum Containing
+ * Block für `position: fixed` darunter. Ohne Portal klebt der Dialog also in der Glaskarte, aus der
+ * heraus er geöffnet wurde, statt über der ganzen Seite zu liegen. */
 export function Modal({ open, onClose, title, description, children, className }: ModalProps) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  /* Portale gibt es erst im Browser; beim Server-Rendern bleibt der Dialog aus. */
+  const isBrowser = useIsBrowser();
 
   useEffect(() => {
     if (!open) return;
@@ -35,8 +53,8 @@ export function Modal({ open, onClose, title, description, children, className }
     };
   }, [open, onClose]);
 
-  if (!open) return null;
-  return (
+  if (!open || !isBrowser) return null;
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-6" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div
         ref={panelRef}
@@ -68,6 +86,7 @@ export function Modal({ open, onClose, title, description, children, className }
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

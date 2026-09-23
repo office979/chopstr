@@ -24,7 +24,7 @@ export function publishGates(input: PublishGateInput): GateReason[] {
     out.push({ code: "clip_not_rendered", message: "Der Clip ist noch nicht fertig." });
   }
   if (!input.candidate || input.candidate.human_verdict !== "accepted") {
-    out.push({ code: "candidate_not_accepted", message: "Du hast diesen Moment noch nicht genommen." });
+    out.push({ code: "candidate_not_accepted", message: "Du hast diesen Clip noch nicht genommen." });
   }
   if (input.clip.guest_approval_required && input.approval?.decision !== "approved") {
     out.push({ code: "guest_approval", message: "Die Person, die du gefragt hast, hat noch nicht geantwortet." });

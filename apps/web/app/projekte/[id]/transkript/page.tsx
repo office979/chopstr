@@ -23,7 +23,8 @@ export default async function TranscriptPage({ params }: Props) {
   const repo = getRepo();
   const source = await repo.getSource(id);
   if (!source) notFound();
-  const transcript = await repo.getCurrentTranscript(id);
+  const [transcript, candidateCount] = await Promise.all([repo.getCurrentTranscript(id), repo.countCandidates(id)]);
+  const hasCandidates = candidateCount.total > 0;
 
   if (!transcript) {
     return (
@@ -58,6 +59,13 @@ export default async function TranscriptPage({ params }: Props) {
             </Link>
           </p>
           <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Text</h1>
+        </div>
+        {/* Ohne diese Knöpfe gibt es von hier keinen Weg zurück (nur der kleine Titel darüber). */}
+        <div className="flex flex-wrap gap-2">
+          <ButtonLink href={`/projekte/${source.id}`} variant="ghost" size="sm">
+            Zum Video
+          </ButtonLink>
+          {hasCandidates && <ButtonLink href={`/projekte/${source.id}/review`} size="sm">Clips auswählen</ButtonLink>}
         </div>
       </div>
       <TranscriptEditor

@@ -34,7 +34,7 @@ export function CandidateCard({ candidate: c, index, selected, glitch, onSelect,
       data-card="true"
       onClick={onSelect}
       aria-pressed={selected}
-      aria-label={`Moment ${index}: ${structureLabel(c.structure)}, ${durationLabel}, Bewertung ${qualityWord(c.total)}`}
+      aria-label={`Clip ${index}: ${structureLabel(c.structure)}, ${durationLabel}, Bewertung ${qualityWord(c.total)}`}
       className={cn(
         "glass transition-soft relative w-full rounded-card p-5 text-left hover:border-white/25",
         selected && "glass-selected",

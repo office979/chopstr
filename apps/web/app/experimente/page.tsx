@@ -3,10 +3,8 @@ import { PageShell } from "@/components/layout/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Badge } from "@/components/ui/Badge";
-import { PublishingNav } from "@/components/publishing/PublishingNav";
 import { getPublishingRepo } from "@/lib/repo/publishing";
 import { requirePublishingPage } from "@/lib/publishing/auth";
-import { canExt } from "@/lib/auth/permissions-publishing";
 import { formatDateTime } from "@/lib/format";
 import { PLATFORM_LABELS } from "@/lib/clips/labels";
 
@@ -26,7 +24,6 @@ export default async function ExperimentsPage() {
   return (
     <PageShell width="default" backgroundWord="A/B">
       <PageHeader eyebrow={`Workspace · ${session.workspaceName}`} title="Experimente" description="Zwei Hooks, gleiche Komposition. Entscheidung erst nach 48 Stunden und Mindestexposure, mit Konfidenz über die Folgequote." />
-      <PublishingNav current="experimente" showConnections={canExt(session.role, "publishing.manage")} />
       {experiments.length === 0 ? (
         <GlassCard padding="lg" className="text-center">
           <p className="text-lg font-medium">Noch kein Experiment</p>

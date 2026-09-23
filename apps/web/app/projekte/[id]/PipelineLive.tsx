@@ -1,13 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { StatusCheck, type StatusCheckState } from "@/components/ui/StatusCheck";
 import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/components/ui/cn";
 import { PIPELINE_STEPS, STATUS_LABELS, isTerminalStatus } from "@/lib/pipeline";
+import { playDoneSound } from "@/lib/sound";
 import type { CandidateCount, PipelineEvent, PipelineStep, SourceStatus } from "@/lib/repo/types";
+
+/* So lange bleibt „Fertig“ stehen, bevor die Auswahl aufgeht: lang genug, dass man den Haken sieht,
+ * kurz genug, dass es nicht nach Hängen aussieht. */
+const DONE_HANDOFF_MS = 1400;
 
 interface Props {
   sourceId: string;
@@ -88,6 +94,21 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
     return () => es.close();
   }, [sourceId, initialStatus, initialEvents]);
 
+  /* Wenn die Analyse fertig wird, während diese Seite offen ist: kurzer Klang, dann weiter zur
+   * Auswahl. Nur beim Übergang, nicht beim Öffnen eines längst fertigen Videos, sonst käme man
+   * auf der Projektseite nie zur Ruhe. Ohne gefundene Clips bleibt man hier. */
+  const router = useRouter();
+  const startedUnfinished = useRef(!isTerminalStatus(initialStatus));
+  const handedOff = useRef(false);
+  useEffect(() => {
+    if (!startedUnfinished.current || handedOff.current) return;
+    if (status !== "ready" || candidateCount.total === 0) return;
+    handedOff.current = true;
+    playDoneSound();
+    const t = window.setTimeout(() => router.push(`/projekte/${sourceId}/review`), DONE_HANDOFF_MS);
+    return () => window.clearTimeout(t);
+  }, [status, candidateCount.total, router, sourceId]);
+
   const steps = useMemo(() => deriveSteps(events), [events]);
   const failed = status === "failed";
   const hasCandidates = status === "ready" && candidateCount.total > 0;
@@ -139,10 +160,15 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
                     aria-valuemax={100}
                     aria-valuenow={Math.round((v.progress ?? 0) * 100)}
                   >
+                    {/* Der Balken zeigt den Fortschritt, der durchlaufende Strahl zeigt, dass gerade
+                        wirklich gerechnet wird. Ohne ihn sieht ein Schritt, der lange bei derselben
+                        Prozentzahl steht (CPU-Transkription), aus wie ein Absturz. */}
                     <div
-                      className="transition-soft h-full rounded-pill bg-ai-soft"
+                      className="transition-soft relative h-full overflow-hidden rounded-pill bg-ai-soft"
                       style={{ width: `${Math.max(4, Math.round((v.progress ?? 0) * 100))}%` }}
-                    />
+                    >
+                      <span className="pipeline-sheen" aria-hidden="true" />
+                    </div>
                   </div>
                 )}
               </div>
@@ -170,7 +196,7 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
           <p className="text-sm text-text-2">
             {hasCandidates
-              ? `${candidateCount.total === 1 ? "Ein Moment" : `${candidateCount.total} Momente`} gefunden, ${candidateCount.gate_passed} davon vollständig geprüft.${
+              ? `${candidateCount.total === 1 ? "Ein Clip" : `${candidateCount.total} Clips`} gefunden, ${candidateCount.gate_passed} davon vollständig geprüft.${
                   candidateCount.accepted > 0 ? ` ${candidateCount.accepted} schon genommen.` : ""
                 }`
               : hasTranscript
@@ -196,7 +222,7 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
                 href={`/projekte/${sourceId}/review`}
                 className="transition-soft inline-flex h-10 items-center rounded-pill bg-text px-5 text-sm font-medium text-black hover:bg-white"
               >
-                Momente auswählen
+                Clips auswählen
               </Link>
             )}
           </div>

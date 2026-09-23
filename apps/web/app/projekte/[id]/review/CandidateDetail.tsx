@@ -66,7 +66,9 @@ export function CandidateDetail({
   const [reason, setReason] = useState("");
   const [panel, setPanel] = useState<Panel>(null);
   const [titleCard, setTitleCard] = useState(c.rubric.suggested_title_card ?? "");
-  const [targets, setTargets] = useState<Platform[]>(PLATFORMS);
+  /* Vorausgewählt ist nur die Standard-Plattform des Markenprofils. Vorher waren alle vier gesetzt,
+   * das erzeugte bei jedem Annehmen vier Renders. Abwählbar ist jetzt auch die Standard-Plattform. */
+  const [targets, setTargets] = useState<Platform[]>([defaultPlatform]);
   /* Hochformat ist der Standard: aus einem Querformat-Video entsteht ein Hochkant-Clip.
    * Ausgeschaltet behält der Clip das Format der Quelle. */
   const [portrait, setPortrait] = useState(true);
@@ -77,12 +79,11 @@ export function CandidateDetail({
   const firstClip = clips[0] ?? null;
 
   const toggleTarget = (p: Platform) => {
-    if (p === defaultPlatform) return;
     setTargets((cur) => (cur.includes(p) ? cur.filter((x) => x !== p) : PLATFORMS.filter((x) => x === p || cur.includes(x))));
   };
   const submitAccept = () => {
-    const chosen = PLATFORMS.filter((p) => targets.includes(p) || p === defaultPlatform);
-    onAccept(chosen, !portrait);
+    if (targets.length === 0) return;
+    onAccept(PLATFORMS.filter((p) => targets.includes(p)), !portrait);
   };
 
   const first = c.first_sent ?? 0;
@@ -108,7 +109,7 @@ export function CandidateDetail({
     <GlassCard padding="lg" className="flex flex-col gap-7">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm text-text-2">Moment, Fassung {c.version}</p>
+          <p className="text-sm text-text-2">Clip, Fassung {c.version}</p>
           <h2 className="mt-1 text-xl font-medium">{structureLabel(c.structure)}</h2>
           <p className="mt-1 font-mono text-xs text-text-3">
             {c.model_id ?? "unbekanntes Modell"}
@@ -286,7 +287,7 @@ export function CandidateDetail({
             </p>
             <div className="flex flex-wrap gap-2">
               {PLATFORMS.map((p) => {
-                const active = targets.includes(p) || p === defaultPlatform;
+                const active = targets.includes(p);
                 const isDefault = p === defaultPlatform;
                 return (
                   <button
@@ -294,19 +295,16 @@ export function CandidateDetail({
                     type="button"
                     onClick={() => toggleTarget(p)}
                     aria-pressed={active}
-                    aria-disabled={isDefault || undefined}
-                    title={isDefault ? "Standard-Plattform des Markenprofils, immer dabei" : undefined}
+                    title={isDefault ? "Aus deinem Branding vorausgewählt. Du kannst sie abwählen." : undefined}
                     className={cn(
                       "transition-soft inline-flex h-9 items-center gap-2 rounded-pill border px-3.5 text-sm",
                       active ? "border-white/40 bg-white/10 text-text" : "border-line text-text-2 hover:border-line-strong hover:text-text",
-                      isDefault && "glass-selected",
                     )}
                   >
                     {PLATFORM_LABELS[p]}
                     <span className="text-[11px] text-text-3">
                       {ASPECT_LABELS[portrait || !sourceAspect ? PLATFORM_ASPECT[p] : sourceAspect]}
                     </span>
-                    {isDefault && <span className="text-[11px] uppercase tracking-wide text-ai-soft">Standard</span>}
                   </button>
                 );
               })}
@@ -328,8 +326,12 @@ export function CandidateDetail({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" onClick={submitAccept} disabled={busy}>
-                Annehmen für {PLATFORMS.filter((p) => targets.includes(p) || p === defaultPlatform).length} Ziele
+              <Button size="sm" onClick={submitAccept} disabled={busy || targets.length === 0}>
+                {targets.length === 0
+                  ? "Mindestens ein Ziel wählen"
+                  : targets.length === 1
+                    ? `Clip für ${PLATFORM_LABELS[targets[0]]} bauen`
+                    : `Clips für ${targets.length} Ziele bauen`}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => onAcceptOpen(false)}>
                 Abbrechen

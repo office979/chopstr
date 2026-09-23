@@ -16,7 +16,6 @@ export default async function WebhooksPage() {
       tab="webhooks"
       title="Webhooks"
       description="Statuswechsel als signierte POST-Anfragen an deine Systeme: Quelle bereit, Clip gerendert, Gast hat entschieden, Veröffentlichung, Kontingent."
-      width="default"
     >
       <WebhooksPanel endpoints={endpoints} deliveries={deliveries} demo={session.demo} />
     </SettingsShell>

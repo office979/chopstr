@@ -34,7 +34,6 @@ export default async function AuditPage({ searchParams }: { searchParams: Search
       tab="audit"
       title="Audit-Log"
       description="Jede Aktion mit Akteur, Zeitpunkt und Nutzlast. Löschnachweise und Rechtebestätigungen bleiben hier dauerhaft."
-      width="default"
       actions={
         <ButtonLink href={csvHref} variant="ghost" size="sm">
           CSV exportieren

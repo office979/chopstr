@@ -54,13 +54,13 @@ export default async function ClipsPage({ params }: Props) {
         <GlassCard padding="lg" className="text-center">
           <p className="text-lg font-medium">Noch keine Clips</p>
           <p className="mx-auto mt-2 max-w-md text-text-2">
-            Clips entstehen, sobald du einen Moment nimmst. Für jede Plattform, die du wählst, wird einer erstellt.
+            Clips entstehen, sobald du einen Vorschlag nimmst. Für jede Plattform, die du wählst, wird einer erstellt.
           </p>
           <div className="mt-6 flex justify-center gap-2">
             <ButtonLink href={`/projekte/${source.id}`} variant="ghost">
               Zum Video
             </ButtonLink>
-            <ButtonLink href={`/projekte/${source.id}/review`}>Momente auswählen</ButtonLink>
+            <ButtonLink href={`/projekte/${source.id}/review`}>Clips auswählen</ButtonLink>
           </div>
         </GlassCard>
       </PageShell>
@@ -89,7 +89,7 @@ export default async function ClipsPage({ params }: Props) {
             Experimente
           </ButtonLink>
           <ButtonLink href={`/projekte/${source.id}/review`} variant="ghost" size="sm">
-            Momente
+            Auswahl
           </ButtonLink>
           <ButtonLink href={`/projekte/${source.id}`} variant="ghost" size="sm">
             Video

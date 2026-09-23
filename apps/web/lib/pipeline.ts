@@ -36,7 +36,7 @@ export const PIPELINE_STEPS: PipelineStepDef[] = [
   {
     key: "detect_candidates",
     label: "Gute Stellen werden gesucht",
-    description: "Die stärksten Momente finden und bewerten",
+    description: "Die stärksten Clips finden und bewerten",
     phase: 2,
   },
 ];

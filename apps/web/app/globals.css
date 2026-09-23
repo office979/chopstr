@@ -341,3 +341,34 @@ input[type="range"].timeline::-moz-range-thumb {
     border: 1px solid #000 !important;
   }
 }
+
+/* Laufender Strahl im Fortschrittsbalken der Pipeline.
+ * Zeigt, dass gerade gerechnet wird, auch wenn die Prozentzahl minutenlang stehen bleibt
+ * (CPU-Transkription meldet nur grob). Reine Anzeige, kein Zustand. */
+.pipeline-sheen {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0) 30%,
+    rgba(255, 255, 255, 0.75) 50%,
+    rgba(255, 255, 255, 0) 70%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: pipeline-sheen 1.6s ease-in-out infinite;
+}
+
+@keyframes pipeline-sheen {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pipeline-sheen {
+    animation: none;
+    opacity: 0;
+  }
+}

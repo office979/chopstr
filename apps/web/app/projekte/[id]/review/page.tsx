@@ -15,7 +15,7 @@ type Props = { params: Promise<{ id: string }> };
 export async function generateMetadata({ params }: Props) {
   const { id } = await params;
   const source = await getRepo().getSource(id);
-  return { title: source ? `Momente auswählen · ${source.title}` : "Momente auswählen" };
+  return { title: source ? `Clips auswählen · ${source.title}` : "Clips auswählen" };
 }
 
 export default async function ReviewPage({ params }: Props) {
@@ -34,12 +34,12 @@ export default async function ReviewPage({ params }: Props) {
   if (candidates.length === 0 || !transcript) {
     const running = source.status !== "ready" && source.status !== "failed";
     return (
-      <PageShell width="narrow" backgroundWord="Momente">
+      <PageShell width="narrow" backgroundWord="Clips">
         <GlassCard padding="lg" className="text-center">
           <p className="text-lg font-medium">{running ? "Der Computer sucht noch" : "Keine guten Stellen gefunden"}</p>
           <p className="mx-auto mt-2 max-w-md text-text-2">
             {running
-              ? "Sobald er fertig ist, erscheinen die gefundenen Momente hier."
+              ? "Sobald er fertig ist, erscheinen die gefundenen Clips hier."
               : "In diesem Video steckt keine Stelle, die für sich allein funktioniert. Das kommt vor."}
           </p>
           {!running && (
@@ -64,7 +64,7 @@ export default async function ReviewPage({ params }: Props) {
   const passed = candidates.filter((c) => c.gate_passed).length;
 
   return (
-    <PageShell width="wide" backgroundWord="Momente">
+    <PageShell width="wide" backgroundWord="Clips">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm text-text-2">
@@ -72,9 +72,9 @@ export default async function ReviewPage({ params }: Props) {
               {source.title}
             </Link>
           </p>
-          <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Momente auswählen</h1>
+          <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Clips auswählen</h1>
           <p className="mt-1 text-sm text-text-2">
-            Der Computer hat {candidates.length === 1 ? "einen Moment" : `${candidates.length} Momente`} gefunden,{" "}
+            Der Computer hat {candidates.length === 1 ? "einen Clip" : `${candidates.length} Clips`} gefunden,{" "}
             {passed === candidates.length ? "alle sind vollständig geprüft" : `${passed} davon vollständig geprüft`}. Du entscheidest, was ein Clip wird.
           </p>
         </div>

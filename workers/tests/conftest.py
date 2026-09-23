@@ -245,6 +245,7 @@ class FakeDB:
             "destination": platform, "aspect": "4:5" if platform == "linkedin" else "9:16", "composition": segments,
             "title_card": None, "ad_label": None, "ai_features": [], "speaker_positions": None, "status": "draft",
             "file_key": None, "render_plan": None, "created_at": len(self.clips),
+            "delete_after": None, "deleted_at": None,  # Migration 0006: eigene Frist für Renderings
         }  # fmt: skip
         row.update(fields)
         self.clips[row["id"]] = row
@@ -346,6 +347,7 @@ class FakeDB:
             row.setdefault("speaker_positions", None)
             row.setdefault("file_key", None)
             row.setdefault("status", "draft")
+            row.setdefault("delete_after", None)  # in Postgres setzt sie der Trigger aus Migration 0006
             row["created_at"] = len(self.clips)
             self.clips[row["id"]] = row
             return FakeCursor([(row["id"],)])
@@ -465,21 +467,40 @@ class FakeDB:
         if q.startswith("select workspace_id from sources where id"):
             s = self.sources.get(params[0])
             return FakeCursor([(s["workspace_id"],)] if s else [])
-        if q.startswith("select id from sources where workspace_id = %s and status <> 'deleted'"):
-            return FakeCursor([(s["id"],) for s in self.sources.values() if s["workspace_id"] == params[0] and s["status"] != "deleted"])
+        if q.startswith("select s.workspace_id from clips c join sources s"):
+            c = self.clips.get(params[0])
+            s = self.sources.get(c["source_id"]) if c else None
+            return FakeCursor([(s["workspace_id"],)] if s else [])
+        if q.startswith("select id from sources where workspace_id = %s and (status <> 'deleted'"):
+            # Auch anonymisierte Quellen, an denen noch ein lebender Clip hängt (Migration 0006)
+            rows = []
+            for s in self.sources.values():
+                if s["workspace_id"] != params[0]:
+                    continue
+                if s["status"] != "deleted" or any(c["source_id"] == s["id"] and c["status"] != "deleted" for c in self.clips.values()):
+                    rows.append(s)
+            return FakeCursor([(s["id"],) for s in rows])
         if q.startswith("select id from sources where delete_after < %s"):
             open_ids = {j["entity_id"] for j in self.deletion_jobs.values() if j["entity"] == "source" and j["status"] in ("queued", "running")}
             rows = [s for s in self.sources.values() if s.get("delete_after") and s["delete_after"] < params[0] and s["status"] != "deleted" and s["id"] not in open_ids]
             rows.sort(key=lambda s: s["delete_after"])
             return FakeCursor([(s["id"],) for s in rows[: int(params[1])]])
+        if q.startswith("select id from clips where delete_after < %s"):
+            open_ids = {j["entity_id"] for j in self.deletion_jobs.values() if j["entity"] == "clip" and j["status"] in ("queued", "running")}
+            rows = [c for c in self.clips.values() if c.get("delete_after") and c["delete_after"] < params[0] and c["status"] != "deleted" and c["id"] not in open_ids]
+            rows.sort(key=lambda c: c["delete_after"])
+            return FakeCursor([(c["id"],) for c in rows[: int(params[1])]])
         if q.startswith("select id from workspaces where deletion_requested_at is not null"):
             open_ids = {j["entity_id"] for j in self.deletion_jobs.values() if j["entity"] == "workspace" and j["status"] in ("queued", "running")}
             rows = [w for w in self.workspaces.values() if w.get("deletion_requested_at") and w.get("deletion_scheduled_for") and w["deletion_scheduled_for"] < params[0] and w["id"] not in open_ids]
             rows.sort(key=lambda w: w["deletion_scheduled_for"])
             return FakeCursor([(w["id"],) for w in rows[: int(params[1])]])
-        if q.startswith("select id, file_key, srt_key, vtt_key, poster_key from clips where source_id"):
+        if q.startswith("select id, file_key, srt_key, vtt_key, poster_key, delete_after, status from clips where source_id"):
             rows = [c for c in self.clips.values() if c["source_id"] == params[0]]
-            return FakeCursor([(c["id"], c.get("file_key"), c.get("srt_key"), c.get("vtt_key"), c.get("poster_key")) for c in rows])
+            return FakeCursor([
+                (c["id"], c.get("file_key"), c.get("srt_key"), c.get("vtt_key"), c.get("poster_key"), c.get("delete_after"), c["status"])
+                for c in rows
+            ])  # fmt: skip
         if q.startswith("select id, source_id, file_key, srt_key, vtt_key, poster_key, status from clips where id"):
             c = self.clips.get(params[0])
             return FakeCursor([(c["id"], c["source_id"], c.get("file_key"), c.get("srt_key"), c.get("vtt_key"), c.get("poster_key"), c["status"])] if c else [])
@@ -746,6 +767,8 @@ class FakeDB:
                 n = len(rows) - len(kept)
                 setattr(self, table, kept)
                 return FakeCursor([], rowcount=n)
+        if q.startswith("delete from clips where id = %s"):  # Aufräumlauf: nur die fälligen Clips
+            return self._delete_dict(self.clips, lambda c: c["id"] == sid)
         if q.startswith("delete from clips where source_id = %s"):
             return self._delete_dict(self.clips, lambda c: c["source_id"] == sid)
         for table in ("candidates", "transcript_corrections", "transcript_versions"):

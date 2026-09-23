@@ -27,7 +27,7 @@ calls: list[tuple] = []
 @activity.defn(name="find_expired")
 async def fake_find_expired(now: str, limit: int) -> dict:
     calls.append(("find_expired", now, limit))
-    return {"sources": ["s1", "s2", "s3"], "workspaces": ["w1"]}
+    return {"sources": ["s1", "s2", "s3"], "clips": ["c1"], "workspaces": ["w1"]}
 
 
 @activity.defn(name="enqueue_deletion")
@@ -63,16 +63,17 @@ async def test_retention_workflow_enqueues_and_deletes_sequentially():
         async with Worker(env.client, task_queue=tq, workflows=[RetentionWorkflow], activities=ACTIVITIES):
             result = await env.client.execute_workflow(
                 RetentionWorkflow.run,
-                RetentionParams(max_per_run=3, task_queue=tq),
+                RetentionParams(max_per_run=4, task_queue=tq),
                 id=f"retention-{uuid.uuid4().hex[:8]}",
                 task_queue=tq,
             )
-    assert result.scanned_sources == 3 and result.scanned_workspaces == 1
-    assert result.jobs == ["job-s1", "job-s2", "job-s3"]  # Limit 3: der Workspace wartet auf den nächsten Lauf
-    assert result.done == 2 and result.failed == 1
-    assert calls[0][0] == "find_expired" and calls[0][2] == 3
+    assert result.scanned_sources == 3 and result.scanned_clips == 1 and result.scanned_workspaces == 1
+    assert result.jobs == ["job-c1", "job-s1", "job-s2", "job-s3"]  # Limit 4: der Workspace wartet auf den nächsten Lauf
+    assert result.done == 3 and result.failed == 1
+    assert calls[0][0] == "find_expired" and calls[0][2] == 4
     order = [c for c in calls if c[0] != "find_expired"]
     assert order == [
+        ("enqueue_deletion", "c1", "retention", "clip"), ("delete_entity", "job-c1"),  # Clips vor ihren Quellen
         ("enqueue_deletion", "s1", "retention", "source"), ("delete_entity", "job-s1"),
         ("enqueue_deletion", "s2", "retention", "source"), ("delete_entity", "job-s2"),
         ("enqueue_deletion", "s3", "retention", "source"), ("delete_entity", "job-s3"),

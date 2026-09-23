@@ -13,7 +13,16 @@ die ``key``-Felder der ``pipeline_events``-Payloads gefunden, Render-Dateien üb
 Workspace: alle Quellen als Einzeljobs (``reason = workspace_deleted``), dann Brand-Assets, dann Audit
 ``workspace.deleted``; die ``workspaces``-Zeile selbst löscht die Web-App danach.
 
-Dazu die Retention-Activities ``find_expired(now)`` und ``enqueue_deletion(entity_id, reason, entity)``.
+Zwei Fristen (AVV, docs/rechtliches/avv-2026-09.md): Rohmaterial ``workspaces.retention_days`` (Standard 30),
+Renderings ``workspaces.render_retention_days`` (Standard 90, Migration 0006 → ``clips.delete_after``). Deshalb
+verschont der reguläre Aufräumlauf (``reason = retention``) beim Löschen einer Quelle die Clips, deren eigene
+Frist noch läuft: Zeile, Dateien und abhängige Zeilen bleiben, nur ``clips.candidate_id`` fällt auf NULL
+(``on delete set null``). Jeder andere Grund (``user_request``, ``gdpr_request``, ``workspace_deleted``) nimmt
+alle Clips mit — ein Löschverlangen darf nichts übriglassen. Wie viele Clips verschont wurden, steht als
+``clips_retained`` im Löschnachweis (``deletion_jobs.rows_deleted``) und damit auch im Audit-Log.
+
+Dazu die Retention-Activities ``find_expired(now)`` (Quellen, Clips, Workspaces) und
+``enqueue_deletion(entity_id, reason, entity)``.
 Keine ``pipeline_events`` aus dieser Activity (sie werden hier gelöscht). Logging nur mit IDs und Zählern.
 """
 
@@ -34,6 +43,9 @@ log = logging.getLogger("chopstr.activities.deletion")
 
 ENTITIES = ("source", "clip", "brand_profile", "workspace")
 REASONS = ("user_request", "retention", "workspace_deleted", "gdpr_request")
+# Nur der reguläre Aufräumlauf verschont Clips mit eigener, noch laufender Frist. user_request,
+# gdpr_request und workspace_deleted sind Löschverlangen und nehmen alle Clips der Quelle mit.
+CLIP_SPARING_REASONS = ("retention",)
 JSON_KEY_PREFIXES = ("asr/", "diar/", "heatmap/", "candidates/")
 RENDER_PREFIX = "renders"
 DELETED_TITLE = "gelöscht"
@@ -41,17 +53,29 @@ MAX_PER_RUN = 50
 
 SQL_JOB = "select id, workspace_id, entity, entity_id, reason, requested_by, status from deletion_jobs where id = %s"
 SQL_SOURCE = "select id, workspace_id, storage_key, audio_key, proxy_key, temporal_workflow_id, status from sources where id = %s"
-SQL_CLIPS_OF_SOURCE = "select id, file_key, srt_key, vtt_key, poster_key from clips where source_id = %s"
+SQL_CLIPS_OF_SOURCE = "select id, file_key, srt_key, vtt_key, poster_key, delete_after, status from clips where source_id = %s"
 SQL_CLIP = "select id, source_id, file_key, srt_key, vtt_key, poster_key, status from clips where id = %s"
 SQL_CAPTION_KEYS = "select ass_key, srt_key from caption_versions where clip_id = %s"
 SQL_EVENT_PAYLOADS = "select payload from pipeline_events where source_id = %s and payload is not null"
 SQL_ASSETS_OF_PROFILE = "select id, brand_profile_id, storage_key from brand_assets where brand_profile_id = %s"
 SQL_ASSETS_OF_WORKSPACE = "select id, brand_profile_id, storage_key from brand_assets where workspace_id = %s"
-SQL_SOURCES_OF_WORKSPACE = "select id from sources where workspace_id = %s and status <> 'deleted'"
+# Auch schon anonymisierte Quellen, an denen noch ein Clip hängt: seit Migration 0006 überlebt ein Clip die
+# Retention-Löschung seiner Quelle, und eine Workspace-Löschung darf ihn trotzdem nicht übersehen.
+SQL_SOURCES_OF_WORKSPACE = (
+    "select id from sources where workspace_id = %s and (status <> 'deleted' or exists ("
+    "select 1 from clips c where c.source_id = sources.id and c.status <> 'deleted'"
+    "))"
+)
 SQL_SOURCE_WORKSPACE = "select workspace_id from sources where id = %s"
+SQL_CLIP_WORKSPACE = "select s.workspace_id from clips c join sources s on s.id = c.source_id where c.id = %s"
 SQL_EXPIRED_SOURCES = (
     "select id from sources where delete_after < %s and status <> 'deleted' and not exists ("
     "select 1 from deletion_jobs j where j.entity = 'source' and j.entity_id = sources.id and j.status in ('queued', 'running')"
+    ") order by delete_after limit %s"
+)
+SQL_EXPIRED_CLIPS = (
+    "select id from clips where delete_after < %s and status <> 'deleted' and not exists ("
+    "select 1 from deletion_jobs j where j.entity = 'clip' and j.entity_id = clips.id and j.status in ('queued', 'running')"
     ") order by delete_after limit %s"
 )
 SQL_EXPIRED_WORKSPACES = (
@@ -71,15 +95,29 @@ SOURCE_ROW_DELETES = (
     ("transcript_versions", "delete from transcript_versions where source_id = %s"),
     ("pipeline_events", "delete from pipeline_events where source_id = %s"),
 )
+# Rohmaterial-Anteil einer Quelle: geht nach ``retention_days`` immer, unabhängig von den Clips.
+SOURCE_ONLY_ROW_DELETES = (
+    ("candidates", "delete from candidates where source_id = %s"),
+    ("transcript_corrections", "delete from transcript_corrections where source_id = %s"),
+    ("transcript_versions", "delete from transcript_versions where source_id = %s"),
+    ("pipeline_events", "delete from pipeline_events where source_id = %s"),
+)
 CLIP_ROW_DELETES = (
     ("caption_versions", "delete from caption_versions where clip_id = %s"),
     ("hook_versions", "delete from hook_versions where clip_id = %s"),
     ("guest_approvals", "delete from guest_approvals where clip_id = %s"),
 )
+# Ein einzelner Clip samt Zeile: für die Retention-Löschung einer Quelle, die nur fällige Clips mitnimmt.
+CLIP_FULL_ROW_DELETES = CLIP_ROW_DELETES + (("clips", "delete from clips where id = %s"),)
 
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _aware(value: datetime) -> datetime:
+    """``timestamptz`` kommt zeitzonenbehaftet zurück; naive Werte (Tests, Altdaten) gelten als UTC."""
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 def _json(value: Any) -> Any:
@@ -187,20 +225,56 @@ def _clip_keys(ctx: common.Context, clip_id: str, file_keys: list[str | None]) -
     return keys
 
 
-def collect_source_keys(ctx: common.Context, src: dict[str, Any]) -> list[tuple[str, str]]:
-    """Alle Objektspeicher-Keys einer Quelle: Original, Audio, Proxy, Clips, Captions, Pipeline-JSONs, Render-Ordner."""
+def split_source_clips(
+    ctx: common.Context, source_id: str, now: datetime, spare_live: bool
+) -> tuple[list[tuple[str, list[str | None]]], list[tuple[str, list[str | None]]]]:
+    """Teilt die Clips einer Quelle in ``(fällig, verschont)``; je Eintrag ``(clip_id, [file/srt/vtt/poster])``.
+
+    ``spare_live`` ist nur beim Aufräumlauf gesetzt. Verschont wird, wessen eigene Frist noch läuft
+    (``delete_after > now``); ohne Frist (NULL) und bereits gelöschte Clips gehen mit der Quelle.
+    """
+    due: list[tuple[str, list[str | None]]] = []
+    spared: list[tuple[str, list[str | None]]] = []
+    for cid, file_key, srt_key, vtt_key, poster_key, delete_after, status in db.fetch_all(ctx.conn, SQL_CLIPS_OF_SOURCE, (source_id,)):
+        entry = (str(cid), [file_key, srt_key, vtt_key, poster_key])
+        alive = spare_live and status != "deleted" and delete_after is not None and _aware(delete_after) > now
+        (spared if alive else due).append(entry)
+    return due, spared
+
+
+def collect_source_keys(
+    ctx: common.Context, src: dict[str, Any], clips: list[tuple[str, list[str | None]]] | None = None
+) -> list[tuple[str, str]]:
+    """Alle Objektspeicher-Keys einer Quelle: Original, Audio, Proxy, Clips, Captions, Pipeline-JSONs, Render-Ordner.
+
+    ``clips`` schränkt auf die mitzulöschenden Clips ein (Aufräumlauf); ``None`` heißt: alle Clips der Quelle.
+    """
     keys: list[tuple[str, str]] = []
     if src.get("storage_key"):
         keys.append(("sources", src["storage_key"]))
     keys += [("derived", k) for k in (src.get("audio_key"), src.get("proxy_key")) if k]
-    for cid, *file_keys in db.fetch_all(ctx.conn, SQL_CLIPS_OF_SOURCE, (src["id"],)):
-        keys += _clip_keys(ctx, str(cid), list(file_keys))
+    if clips is None:
+        clips, _ = split_source_clips(ctx, src["id"], _now(), spare_live=False)
+    for clip_id, file_keys in clips:
+        keys += _clip_keys(ctx, clip_id, file_keys)
     for (payload,) in db.fetch_all(ctx.conn, SQL_EVENT_PAYLOADS, (src["id"],)):
         data = _json(payload)
         key = data.get("key") if isinstance(data, dict) else None
         if isinstance(key, str) and key.startswith(JSON_KEY_PREFIXES):
             keys.append(("derived", key))
     return keys
+
+
+def _delete_source_rows(ctx: common.Context, source_id: str, due_clips: list[tuple[str, list[str | None]]], spare_live: bool) -> dict[str, int]:
+    """Zeilen einer Quelle löschen. Beim Aufräumlauf clipweise, damit verschonte Clips stehen bleiben."""
+    if not spare_live:
+        return _delete_rows(ctx, SOURCE_ROW_DELETES, source_id)
+    counts: dict[str, int] = {table: 0 for table, _sql in CLIP_FULL_ROW_DELETES}
+    for clip_id, _file_keys in due_clips:
+        for table, n in _delete_rows(ctx, CLIP_FULL_ROW_DELETES, clip_id).items():
+            counts[table] += n
+    counts.update(_delete_rows(ctx, SOURCE_ONLY_ROW_DELETES, source_id))
+    return counts
 
 
 # -- Entitäten -----------------------------------------------------------------------------------
@@ -210,9 +284,12 @@ def _delete_source(ctx: common.Context, job: dict) -> dict[str, Any]:
         raise LookupError(f"Quelle {job['entity_id']} nicht gefunden")
     sid, workspace_id, storage_key, audio_key, proxy_key, workflow_id, status = row
     src = {"id": str(sid), "workspace_id": str(workspace_id), "storage_key": storage_key, "audio_key": audio_key, "proxy_key": proxy_key}
+    spare_live = job["reason"] in CLIP_SPARING_REASONS
+    due_clips, spared_clips = split_source_clips(ctx, src["id"], _now(), spare_live)
     terminated = _terminate_if_running(workflow_id, ctx.settings)
-    keys = _delete_keys(ctx, collect_source_keys(ctx, src))
-    rows = _delete_rows(ctx, SOURCE_ROW_DELETES, src["id"])
+    keys = _delete_keys(ctx, collect_source_keys(ctx, src, due_clips))
+    rows = _delete_source_rows(ctx, src["id"], due_clips, spare_live)
+    rows["clips_retained"] = len(spared_clips)
     db.update(
         ctx.conn,
         "sources",
@@ -229,8 +306,11 @@ def _delete_source(ctx: common.Context, job: dict) -> dict[str, Any]:
         temporal_workflow_id=None,
         deleted_at=_now(),
     )
-    log.info("source deleted source=%s keys=%s rows=%s terminated=%s", src["id"], len(keys), sum(rows.values()), terminated)
-    return {"keys_deleted": keys, "rows_deleted": rows, "workflow_terminated": terminated}
+    log.info(
+        "source deleted source=%s keys=%s rows=%s clips_retained=%s terminated=%s",
+        src["id"], len(keys), sum(rows.values()) - len(spared_clips), len(spared_clips), terminated,
+    )  # fmt: skip
+    return {"keys_deleted": keys, "rows_deleted": rows, "clips_retained": len(spared_clips), "workflow_terminated": terminated}
 
 
 def _delete_clip(ctx: common.Context, job: dict) -> dict[str, Any]:
@@ -350,6 +430,11 @@ def enqueue(
             if row is None:
                 raise LookupError(f"Quelle {entity_id} nicht gefunden")
             workspace_id = str(row[0])
+        elif entity == "clip":
+            row = db.fetch_one(ctx.conn, SQL_CLIP_WORKSPACE, (entity_id,))
+            if row is None:
+                raise LookupError(f"Clip {entity_id} nicht gefunden")
+            workspace_id = str(row[0])
         else:
             raise ValueError("workspace_id fehlt")
     inserted = db.insert(
@@ -367,11 +452,12 @@ def enqueue(
 
 
 def run_find_expired(ctx: common.Context, now: datetime, limit: int = MAX_PER_RUN) -> dict[str, list[str]]:
-    """Quellen mit abgelaufener Löschfrist und Workspaces nach der Karenz, jeweils ohne offenen Job."""
+    """Fällige Quellen, fällige Clips (eigene Frist, Migration 0006) und Workspaces nach der Karenz — je ohne offenen Job."""
     sources = [str(r[0]) for r in db.fetch_all(ctx.conn, SQL_EXPIRED_SOURCES, (now, limit))]
+    clips = [str(r[0]) for r in db.fetch_all(ctx.conn, SQL_EXPIRED_CLIPS, (now, limit))]
     workspaces = [str(r[0]) for r in db.fetch_all(ctx.conn, SQL_EXPIRED_WORKSPACES, (now, limit))]
-    log.info("retention scan sources=%s workspaces=%s", len(sources), len(workspaces))
-    return {"sources": sources, "workspaces": workspaces}
+    log.info("retention scan sources=%s clips=%s workspaces=%s", len(sources), len(clips), len(workspaces))
+    return {"sources": sources, "clips": clips, "workspaces": workspaces}
 
 
 def _parse_now(value: str | datetime | None) -> datetime:
@@ -410,6 +496,7 @@ def enqueue_deletion(entity_id: str, reason: str = "retention", entity: str = "s
 
 
 __all__ = [
+    "CLIP_SPARING_REASONS",
     "ENTITIES",
     "MAX_PER_RUN",
     "REASONS",
@@ -420,5 +507,6 @@ __all__ = [
     "find_expired",
     "run_delete_entity",
     "run_find_expired",
+    "split_source_clips",
     "terminate_workflow",
 ]

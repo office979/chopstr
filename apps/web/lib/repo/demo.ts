@@ -515,19 +515,21 @@ export const demoRepo: Repo = {
   },
 
   /* client sieht nur Quellen seiner Marke */
-  async listSources() {
+  async listSources(scope) {
     const s = state();
     const { brandScope } = await currentSession();
+    const withDeleted = scope?.includeDeleted === true;
     for (const id of s.simulations.keys()) advanceSimulation(id);
     return [...s.sources]
-      .filter((x) => x.status !== "deleted" && (!brandScope || x.brand_profile_id === brandScope))
+      .filter((x) => (x.status !== "deleted" || withDeleted) && (!brandScope || x.brand_profile_id === brandScope))
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
   },
 
-  async getSource(id) {
+  async getSource(id, scope) {
     advanceSimulation(id);
     const { brandScope } = await currentSession();
-    const src = state().sources.find((x) => x.id === id && x.status !== "deleted") ?? null;
+    const withDeleted = scope?.includeDeleted === true;
+    const src = state().sources.find((x) => x.id === id && (x.status !== "deleted" || withDeleted)) ?? null;
     if (src && brandScope && src.brand_profile_id !== brandScope) return null;
     return src;
   },
@@ -717,6 +719,9 @@ export const demoRepo: Repo = {
         provenance: {},
         render_error: null,
         rendered_at: null,
+        /* In Postgres setzt das ein Trigger (Migration 0006); hier von Hand, sonst hätte der
+         * Testmodus keine Frist am Clip und die Seite nach dem Löschen kein Datum. */
+        delete_after: new Date(Date.now() + s.workspace.render_retention_days * 86_400_000).toISOString(),
         deleted_at: null,
         created_by: actorId,
         created_at: now,

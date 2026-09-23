@@ -264,7 +264,16 @@ und `finished_at`. Fehler: `failed` mit `error`, Audit `<entity>.delete_failed`,
 | `source` | Original (`sources`), `audio_key`, `proxy_key`, alle `clips.file_key/srt_key/vtt_key/poster_key`, `caption_versions.ass_key/srt_key`, der ganze Ordner `renders/<clip_id>/` (`Storage.list`), die JSONs unter `asr/`, `diar/`, `heatmap/`, `candidates/` (aus den `key`-Feldern der `pipeline_events`-Payloads) | caption_versions, hook_versions, guest_approvals, clips, candidates, transcript_corrections, transcript_versions, pipeline_events (in dieser Reihenfolge, Zähler in `rows_deleted`); die `sources`-Zeile bleibt anonymisiert: Titel „gelöscht“, `original_filename`, `audio_key`, `proxy_key`, `sha256` null, `storage_key` leer, `brief` `{}`, Status `deleted`, `deleted_at` |
 | `clip` | Render-Dateien und Caption-Keys des Clips, Ordner `renders/<clip_id>/` | caption_versions, hook_versions, guest_approvals des Clips; Keys am Clip werden genullt |
 | `brand_profile` | alle `brand_assets.storage_key` des Profils | `brand_assets` |
-| `workspace` | wie `source` je Quelle, dann alle Brand-Assets des Workspace | je nicht gelöschter Quelle ein eigener Job (`reason = workspace_deleted`), inline ausgeführt; Audit `workspace.deleted`; die `workspaces`-Zeile löscht die Web-App danach |
+| `workspace` | wie `source` je Quelle, dann alle Brand-Assets des Workspace | je Quelle ein eigener Job (`reason = workspace_deleted`), inline ausgeführt — auch für bereits anonymisierte Quellen, an denen noch ein Clip hängt; Audit `workspace.deleted`; die `workspaces`-Zeile löscht die Web-App danach |
+
+**Zwei Fristen (AVV).** Rohmaterial läuft nach `workspaces.retention_days` ab (Standard 30, `sources.delete_after`),
+Renderings nach `workspaces.render_retention_days` (Standard 90, `clips.delete_after`, Migration 0006, gesetzt per
+BEFORE-INSERT-Trigger). Deshalb verschont die Löschung einer Quelle mit `reason = retention` die Clips, deren eigene
+Frist noch läuft: Zeile, Dateien (`file_key`, `srt_key`, `vtt_key`, `poster_key`, `renders/<clip_id>/`,
+`caption_versions`-Keys) und abhängige Zeilen bleiben; nur `clips.candidate_id` fällt durch das Löschen der
+`candidates`-Zeile auf NULL (`on delete set null`). Jeder andere Grund (`user_request`, `gdpr_request`,
+`workspace_deleted`) nimmt alle Clips mit. `rows_deleted` enthält zusätzlich `clips_retained` — wie viele Clips
+stehen geblieben sind, steht damit im Löschnachweis und im Audit-Log.
 
 `keys_deleted` ist der Löschnachweis: eine Liste `{bucket, key, deleted_at, existed}`; Keys, die schon fehlten,
 stehen mit `existed = false` drin (bereits weg). Läuft für die Quelle noch ein `ClipProjectWorkflow`
@@ -274,9 +283,12 @@ Die Activity schreibt keine `pipeline_events` (die werden gerade gelöscht) und 
 ### Retention (`workflows/retention.py`, Schedule `retention-daily`)
 
 `RetentionWorkflow` läuft täglich über den Temporal-Schedule: `find_expired(now)` liefert Quellen mit
-`delete_after < now` und Status nicht `deleted` ohne offenen Job sowie Workspaces mit gesetztem
-`deletion_requested_at` und `deletion_scheduled_for < now` (30 Tage Karenz). Je Treffer `enqueue_deletion`
-(`reason = retention`) und direkt danach `delete_entity`, sequenziell, höchstens 50 pro Lauf (`max_per_run`).
+`delete_after < now` und Status nicht `deleted` ohne offenen Job, ebenso Clips mit eigener abgelaufener Frist
+(`clips.delete_after`), sowie Workspaces mit gesetztem `deletion_requested_at` und `deletion_scheduled_for < now`
+(30 Tage Karenz). Je Treffer `enqueue_deletion` (`reason = retention`) und direkt danach `delete_entity`,
+sequenziell, höchstens 50 pro Lauf (`max_per_run`). Reihenfolge: erst Clips, dann Quellen, dann Workspaces — sind
+Quelle und Clip am selben Tag fällig, würde die Quellenlöschung sonst die Clipzeile wegnehmen und der Clip-Job
+liefe in einen `LookupError`.
 Ein fehlgeschlagener Job zählt in `failed`, die anderen laufen weiter. Der Schedule wird mit
 `python -m chopstr_worker.worker --queues cpu --ensure-schedules` angelegt (`client.create_schedule` mit
 `ScheduleSpec(cron_expressions=[RETENTION_CRON], time_zone_name=RETENTION_TIMEZONE)`; existiert er, wird er

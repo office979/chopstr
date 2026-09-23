@@ -214,6 +214,7 @@ function toClip(r: Row): Clip {
     provenance: jsonValue<Clip["provenance"]>(r.provenance, {}),
     render_error: (r.render_error as string | null) ?? null,
     rendered_at: isoOrNull(r.rendered_at),
+    delete_after: isoOrNull(r.delete_after),
     deleted_at: isoOrNull(r.deleted_at),
     created_by: (r.created_by as string | null) ?? null,
     created_at: isoOrNull(r.created_at) ?? "",
@@ -647,23 +648,26 @@ export const postgresRepo: Repo = {
     });
   },
 
-  /* client sieht nur Quellen seiner Marke: RLS über app.brand_scope und zusätzlich hier gefiltert */
-  async listSources() {
+  /* client sieht nur Quellen seiner Marke: RLS über app.brand_scope und zusätzlich hier gefiltert.
+   * `or ${deleted}` ist ein Boolescher Parameter: false lässt den Filter stehen, true hebt ihn auf. */
+  async listSources(scope) {
     const session = await currentSession();
+    const deleted = scope?.includeDeleted === true;
     return withContext(session, async (tx) => {
       const rows = session.brandScope
-        ? await tx`select * from sources where workspace_id = ${session.workspaceId} and status <> 'deleted' and brand_profile_id = ${session.brandScope} order by created_at desc`
-        : await tx`select * from sources where workspace_id = ${session.workspaceId} and status <> 'deleted' order by created_at desc`;
+        ? await tx`select * from sources where workspace_id = ${session.workspaceId} and (status <> 'deleted' or ${deleted}) and brand_profile_id = ${session.brandScope} order by created_at desc`
+        : await tx`select * from sources where workspace_id = ${session.workspaceId} and (status <> 'deleted' or ${deleted}) order by created_at desc`;
       return rows.map((r) => toSource(r as Row));
     });
   },
 
-  async getSource(id) {
+  async getSource(id, scope) {
     const session = await currentSession();
+    const deleted = scope?.includeDeleted === true;
     return withContext(session, async (tx) => {
       const rows = session.brandScope
-        ? await tx`select * from sources where id = ${id} and workspace_id = ${session.workspaceId} and status <> 'deleted' and brand_profile_id = ${session.brandScope}`
-        : await tx`select * from sources where id = ${id} and workspace_id = ${session.workspaceId} and status <> 'deleted'`;
+        ? await tx`select * from sources where id = ${id} and workspace_id = ${session.workspaceId} and (status <> 'deleted' or ${deleted}) and brand_profile_id = ${session.brandScope}`
+        : await tx`select * from sources where id = ${id} and workspace_id = ${session.workspaceId} and (status <> 'deleted' or ${deleted})`;
       return rows.length ? toSource(rows[0] as Row) : null;
     });
   },

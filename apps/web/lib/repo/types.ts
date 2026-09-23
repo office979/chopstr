@@ -155,6 +155,14 @@ export interface Source {
   updated_at: string;
 }
 
+/* Nach dem Aufräumlauf bleibt die Quelle anonymisiert stehen (Titel „gelöscht“, Keys leer,
+ * status = 'deleted'), während ihre Clips ihre eigene, längere Frist weiterlaufen lassen
+ * (Migration 0006). Normalerweise ist so eine Quelle unsichtbar. Wer die überlebenden Clips
+ * zeigen will, setzt includeDeleted und prüft danach selbst, ob noch Clips da sind. */
+export interface SourceScope {
+  includeDeleted?: boolean;
+}
+
 export interface SourceInput {
   id?: string;
   brand_profile_id: string | null;
@@ -437,6 +445,9 @@ export interface Clip {
   provenance: Provenance;
   render_error: string | null;
   rendered_at: string | null;
+  /* Eigene Löschfrist des Clips (Migration 0006): workspaces.render_retention_days ab Erstellung,
+   * unabhängig von der kürzeren Frist der Quelle. Gesetzt vom Trigger, nicht von der Web-App. */
+  delete_after: string | null;
   deleted_at: string | null;
   created_by: string | null;
   created_at: string;
@@ -525,8 +536,8 @@ export interface Repo extends AuthRepo, WorkspaceAdminRepo, BlockBRepo {
   getBrandProfile(id: string): Promise<BrandProfile | null>;
   saveBrandProfile(input: BrandProfileInput): Promise<BrandProfile>;
   addBrandVocab(profileId: string, words: string[]): Promise<void>;
-  listSources(): Promise<Source[]>;
-  getSource(id: string): Promise<Source | null>;
+  listSources(scope?: SourceScope): Promise<Source[]>;
+  getSource(id: string, scope?: SourceScope): Promise<Source | null>;
   createSource(input: SourceInput): Promise<Source>;
   updateSource(id: string, patch: Partial<Source>): Promise<Source | null>;
   listPipelineEvents(sourceId: string, afterId?: number): Promise<PipelineEvent[]>;

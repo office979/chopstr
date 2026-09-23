@@ -7,6 +7,8 @@ import { SESSION_COOKIE, sessionCookieOptions } from "@/lib/auth/cookies";
  * Im Demo-Modus (ohne DATABASE_URL) gibt es keine Umleitung. */
 
 const PUBLIC_PATHS: RegExp[] = [
+  /* Öffentliche Landingpage */
+  /^\/produkt(\/|$)/,
   /^\/anmelden(\/|$)/,
   /^\/registrieren(\/|$)/,
   /^\/passwort(\/|$)/,

@@ -60,24 +60,82 @@ def utf16be(h: bytes) -> str:
         return ""
 
 
+def cmap_aus_strom(d: bytes) -> dict[int, str]:
+    """Eine einzelne ToUnicode-Tabelle auswerten."""
+    tabelle: dict[int, str] = {}
+    for block in BFCHAR.findall(d):
+        for quelle, ziel in HEXPAAR.findall(block):
+            tabelle[int(quelle, 16)] = utf16be(ziel)
+    for block in BFRANGE.findall(d):
+        for von, bis, ziel in HEXTRIPEL.findall(block):
+            start, ende = int(von, 16), int(bis, 16)
+            erstes = utf16be(ziel)
+            if len(erstes) != 1 or ende - start > 65535:
+                continue
+            for i in range(start, ende + 1):
+                tabelle[i] = chr(ord(erstes) + (i - start))
+    return tabelle
+
+
 def tounicode(stroeme: list[bytes]) -> dict[int, str]:
-    """Glyph-Nummer zu Zeichen, aus allen ToUnicode-Tabellen der Datei zusammengesetzt."""
+    """Alle Tabellen der Datei in einer.
+
+    ACHTUNG: Nur brauchbar, wenn die Datei eine einzige Schrift benutzt. Glyphnummern gelten je
+    Schrift, nicht dokumentweit. Bei mehreren Schriften kollidieren sie und das Ergebnis ist
+    stellenweise falsch, ohne dass es auffällt. Dafür gibt es ``cmaps_je_schrift``.
+    """
     tabelle: dict[int, str] = {}
     for d in stroeme:
-        if b"beginbfchar" not in d and b"beginbfrange" not in d:
-            continue
-        for block in BFCHAR.findall(d):
-            for quelle, ziel in HEXPAAR.findall(block):
-                tabelle[int(quelle, 16)] = utf16be(ziel)
-        for block in BFRANGE.findall(d):
-            for von, bis, ziel in HEXTRIPEL.findall(block):
-                start, ende = int(von, 16), int(bis, 16)
-                erstes = utf16be(ziel)
-                if len(erstes) != 1 or ende - start > 65535:
-                    continue
-                for i in range(start, ende + 1):
-                    tabelle[i] = chr(ord(erstes) + (i - start))
+        if b"beginbfchar" in d or b"beginbfrange" in d:
+            tabelle.update(cmap_aus_strom(d))
     return tabelle
+
+
+OBJEKT = re.compile(rb"(\d+)\s+0\s+obj\b(.*?)\bendobj", re.S)
+TOUNICODE_REF = re.compile(rb"/ToUnicode\s+(\d+)\s+0\s+R")
+FONT_RES = re.compile(rb"/Font\s*<<(.*?)>>", re.S)
+FONT_PAAR = re.compile(rb"/([A-Za-z0-9]+)\s+(\d+)\s+0\s+R")
+
+
+def cmaps_je_schrift(roh: bytes) -> dict[str, dict[int, str]]:
+    """Ressourcenname der Schrift (z. B. „F4") zu ihrer eigenen Glyphtabelle.
+
+    Der Weg dahin: Objekte einlesen, in den Schrift-Objekten die Referenz auf ihre ToUnicode-Tabelle
+    finden, deren Strom entpacken, und über die Ressourcen-Verzeichnisse der Seiten den Namen
+    zuordnen, unter dem die Schrift im Inhaltsstrom aufgerufen wird.
+    """
+    objekte: dict[int, bytes] = {int(n): koerper for n, koerper in OBJEKT.findall(roh)}
+
+    def strom_von(nummer: int) -> bytes:
+        koerper = objekte.get(nummer, b"")
+        treffer = STREAM.search(koerper)
+        if not treffer:
+            return b""
+        roh_strom = treffer.group(1)
+        try:
+            return zlib.decompress(roh_strom)
+        except zlib.error:
+            return roh_strom
+
+    # Schrift-Objekt zu Tabelle
+    je_objekt: dict[int, dict[int, str]] = {}
+    for nummer, koerper in objekte.items():
+        ref = TOUNICODE_REF.search(koerper)
+        if not ref:
+            continue
+        d = strom_von(int(ref.group(1)))
+        if b"beginbfchar" in d or b"beginbfrange" in d:
+            je_objekt[nummer] = cmap_aus_strom(d)
+
+    # Ressourcenname zu Schrift-Objekt
+    je_name: dict[str, dict[int, str]] = {}
+    for koerper in objekte.values():
+        for block in FONT_RES.findall(koerper):
+            for name, nummer in FONT_PAAR.findall(block):
+                tabelle = je_objekt.get(int(nummer))
+                if tabelle:
+                    je_name.setdefault(name.decode("ascii", "ignore"), tabelle)
+    return je_name
 
 
 def glyph_zu_zeichen(g: int, tabelle: dict[int, str]) -> str:
@@ -93,22 +151,34 @@ def glyph_zu_zeichen(g: int, tabelle: dict[int, str]) -> str:
     return chr(z) if 32 <= z < 127 else ""
 
 
+TF = re.compile(rb"/([A-Za-z0-9]+)\s+[-\d.]+\s+Tf")
+
+
 def text(pfad: str | Path, fliesstext: bool = True) -> str:
     roh = Path(pfad).read_bytes()
     stroeme = entpacke(roh)
-    tabelle = tounicode(stroeme)
+    je_schrift = cmaps_je_schrift(roh)
+    # Rückfall für Dateien mit nur einer Schrift oder ohne auflösbare Ressourcen
+    gesamt = tounicode(stroeme)
 
     teile: list[str] = []
     for d in stroeme:
         if b"Tj" not in d and b"TJ" not in d:
             continue
+        tabelle = gesamt
         pos = 0
-        for treffer in re.finditer(rb"<([0-9A-Fa-f]+)>\s*Tj|\[(.*?)\]\s*TJ|T\*|\bTD\b|\bET\b", d, re.S):
+        muster = rb"/([A-Za-z0-9]+)\s+[-\d.]+\s+Tf|<([0-9A-Fa-f]+)>\s*Tj|\[(.*?)\]\s*TJ|T\*|\bTD\b|\bET\b"
+        for treffer in re.finditer(muster, d, re.S):
             zwischen = d[pos : treffer.start()]
             pos = treffer.end()
             if ZEILENUMBRUCH.search(zwischen):
                 teile.append("\n")
-            roh_einzel, roh_array = treffer.group(1), treffer.group(2)
+            schriftname, roh_einzel, roh_array = treffer.group(1), treffer.group(2), treffer.group(3)
+            if schriftname:
+                # Schriftwechsel: ab hier gilt die Glyphtabelle dieser Schrift. Ohne das mischen
+                # sich die Nummernkreise mehrerer Schriften und der Text wird stellenweise falsch.
+                tabelle = je_schrift.get(schriftname.decode("ascii", "ignore"), gesamt)
+                continue
             if roh_einzel:
                 teile.append(zeichenkette(roh_einzel, tabelle))
             elif roh_array is not None:

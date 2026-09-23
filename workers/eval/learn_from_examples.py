@@ -30,6 +30,21 @@ from eval import clip_eval
 
 VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v"}
 
+# Wörter, mit denen jemand seine Aussage abschwächt, während er noch denkt. In den schlechten
+# Beispielen häufen sie sich: „Also man könnte wahrscheinlich nicht sagen, dass er
+# unterdurchschnittlich intelligent ist, so würde ich jetzt mal nicht denken." Die guten Beispiele
+# behaupten stattdessen etwas.
+WEICHMACHER = {
+    "irgendwie", "irgendwas", "irgendein", "irgendeine", "vielleicht", "wahrscheinlich",
+    "eigentlich", "quasi", "halt", "naja", "ungefähr", "sozusagen", "gewisse", "gewissermaßen",
+    "manchmal", "teilweise", "eventuell", "womöglich", "tendenziell",
+}  # fmt: skip
+WEICHMACHER_PHRASEN = ("ich glaube", "ich denke", "ich würde sagen", "man könnte sagen", "das gefühl")
+
+# Der Gesprächspartner stellt die Frage, die Antwort kommt erst danach. Ein Clip, der damit
+# beginnt, verschenkt seine ersten Sekunden an den Anlauf.
+FRAGEWOERTER = {"was", "wie", "warum", "wieso", "weshalb", "wer", "wann", "wo", "welche", "welcher", "welches"}
+
 
 def schluessel(video: Path) -> str:
     """Eindeutiger Name für den Zwischenspeicher.
@@ -73,6 +88,24 @@ def measure(daten: dict[str, Any], dauer_s: float) -> dict[str, Any]:
 
     sprech_s = max(1e-6, cand["end_s"] - cand["start_s"])
     saetze = dach_nlp.sentence_boundaries(words)
+    volltext = " ".join(str(w.get("text", "")) for w in words)
+    klein = volltext.lower()
+
+    # Weichmacher: Anteil der Wörter, mit denen die Aussage relativiert wird.
+    marken = [dach_nlp.core_token(str(w.get("text", ""))) for w in words]
+    weich = sum(1 for m in marken if m in WEICHMACHER)
+    weich += sum(klein.count(p) for p in WEICHMACHER_PHRASEN)
+
+    # Fragen: viele davon heißen Interview-Hin-und-Her statt einer durchgezogenen Aussage.
+    fragen = volltext.count("?")
+    erste_satz_ende = saetze[0] if saetze else len(words) - 1
+    erster_satz = " ".join(str(w.get("text", "")) for w in words[: erste_satz_ende + 1])
+    beginnt_mit_frage = erster_satz.strip().endswith("?") or dach_nlp.core_token(str(words[0].get("text", ""))) in FRAGEWOERTER
+
+    # Endet der Clip offen? „...und dann machen die Leute auch." landet nicht, es bricht ab.
+    letzter_start = (saetze[-2] + 1) if len(saetze) >= 2 else 0
+    letzter_satz = " ".join(str(w.get("text", "")) for w in words[letzter_start:])
+    endet_offen = dach_nlp.ends_with_open_loop(letzter_satz)
     # Vorlauf bis zum ersten Wort und Nachlauf nach dem letzten: zeigt, wie eng geschnitten wird.
     vorlauf = cand["start_s"]
     nachlauf = max(0.0, dauer_s - cand["end_s"])
@@ -83,6 +116,10 @@ def measure(daten: dict[str, Any], dauer_s: float) -> dict[str, Any]:
         "woerter": len(words),
         "woerter_pro_minute": round(len(words) / (sprech_s / 60.0), 1),
         "saetze": len(saetze),
+        "weichmacher_je_100w": round(weich / max(1, len(words)) * 100, 1),
+        "fragen": fragen,
+        "beginnt_mit_frage": bool(beginnt_mit_frage),
+        "endet_offen": bool(endet_offen),
         "vorlauf_s": round(vorlauf, 2),
         "nachlauf_s": round(nachlauf, 2),
         "satzanfang": grenzen["satzanfang"],
@@ -116,6 +153,10 @@ def gruppe_zusammenfassen(zeilen: list[dict]) -> dict[str, Any]:
         "dauer_max_s": dauern[-1],
         "saetze_median": statistics.median(saetze),
         "woerter_pro_minute_median": statistics.median(wpm),
+        "weichmacher_je_100w_median": round(statistics.median([z["weichmacher_je_100w"] for z in brauchbar]), 1),
+        "fragen_median": statistics.median([z["fragen"] for z in brauchbar]),
+        "beginnt_mit_frage_anteil": anteil([z["beginnt_mit_frage"] for z in brauchbar]),
+        "endet_offen_anteil": anteil([z["endet_offen"] for z in brauchbar]),
         "vorlauf_median_s": round(statistics.median([z["vorlauf_s"] for z in brauchbar]), 2),
         "nachlauf_median_s": round(statistics.median([z["nachlauf_s"] for z in brauchbar]), 2),
         "satzanfang_anteil": anteil([z["satzanfang"] for z in brauchbar]),
@@ -184,7 +225,8 @@ def main(argv: list[str] | None = None) -> None:
     print("-" * 56)
     for schluessel in (
         "clips", "dauer_median_s", "dauer_min_s", "dauer_max_s", "saetze_median",
-        "woerter_pro_minute_median", "vorlauf_median_s", "nachlauf_median_s",
+        "woerter_pro_minute_median", "weichmacher_je_100w_median", "fragen_median",
+        "beginnt_mit_frage_anteil", "endet_offen_anteil", "nachlauf_median_s",
         "satzanfang_anteil", "satzende_anteil", "rueckverweis_anteil", "verneinung_am_rand_anteil",
     ):  # fmt: skip
         pv, nv = p.get(schluessel), n.get(schluessel)

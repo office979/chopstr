@@ -156,3 +156,21 @@ def test_verpasste_stellen_werden_mit_grund_gemeldet():
     ergebnis = clip_eval.match_references([{"start_s": 0.0, "end_s": 10.0}], stellen, 0.5, 10)
     assert ergebnis["gefunden"] == 0
     assert ergebnis["verpasst"][0]["grund"] == "Klare Zahl mit Beleg"
+
+
+# -- Zwischenspeicher der Beispiel-Auswertung ------------------------------------------------------
+def test_gleiche_dateinamen_in_verschiedenen_ordnern_kollidieren_nicht():
+    """Beide Beispielordner enthalten „Download (2).mp4".
+
+    Mit dem Dateinamen als Schlüssel bekam der negative Clip das Transkript des positiven. Der
+    Vergleich sah dann plausibel aus und war trotzdem wertlos: gleiche Wortzahl, verschiedene
+    Dauer. Genau solche Fehler fallen ohne Test nicht auf.
+    """
+    from pathlib import Path
+
+    from eval.learn_from_examples import schluessel
+
+    a = Path("/x/Positive Beispiele/Download (2).mp4")
+    b = Path("/x/Negative Beispiele/Download (2).mp4")
+    assert schluessel(a) != schluessel(b)
+    assert "Positive" in schluessel(a) and "Negative" in schluessel(b)

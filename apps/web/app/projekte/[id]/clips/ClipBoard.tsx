@@ -10,7 +10,7 @@ import { cn } from "@/components/ui/cn";
 import { SilentPreview, type PreviewFont } from "@/components/clips/SilentPreview";
 import { GuestApprovalDialog } from "@/components/clips/GuestApprovalDialog";
 import { Modal } from "@/components/ui/Modal";
-import type { Candidate, CaptionVersion, Clip, GuestApproval, HookVersion, PipelineEvent } from "@/lib/repo/types";
+import type { Aspect, Candidate, CaptionVersion, Clip, GuestApproval, HookVersion, PipelineEvent } from "@/lib/repo/types";
 import { EXPORT_BLOCKED_MESSAGE, exportBlocked, latestByClip } from "@/lib/guest/approval";
 import { structureLabel } from "@/lib/candidates/labels";
 import {
@@ -81,6 +81,15 @@ function isSettled(c: Clip): boolean {
 function isDone(c: Clip): boolean {
   return c.status === "rendered" || c.status === "exported";
 }
+
+/* Seitenverhältnis als CSS-Wert. Vorher wurde alles außer 4:5 als 9:16 dargestellt, ein 16:9-Clip
+ * (Hochformat-Schalter aus) bekam also einen hochkanten Rahmen und wurde im Bild gestaucht. */
+const ASPECT_RATIO_CSS: Record<Aspect, string> = {
+  "9:16": "9 / 16",
+  "4:5": "4 / 5",
+  "1:1": "1 / 1",
+  "16:9": "16 / 9",
+};
 
 function checkState(c: Clip): StatusCheckState {
   if (c.status === "failed") return "error";
@@ -367,7 +376,10 @@ export function ClipBoard({
             </div>
           </div>
 
-          <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label={`Clips zu Vorschlag ${gi + 1}`}>
+          {/* Eine Reihe je Clip statt vier Spalten: die Karten sind nicht mehr aneinander
+              hochgezogen (Grid-Zeilen gleicher Höhe), und der vorhandene Platz nach rechts wird
+              genutzt, statt alles vertikal zu stapeln. */}
+          <ul className="flex flex-col gap-4" aria-label={`Clips zu Vorschlag ${gi + 1}`}>
             {g.clips.map((clip) => {
               const ev = latest.get(clip.id);
               const state = checkState(clip);
@@ -392,10 +404,10 @@ export function ClipBoard({
                 ? publishGates({ clip, candidate: g.candidate, approval, workspace: { dpa_signed_at: publishing.dpaSigned ? "ja" : null }, plan: publishing.plan })
                 : [];
               return (
-                <li key={clip.id} className="flex min-w-0 flex-col gap-3 rounded-inner border border-line p-4">
+                <li key={clip.id} className="flex min-w-0 flex-col gap-4 rounded-inner border border-line p-4 lg:flex-row lg:items-start">
                   <div
-                    className="relative w-full overflow-hidden rounded-[12px] border border-line bg-black"
-                    style={{ aspectRatio: clip.aspect === "4:5" ? "4 / 5" : "9 / 16", maxHeight: 220 }}
+                    className="relative mx-auto w-full max-w-[280px] shrink-0 overflow-hidden rounded-[12px] border border-line bg-black lg:mx-0 lg:h-[340px] lg:w-auto lg:max-w-[600px]"
+                    style={{ aspectRatio: ASPECT_RATIO_CSS[clip.aspect] }}
                   >
                     {video ? (
                       <ClipVideo src={video} poster={poster} label={`${PLATFORM_LABELS[clip.platform]} ${clip.aspect}`} />
@@ -427,6 +439,9 @@ export function ClipBoard({
                     </div>
                   </div>
 
+                  {/* Rechte Spalte: Zustand, Hinweise, Bedienung. Nimmt den Platz nach rechts,
+                      statt alles unter die Vorschau zu stapeln. */}
+                  <div className="flex min-w-0 flex-1 flex-col gap-3">
                   <div className="flex items-start gap-3">
                     <StatusCheck state={state} size={28} label={`${CLIP_STATUS_LABELS[clip.status]}`} />
                     <div className="min-w-0 flex-1">
@@ -541,36 +556,42 @@ export function ClipBoard({
                     </p>
                   )}
 
-                  <div className="mt-auto flex flex-wrap gap-1.5 border-t border-line pt-3">
+                  {/* Downloads mit Beschriftung. Vorher standen hier nur „MP4 SRT VTT“; dass das
+                      Downloads sind, ließ sich nur durch Draufklicken herausfinden. */}
+                  <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+                    <span className="text-xs text-text-2">Herunterladen:</span>
                     {(
                       [
-                        ["MP4", mp4],
-                        ["SRT", srt],
-                        ["VTT", vtt],
+                        ["Video", "MP4", mp4],
+                        ["Untertitel", "SRT", srt],
+                        ["Untertitel", "VTT", vtt],
                       ] as const
-                    ).map(([label, href]) =>
+                    ).map(([label, kind, href]) =>
                       href && !blocked ? (
                         <a
-                          key={label}
+                          key={kind}
                           href={href}
                           download
-                          className="transition-soft inline-flex h-8 items-center rounded-pill border border-line-strong px-3 font-mono text-xs text-text hover:border-white/40 hover:bg-white/5"
+                          className="transition-soft inline-flex h-8 items-center gap-1.5 rounded-pill border border-line-strong px-3 text-xs text-text hover:border-white/40 hover:bg-white/5"
                         >
-                          {label}
+                          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <path d="M8 2v8m0 0 3-3M8 10 5 7M3 13h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                          {label} <span className="font-mono text-text-3">{kind}</span>
                         </a>
                       ) : (
                         <span
-                          key={label}
+                          key={kind}
                           aria-disabled="true"
-                          title={blocked ? EXPORT_BLOCKED_MESSAGE : demo ? "Im Demo-Modus gibt es keine Dateien" : isDone(clip) ? "Datei noch nicht verfügbar" : "Erst nach dem Render"}
-                          className={cn("inline-flex h-8 cursor-not-allowed items-center rounded-pill border px-3 font-mono text-xs", blocked ? "border-attention/40 text-attention/70" : "border-line text-text-3")}
+                          title={blocked ? EXPORT_BLOCKED_MESSAGE : demo ? "Im Demo-Modus gibt es keine Dateien" : isDone(clip) ? "Datei noch nicht verfügbar" : "Erst wenn der Clip fertig ist"}
+                          className={cn("inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-pill border px-3 text-xs", blocked ? "border-attention/40 text-attention/70" : "border-line text-text-3")}
                         >
-                          {label}
+                          {label} <span className="font-mono">{kind}</span>
                         </span>
                       ),
                     )}
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Link
                       href={`/projekte/${sourceId}/clips/${clip.id}/hooks`}
                       className="transition-soft inline-flex h-9 items-center rounded-pill bg-text px-4 text-sm font-medium text-black hover:bg-white"
@@ -581,7 +602,7 @@ export function ClipBoard({
                       Änderungen übernehmen
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => togglePreview(clip)} aria-expanded={open}>
-                      {open ? "Vorschau schließen" : "Vorschau"}
+                      {open ? "Ton-Vorschau schließen" : "Mit Ton ansehen"}
                     </Button>
                     {canDelete && (
                       <Button size="sm" variant="danger" onClick={() => setDeleteTarget(clip)} disabled={clip.status === "rendering"}>
@@ -621,11 +642,11 @@ export function ClipBoard({
                             playsInline
                             controls
                             preload="metadata"
-                            aria-label={`Vorschau ohne Ton, ${PLATFORM_LABELS[clip.platform]}`}
-                            className="mx-auto w-full max-w-[300px] rounded-inner border border-line-strong bg-black"
-                            style={{ aspectRatio: clip.aspect === "4:5" ? "4 / 5" : "9 / 16" }}
+                            aria-label={`Vorschau, ${PLATFORM_LABELS[clip.platform]}`}
+                            className="mx-auto w-full max-w-[420px] rounded-inner border border-line-strong bg-black"
+                            style={{ aspectRatio: ASPECT_RATIO_CSS[clip.aspect] }}
                           />
-                          <p className="text-center text-xs text-text-2">Gerenderte Datei, stumm in Schleife. Ton über die Steuerung im Player.</p>
+                          <p className="text-center text-xs text-text-2">Startet stumm. Ton über die Steuerung im Player.</p>
                         </div>
                       ) : detail ? (
                         <SilentPreview
@@ -645,10 +666,11 @@ export function ClipBoard({
                         </p>
                       )}
                       {!video && detail && !detail.captions && (
-                        <p className="mt-2 text-center text-xs text-text-2">Noch keine Caption-Karten. Sie entstehen beim Render.</p>
+                        <p className="mt-2 text-center text-xs text-text-2">Noch keine Untertitel. Sie entstehen beim Bauen.</p>
                       )}
                     </div>
                   )}
+                  </div>
                 </li>
               );
             })}

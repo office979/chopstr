@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
 
 from chopstr_worker import config, heuristic_llm
@@ -109,7 +111,10 @@ def test_full_flow_row_matches_contract(brain, llm):
     assert list(g) == ["standalone", "fidelity", "sentence_boundaries", "verb_bracket", "no_open_loop"]
     assert g["standalone"] == {"passed": True, "detail": "keine offenen Verweise"}
     assert g["sentence_boundaries"]["passed"] and g["fidelity"]["passed"] and g["no_open_loop"]["passed"]
-    assert g["verb_bracket"]["passed"] is True and g["verb_bracket"]["available"] is False  # kein spaCy im Test
+    # Die Verbklammer-Prüfung braucht spaCy. Ohne spaCy meldet das Gate available = False und lässt
+    # durch, mit spaCy prüft es wirklich. Beides ist gültig; der Test darf nicht an der Umgebung hängen.
+    assert g["verb_bracket"]["passed"] is True
+    assert g["verb_bracket"]["available"] is (importlib.util.find_spec("spacy") is not None)
 
     # Story-Graph: Satz 6 relativiert, das Fake-LLM bestätigt
     assert len(c.story_graph_flags) == 1

@@ -288,7 +288,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
         <Field label="Wie soll es heißen?" htmlFor="title" required error={errors.title}>
           <Input id="title" name="title" placeholder="z. B. Podcast Folge 13: Preise im Handwerk" required disabled={busy} />
         </Field>
-        <Field label="Aussehen" htmlFor="brand_profile_id" hint="Bestimmt Farben, Schrift und wie die Untertitel aussehen.">
+        <Field label="Branding" htmlFor="brand_profile_id" hint="Bestimmt Farben, Schrift und wie die Untertitel aussehen.">
           <Select id="brand_profile_id" name="brand_profile_id" defaultValue={profiles[0]?.id ?? ""} disabled={busy}>
             {profiles.length === 0 && <option value="">Noch keines angelegt</option>}
             {profiles.map((p) => (

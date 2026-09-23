@@ -5,28 +5,46 @@ import { requirePageRole } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
 import { buildHistory } from "@/lib/brand/history";
 import { BrandForm } from "./BrandForm";
+import { BrandList } from "./BrandList";
 import { HistoryCard } from "./HistoryCard";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Markenprofil" };
+export const metadata = { title: "Branding" };
 
-export default async function BrandPage() {
+type Props = { searchParams: Promise<{ p?: string }> };
+
+/* Mehrere Brandings je Workspace. Welches bearbeitet wird, steht in ?p=<id>; ?p=neu zeigt ein
+ * leeres Formular. Ohne Parameter gilt das erste. Der Zustand steckt in der Adresse, damit ein
+ * Neuladen nicht zurückspringt. */
+export default async function BrandPage({ searchParams }: Props) {
   const session = await requirePageRole("brand.edit");
+  const { p } = await searchParams;
   const repo = getRepo();
   const profiles = await repo.listBrandProfiles();
-  const profile = profiles[0] ?? null;
-  const [assets, versions] = profile ? await Promise.all([repo.listBrandAssets(profile.id), repo.listBrandProfileVersions(profile.id)]) : [[], []];
+
+  const isNew = p === "neu";
+  const profile = isNew ? null : (profiles.find((x) => x.id === p) ?? profiles[0] ?? null);
+  const [assets, versions] = profile
+    ? await Promise.all([repo.listBrandAssets(profile.id), repo.listBrandProfileVersions(profile.id)])
+    : [[], []];
   const history = profile ? buildHistory(versions, profile) : [];
 
   return (
-    <PageShell width="narrow" backgroundWord="Marke">
+    <PageShell backgroundWord="Brand">
       <PageHeader
         eyebrow="Brand Brain"
-        title="Markenprofil"
-        description="Anrede, Land und Wörterbuch steuern Transkription, Captions und später die Hooks. Alles bleibt in deinem Workspace."
+        title="Branding"
+        description="Anrede, Land und Wörterbuch steuern Transkription, Untertitel und Hooks. Alles bleibt in deinem Workspace."
       />
-      <BrandForm profile={profile} assets={assets} canUploadAssets={can(session.role, "brand.assets")} />
-      {profile && (
+      <BrandList profiles={profiles} activeId={profile?.id ?? null} isNew={isNew} />
+      {/* key erzwingt ein frisches Formular beim Wechsel; sonst blieben die Eingaben des vorigen stehen */}
+      <BrandForm
+        key={isNew ? "neu" : (profile?.id ?? "leer")}
+        profile={profile}
+        assets={assets}
+        canUploadAssets={can(session.role, "brand.assets")}
+      />
+      {profile && !isNew && (
         <div className="mt-5">
           <HistoryCard profileId={profile.id} entries={history} canRestore={can(session.role, "brand.edit")} />
         </div>

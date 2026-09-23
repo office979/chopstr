@@ -46,7 +46,7 @@ export function Sidebar({ user }: { user: NavUser | null }) {
   const main: NavItem[] = [
     { href: "/", label: "Meine Videos", icon: <IconGrid />, match: (p) => p === "/" || p.startsWith("/projekte") },
   ];
-  if (user?.canBrand) main.push({ href: "/marke", label: "Aussehen", icon: <IconBrand />, match: (p) => p.startsWith("/marke") });
+  if (user?.canBrand) main.push({ href: "/marke", label: "Branding", icon: <IconBrand />, match: (p) => p.startsWith("/marke") });
 
   const publishing: NavItem[] = [];
   if (canExt(user?.role, "series.manage")) publishing.push({ href: "/serien", label: "Serien", icon: <IconStack />, match: (p) => p.startsWith("/serien") });

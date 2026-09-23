@@ -127,7 +127,7 @@ export function GuestApprovalDialog({ sourceId, clipId, clipLabel, guestApproval
       {canRequest && (
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="ghost" onClick={openDialog}>
-            {status === "pending" ? "Neuen Link erstellen" : status === "none" ? "Jemanden fragen" : "Nochmal fragen"}
+            {status === "pending" ? "Neuen Freigabe-Link" : status === "none" ? "Freigeben lassen" : "Erneut freigeben lassen"}
           </Button>
         </div>
       )}

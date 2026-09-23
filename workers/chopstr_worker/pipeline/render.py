@@ -150,13 +150,19 @@ def _path(value: str | os.PathLike) -> str:
     return _q(p)
 
 
-def _drawtext_lines(lines: list[str], font: Path, font_px: int, y0: int, seconds: float) -> list[str]:
+def _drawtext_lines(lines: list[str], font: Path, font_px: int, y0: int, seconds: float, style: str = "dark") -> list[str]:
+    """Textzeilen als drawtext-Filter.
+
+    ``style = "light"`` ist der Instagram-Look: schwarze Schrift auf deckendem Weiß. ``"dark"`` ist
+    der frühere Look, weiße Schrift auf halbdurchsichtigem Schwarz; er bleibt für die Titelkarte,
+    die über dem eigenen Standbild liegt."""
     line_h = int(round(font_px * 1.3))
+    fontcolor, boxcolor = ("black", "white@0.95") if style == "light" else ("white", "black@0.6")
     out = []
     for i, line in enumerate(lines):
         out.append(
-            f"drawtext=fontfile={_path(font)}:text={_text(line)}:expansion=none:fontsize={font_px}:fontcolor=white:"
-            f"box=1:boxcolor=black@0.6:boxborderw={max(8, font_px // 4)}:x=(w-text_w)/2:y={y0 + i * line_h}:"
+            f"drawtext=fontfile={_path(font)}:text={_text(line)}:expansion=none:fontsize={font_px}:fontcolor={fontcolor}:"
+            f"box=1:boxcolor={boxcolor}:boxborderw={max(8, font_px // 4)}:x=(w-text_w)/2:y={y0 + i * line_h}:"
             f"enable='lt(t,{seconds:.2f})'"
         )
     return out
@@ -190,7 +196,7 @@ def overlay_filters(plan: dict, font: Path | None, caps: dict[str, bool]) -> tup
     if hook:
         font_px = max(18, int(round(out_h * 0.036)))
         lines = captions_de.wrap_lines(str(hook["text"]).split(), captions_de.max_chars(font_px, out_w - 2 * margin_x), 3)
-        filters += _drawtext_lines(lines, font, font_px, y, float(hook["seconds"]))
+        filters += _drawtext_lines(lines, font, font_px, y, float(hook["seconds"]), style="light")
         hook_drawn = True
     return filters, notes, title_drawn, hook_drawn
 

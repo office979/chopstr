@@ -116,7 +116,9 @@ def _load_brand_extra(ctx: common.Context, source_id: str) -> dict[str, Any]:
     out["banned_phrases"] = list(out.get("banned_phrases") or [])
     out["tone_adjectives"] = list(out.get("tone_adjectives") or [])
     out["default_platform"] = out.get("default_platform") or "linkedin"
-    out["caption_preset"] = out.get("caption_preset") or "linkedin_static"
+    # Kein Ersatzwert: NULL heißt „keine ausdrückliche Wahl“ und muss so bei caption_preset_for
+    # ankommen, sonst gewinnt der ruhige LinkedIn-Stil wieder im Hochformat (Migration 0007).
+    out["caption_preset"] = out.get("caption_preset") or None
     out["caption_style"] = dict(_json(out.get("caption_style"), {}) or {})
     out["rights_status"] = out.get("rights_status") or "own"
     out["ci"] = dict(_json(out.get("ci"), {}) or {})
@@ -362,10 +364,29 @@ def fidelity_warnings(words: list[dict], segments: list[dict], cand_start: float
     return fidelity.check_cut(cand, kept) if kept else []
 
 
-def caption_preset_for(destination: str, extra: dict) -> str:
-    """Plattform-Default; auf der Standardplattform des Markenprofils gilt dessen Caption-Preset."""
+# Wortweise Presets je Plattform, wenn hochkant gerendert wird. LinkedIn hat kein eigenes
+# Wort-Preset, im Hochformat bekommt es deshalb das von Reels (gleiche Safe Zone, gleiche Schrift).
+PORTRAIT_WORD_PRESET = {
+    "tiktok": "tiktok_words",
+    "reels": "reels_words",
+    "shorts": "shorts_words",
+    "linkedin": "reels_words",
+}
+
+
+def caption_preset_for(destination: str, extra: dict, aspect: str | None = None) -> str:
+    """Untertitel-Stil für diesen Clip.
+
+    Reihenfolge: eine ausdrückliche Wahl im Markenprofil schlägt alles. Sonst entscheidet das
+    Format, nicht die Plattform — ein hochkanter Clip bekommt wortweise Untertitel, auch wenn die
+    Zielplattform LinkedIn ist. Seit dem Wegfall der Auswahl entstehen alle Clips in 9:16, und der
+    ruhige LinkedIn-Stil (mehrere Wörter, zwei Zeilen) wirkt dort wie ein Fehler statt wie eine
+    Entscheidung. Im Querformat bleibt es beim bisherigen Plattform-Default.
+    """
     if destination == extra.get("default_platform") and extra.get("caption_preset") in captions_de.PRESETS:
         return str(extra["caption_preset"])
+    if aspect == "9:16":
+        return PORTRAIT_WORD_PRESET.get(destination, "reels_words")
     return captions_de.PLATFORM_DEFAULT_PRESET.get(destination, "linkedin_static")
 
 
@@ -500,7 +521,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     st.progress(0.35, "Captions auf der Ausgabe-Timeline", clip_id=clip_id, phase="captions")
     common.heartbeat("render", "captions")
     out_words = compose.remap_words(words, comp)
-    preset_name = caption_preset_for(destination, extra)
+    preset_name = caption_preset_for(destination, extra, aspect)
     preset = captions_de.scaled_preset(preset_name, out_w, out_h)
     style = extra.get("caption_style") or {}
     text_field = caption_text_field_for(style)

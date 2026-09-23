@@ -96,10 +96,12 @@ def seed(conn, now: datetime | None = None, password_hash: str | None = None) ->
     if row:
         report["brand_profile"] = "vorhanden"
     else:
+        # caption_preset bleibt weg: NULL heißt „keine ausdrückliche Wahl“, das Format entscheidet
+        # über den Untertitel-Stil (Migration 0007, activities/render.caption_preset_for).
         db.insert(
             conn, "brand_profiles", returning="id",
             workspace_id=workspace_id, name=BRAND_NAME, address="du", country="AT", asr_variant="de",
-            default_platform="linkedin", caption_preset="linkedin_static", brand_vocab=["chopstr", "PLACEMedia"],
+            default_platform="linkedin", brand_vocab=["chopstr", "PLACEMedia"],
             ci=db.jsonb(DEFAULT_CI),
         )  # fmt: skip
         report["brand_profile"] = "angelegt"

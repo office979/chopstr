@@ -234,6 +234,7 @@ class FakeDB:
             "id": str(uuid.uuid4()), "source_id": source_id, "version": 1, "segments": segments,
             "start_s": min(float(x["start"]) for x in segments), "end_s": max(float(x["end"]) for x in segments),
             "rubric": {"suggested_title_card": ""}, "risk_flags": [], "human_verdict": None,
+            "verdict_reason": None, "verdict_by": None, "verdict_at": None,
         }  # fmt: skip
         row.update(fields)
         self.candidates.append(row)
@@ -260,6 +261,14 @@ class FakeDB:
         row.update(fields)
         self.hook_versions.append(row)
         return row["id"]
+
+    def _auto_candidates(self, source_id: str, reason: str) -> list[dict]:
+        """Automatisch angenommene Kandidaten einer Quelle (kein ``verdict_by``, Automatik-Begründung)."""
+        return [
+            c
+            for c in self.candidates
+            if c["source_id"] == source_id and c.get("verdict_by") is None and c.get("verdict_reason") == reason
+        ]
 
     @staticmethod
     def _insert_row(sql: str, params: tuple) -> dict:
@@ -304,12 +313,45 @@ class FakeDB:
             cols = sql.split("(", 1)[1].split(")", 1)[0].replace("\n", " ").split(",")
             row = {c.strip(): _unwrap(v) for c, v in zip(cols, params)}
             row["id"] = str(uuid.uuid4())
-            row.setdefault("human_verdict", None)
+            for key in ("human_verdict", "verdict_reason", "verdict_by", "verdict_at"):
+                row.setdefault(key, None)
             self.candidates.append(row)
             return FakeCursor([(row["id"],)])
         if q.startswith("delete from candidates where source_id = %s and human_verdict is null"):
             self.candidates = [c for c in self.candidates if not (c["source_id"] == params[0] and c.get("human_verdict") is None)]
             return FakeCursor([])
+        if q.startswith("update candidates set"):
+            cid = params[-1]
+            for c in self.candidates:
+                if c["id"] == cid:
+                    self._apply_update(sql, params, c)
+            return FakeCursor([], rowcount=1)
+        # Automatische Clips (analyze.auto_create_clips): Aufräumen vor dem Neuschreiben
+        if q.startswith("delete from clips where status = 'draft' and candidate_id in"):
+            auto = {c["id"] for c in self._auto_candidates(params[0], params[1])}
+            return self._delete_dict(self.clips, lambda c: c["status"] == "draft" and c.get("candidate_id") in auto)
+        if q.startswith("delete from candidates where source_id = %s and verdict_by is null and verdict_reason = %s"):
+            with_clip = {c.get("candidate_id") for c in self.clips.values()}
+            gone = {c["id"] for c in self._auto_candidates(params[0], params[1]) if c["id"] not in with_clip}
+            self.candidates = [c for c in self.candidates if c["id"] not in gone]
+            return FakeCursor([], rowcount=len(gone))
+        if q.startswith("select p.default_platform from sources s"):
+            src = self.sources.get(params[0])
+            if src is None:
+                return FakeCursor([])
+            p = self.brand_profiles.get(src.get("brand_profile_id")) or {}
+            return FakeCursor([(p.get("default_platform"),)])
+        if q.startswith("select id from clips where candidate_id = %s"):
+            rows = [c for c in self.clips.values() if c.get("candidate_id") == params[0]]
+            return FakeCursor([(c["id"],) for c in rows[:1]])
+        if q.startswith("select k.start_s, k.end_s from clips c join candidates k"):
+            by_id = {c["id"]: c for c in self.candidates}
+            rows = []
+            for c in self.clips.values():
+                k = by_id.get(c.get("candidate_id"))
+                if c["source_id"] == params[0] and k is not None:
+                    rows.append((k.get("start_s"), k.get("end_s")))
+            return FakeCursor(rows)
         if q.startswith("update sources set"):
             set_part = sql.split("set", 1)[1].split("where", 1)[0]
             cols = [c.split("=")[0].strip() for c in set_part.split(",")]

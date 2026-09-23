@@ -5,21 +5,29 @@ kommt aus ``activities.render`` und wird hier nur re-exportiert.
 ASR-Ergebnis bereits im Storage (Re-Run), fließt auch der Text-Anteil ein (``signals.combined``).
 ``detect_candidates`` lädt Transkript, Briefing, Markenprofil und Heatmap, lässt ``pipeline.story_engine``
 laufen und schreibt ``candidates`` nach ``packages/schema/CANDIDATES.md``.
+
+Seit dem Wegfall des Auswahlschritts legt ``detect_candidates`` im selben Zug für **jeden** Kandidaten
+eine ``clips``-Zeile an (``auto_create_clips``) und setzt den Kandidaten auf ``human_verdict = 'accepted'``.
+Damit ist die Warteschlange des Renderers (``clips.status = 'draft'`` mit angenommenem Kandidaten)
+ohne menschliches Zutun gefüllt. Weil beide Wege — der lokale Worker und die Temporal-Activity —
+durch ``run_detect_candidates`` laufen, hängt die Clip-Erzeugung an genau einer Stelle.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from datetime import UTC, datetime
+from typing import Any
 
 from temporalio import activity
 
 from .. import costlog, db, decision_log, events, outbox, storage, usage
-from ..pipeline import signals, story_engine
+from ..pipeline import copy_engine, signals, story_engine
 from ..providers_llm import LLM
 from ..residency import Tenant
 from . import common
-from .render import STEP_RENDER, render_pack
+from .render import STEP_RENDER, ad_label_for, render_pack
 from .transcribe import asr_key_for
 
 log = logging.getLogger("chopstr.activities.analyze")
@@ -27,6 +35,32 @@ log = logging.getLogger("chopstr.activities.analyze")
 STEP_HEATMAP = "heatmap"
 STEP_CANDIDATES = "detect_candidates"
 SIGNALS_VERSION = "signals_v1"
+
+# -- Automatische Clips (ohne Auswahlschritt) ---------------------------------------------------
+# Gründerentscheidung: alle Kandidaten bekommen einen Clip, immer Hochformat, je Kandidat genau einer.
+AUTO_CLIP_ASPECT = "9:16"
+AUTO_CLIP_PLATFORM = "reels"  # Rückfall, wenn an der Quelle kein Markenprofil hängt
+AUTO_VERDICT_REASON = "automatisch angenommen (ohne Auswahlschritt)"
+# Rundung der Kandidatenfenster für den Dublettenschutz (Zehntelsekunden)
+_WINDOW_DIGITS = 1
+
+SQL_DEFAULT_PLATFORM = (
+    "select p.default_platform from sources s left join brand_profiles p on p.id = s.brand_profile_id where s.id = %s"
+)
+SQL_CLIP_FOR_CANDIDATE = "select id from clips where candidate_id = %s limit 1"
+SQL_CLIP_WINDOWS = (
+    "select k.start_s, k.end_s from clips c join candidates k on k.id = c.candidate_id where c.source_id = %s"
+)
+# Re-Run: die noch nicht gerenderten Automatik-Clips und ihre Kandidaten weichen dem neuen Ergebnis.
+# Menschliche Urteile haben immer ein ``verdict_by`` und bleiben deshalb unberührt.
+SQL_DROP_AUTO_CLIPS = (
+    "delete from clips where status = 'draft' and candidate_id in "
+    "(select id from candidates where source_id = %s and verdict_by is null and verdict_reason = %s)"
+)
+SQL_DROP_AUTO_CANDIDATES = (
+    "delete from candidates where source_id = %s and verdict_by is null and verdict_reason = %s "
+    "and not exists (select 1 from clips c where c.candidate_id = candidates.id)"
+)
 
 
 def heatmap_key_for(audio_key: str, with_text: bool) -> str:
@@ -97,8 +131,19 @@ def candidates_key_for(tv_id: str, tv_version: int, brief: dict, prompt_versions
     return storage.derived_key(f"transcript/{tv_id}", params, story_engine.CONTRACT, "json", prefix="candidates")
 
 
+def _drop_stale_auto_rows(ctx: common.Context, source_id: str) -> None:
+    """Re-Run-Aufräumen für die Automatik: Ohne diesen Schritt überlebt jeder automatisch angenommene
+    Kandidat den Lauf (``human_verdict`` ist gesetzt) und das neue Ergebnis käme obendrauf — doppelte
+    Kandidaten und doppelte Clips. Entfernt werden deshalb die Automatik-Clips, die noch nicht gerendert
+    sind (``draft``), und anschließend die Automatik-Kandidaten, an denen danach kein Clip mehr hängt.
+    Gerenderte Ergebnisse und alles mit menschlichem Urteil (``verdict_by`` gesetzt) bleiben stehen."""
+    ctx.conn.execute(SQL_DROP_AUTO_CLIPS, (source_id, AUTO_VERDICT_REASON))
+    ctx.conn.execute(SQL_DROP_AUTO_CANDIDATES, (source_id, AUTO_VERDICT_REASON))
+
+
 def _write_rows(ctx: common.Context, source_id: str, cands: list[story_engine.CandidateResult]) -> list[str]:
     """Alte Kandidaten ohne Urteil löschen (Re-Run), neue Zeilen schreiben; Zeilen mit Urteil bleiben."""
+    _drop_stale_auto_rows(ctx, source_id)
     ctx.conn.execute("delete from candidates where source_id = %s and human_verdict is null", (source_id,))
     ids = []
     for c in cands:
@@ -127,6 +172,83 @@ def _write_rows(ctx: common.Context, source_id: str, cands: list[story_engine.Ca
         )
         ids.append(str(inserted[0]) if inserted else "")
     return ids
+
+
+def _window(start: Any, end: Any) -> tuple[float, float]:
+    """Kandidatenfenster als Schlüssel für den Dublettenschutz (Zehntelsekunden)."""
+    return round(float(start or 0.0), _WINDOW_DIGITS), round(float(end or 0.0), _WINDOW_DIGITS)
+
+
+def clip_platform(ctx: common.Context, source_id: str) -> str:
+    """Standard-Plattform aus dem Markenprofil der Quelle; ohne Profil oder Wert ``reels``.
+
+    Das Seitenverhältnis hängt bewusst nicht daran (immer ``9:16``), die Plattform steuert nur
+    Untertitel-Voreinstellung und Branding im Render."""
+    try:
+        row = db.fetch_one(ctx.conn, SQL_DEFAULT_PLATFORM, (source_id,))
+    except Exception as exc:  # Markenprofil ist Komfort, die Automatik darf daran nicht scheitern
+        log.warning("default platform not readable source=%s error=%s", source_id, exc.__class__.__name__)
+        return AUTO_CLIP_PLATFORM
+    value = str(row[0]).strip() if row and row[0] else ""
+    if value not in copy_engine.PLATFORMS:
+        return AUTO_CLIP_PLATFORM
+    return value
+
+
+def auto_create_clips(
+    ctx: common.Context, source_id: str, src: dict, candidate_ids: list[str], cands: list[story_engine.CandidateResult]
+) -> list[str]:
+    """Je Kandidat genau eine ``clips``-Zeile, damit der Renderer ohne Auswahlschritt weiterarbeitet.
+
+    Felder wie in ``createClips`` der Web-App (``apps/web/lib/repo/postgres.ts``): ``composition`` aus
+    den Segmenten des Kandidaten, ``title_card`` aus der Rubrik, ``ad_label`` nach Land, ``destination``
+    gleich der Plattform, ``status = 'draft'``. Abweichend davon ist ``aspect`` fest ``9:16`` und
+    ``created_by`` leer (kein Mensch beteiligt). ``delete_after`` setzt der Trigger aus Migration 0006.
+
+    Idempotent auf zwei Ebenen: ein Kandidat mit vorhandenem Clip wird übersprungen, und ein Fenster,
+    zu dem an dieser Quelle schon ein Clip existiert, bekommt keinen zweiten (zweiter Lauf, gelöschte
+    oder bereits gerenderte Clips)."""
+    platform = clip_platform(ctx, source_id)
+    ad_label = ad_label_for(dict(src.get("brief") or {}), src.get("country") or "AT")
+    taken = {_window(r[0], r[1]) for r in db.fetch_all(ctx.conn, SQL_CLIP_WINDOWS, (source_id,))}
+    created: list[str] = []
+    for candidate_id, cand in zip(candidate_ids, cands):
+        if not candidate_id:
+            continue
+        if db.fetch_one(ctx.conn, SQL_CLIP_FOR_CANDIDATE, (candidate_id,)) is not None:
+            continue
+        row = cand.to_row()
+        key = _window(row["start_s"], row["end_s"])
+        if key in taken:
+            continue
+        title_card = str((row.get("rubric") or {}).get("suggested_title_card") or "").strip() or None
+        inserted = db.insert(
+            ctx.conn,
+            "clips",
+            returning="id",
+            source_id=source_id,
+            candidate_id=candidate_id,
+            platform=platform,
+            destination=platform,
+            aspect=AUTO_CLIP_ASPECT,
+            composition=db.jsonb(row["segments"]),
+            title_card=title_card,
+            ad_label=ad_label,
+            status="draft",
+            created_by=None,
+        )
+        db.update(
+            ctx.conn,
+            "candidates",
+            {"id": candidate_id},
+            human_verdict="accepted",
+            verdict_reason=AUTO_VERDICT_REASON,
+            verdict_at=datetime.now(UTC),
+        )
+        taken.add(key)
+        created.append(str(inserted[0]) if inserted else "")
+    log.info("auto clips source=%s platform=%s aspect=%s created=%s", source_id, platform, AUTO_CLIP_ASPECT, len(created))
+    return created
 
 
 def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
@@ -173,6 +295,8 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
             ctx.store.put_json("derived", key, report.to_json())
 
         ids = _write_rows(ctx, source_id, report.candidates)
+        # Kein Auswahlschritt mehr: die Clips entstehen hier, nicht erst nach einem Urteil in der Oberfläche.
+        clips = auto_create_clips(ctx, source_id, src, ids, report.candidates)
         decisions = decision_log.record_detect_report(
             ctx.conn, src["workspace_id"], source_id, src.get("brand_profile_id"), report, ids,
             str(brief.get("platform") or "linkedin"),
@@ -195,8 +319,9 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
             s,
         )
         st.finish(
-            f"{len(report.candidates)} Kandidaten aus {report.chapters} Kapiteln, {report.gate_passed} ohne Einwand",
+            f"{len(report.candidates)} Kandidaten aus {report.chapters} Kapiteln, {len(clips)} Clips angelegt",
             candidates=len(report.candidates),
+            clips=len(clips),
             gate_passed=report.gate_passed,
             chapters=report.chapters,
             provider=llm.provider,
@@ -241,11 +366,16 @@ def notify(source_id: str, event: str) -> None:
 
 
 __all__ = [
+    "AUTO_CLIP_ASPECT",
+    "AUTO_CLIP_PLATFORM",
+    "AUTO_VERDICT_REASON",
     "SIGNALS_VERSION",
     "STEP_CANDIDATES",
     "STEP_HEATMAP",
     "STEP_RENDER",
+    "auto_create_clips",
     "candidates_key_for",
+    "clip_platform",
     "detect_candidates",
     "heatmap",
     "heatmap_key_for",

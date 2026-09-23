@@ -7,7 +7,7 @@ import pytest
 from chopstr_worker import config
 from chopstr_worker.activities import render as act_render
 from chopstr_worker.activities.render import STEP_RENDER
-from chopstr_worker.pipeline import reframe
+from chopstr_worker.pipeline import captions_de, reframe
 from tests.conftest import make_test_video, requires_ffmpeg
 from tests.transcript_fixtures import make_words
 
@@ -177,6 +177,30 @@ def test_helpers_fidelity_and_preset():
     assert act_render.caption_preset_for("linkedin", {"default_platform": "linkedin", "caption_preset": "corporate_third"}) == "corporate_third"
     assert act_render.caption_preset_for("tiktok", {"default_platform": "linkedin", "caption_preset": "corporate_third"}) == "tiktok_words"
     assert act_render.ad_label_for({"is_ad": True}, "AT") == "Werbung" and act_render.ad_label_for({}, "DE") is None
+
+
+def test_brand_without_caption_preset_stays_null_and_portrait_gets_one_word_per_card(fake_db, fake_context):
+    """Migration 0007: ohne ausdrückliche Wahl bleibt caption_preset NULL, und 9:16 wird wortweise.
+
+    Früher hat ``_load_brand_extra`` NULL auf "linkedin_static" zurückgebogen. Dann sah
+    ``caption_preset_for`` eine Wahl, die niemand getroffen hat, und hochkante Clips bekamen auf der
+    Standardplattform den ruhigen Stil mit mehreren Wörtern in zwei Zeilen.
+    """
+    wid = fake_db.add_workspace()
+    pid = fake_db.add_brand_profile(wid, country="AT", address="du", default_platform="linkedin")  # caption_preset ungesetzt
+    assert fake_db.brand_profiles[pid].get("caption_preset") is None
+    sid = fake_db.add_source(wid, "uploads/in.mp4", brand_profile_id=pid, status="ready")
+
+    extra = act_render._load_brand_extra(fake_context, sid)
+    assert extra["caption_preset"] is None  # kein Ersatzwert, sonst wäre die Migration wirkungslos
+
+    for destination in ("tiktok", "reels", "shorts", "linkedin"):
+        name = act_render.caption_preset_for(destination, extra, "9:16")
+        assert captions_de.PRESETS[name].words_per_card == 1, f"{destination} bekommt kein wortweises Preset: {name}"
+
+    # Quer bleibt beim ruhigen Plattform-Default, dort sind mehrere Wörter je Einblendung richtig.
+    assert act_render.caption_preset_for("linkedin", extra, "16:9") == "linkedin_static"
+    assert captions_de.PRESETS["linkedin_static"].words_per_card is None
 
 
 def test_destination_with_clip_id_renders_exactly_that_clip(fake_db, fake_context, project):

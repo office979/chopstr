@@ -5,7 +5,10 @@ Temporal-Worker aufruft, ohne Temporal, MinIO oder GPU:
 
   (a) ``sources`` mit ``status = 'uploaded'`` (älteste zuerst, eine nach der anderen):
       probe_and_extract -> transcribe_de -> diarize -> heatmap -> fuse_and_nlp -> detect_candidates
+      ``detect_candidates`` legt am Ende selbst für jeden Kandidaten eine ``clips``-Zeile an und nimmt
+      den Kandidaten an; einen manuellen Auswahlschritt gibt es nicht mehr.
   (b) ``clips`` mit ``status = 'draft'``, deren Kandidat ``human_verdict = 'accepted'`` hat: ``render_pack``
+      (durch (a) ist das im nächsten Durchlauf ohne menschliches Zutun gefüllt)
   (c) ``deletion_jobs`` mit ``status = 'queued'``: ``delete_entity``
   (d) ``publications`` mit ``status = 'scheduled'`` und fälligem ``scheduled_for``: ``publish_clip``
       (nur wenn ``APP_INTERNAL_URL`` erreichbar ist, sonst Hinweis und überspringen)

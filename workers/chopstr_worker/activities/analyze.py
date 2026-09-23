@@ -34,7 +34,9 @@ log = logging.getLogger("chopstr.activities.analyze")
 
 STEP_HEATMAP = "heatmap"
 STEP_CANDIDATES = "detect_candidates"
-SIGNALS_VERSION = "signals_v1"
+# v2: Die Nutzlast traegt zusaetzlich den reinen Audioanteil (audio_values). Ohne Versionswechsel
+# bliebe eine vorhandene Heatmap liegen und die Bewertung bekaeme nie ein Klangsignal zu sehen.
+SIGNALS_VERSION = "signals_v2"
 
 # -- Automatische Clips (ohne Auswahlschritt) ---------------------------------------------------
 # Gründerentscheidung: alle Kandidaten bekommen einen Clip, immer Hochformat, je Kandidat genau einer.
@@ -84,8 +86,9 @@ def run_heatmap(ctx: common.Context, source_id: str) -> str:
             st.finish("Heatmap bereits vorhanden, Schritt übersprungen", skipped=True, key=key)
             return key
         local = common.ensure_local_audio(ctx, source_id, audio_key)
-        heat = signals.combined(str(local), words)
-        payload = signals.to_payload(heat)
+        audio = signals.audio_heatmap(str(local))
+        heat = signals.combined(str(local), words, audio=audio)
+        payload = signals.to_payload(heat, audio=audio)
         payload["source_id"] = source_id
         payload["text_included"] = bool(words)
         ctx.store.put_json("derived", key, payload)

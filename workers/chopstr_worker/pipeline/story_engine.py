@@ -30,7 +30,10 @@ from . import dach_nlp, fidelity, story_graph, story_score
 from .segment import Sentence, chapterize, numbered, sentences_from_words
 
 CONTRACT = "candidates_v1"
-ENGINE_VERSION = "story_engine_v1"
+# v2: Die Bewertung kommt aus der redaktionellen Grundlage (sieben Kriterien statt fuenf),
+# traegt den Laengenabzug und den Klanganteil. Ergebnisse aus v1 sind damit nicht mehr
+# vergleichbar; der Wert steckt im Idempotenz-Schluessel und erzwingt eine Neuberechnung.
+ENGINE_VERSION = "story_engine_v2"
 MIN_LEN_S = 12.0
 MAX_LEN_S = 90.0
 MAX_CANDIDATES = 20
@@ -156,8 +159,49 @@ def weighted_total(scores: dict[str, Any], weights: dict[str, float]) -> float:
     return round(sum(float(scores.get(k, 0) or 0) * weights[k] for k in SCORE_KEYS), 2)
 
 
-def policy_total(r: dict[str, Any], dauer_s: float, pol: editorial.Policy | None = None) -> float:
-    """Gesamtwert nach der redaktionellen Grundlage, mit Längenabzug.
+def audio_wert(heat_payload: dict[str, Any] | None, start_s: float, end_s: float) -> float | None:
+    """Wie auffällig ist dieser Abschnitt im Klang? 0 bis 1, wobei 0,5 den Durchschnitt meint.
+
+    Grundlage ist der reine Audioanteil der Heatmap (RMS-Energie und Spectral Flux, bereits als
+    z-Wert auf -3 bis 3 begrenzt). Der Textanteil bleibt bewusst aussen vor: Diskursmarker, Fragen
+    und Zahlen stecken schon in der Rubrik, sie ein zweites Mal über die Heatmap einzurechnen wäre
+    eine Doppelzählung.
+
+    Zwei Anteile, je zur Hälfte:
+      * das mittlere Niveau im Abschnitt, also wie laut und bewegt dort gesprochen wird,
+      * der Anstieg innerhalb des Abschnitts. Die Masterclass nennt beim Moment-Typ Konflikt
+        ausdrücklich die „lauter werdende Stimme"; ein Abschnitt, der sich steigert, ist etwas
+        anderes als einer, der durchgehend laut ist.
+
+    None heisst: kein Audioanteil vorhanden. Alte Heatmaps haben ihn nicht, und ein geratener
+    Mittelwert wäre schlechter als die ehrliche Auskunft, dass nichts vorliegt.
+    """
+    if not heat_payload:
+        return None
+    werte = heat_payload.get("audio_values")
+    if not werte:
+        return None
+    bin_s = float(heat_payload.get("bin_s") or 1.0) or 1.0
+    von, bis = int(start_s / bin_s), int(end_s / bin_s) + 1
+    teil = [float(v) for v in werte[max(0, von) : bis]]
+    if not teil:
+        return None
+
+    # z-Werte liegen auf -3 bis 3, also auf 0 bis 1 abbilden.
+    niveau = (sum(teil) / len(teil) + 3.0) / 6.0
+    if len(teil) >= 4:
+        h = len(teil) // 2
+        erste, zweite = sum(teil[:h]) / h, sum(teil[h:]) / (len(teil) - h)
+        anstieg = (zweite - erste + 3.0) / 6.0
+    else:
+        anstieg = 0.5
+    return round(max(0.0, min(1.0, 0.5 * niveau + 0.5 * anstieg)), 3)
+
+
+def policy_total(
+    r: dict[str, Any], dauer_s: float, pol: editorial.Policy | None = None, audio: float | None = None
+) -> float:
+    """Gesamtwert nach der redaktionellen Grundlage, mit Längenabzug und Klang.
 
     Zwei Dinge fehlten der alten Rechnung, und beide sind genau das, was die Auswertung der
     Beispielclips als Schwäche gezeigt hat:
@@ -177,7 +221,16 @@ def policy_total(r: dict[str, Any], dauer_s: float, pol: editorial.Policy | None
     punkte = r.get("rubric_points") or {}
     if not punkte:
         return 0.0
-    return round(pol.gesamtwert(punkte) * (1.0 - pol.laenge_abzug(dauer_s)), 2)
+    wert = pol.gesamtwert(punkte) * (1.0 - pol.laenge_abzug(dauer_s))
+
+    # Klang wirkt symmetrisch um den Durchschnitt: 0,5 lässt den Wert unverändert, darüber hebt er,
+    # darunter senkt er. Ein Gewicht von 0,15 heisst also höchstens 15 Prozent in beide Richtungen.
+    # Ohne Audioanteil bleibt der Wert unberührt, statt einen Mittelwert zu erfinden.
+    cfg = pol.audio
+    if audio is not None and cfg.get("in_bewertung_verwenden"):
+        w = float(cfg.get("gewicht") or 0.0)
+        wert *= (1.0 - w) + w * 2.0 * max(0.0, min(1.0, audio))
+    return round(wert, 2)
 
 
 # -- Kapitel und Seeds ---------------------------------------------------------------------------
@@ -410,8 +463,11 @@ def evaluate_span(
     brief: dict[str, Any],
     llm: LLM,
     weights: dict[str, float],
+    heat_payload: dict[str, Any] | None = None,
 ) -> CandidateResult | dict:
-    """Stufe 3 und 4 für einen Vorschlag. Rückgabe: Kandidat oder ``{"reason": ...}`` bei Verwerfung."""
+    """Stufe 3 und 4 für einen Vorschlag. Rückgabe: Kandidat oder ``{"reason": ...}`` bei Verwerfung.
+
+    ``heat_payload`` liefert den Klanganteil. Fehlt er, wird ohne ihn bewertet."""
     first0, last0 = int(proposal["first_sent"]), int(proposal["last_sent"])
     heuristic = getattr(llm, "is_heuristic", False)
     r = story_score.score_with_repair(sents, first0, last0, brief, llm, max_rounds=MAX_REPAIR_ROUNDS)
@@ -426,6 +482,7 @@ def evaluate_span(
 
     span = sents[first : last + 1]
     clip_text = " ".join(s.text for s in span)
+    klang = audio_wert(heat_payload, sents[first].start, sents[last].end)
     scores = {k: int(max(0, min(10, int(r.get(k, 0) or 0)))) for k in SCORE_KEYS}
     gates = deterministic_gates(words, sents, first, last, r)
     flags = later_qualifications(sents, first, last, llm)
@@ -444,6 +501,8 @@ def evaluate_span(
         "rubric_points": dict(r.get("rubric_points") or {}),
         "policy_version": str(r.get("policy_version") or ""),
         "laenge_abzug": round(editorial.load().laenge_abzug(dur), 3),
+        # Klanganteil, 0,5 ist Durchschnitt. null heisst: keine Heatmap mit Audioanteil vorhanden.
+        "klang": klang,
         "unresolved_references": [str(x) for x in (r.get("unresolved_references") or [])],
         "needs_earlier_context": bool(r.get("needs_earlier_context")),
         "ends_before_answer": bool(r.get("ends_before_answer")),
@@ -473,7 +532,7 @@ def evaluate_span(
         story_graph_flags=flags,
         risk_flags=risk_flags_for(r, clip_text, heuristic),
         # Die Grundlage entscheidet, nicht mehr die alten fuenf Kriterien ohne Laengenabzug.
-        total=policy_total(r, dur),
+        total=policy_total(r, dur, audio=klang),
         gate_passed=gate_passed,
         why=build_why(scores, r, gates, flags, dur, platform, heuristic),
         model_id=str(r.get("model_id") or llm.model()),
@@ -557,7 +616,7 @@ def run(
             if reason:
                 report.discarded.append({"reason": reason, "first_sent": first, "last_sent": last, "duration_s": round(dur, 2)})
                 continue
-            out = evaluate_span(words, sents, m, brief, llm, weights)
+            out = evaluate_span(words, sents, m, brief, llm, weights, heat_payload)
             if isinstance(out, dict):
                 report.discarded.append(out)
                 continue
@@ -606,6 +665,7 @@ __all__ = [
     "risk_flags_for",
     "run",
     "select_best",
+    "audio_wert",
     "policy_total",
     "weighted_total",
 ]

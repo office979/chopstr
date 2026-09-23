@@ -90,8 +90,10 @@ def seeds(heat: np.ndarray, top_k: int = 25, min_gap_s: int = 45) -> list[int]:
     return sorted(chosen)
 
 
-def combined(wav_path: str, words: list[dict], laughter: np.ndarray | None = None) -> np.ndarray:
-    a = audio_heatmap(wav_path)
+def combined(wav_path: str, words: list[dict], laughter: np.ndarray | None = None, audio: np.ndarray | None = None) -> np.ndarray:
+    """Audio und Text zu gleichen Teilen. ``audio`` erlaubt es, den bereits berechneten Audioanteil
+    hereinzureichen, statt ihn ein zweites Mal aus der Datei zu lesen."""
+    a = audio if audio is not None else audio_heatmap(wav_path)
     t = text_heatmap(words, len(a))
     h = 0.5 * a + 0.5 * t
     if laughter is not None and len(laughter) == len(h):
@@ -99,14 +101,22 @@ def combined(wav_path: str, words: list[dict], laughter: np.ndarray | None = Non
     return h.astype(np.float32)
 
 
-def to_payload(heat: np.ndarray, bin_s: float = 1.0, top_k: int = 25) -> dict:
-    """JSON-taugliche Darstellung für den Storage."""
-    return {
+def to_payload(heat: np.ndarray, bin_s: float = 1.0, top_k: int = 25, audio: np.ndarray | None = None) -> dict:
+    """JSON-taugliche Darstellung für den Storage.
+
+    ``audio`` ist der reine Audioanteil ohne Textmischung. Die Bewertung braucht ihn getrennt: Die
+    Textsignale stecken bereits in der Rubrik, und sie ein zweites Mal über die Heatmap einzurechnen
+    wäre eine Doppelzählung.
+    """
+    out = {
         "bin_s": bin_s,
         "n_bins": int(len(heat)),
         "values": [round(float(v), 4) for v in heat],
         "seeds": seeds(heat, top_k=top_k),
     }
+    if audio is not None:
+        out["audio_values"] = [round(float(v), 4) for v in audio]
+    return out
 
 
 __all__ = ["DISCOURSE_MARKERS", "audio_heatmap", "combined", "read_wav_mono", "seeds", "text_heatmap", "to_payload"]

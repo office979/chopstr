@@ -227,3 +227,58 @@ def test_ohne_bewertung_faellt_der_wert_auf_null(policy):
 
     assert story_engine.policy_total({}, 41.0) == 0.0
     assert story_engine.policy_total({"rubric_points": {}}, 41.0) == 0.0
+
+
+# -- Klanganteil -----------------------------------------------------------------------------------
+def _heat(audio_values, bin_s=1.0):
+    return {"bin_s": bin_s, "n_bins": len(audio_values), "values": audio_values, "audio_values": audio_values}
+
+
+def test_ohne_audioanteil_bleibt_der_wert_unberuehrt(policy):
+    """Alte Heatmaps haben kein audio_values. Dann wird nichts erfunden."""
+    from chopstr_worker.pipeline import story_engine
+
+    assert story_engine.audio_wert(None, 0.0, 10.0) is None
+    assert story_engine.audio_wert({"bin_s": 1.0, "values": [1, 2, 3]}, 0.0, 3.0) is None
+
+    r = {"rubric_points": {k.schluessel: policy.skala_max for k in policy.kriterien}}
+    assert story_engine.policy_total(r, 41.0, audio=None) == pytest.approx(policy.punkte_gesamt)
+
+
+def test_lauter_abschnitt_schlaegt_leisen(policy):
+    from chopstr_worker.pipeline import story_engine
+
+    leise = story_engine.audio_wert(_heat([-2.0] * 40), 0.0, 40.0)
+    laut = story_engine.audio_wert(_heat([2.0] * 40), 0.0, 40.0)
+    assert laut > leise
+
+
+def test_lauter_werdende_stimme_schlaegt_gleichbleibende(policy):
+    """Die Masterclass nennt beim Typ Konflikt ausdruecklich die lauter werdende Stimme."""
+    from chopstr_worker.pipeline import story_engine
+
+    gleich = story_engine.audio_wert(_heat([0.0] * 40), 0.0, 40.0)
+    steigend = story_engine.audio_wert(_heat([-1.0] * 20 + [1.0] * 20), 0.0, 40.0)
+    assert steigend > gleich
+
+
+def test_durchschnittlicher_klang_veraendert_den_wert_nicht(policy):
+    """0,5 ist neutral. Sonst wuerde jeder Clip allein durch das Anschliessen des Audios abgewertet."""
+    from chopstr_worker.pipeline import story_engine
+
+    r = {"rubric_points": {k.schluessel: policy.skala_max for k in policy.kriterien}}
+    ohne = story_engine.policy_total(r, 41.0, audio=None)
+    neutral = story_engine.policy_total(r, 41.0, audio=0.5)
+    assert neutral == pytest.approx(ohne)
+
+
+def test_klang_wirkt_in_beide_richtungen(policy):
+    from chopstr_worker.pipeline import story_engine
+
+    r = {"rubric_points": {k.schluessel: policy.skala_max for k in policy.kriterien}}
+    neutral = story_engine.policy_total(r, 41.0, audio=0.5)
+    hoch = story_engine.policy_total(r, 41.0, audio=1.0)
+    tief = story_engine.policy_total(r, 41.0, audio=0.0)
+    w = float(policy.audio["gewicht"])
+    assert hoch == pytest.approx(neutral * (1 + w), abs=0.02)
+    assert tief == pytest.approx(neutral * (1 - w), abs=0.02)

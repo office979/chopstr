@@ -147,7 +147,7 @@ describe("standSatz", () => {
   it("sagt beim Veralten, was zu tun ist", () => {
     /* Ein Zustand ohne Handlung lässt den Nutzer stehen. */
     const e = eingabe({ transkriptVersion: 4 });
-    expect(standSatz("veraltet", wasAbweicht(e))).toContain("neu bauen");
+    expect(standSatz("veraltet", wasAbweicht(e))).toContain("neu clippen");
   });
 });
 

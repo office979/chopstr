@@ -56,18 +56,18 @@ export type Datei = "keine" | "wird_erstellt" | "aktuell" | "veraltet" | "fehlge
 
 export const DATEI_LABEL: Record<Datei, string> = {
   keine: "Noch kein Video",
-  wird_erstellt: "Wird gebaut",
+  wird_erstellt: "Wird geclippt",
   aktuell: "Video aktuell",
   veraltet: "Video veraltet",
-  fehlgeschlagen: "Bauen fehlgeschlagen",
+  fehlgeschlagen: "Clippen fehlgeschlagen",
 };
 
 export const DATEI_SATZ: Record<Datei, string> = {
   keine: "Für diesen Clip gibt es noch keine Videodatei.",
-  wird_erstellt: "Das Video entsteht gerade.",
-  aktuell: "Das gebaute Video zeigt genau, was eingestellt ist.",
-  veraltet: "Das gebaute Video zeigt nicht mehr, was eingestellt ist.",
-  fehlgeschlagen: "Beim Bauen ist etwas schiefgegangen.",
+  wird_erstellt: "Das Video wird gerade geclippt.",
+  aktuell: "Das geclippte Video zeigt genau, was eingestellt ist.",
+  veraltet: "Das geclippte Video zeigt nicht mehr, was eingestellt ist.",
+  fehlgeschlagen: "Beim Clippen ist etwas schiefgegangen.",
 };
 
 /* Ein einzelner Befund, formuliert als das, was zu tun ist.
@@ -201,7 +201,7 @@ export function pruefstand({ clip, freigabe, stand, bearbeitet = false }: Pruefs
     befunde.push({
       schwere: "fehler",
       art: "datei",
-      text: "Das gebaute Video zeigt nicht mehr, was eingestellt ist. Einmal neu bauen, dann stimmt der Download wieder.",
+      text: "Das geclippte Video zeigt nicht mehr, was eingestellt ist. Einmal neu clippen, dann stimmt der Download wieder.",
       stelle: null,
     });
   }
@@ -210,7 +210,7 @@ export function pruefstand({ clip, freigabe, stand, bearbeitet = false }: Pruefs
     befunde.push({
       schwere: "fehler",
       art: "render",
-      text: clip.render_error ?? "Das Bauen hat nicht geklappt. Nochmal versuchen.",
+      text: clip.render_error ?? "Das Clippen hat nicht geklappt. Nochmal versuchen.",
       stelle: null,
     });
   }
@@ -249,12 +249,12 @@ export interface Hauptaktion {
 export function hauptaktion(p: Pruefstand): Hauptaktion {
   if (p.redaktion === "verworfen") return { id: "zurueckholen", label: "Zurückholen" };
   if (p.datei === "fehlgeschlagen") return { id: "neu_bauen", label: "Nochmal versuchen" };
-  if (p.datei === "wird_erstellt") return { id: "warten", label: "Wird gebaut" };
+  if (p.datei === "wird_erstellt") return { id: "warten", label: "Wird geclippt" };
   if (p.qualitaet === "fehler" && p.befunde.some((b) => b.art === "sinn")) {
     return { id: "beheben", label: "Fehler beheben" };
   }
   if (p.datei === "veraltet" || p.datei === "keine") {
-    return { id: "neu_bauen", label: p.datei === "keine" ? "Video bauen" : "Video neu bauen" };
+    return { id: "neu_bauen", label: p.datei === "keine" ? "Video clippen" : "Video neu clippen" };
   }
   if (p.redaktion === "freigegeben") return { id: "herunterladen", label: "Herunterladen" };
   return { id: "pruefen", label: "Clip prüfen" };
@@ -283,22 +283,22 @@ export function aktionStand(
   if (id === "freigeben") {
     if (p.redaktion === "verworfen") return { erlaubt: false, grund: "Erst zurückholen." };
     if (p.redaktion === "freigegeben") return { erlaubt: false, grund: "Ist schon freigegeben." };
-    if (p.datei === "wird_erstellt") return { erlaubt: false, grund: "Warte, bis das Video gebaut ist." };
+    if (p.datei === "wird_erstellt") return { erlaubt: false, grund: "Warte, bis das Video fertig geclippt ist." };
     /* Ein schwerer Befund am Inhalt sperrt die Freigabe. Ein veraltetes Video nicht: das ist eine
      * Aussage über die Datei, nicht über den Clip, und wird nach der Freigabe neu gebaut. */
     if (p.qualitaet === "fehler" && p.befunde.some((b) => b.art === "sinn")) {
       return { erlaubt: false, grund: "Erst den Fehler am Inhalt beheben, sonst gibst du etwas anderes frei, als gesagt wurde." };
     }
-    if (p.datei === "fehlgeschlagen") return { erlaubt: false, grund: "Das Bauen ist fehlgeschlagen. Erst nochmal versuchen." };
+    if (p.datei === "fehlgeschlagen") return { erlaubt: false, grund: "Das Clippen ist fehlgeschlagen. Erst nochmal versuchen." };
     return ERLAUBT;
   }
 
   if (id === "herunterladen") {
     if (opts.exportGesperrt) return { erlaubt: false, grund: opts.exportGesperrt };
     if (p.datei === "wird_erstellt") return { erlaubt: false, grund: "Das Video entsteht noch." };
-    if (p.datei === "fehlgeschlagen") return { erlaubt: false, grund: "Das Bauen ist fehlgeschlagen. Erst nochmal versuchen." };
-    if (p.datei === "keine") return { erlaubt: false, grund: "Erst das Video bauen." };
-    if (p.datei === "veraltet") return { erlaubt: false, grund: "Erst das Video neu bauen, sonst lädst du einen alten Stand herunter." };
+    if (p.datei === "fehlgeschlagen") return { erlaubt: false, grund: "Das Clippen ist fehlgeschlagen. Erst nochmal versuchen." };
+    if (p.datei === "keine") return { erlaubt: false, grund: "Erst das Video clippen." };
+    if (p.datei === "veraltet") return { erlaubt: false, grund: "Erst das Video neu clippen, sonst lädst du einen alten Stand herunter." };
     if (opts.hatDatei === false) return { erlaubt: false, grund: "Die Datei ist gerade nicht verfügbar." };
     return ERLAUBT;
   }
@@ -310,8 +310,8 @@ export function aktionStand(
 
   /* Gastfreigabe: jemanden von aussen um eine Entscheidung bitten. An einem veralteten Video wäre
    * das eine Frage zu etwas, das so nicht herauskommt. */
-  if (p.datei === "veraltet") return { erlaubt: false, grund: "Erst neu bauen, sonst sieht die Person einen alten Stand." };
-  if (p.datei !== "aktuell") return { erlaubt: false, grund: "Erst das Video bauen." };
+  if (p.datei === "veraltet") return { erlaubt: false, grund: "Erst neu clippen, sonst sieht die Person einen alten Stand." };
+  if (p.datei !== "aktuell") return { erlaubt: false, grund: "Erst das Video clippen." };
   return ERLAUBT;
 }
 
@@ -348,7 +348,7 @@ export const FILTER_LABEL: Record<FilterId, string> = {
   fehler: "Fehler beheben",
   hinweis: "Mit Hinweis",
   veraltet: "Video veraltet",
-  wird_erstellt: "Wird gebaut",
+  wird_erstellt: "Wird geclippt",
   postbereit: "Bereit zum Posten",
   freigegeben: "Freigegeben",
   verworfen: "Verworfen",
@@ -488,7 +488,7 @@ export function naechsteAufgabe(z: VideoStand): Aufgabe | null {
   }
   if (z.veraltet > 0) {
     return {
-      text: z.veraltet === 1 ? "1 Video neu bauen" : `${z.veraltet} Videos neu bauen`,
+      text: z.veraltet === 1 ? "1 Video neu clippen" : `${z.veraltet} Videos neu clippen`,
       pfad: "/clips#veraltet",
     };
   }
@@ -496,7 +496,7 @@ export function naechsteAufgabe(z: VideoStand): Aufgabe | null {
     return { text: z.zuPruefen === 1 ? "1 Clip prüfen" : `${z.zuPruefen} Clips prüfen`, pfad: "/clips#zu_pruefen" };
   }
   if (z.wirdGebaut > 0) {
-    return { text: z.wirdGebaut === 1 ? "1 Clip wird gebaut" : `${z.wirdGebaut} Clips werden gebaut`, pfad: "/clips" };
+    return { text: z.wirdGebaut === 1 ? "1 Clip wird geclippt" : `${z.wirdGebaut} Clips werden geclippt`, pfad: "/clips" };
   }
   if (z.postbereit > 0) {
     return {

@@ -76,13 +76,13 @@ export function vorschauStand(e: StandEingabe): VorschauStand {
 export function standSatz(stand: VorschauStand, ab: WasAbweicht): string {
   switch (stand) {
     case "laeuft":
-      return "Das Video wird gerade gebaut.";
+      return "Das Video wird gerade geclippt.";
     case "fehler":
-      return "Beim Bauen ist etwas schiefgegangen.";
+      return "Beim Clippen ist etwas schiefgegangen.";
     case "keine":
       return "Es gibt noch keine Videodatei. Links siehst du, wie der Clip aussehen wird.";
     case "aktuell":
-      return "Die gebaute Datei zeigt genau das, was eingestellt ist.";
+      return "Die geclippte Datei zeigt genau das, was eingestellt ist.";
     case "veraltet": {
       /* Die Mehrzahl haengt nicht an der Zahl der Teile: „die Untertitel" ist fuer sich schon
        * Mehrzahl. Deshalb steht sie am Teil und wird nicht gezaehlt. */
@@ -92,12 +92,12 @@ export function standSatz(stand: VorschauStand, ab: WasAbweicht): string {
         ab.schnitt ? { wort: "der Schnitt", mehrzahl: false } : null,
         ab.bildausschnitt ? { wort: "der Bildausschnitt", mehrzahl: false } : null,
       ].filter(Boolean) as { wort: string; mehrzahl: boolean }[];
-      if (teile.length === 0) return "Das gebaute Video ist nicht mehr aktuell.";
+      if (teile.length === 0) return "Das geclippte Video ist nicht mehr aktuell.";
       const woerter = teile.map((t) => t.wort);
       const liste =
         woerter.length === 1 ? woerter[0] : `${woerter.slice(0, -1).join(", ")} und ${woerter[woerter.length - 1]}`;
       const mehrzahl = teile.length > 1 || teile[0].mehrzahl;
-      return `${liste} ${mehrzahl ? "wurden" : "wurde"} geändert, seit das Video gebaut wurde. Zum Herunterladen einmal neu bauen.`;
+      return `${liste} ${mehrzahl ? "wurden" : "wurde"} geändert, seit das Video geclippt wurde. Zum Herunterladen einmal neu clippen.`;
     }
   }
 }

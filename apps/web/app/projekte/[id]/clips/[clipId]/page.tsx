@@ -8,6 +8,7 @@ import { requireSession } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
 import { mediaUrl } from "@/lib/clips/labels";
 import { sentencesFromWords, sentenceRange } from "@/lib/transcript/sentences";
+import { fassung } from "@/lib/brand/fassung";
 import { ClipDetail } from "./ClipDetail";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,9 @@ export default async function ClipPage({ params }: Props) {
   const repo = getRepo();
   const [source, clip] = await Promise.all([repo.getSource(id), repo.getClip(clipId)]);
   if (!source || !clip || clip.source_id !== id) notFound();
+
+  /* Die Marke dieses Videos, um die geclippte Fassung mit der heutigen zu vergleichen. */
+  const marke = source.brand_profile_id ? await repo.getBrandProfile(source.brand_profile_id) : null;
 
   const publishing = getPublishingRepo();
   /* Die Geschwister dieses Clips, in der Reihenfolge, in der sie im Video vorkommen. Damit lässt
@@ -119,6 +123,12 @@ export default async function ClipPage({ params }: Props) {
         quelleDauerS={source.duration_s ?? 0}
         wellenformSrc={mediaUrl(mediaBase, source.waveform_key)}
         quelleFertig={source.status === "ready"}
+        markenFassung={
+          marke
+            ? fassung((clip.render_plan?.brand?.profil_fassung) ?? null, marke.version)
+            : null
+        }
+        markenName={marke?.name ?? null}
         /* Die Vorschau rechnet den Ausschnitt selbst aus, dafuer braucht sie beide Groessen. Die
          * Ausgabegroesse steht im Plan; ohne Plan gilt 1080x1920, das Format aller neuen Clips. */
         srcW={source.width ?? null}

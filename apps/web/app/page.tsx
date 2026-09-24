@@ -151,7 +151,7 @@ export default async function ProjectsPage() {
               href={zielFuer("zu_pruefen")}
             />
             <Stat
-              label="Videos neu bauen"
+              label="Videos neu clippen"
               value={gesamt.veraltet}
               hint={gesamt.veraltet > 0 ? "zeigen nicht, was eingestellt ist" : activeCount > 0 ? "der Computer rechnet" : "alle auf dem neuesten Stand"}
               href={zielFuer("veraltet")}

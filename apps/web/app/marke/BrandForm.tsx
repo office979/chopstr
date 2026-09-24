@@ -14,6 +14,7 @@ import type { PreviewFont } from "@/components/clips/SilentPreview";
 import Link from "next/link";
 import { cn } from "@/components/ui/cn";
 import { setzeUngespeichert } from "@/lib/brand/ungespeichert";
+import { fassungKurz, type Fassung } from "@/lib/brand/fassung";
 import { AssetsCard } from "./AssetsCard";
 import { Beispielszene } from "./Beispielszene";
 import { PLATFORMS, PLATFORM_LABELS } from "@/lib/clips/labels";
@@ -39,7 +40,7 @@ export function BrandForm({
    * was eine Änderung bewirkt. */
   /* Die Videos, die diese Marke benutzen. Als Liste und nicht als Zahl: „3 Projekte nutzen dieses
    * Profil" beantwortet nicht die Frage, die man vor dem Speichern hat, nämlich WELCHE. */
-  betroffeneVideos: { id: string; titel: string }[];
+  betroffeneVideos: { id: string; titel: string; fassung: Fassung }[];
 }) {
   const [state, action, pending] = useActionState(saveBrandProfileAction, initialState);
   /* Ob etwas ungespeichert ist. Gemessen daran, dass jemand ein Feld angefasst hat - nicht an
@@ -425,22 +426,34 @@ export function BrandForm({
       <GlassCard padding="md" className="flex flex-col gap-2">
         <p className="text-sm font-medium text-text">Was ändert sich damit?</p>
         <p className="text-sm text-text-2">
-          Neue Clips bekommen dieses Aussehen sofort. Schon gebaute Clips behalten ihres, bis du
-          sie einzeln neu bauen lässt.
+          Neue Clips bekommen dieses Aussehen sofort. Schon geclippte Videos behalten ihres, bis
+          du sie einzeln neu clippen lässt.
         </p>
         {betroffeneVideos.length > 0 && (
           <>
             <p className="mt-1 text-sm text-text-2">
               {betroffeneVideos.length === 1 ? "Dieses Video nutzt die Marke:" : `Diese ${betroffeneVideos.length} Videos nutzen die Marke:`}
             </p>
-            <ul className="flex flex-wrap gap-2">
+            {/* Je Video die Fassung, mit der es geclippt wurde. Damit ist vor dem Speichern zu
+                sehen, welche Videos die Änderung betrifft und welche noch auf einem älteren
+                Stand stehen - ohne raten oder alles neu clippen zu müssen. */}
+            <ul className="flex flex-col gap-1.5">
               {betroffeneVideos.map((v) => (
                 <li key={v.id}>
                   <Link
                     href={`/projekte/${v.id}/clips`}
-                    className="transition-soft inline-block max-w-[280px] truncate rounded-pill border border-line px-3 py-1 text-xs text-text-2 hover:border-line-strong hover:text-text"
+                    className="transition-soft flex flex-wrap items-center justify-between gap-2 rounded-inner border border-line px-3 py-2 text-sm text-text-2 hover:border-line-strong hover:text-text"
                   >
-                    {v.titel}
+                    <span className="min-w-0 flex-1 truncate">{v.titel}</span>
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-pill border px-2 py-0.5 text-xs",
+                        v.fassung.stand === "aelter" && "border-attention/50 text-attention",
+                        v.fassung.stand !== "aelter" && "border-line text-text-3",
+                      )}
+                    >
+                      {fassungKurz(v.fassung)}
+                    </span>
                   </Link>
                 </li>
               ))}

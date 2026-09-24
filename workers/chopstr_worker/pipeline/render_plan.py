@@ -109,16 +109,29 @@ def caption_block(
 
 
 def brand_block(brand: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Block ``brand``: Font- und Logo-Asset des Markenprofils plus Wasserzeichen-Einstellung (keine Pfade)."""
+    """Block ``brand``: Font- und Logo-Asset des Markenprofils, Wasserzeichen, und die Fassung.
+
+    ``profil_fassung`` ist die Versionsnummer des Markenprofils zum Zeitpunkt des Clippens. Ohne
+    sie laesst sich am fertigen Video nicht mehr sagen, mit welchen Farben, Schriften und Regeln
+    es entstanden ist. Eine Agentur, die eine Marke aendert, sieht damit an jedem Video, ob es
+    noch die aktuelle Fassung zeigt - und muss nicht raten oder alles neu clippen.
+
+    Fehlt der Wert (aeltere Videos, kein Markenprofil), steht ``None`` da. Eine erfundene Zahl
+    waere schlimmer als keine: sie behauptete ein Wissen, das es nicht gibt.
+    """
     b = dict(brand or {})
     wm = {**WATERMARK_DEFAULTS, **dict(b.get("watermark") or {})}
     wm["enabled"] = bool(wm["enabled"]) and bool(b.get("logo_asset_id"))
     wm["opacity"] = min(1.0, max(0.0, float(wm["opacity"])))
     wm["width_ratio"] = min(0.5, max(0.05, float(wm["width_ratio"])))
+    fassung = b.get("profil_fassung")
     return {
         "font_asset_id": str(b["font_asset_id"]) if b.get("font_asset_id") else None,
         "logo_asset_id": str(b["logo_asset_id"]) if b.get("logo_asset_id") else None,
         "watermark": wm,
+        "profil_id": str(b["profil_id"]) if b.get("profil_id") else None,
+        "profil_fassung": int(fassung) if fassung is not None else None,
+        "profil_name": str(b["profil_name"]) if b.get("profil_name") else None,
     }
 
 

@@ -379,6 +379,7 @@ class FakeDB:
                 p.get("gender_mode"), p.get("banned_phrases"), p.get("tone_adjectives"), p.get("default_platform"),
                 p.get("caption_preset"), p.get("caption_style"), src.get("rights_status"), src.get("source_owner"),
                 src.get("source_title"), src.get("source_url"), p.get("ci"),
+                src.get("brand_profile_id"), p.get("version", 1) if p else None, p.get("name") if p else None,
             )])  # fmt: skip
         if q.startswith("select id, status, aspect, composition, title_card, ad_label, ai_features, speaker_positions, file_key from clips"):
             if "where id = %s" in q:  # gezielter Render eines Clips (Ziel "plattform:clip_id")

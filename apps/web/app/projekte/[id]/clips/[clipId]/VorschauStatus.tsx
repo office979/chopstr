@@ -82,10 +82,10 @@ export function VorschauStatus({
     try {
       const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/render`, { method: "POST" });
       const data = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Das Erstellen konnte nicht gestartet werden");
+      if (!res.ok) throw new Error(data.error ?? "Das Clippen konnte nicht gestartet werden");
     } catch (err) {
       setLaeuft(false);
-      setFehler(err instanceof Error ? err.message : "Das Erstellen konnte nicht gestartet werden");
+      setFehler(err instanceof Error ? err.message : "Das Clippen konnte nicht gestartet werden");
     }
   };
 
@@ -114,7 +114,7 @@ export function VorschauStatus({
             onClick={() => (onMehr ? onMehr() : void neuBauen())}
             disabled={offeneAenderungen}
           >
-            {zustand === "keine" ? "Video bauen" : "Neu bauen"}
+            {zustand === "keine" ? "Video clippen" : "Neu clippen"}
           </Button>
         )}
         {zustand === "laeuft" && (
@@ -142,7 +142,7 @@ export function VorschauStatus({
             <p className="text-sm text-text-2">{stand.renderFehler}</p>
           )}
           {offeneAenderungen && zustand !== "laeuft" && (
-            <p className="text-sm text-text-2">Speichere erst deine Änderungen, sonst wird der alte Stand gebaut.</p>
+            <p className="text-sm text-text-2">Speichere erst deine Änderungen, sonst wird der alte Stand geclippt.</p>
           )}
           {zustand === "laeuft" && (
             <p className="text-sm text-text-2">Du kannst weiterarbeiten, das läuft im Hintergrund.</p>
@@ -162,7 +162,7 @@ export function VorschauStatus({
           )}
           {nachfrage && (
             <p className="text-sm text-text-2">
-              Bauen dauert ein paar Minuten. Willst du das vorher noch anpassen?
+              Clippen dauert ein paar Minuten. Willst du das vorher noch anpassen?
             </p>
           )}
         </div>
@@ -185,14 +185,14 @@ export function VorschauStatus({
               disabled={zustand === "laeuft" || offeneAenderungen}
             >
               {nachfrage
-                ? "Trotzdem bauen"
+                ? "Trotzdem clippen"
                 : zustand === "laeuft"
-                  ? "Wird gebaut"
+                  ? "Wird geclippt"
                   : zustand === "fehler"
                     ? "Nochmal versuchen"
                     : zustand === "keine"
-                      ? "Video bauen"
-                      : "Video mit Änderungen neu bauen"}
+                      ? "Video clippen"
+                      : "Video mit deinen Änderungen neu clippen"}
             </Button>
           </div>
         )}
@@ -207,11 +207,11 @@ export function VorschauStatus({
  *   aktuell   die Datei entspricht genau dem, was eingestellt ist - nur dann gibt es sie zum
  *             Herunterladen */
 const ÜBERSCHRIFT: Record<string, string> = {
-  keine: "Noch kein Video gebaut",
-  laeuft: "Video wird gebaut",
+  keine: "Noch nicht geclippt",
+  laeuft: "Video wird geclippt",
   veraltet: "Video ist nicht auf dem neuesten Stand",
   aktuell: "Video ist auf dem neuesten Stand",
-  fehler: "Das Bauen hat nicht geklappt",
+  fehler: "Das Clippen hat nicht geklappt",
 };
 
 /* Ein farbiger Punkt. Drei Zustände, die man auseinanderhalten muss, lassen sich schneller sehen

@@ -592,7 +592,7 @@ export function ClipBoard({
                 font={previewFont}
               />
               {!details[zoomClip.id].captions && (
-                <p className="mt-2 text-center text-xs text-text-2">Noch keine Untertitel. Sie entstehen beim Bauen.</p>
+                <p className="mt-2 text-center text-xs text-text-2">Noch keine Untertitel. Sie entstehen beim Clippen.</p>
               )}
             </div>
           ) : (
@@ -935,7 +935,7 @@ export function ClipBoard({
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                     {p.postbereit ? (
                       <span
-                        title="Freigegeben, ohne offenen Fehler, und die gebaute Datei ist aktuell."
+                        title="Freigegeben, ohne offenen Fehler, und die geclippte Datei ist aktuell."
                         className="inline-flex h-6 items-center rounded-pill border border-brand/60 bg-brand/15 px-2.5 text-[12px] font-medium text-text"
                       >
                         Bereit zum Posten

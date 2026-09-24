@@ -183,7 +183,7 @@ export function SerieClips({ serieId, serieName, zugeordnet, zurWahl, canEdit }:
         open={offen}
         onClose={() => setOffen(false)}
         title="Clip zu dieser Serie hinzufügen"
-        description="Nur fertig gebaute Clips. Gehört die Serie zu einer Marke, stehen auch nur deren Clips hier."
+        description="Nur fertig geclippte Clips. Gehört die Serie zu einer Marke, stehen auch nur deren Clips hier."
         className="max-w-[640px]"
       >
         <ul className="flex max-h-[60dvh] flex-col gap-2 overflow-y-auto">

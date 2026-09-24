@@ -966,6 +966,7 @@ export const postgresRepo: Repo = {
                c.render_plan->'zeitmarken'               as plan_zeitmarken,
                c.render_plan->'sources'->>'transcript_version' as plan_tv,
                c.render_plan->'output'->>'height'        as plan_h,
+               c.render_plan->'brand'->>'profil_fassung' as marken_fassung,
                c.caption_style,
                (select max(t.version) from transcript_versions t where t.source_id = c.source_id) as tv
         from clips c
@@ -988,6 +989,7 @@ export const postgresRepo: Repo = {
         plan_output_height: num(r.plan_h),
         caption_style: jsonValue<Record<string, unknown> | null>(r.caption_style, null),
         transkript_version: num(r.tv),
+        marken_fassung: num(r.marken_fassung),
       }));
     });
   },

@@ -64,10 +64,31 @@ def test_to_ass_uses_brand_font_family():
 
 
 def test_brand_block_normalizes_watermark():
-    assert render_plan.brand_block(None) == {"font_asset_id": None, "logo_asset_id": None, "watermark": {**render_plan.WATERMARK_DEFAULTS}}
+    assert render_plan.brand_block(None) == {
+        "font_asset_id": None,
+        "logo_asset_id": None,
+        "watermark": {**render_plan.WATERMARK_DEFAULTS},
+        "profil_id": None,
+        "profil_fassung": None,
+        "profil_name": None,
+    }
     b = render_plan.brand_block({"font_asset_id": "f1", "logo_asset_id": "l1", "watermark": {"enabled": True, "opacity": 2.0}})
     assert b["watermark"]["enabled"] is True and b["watermark"]["opacity"] == 1.0 and b["watermark"]["width_ratio"] == 0.18
     assert render_plan.brand_block({"watermark": {"enabled": True}})["watermark"]["enabled"] is False  # ohne Logo kein Wasserzeichen
+
+
+def test_brand_block_haelt_die_markenfassung_fest():
+    """Mit welcher Fassung des Markenprofils wurde geclippt?
+
+    Ohne diesen Vermerk laesst sich am fertigen Video nicht mehr sagen, welche Farben, Schriften
+    und Regeln galten. Eine Agentur, die eine Marke aendert, muesste raten, welche Videos noch
+    stimmen. Fehlt die Angabe, steht None da statt einer erfundenen Zahl.
+    """
+    b = render_plan.brand_block({"profil_id": "p1", "profil_fassung": 4, "profil_name": "Kunde A"})
+    assert b["profil_id"] == "p1" and b["profil_fassung"] == 4 and b["profil_name"] == "Kunde A"
+    assert render_plan.brand_block({})["profil_fassung"] is None
+    # Aus der Datenbank kommt die Version haeufig als Zeichenkette.
+    assert render_plan.brand_block({"profil_fassung": "7"})["profil_fassung"] == 7
 
 
 def test_watermark_filter_stays_inside_safe_zone():
@@ -84,11 +105,11 @@ def test_render_uses_brand_font_and_logo(fake_db, fake_context, project):
     assert clip["status"] == "rendered" and clip["render_error"] is None
     plan = clip["render_plan"]
     assert plan["captions"]["font"] == "Inter" and plan["captions"]["preset"] == "tiktok_bold"
-    assert plan["brand"] == {
-        "font_asset_id": project["font_id"],
-        "logo_asset_id": project["logo_id"],
-        "watermark": {"enabled": True, "position": "bottom_right", "opacity": 0.85, "width_ratio": 0.18},
-    }
+    assert plan["brand"]["font_asset_id"] == project["font_id"]
+    assert plan["brand"]["logo_asset_id"] == project["logo_id"]
+    assert plan["brand"]["watermark"] == {"enabled": True, "position": "bottom_right", "opacity": 0.85, "width_ratio": 0.18}
+    # Die Fassung des Markenprofils landet im Plan und bleibt damit am gebauten Clip haengen.
+    assert plan["brand"]["profil_fassung"] == project.get("brand_version", 1)
     font_local = fake_context.work_dir / "fonts" / f"{project['font_sha']}.otf"
     assert font_local.is_file() and font_local.stat().st_size == INTER_OTF.stat().st_size
     ass_key = clip["file_key"][: -len(".mp4")] + ".ass"

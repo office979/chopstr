@@ -397,7 +397,7 @@ function finishRenderSimulation(s: DemoState, clip: Clip) {
   const prevCaptions = currentCaptionsOf(clip.id);
   s.captions.push({ ...captionFields, id: uuid(), clip_id: clip.id, version: (prevCaptions?.version ?? 0) + 1, created_by: null, created_at: nowIso() });
 
-  const plan = buildDemoRenderPlan(clip, candidate, source, hook, captionFields, transcript?.version ?? 0);
+  const plan = buildDemoRenderPlan(clip, candidate, source, hook, captionFields, transcript?.version ?? 0, brand);
   Object.assign(clip, buildDemoRenderPatch(clip, source, brand, plan, captionFields), { updated_at: nowIso() });
   if (!clip.created_by) clip.created_by = actorId;
   pushEvent(s, {
@@ -806,6 +806,8 @@ export const demoRepo: Repo = {
         caption_style: null,
         transkript_version:
           st.transcripts.filter((t) => t.source_id === c.source_id).reduce((m, t) => Math.max(m, t.version), 0) || null,
+        marken_fassung:
+          ((c.render_plan?.brand as { profil_fassung?: number } | undefined)?.profil_fassung) ?? null,
       }));
   },
 

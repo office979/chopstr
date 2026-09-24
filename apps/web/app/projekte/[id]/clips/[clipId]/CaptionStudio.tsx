@@ -474,7 +474,7 @@ export function CaptionStudio({
           <section className="flex flex-col gap-2 border-t border-line pt-5">
             <p className="text-sm font-medium text-text">Vorlagen</p>
             <p className="text-sm text-text-2">
-              Eine Vorlage ist ein gemerktes Aussehen. Sie ändert nichts an schon gebauten Clips.
+              Eine Vorlage ist ein gemerktes Aussehen. Sie ändert nichts an Videos, die schon geclippt sind.
             </p>
             {vorlagen.length > 0 && (
               <div className="flex flex-wrap gap-2">

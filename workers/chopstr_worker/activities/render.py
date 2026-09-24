@@ -58,7 +58,7 @@ CONTENT_TYPES = {"mp4": "video/mp4", "srt": "application/x-subrip", "vtt": "text
 SQL_CANDIDATE = "select id, source_id, segments, rubric, risk_flags, start_s, end_s from candidates where id = %s"
 SQL_BRAND_EXTRA = (
     "select p.gender_mode, p.banned_phrases, p.tone_adjectives, p.default_platform, p.caption_preset, p.caption_style, "
-    "s.rights_status, s.source_owner, s.source_title, s.source_url, p.ci "
+    "s.rights_status, s.source_owner, s.source_title, s.source_url, p.ci, p.id, p.version, p.name "
     "from sources s left join brand_profiles p on p.id = s.brand_profile_id where s.id = %s"
 )
 SQL_ASSET = "select id, kind, name, storage_key, mime_type, sha256, font_family, font_weight from brand_assets where id = %s"
@@ -114,6 +114,10 @@ def _load_brand_extra(ctx: common.Context, source_id: str) -> dict[str, Any]:
     keys = [
         "gender_mode", "banned_phrases", "tone_adjectives", "default_platform", "caption_preset", "caption_style",
         "rights_status", "source_owner", "source_title", "source_url", "ci",
+        # Welche Fassung des Markenprofils galt beim Clippen? Ohne diesen Vermerk laesst sich am
+        # fertigen Video nicht mehr sagen, mit welchen Farben, Schriften und Regeln es entstanden
+        # ist - und eine Agentur, die eine Marke aendert, kann nicht pruefen, was noch stimmt.
+        "brand_profile_id", "brand_profile_version", "brand_profile_name",
     ]  # fmt: skip
     out = dict(zip(keys, row)) if row else {}
     out["gender_mode"] = out.get("gender_mode") or "neutral"
@@ -636,6 +640,9 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
             "font_asset_id": brand_assets["font_asset_id"],
             "logo_asset_id": brand_assets["logo_asset_id"],
             "watermark": brand_assets["watermark"],
+            "profil_id": extra.get("brand_profile_id"),
+            "profil_fassung": extra.get("brand_profile_version"),
+            "profil_name": extra.get("brand_profile_name"),
         },
         caption_text_field=text_field,
         zeitmarken=zeitmarken,

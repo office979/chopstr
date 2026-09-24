@@ -238,7 +238,7 @@ export function Bibliothek({ zeilen, canDelete, canUpload }: Props) {
                             {stand.postbereit} bereit zum Posten
                           </ClipZahl>
                         )}
-                        {stand.wirdGebaut > 0 && <span className="text-text-3">{stand.wirdGebaut} werden gebaut</span>}
+                        {stand.wirdGebaut > 0 && <span className="text-text-3">{stand.wirdGebaut} werden geclippt</span>}
                       </div>
                     )}
 

@@ -23,6 +23,7 @@ import {
 } from "@/lib/clips/schnitt";
 import { pruefen } from "@/lib/clips/untertitel-pruefung";
 import { vorschauStand } from "@/lib/clips/vorschau-stand";
+import { fassungSatz, type Fassung } from "@/lib/brand/fassung";
 import { ClipPreview } from "./ClipPreview";
 import { LiveVorschau } from "./LiveVorschau";
 import { ClipTextEditor } from "./ClipTextEditor";
@@ -84,6 +85,10 @@ interface Props {
   /* Ist das Video fertig analysiert? Ohne das lässt sich nicht sagen, ob eine fehlende Tonspur
    * noch kommt oder nie kommen wird. */
   quelleFertig: boolean;
+  /* Mit welcher Fassung der Marke wurde dieses Video geclippt? Null, wenn keine Marke zugeordnet
+   * ist. */
+  markenFassung: Fassung | null;
+  markenName: string | null;
   /* Der Plan des letzten Laufs: daran hängt, ob das gebaute Video noch aktuell ist. */
   renderPlan: RenderPlan | null;
   clipStatus: ClipStatus;
@@ -108,7 +113,7 @@ const BEREICHE: { id: Bereich; name: string; satz: string }[] = [
   { id: "schnitt", name: "Schnitt", satz: "Timeline und Bildausschnitt" },
   { id: "text", name: "Text", satz: "Gesprochene Wörter prüfen" },
   { id: "untertitel", name: "Untertitel", satz: "Aussehen, Position, Lesbarkeit" },
-  { id: "fertig", name: "Fertigstellen", satz: "Offenes prüfen, bauen, herunterladen" },
+  { id: "fertig", name: "Fertigstellen", satz: "Offenes prüfen, clippen, herunterladen" },
 ];
 
 export function ClipDetail({
@@ -142,6 +147,8 @@ export function ClipDetail({
   quelleDauerS,
   wellenformSrc,
   quelleFertig,
+  markenFassung,
+  markenName,
   renderPlan,
   clipStatus,
   renderFehler,
@@ -313,7 +320,7 @@ export function ClipDetail({
         }
         setMessage({
           tone: "ok",
-          text: data.needs_render ? "Gespeichert. Wirkt, sobald der Clip neu gebaut wird." : "Gespeichert.",
+          text: data.needs_render ? "Gespeichert. Wirkt, sobald das Video neu geclippt wird." : "Gespeichert.",
         });
       } catch (err) {
         markenRef.current = vorher;
@@ -542,7 +549,7 @@ export function ClipDetail({
       setMessage({
         tone: "ok",
         text: data.needs_render
-          ? "Untertitel gespeichert. Sie erscheinen, sobald der Clip neu gebaut wird."
+          ? "Untertitel gespeichert. Sie erscheinen, sobald das Video neu geclippt wird."
           : "Untertitel gespeichert.",
       });
     } catch (err) {
@@ -582,7 +589,7 @@ export function ClipDetail({
       setGesichert(data.composition);
       setMessage({
         tone: "ok",
-        text: data.needs_render ? "Schnitt gespeichert. Der Clip muss neu gebaut werden." : "Schnitt gespeichert.",
+        text: data.needs_render ? "Schnitt gespeichert. Das Video muss neu geclippt werden." : "Schnitt gespeichert.",
       });
     } catch (err) {
       setMessage({
@@ -725,8 +732,8 @@ export function ClipDetail({
                 { an: false, name: "Mit deinen Änderungen", titel: "Zeigt, was jetzt eingestellt ist" },
                 {
                   an: true,
-                  name: gebautesVeraltet ? "Zuletzt gebaut · alt" : "Zuletzt gebaut",
-                  titel: "Das Ergebnis des letzten Bauens",
+                  name: gebautesVeraltet ? "Zuletzt geclippt · alt" : "Zuletzt geclippt",
+                  titel: "Das Ergebnis des letzten Clippens",
                 },
               ].map((w) => (
                 <button
@@ -885,7 +892,7 @@ export function ClipDetail({
                     {schnittGeaendert
                       ? `Schnitt geändert, noch nicht gespeichert. Neue Länge ${neueDauer.toFixed(1).replace(".", ",")} s.`
                       : schnittVeraltet
-                        ? "Schnitt gespeichert. Das gebaute Video hat ihn noch nicht."
+                        ? "Schnitt gespeichert. Das geclippte Video hat ihn noch nicht."
                         : `Gespeichert. Länge ${neueDauer.toFixed(1).replace(".", ",")} s.`}
                   </p>
                   {(schnittGeaendert || schnittVeraltet) && (
@@ -1016,7 +1023,7 @@ export function ClipDetail({
               <p className="text-sm font-medium text-text">Was noch offen ist</p>
               {offeneAenderungen ? (
                 <p className="text-sm text-attention">
-                  {"Es gibt ungespeicherte Änderungen. Gebaut wird der gespeicherte Stand."}
+                  {"Es gibt ungespeicherte Änderungen. Geclippt wird der gespeicherte Stand."}
                 </p>
               ) : null}
               {offeneUntertitel > 0 ? (
@@ -1031,7 +1038,15 @@ export function ClipDetail({
                   </Button>
                 </div>
               ) : null}
-              {!offeneAenderungen && offeneUntertitel === 0 && (
+              {/* Die Fassung der Marke. Sie steht hier, weil hier auch der Knopf zum Neuclippen
+                  sitzt: die Antwort auf „meine Marke hat sich geändert" ist genau dieser Knopf. */}
+              {markenFassung && fassungSatz(markenFassung) && (
+                <p className={cn("text-sm", markenFassung.stand === "aelter" ? "text-attention" : "text-text-3")}>
+                  {markenName ? `Marke ${markenName}: ` : ""}
+                  {fassungSatz(markenFassung)}
+                </p>
+              )}
+              {!offeneAenderungen && offeneUntertitel === 0 && !(markenFassung && markenFassung.stand === "aelter") && (
                 <p className="text-sm text-text-2">Nichts. Alles gespeichert, keine offenen Untertitel.</p>
               )}
               <ButtonLink href={`/projekte/${sourceId}/clips`} variant="ghost" size="sm" className="self-start">

@@ -450,6 +450,17 @@ export interface RenderPlan {
    * schon im Plan, aber nicht rückrechenbar; nur hiermit kann die Oberfläche sagen, ob das
    * gebaute Video noch zu den gesetzten Marken passt. Ältere Pläne haben das Feld nicht. */
   zeitmarken?: Zeitmarke[];
+  /* Die Marke, mit der geclippt wurde. ``profil_fassung`` ist die Versionsnummer des
+   * Markenprofils zu diesem Zeitpunkt; daran lässt sich am fertigen Video ablesen, welche Farben,
+   * Schriften und Regeln galten. Ältere Pläne haben den Block nicht oder nur ohne Fassung. */
+  brand?: {
+    font_asset_id: string | null;
+    logo_asset_id: string | null;
+    watermark: Record<string, unknown>;
+    profil_id?: string | null;
+    profil_fassung?: number | null;
+    profil_name?: string | null;
+  };
   sources: { storage_key: string; transcript_version: number; hook_version: number; candidate_id: string };
   versions: { captions_de: string; render: string; reframe: string };
 }
@@ -594,8 +605,11 @@ export interface ClipStand {
   /* Der eigene Untertitelstil dieses Clips, falls einer gespeichert ist. */
   caption_style: Record<string, unknown> | null;
   /* Die neueste Transkriptfassung des Videos. Daran hängt, ob eine Textkorrektur schon im
-   * gebauten Video steckt. */
+   * geclippten Video steckt. */
   transkript_version: number | null;
+  /* Mit welcher Fassung des Markenprofils wurde geclippt? Null bei Videos aus der Zeit, bevor
+   * das vermerkt wurde - dann ist die ehrliche Antwort „nicht vermerkt" und keine Zahl. */
+  marken_fassung: number | null;
 }
 
 export interface ClipCount {

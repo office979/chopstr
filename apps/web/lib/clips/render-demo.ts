@@ -98,6 +98,7 @@ export function buildDemoRenderPlan(
   hook: HookVersion | null,
   captions: CaptionFields,
   transcriptVersion: number,
+  brand: BrandProfile | null,
 ): RenderPlan {
   const size = ASPECT_SIZE[clip.aspect];
   const fps = source.fps ?? 25;
@@ -163,6 +164,16 @@ export function buildDemoRenderPlan(
       transcript_version: transcriptVersion,
       hook_version: hook?.version ?? 0,
       candidate_id: candidate.id,
+    },
+    /* Dieselbe Angabe, die der Worker in den Plan schreibt: mit welcher Fassung der Marke
+     * geclippt wurde. Ohne sie sähe der Testmodus so aus, als gäbe es den Vermerk nicht. */
+    brand: {
+      font_asset_id: brand?.ci?.fonts?.primary_asset_id ?? null,
+      logo_asset_id: brand?.ci?.logo_asset_id ?? null,
+      watermark: (brand?.ci?.watermark as Record<string, unknown>) ?? {},
+      profil_id: brand?.id ?? null,
+      profil_fassung: brand?.version ?? null,
+      profil_name: brand?.name ?? null,
     },
     versions: { captions_de: "captions_v1", render: "render_v1", reframe: "reframe_v2" },
   };

@@ -5,6 +5,7 @@ import { requirePageRole } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
 import { buildHistory } from "@/lib/brand/history";
 import { previewFontFor } from "@/lib/brand/preview-font";
+import { fassungFuerVideo } from "@/lib/brand/fassung";
 import { BrandForm } from "./BrandForm";
 import { BrandList } from "./BrandList";
 import { HistoryCard } from "./HistoryCard";
@@ -34,10 +35,23 @@ export default async function BrandPage({ searchParams }: Props) {
   const vorschauSchrift = profile ? await previewFontFor(repo, profile) : null;
   /* Wie viele Projekte dieses Profil schon benutzt haben. Daran hängt der Satz darüber, was eine
    * Änderung bewirkt: gebaute Clips behalten ihr Aussehen. */
+  /* Die Videos dieser Marke, jeweils mit der Fassung, mit der sie geclippt wurden.
+   *
+   * Das ist die Frage vor jeder Markenänderung: welche Videos betrifft das, und welche zeigen
+   * noch die alte Fassung? Vorher stand hier nur eine Zahl, und die beantwortet sie nicht. */
   const betroffen = profile
-    ? (await repo.listSources())
-        .filter((s) => s.brand_profile_id === profile.id)
-        .map((s) => ({ id: s.id, titel: s.title }))
+    ? await (async () => {
+        const quellen = (await repo.listSources()).filter((s) => s.brand_profile_id === profile.id);
+        const staende = await repo.listClipStands();
+        return quellen.map((s) => {
+          /* Nur fertig geclippte Clips. Einer, der gerade läuft, hat noch keinen Plan und damit
+             * keine Fassung - er zählt nicht als „nicht vermerkt", sondern gar nicht. */
+          const fassungen = staende
+            .filter((c) => c.source_id === s.id && (c.status === "rendered" || c.status === "exported"))
+            .map((c) => c.marken_fassung);
+          return { id: s.id, titel: s.title, fassung: fassungFuerVideo(fassungen, profile.version) };
+        });
+      })()
     : [];
 
   return (

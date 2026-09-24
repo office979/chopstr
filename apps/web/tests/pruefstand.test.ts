@@ -199,7 +199,7 @@ describe("gesperrte Handlungen nennen den Grund", () => {
     const c = clip({ review: "bereit", composition: [{ start: 10, end: 25, role: "body" }] });
     const a = aktionStand("herunterladen", pruefstand(eingabe({ clip: c })));
     expect(a.erlaubt).toBe(false);
-    expect(a.grund).toMatch(/neu bauen/);
+    expect(a.grund).toMatch(/neu clippen/);
   });
 
   it("gibt für jede gesperrte Handlung einen Satz", () => {

@@ -76,13 +76,13 @@ export function vorschauStand(e: StandEingabe): VorschauStand {
 export function standSatz(stand: VorschauStand, ab: WasAbweicht): string {
   switch (stand) {
     case "laeuft":
-      return "Die Vorschau wird gerade neu erstellt.";
+      return "Das Video wird gerade gebaut.";
     case "fehler":
-      return "Das Erstellen der Vorschau hat nicht geklappt.";
+      return "Beim Bauen ist etwas schiefgegangen.";
     case "keine":
-      return "Es gibt noch keine fertige Datei. Die Vorschau links zeigt, was eingestellt ist.";
+      return "Es gibt noch keine Videodatei. Links siehst du, wie der Clip aussehen wird.";
     case "aktuell":
-      return "Die aktuelle Vorschau ist bereit. Sie zeigt genau das, was eingestellt ist.";
+      return "Die gebaute Datei zeigt genau das, was eingestellt ist.";
     case "veraltet": {
       /* Die Mehrzahl haengt nicht an der Zahl der Teile: „die Untertitel" ist fuer sich schon
        * Mehrzahl. Deshalb steht sie am Teil und wird nicht gezaehlt. */
@@ -97,7 +97,7 @@ export function standSatz(stand: VorschauStand, ab: WasAbweicht): string {
       const liste =
         woerter.length === 1 ? woerter[0] : `${woerter.slice(0, -1).join(", ")} und ${woerter[woerter.length - 1]}`;
       const mehrzahl = teile.length > 1 || teile[0].mehrzahl;
-      return `Das gebaute Video ist nicht mehr aktuell: ${liste} ${mehrzahl ? "wurden" : "wurde"} seitdem geändert.`;
+      return `${liste} ${mehrzahl ? "wurden" : "wurde"} geändert, seit das Video gebaut wurde. Zum Herunterladen einmal neu bauen.`;
     }
   }
 }

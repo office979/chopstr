@@ -13,6 +13,10 @@ interface Props extends StandEingabe {
   /* Es gibt noch nicht gespeicherte Änderungen. Dann ist Neu-Bauen sinnlos: gebaut würde der
    * gespeicherte Stand, und der Nutzer sähe seine Änderung wieder nicht. */
   offeneAenderungen: boolean;
+  /* Untertitel, die über den sicheren Bereich hinausragen würden. Gebaut wird trotzdem, aber
+   * nicht stillschweigend: ein Video, das gleich wieder nachgebessert werden muss, soll nicht
+   * als „auf dem neuesten Stand" aus der Maschine kommen. */
+  offeneUntertitel: number;
   /* Wird nach einem angestoßenen Lauf gerufen, damit die Seite den neuen Stand holt. */
   onNeuGebaut: () => void;
 }
@@ -23,8 +27,17 @@ interface Props extends StandEingabe {
  * Untertitel", und einen Knopf, das zu ändern, gab es nicht. Hier stehen die drei Zustände
  * getrennt: gespeichert aber alt, wird gerade erstellt, aktuell und bereit.
  */
-export function VorschauStatus({ sourceId, clipId, canEdit, offeneAenderungen, onNeuGebaut, ...stand }: Props) {
+export function VorschauStatus({
+  sourceId,
+  clipId,
+  canEdit,
+  offeneAenderungen,
+  offeneUntertitel,
+  onNeuGebaut,
+  ...stand
+}: Props) {
   const [laeuft, setLaeuft] = useState(false);
+  const [nachfrage, setNachfrage] = useState(false);
   const [fortschritt, setFortschritt] = useState<number | null>(null);
   const [fehler, setFehler] = useState<string | null>(null);
 
@@ -56,6 +69,7 @@ export function VorschauStatus({ sourceId, clipId, canEdit, offeneAenderungen, o
 
   const neuBauen = async () => {
     setFehler(null);
+    setNachfrage(false);
     setLaeuft(true);
     try {
       const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/render`, { method: "POST" });
@@ -89,27 +103,74 @@ export function VorschauStatus({ sourceId, clipId, canEdit, offeneAenderungen, o
           {offeneAenderungen && zustand !== "laeuft" && (
             <p className="text-sm text-text-2">Speichere erst deine Änderungen, sonst wird der alte Stand gebaut.</p>
           )}
+          {zustand === "laeuft" && (
+            <p className="text-sm text-text-2">Du kannst weiterarbeiten, das läuft im Hintergrund.</p>
+          )}
+          {zustand === "aktuell" && offeneUntertitel === 0 && (
+            <p className="text-sm text-text-2">Der Download in der Clip-Übersicht enthält genau diese Fassung.</p>
+          )}
+          {/* Ein Hinweis, der nach dem Bauen bleibt: sonst stünde „auf dem neuesten Stand" über
+              einem Video, in dem ein Wort über den Rand ragt. */}
+          {offeneUntertitel > 0 && zustand !== "laeuft" && (
+            <p className="text-sm text-attention">
+              {offeneUntertitel === 1
+                ? "Ein Untertitel ragt über den sicheren Bereich hinaus."
+                : `${offeneUntertitel} Untertitel ragen über den sicheren Bereich hinaus.`}{" "}
+              Bei den Untertiteln steht ein Knopf, der das auflöst.
+            </p>
+          )}
+          {nachfrage && (
+            <p className="text-sm text-text-2">
+              Bauen dauert ein paar Minuten. Willst du das vorher noch anpassen?
+            </p>
+          )}
         </div>
         {canEdit && zustand !== "aktuell" && (
-          <Button
-            variant={zustand === "veraltet" || zustand === "fehler" ? "primary" : "ghost"}
-            onClick={() => void neuBauen()}
-            disabled={zustand === "laeuft" || offeneAenderungen}
-          >
-            {zustand === "laeuft" ? "Wird erstellt" : zustand === "fehler" ? "Nochmal versuchen" : "Vorschau neu erstellen"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {nachfrage && (
+              <Button variant="ghost" onClick={() => setNachfrage(false)}>
+                Erst anpassen
+              </Button>
+            )}
+            <Button
+              variant={zustand === "veraltet" || zustand === "fehler" ? "primary" : "ghost"}
+              onClick={() => {
+                if (offeneUntertitel > 0 && !nachfrage) {
+                  setNachfrage(true);
+                  return;
+                }
+                void neuBauen();
+              }}
+              disabled={zustand === "laeuft" || offeneAenderungen}
+            >
+              {nachfrage
+                ? "Trotzdem bauen"
+                : zustand === "laeuft"
+                  ? "Wird gebaut"
+                  : zustand === "fehler"
+                    ? "Nochmal versuchen"
+                    : zustand === "keine"
+                      ? "Video bauen"
+                      : "Video mit Änderungen neu bauen"}
+            </Button>
+          </div>
         )}
       </div>
     </GlassCard>
   );
 }
 
+/* Die drei Zustände, die auseinandergehalten werden müssen, in den Worten der Sache:
+ *   keine     es gibt noch keine Datei
+ *   veraltet  es gibt eine, aber sie kennt deine Änderungen nicht
+ *   aktuell   die Datei entspricht genau dem, was eingestellt ist - nur dann gibt es sie zum
+ *             Herunterladen */
 const ÜBERSCHRIFT: Record<string, string> = {
-  keine: "Noch nicht gebaut",
-  laeuft: "Vorschau wird aktualisiert",
-  veraltet: "Änderung gespeichert",
-  aktuell: "Aktuelle Vorschau bereit",
-  fehler: "Das hat nicht geklappt",
+  keine: "Noch kein Video gebaut",
+  laeuft: "Video wird gebaut",
+  veraltet: "Video ist nicht auf dem neuesten Stand",
+  aktuell: "Video ist auf dem neuesten Stand",
+  fehler: "Das Bauen hat nicht geklappt",
 };
 
 /* Ein farbiger Punkt. Drei Zustände, die man auseinanderhalten muss, lassen sich schneller sehen

@@ -16,16 +16,22 @@ export interface WellenformDaten {
  *
  * Es wird bewusst NICHT geglättet oder verschönert: wer an einer Pause schneiden will, muss die
  * Pause sehen, und eine dekorative Welle zeigt sie nicht. */
+export type WellenformStand = "da" | "laeuft" | "fehlt" | "fehler";
+
 export function Wellenform({
   daten,
   vonS,
   bisS,
   hoehe = 44,
+  stand = "da",
 }: {
   daten: WellenformDaten | null;
   vonS: number;
   bisS: number;
   hoehe?: number;
+  /* Warum es (noch) keine Tonspur gibt. Ein stummer Hinweis „wird erzeugt" stand vorher auch
+   * dann da, wenn sie nie kommen würde. */
+  stand?: WellenformStand;
 }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const [breite, setBreite] = useState(0);
@@ -72,8 +78,12 @@ export function Wellenform({
     <div className="relative w-full" style={{ height: hoehe }}>
       <canvas ref={ref} className="block h-full w-full" aria-hidden="true" />
       {!daten && (
-        <span className="absolute inset-0 flex items-center justify-center text-xs text-text-3">
-          Tonspur wird beim Verarbeiten erzeugt
+        <span className="absolute inset-0 flex items-center justify-center px-3 text-center text-xs text-text-3">
+          {stand === "laeuft"
+            ? "Die Tonspur entsteht gerade. Sie erscheint hier, sobald das Video verarbeitet ist."
+            : stand === "fehler"
+              ? "Die Tonspur ließ sich nicht laden. Schneiden geht trotzdem, nur ohne Ausschlag."
+              : "Für dieses Video gibt es noch keine Tonspur. Sie entsteht beim Verarbeiten."}
         </span>
       )}
     </div>

@@ -140,8 +140,14 @@ describe("standSatz", () => {
     expect(standSatz("veraltet", wasAbweicht(e))).toContain("die Untertitel wurden");
   });
 
-  it("sagt bei aktuell, dass die Vorschau zeigt was eingestellt ist", () => {
-    expect(standSatz("aktuell", wasAbweicht(eingabe()))).toContain("bereit");
+  it("sagt bei aktuell, dass die Datei zeigt was eingestellt ist", () => {
+    expect(standSatz("aktuell", wasAbweicht(eingabe()))).toContain("genau das, was eingestellt ist");
+  });
+
+  it("sagt beim Veralten, was zu tun ist", () => {
+    /* Ein Zustand ohne Handlung lässt den Nutzer stehen. */
+    const e = eingabe({ transkriptVersion: 4 });
+    expect(standSatz("veraltet", wasAbweicht(e))).toContain("neu bauen");
   });
 });
 

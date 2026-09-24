@@ -17,7 +17,7 @@ import {
 } from "@/lib/clips/schnitt";
 import type { RenderShot, Zeitmarke } from "@/lib/repo/types";
 import { Lineal, timecode } from "./Lineal";
-import { Wellenform, type WellenformDaten } from "./Wellenform";
+import { Wellenform, type WellenformDaten, type WellenformStand } from "./Wellenform";
 
 interface Props {
   /* Der volle Zeitraum, den die Leiste zeigen kann: der Clip plus etwas Luft davor und danach,
@@ -37,6 +37,7 @@ interface Props {
   laeuft: boolean;
   onPlayPause: () => void;
   wellenform: WellenformDaten | null;
+  wellenformStand: WellenformStand;
   filmstreifen: string[];
   shots: RenderShot[];
   zeitmarken: Zeitmarke[];
@@ -71,6 +72,7 @@ export function Timeline({
   laeuft,
   onPlayPause,
   wellenform,
+  wellenformStand,
   filmstreifen,
   shots,
   zeitmarken,
@@ -217,15 +219,21 @@ export function Timeline({
         <div className="flex items-baseline gap-3">
           <h2 className="text-lg font-semibold">Timeline</h2>
           <span className="text-sm text-text-2">
-            Clip <span className="tabular-nums">{timecode(dauerGesamt, true)}</span>
+            Fertiger Clip: <span className="tabular-nums">{timecode(dauerGesamt, true)}</span>
           </span>
         </div>
+        {/* Zwei Zeitrechnungen, und beide sind beschriftet. Vorher stand „Clip 0:36" neben einem
+          * Lineal bei 3:15 und einer Eingabe ab 0:00, ohne dass irgendwo stand, worauf sich was
+          * bezieht. */}
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-inner border border-line px-2.5 py-1 text-sm tabular-nums text-text">
-            {timecode(imClip, true)}
+          <span className="rounded-inner border border-line px-2.5 py-1 text-sm text-text-2">
+            Im Originalvideo <span className="tabular-nums text-text">{timecode(zeit, true)}</span>
+          </span>
+          <span className="rounded-inner border border-line px-2.5 py-1 text-sm text-text-2">
+            Im fertigen Clip <span className="tabular-nums text-text">{timecode(imClip, true)}</span>
           </span>
           <label className="flex items-center gap-1.5 text-sm text-text-2">
-            <span className="sr-only">Zu Zeitpunkt springen</span>
+            <span className="sr-only">Zu Zeitpunkt im Originalvideo springen</span>
             <input
               value={eingabe}
               onChange={(e) => setEingabe(e.target.value)}
@@ -236,7 +244,7 @@ export function Timeline({
                 }
               }}
               placeholder="0:12"
-              aria-label="Zeitpunkt in der Quelle, zum Beispiel 0:12"
+              aria-label="Zeitpunkt im Originalvideo, zum Beispiel 0:12"
               className="transition-soft w-[86px] rounded-inner border border-line bg-black/40 px-2.5 py-1.5 text-sm tabular-nums text-text placeholder:text-text-3 focus:border-white/50 focus:outline-none"
             />
             <Button variant="ghost" size="sm" onClick={springeZu}>
@@ -336,7 +344,7 @@ export function Timeline({
 
           {/* Ton */}
           <div className="mt-1 w-full overflow-hidden rounded-[6px] bg-black/40">
-            <Wellenform daten={wellenform} vonS={fensterVon} bisS={fensterBis} />
+            <Wellenform daten={wellenform} vonS={fensterVon} bisS={fensterBis} stand={wellenformStand} />
           </div>
 
           {/* Schnitt: Abschnitte mit Griffen */}
@@ -441,7 +449,9 @@ export function Timeline({
 
         <div className="mt-2 flex items-center justify-between text-xs text-text-3">
           <span className="tabular-nums">{timecode(fensterVon)}</span>
-          <span>{lupe > 1 ? "Ausschnitt, folgt dem Abspielkopf" : "Ganzes Video"}</span>
+          <span>
+            Zeiten im Originalvideo · {lupe > 1 ? "Ausschnitt, folgt dem Abspielkopf" : "ganzes Video"}
+          </span>
           <span className="tabular-nums">{timecode(fensterBis)}</span>
         </div>
         </div>

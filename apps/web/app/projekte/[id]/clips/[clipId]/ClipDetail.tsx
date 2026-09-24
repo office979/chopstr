@@ -20,6 +20,7 @@ import {
   zusammenziehen,
   type Schnitt,
 } from "@/lib/clips/schnitt";
+import { pruefen } from "@/lib/clips/untertitel-pruefung";
 import { ClipPreview } from "./ClipPreview";
 import { LiveVorschau } from "./LiveVorschau";
 import { ClipTextEditor } from "./ClipTextEditor";
@@ -163,18 +164,35 @@ export function ClipDetail({
   const [vorStapel, setVorStapel] = useState<Stand[]>([]);
   const [schnittSaving, setSchnittSaving] = useState(false);
   const [wellenform, setWellenform] = useState<WellenformDaten | null>(null);
+  /* Warum es (noch) keine Tonspur gibt: „wird noch erzeugt" ist etwas anderes als „liess sich
+   * nicht laden", und der Nutzer soll den Unterschied sehen. */
+  const [wellenformStand, setWellenformStand] = useState<"da" | "laeuft" | "fehlt" | "fehler">(
+    wellenformSrc ? "laeuft" : "fehlt",
+  );
   const [laeuft, setLaeuft] = useState(false);
   const [spielen, setSpielen] = useState(0);
 
   useEffect(() => {
-    if (!wellenformSrc) return undefined;
+    if (!wellenformSrc) {
+      setWellenformStand("fehlt");
+      return undefined;
+    }
     let weg = false;
+    setWellenformStand("laeuft");
     fetch(wellenformSrc)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (!weg && d && Array.isArray(d.werte)) setWellenform(d as WellenformDaten);
+        if (weg) return;
+        if (d && Array.isArray(d.werte)) {
+          setWellenform(d as WellenformDaten);
+          setWellenformStand("da");
+        } else {
+          setWellenformStand("fehler");
+        }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!weg) setWellenformStand("fehler");
+      });
     return () => {
       weg = true;
     };
@@ -348,10 +366,13 @@ export function ClipDetail({
     () => (hasText ? words.slice(wordFrom, wordTo + 1) : []),
     [hasText, words, wordFrom, wordTo],
   );
-  const laengstesWort = useMemo(
-    () => clipWords.reduce((lang, w) => (w.text.length > lang.length ? w.text : lang), ""),
-    [clipWords],
+  /* Untertitel, die über den sicheren Bereich hinausragen. Gerechnet auf den EINGESTELLTEN Stil,
+   * weil die Frage „kann ich jetzt bauen?" sich auf das bezieht, was gleich gebaut wird. */
+  const offeneUntertitel = useMemo(
+    () => pruefen(clipWords, stil).filter((b) => b.grund === "passt_nicht").length,
+    [clipWords, stil],
   );
+
   const stilGeaendert = useMemo(
     () => JSON.stringify(stil) !== JSON.stringify(stilGespeichert),
     [stil, stilGespeichert],
@@ -552,7 +573,11 @@ export function ClipDetail({
         </ButtonLink>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] lg:items-start">
+      {/* Arbeitsbereich: Vorschau und Timeline nebeneinander. Vorher lag die Timeline unter
+        * allen Einstellungen, also einen Bildschirm weiter unten - beim Schneiden sah man
+        * entweder das Bild oder die Spur, nie beides. Alles, was man nicht beim Schneiden
+        * braucht, steht darunter. */}
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)] lg:items-start">
         <div className="lg:sticky lg:top-8">
           {clipSrc && (
             <div className="mb-3 flex gap-1 rounded-pill border border-line p-1">
@@ -626,6 +651,7 @@ export function ClipDetail({
               clipId={clipId}
               canEdit={canEdit}
               offeneAenderungen={dirty || stilGeaendert || schnittGeaendert}
+              offeneUntertitel={offeneUntertitel}
               onNeuGebaut={() => router.refresh()}
               status={clipStatus}
               hatDatei={Boolean(clipSrc)}
@@ -638,24 +664,73 @@ export function ClipDetail({
             />
           </div>
 
-          <div className="mt-4">
-            <Bildausschnitt
-              zeit={currentTime}
-              shots={shots}
-              zeitmarken={marken}
-              onMarke={(m) =>
-                markenAendern((vorher) =>
-                  [...vorher.filter((x) => Math.abs(x.ab_s - m.ab_s) > 0.35), m].sort((a, b) => a.ab_s - b.ab_s),
-                )
-              }
-              onMarkeWeg={(abS) => markenAendern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
-              quelleBreite={quelleBreite}
-              canEdit={canEdit}
-            />
-          </div>
         </div>
 
-        <div className="flex flex-col gap-5">
+        <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-8">
+          <Timeline
+            bereichVonS={bereichVon}
+            bereichBisS={bereichBis}
+            schnitt={schnitt}
+            onSchnitt={(neu) => schnittSetzen(neu)}
+            onZiehen={schnittZiehen}
+            onZiehenFertig={schnittLoslassen}
+            quelleDauerS={quelleDauerS}
+            zeit={currentTime}
+            onSeek={seek}
+            laeuft={laeuft}
+            onPlayPause={() => setSpielen((n) => n + 1)}
+            wellenform={wellenform}
+            wellenformStand={wellenformStand}
+            filmstreifen={streifenBilder}
+            shots={shots}
+            zeitmarken={marken}
+            onMarkeWeg={(abS) => markenAendern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
+            onMarkeVerschieben={(vonS, nachS) =>
+              markenAendern((vorher) =>
+                vorher
+                  .map((x) => (Math.abs(x.ab_s - vonS) < 1e-6 ? { ...x, ab_s: Math.round(nachS * 100) / 100 } : x))
+                  .sort((a, b) => a.ab_s - b.ab_s),
+              )
+            }
+            markeBeschriftung={(m) => markeBeschreibung(m, auswahlAusShots)}
+            canEdit={canEdit}
+            kannZurueck={zurueckStapel.length > 0}
+            kannVor={vorStapel.length > 0}
+            onZurueck={zurueck}
+            onVor={vor}
+          />
+
+          {canEdit && (
+            <GlassCard padding="md" className="mt-3" selected={schnittGeaendert}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-col gap-1">
+                  <p className="text-sm text-text">
+                    {schnittGeaendert
+                      ? `Schnitt geändert, noch nicht gespeichert. Neue Länge ${neueDauer.toFixed(1).replace(".", ",")} s.`
+                      : schnittVeraltet
+                        ? "Schnitt gespeichert. Das gebaute Video hat ihn noch nicht."
+                        : `Gespeichert. Länge ${neueDauer.toFixed(1).replace(".", ",")} s.`}
+                  </p>
+                  {(schnittGeaendert || schnittVeraltet) && (
+                    <p className="text-sm text-text-2">{'Links unter „Mit deinen Änderungen“ siehst du ihn schon.'}</p>
+                  )}
+                </div>
+                <Button
+                  variant={schnittGeaendert ? "primary" : "ghost"}
+                  disabled={!schnittGeaendert || schnittSaving}
+                  onClick={() => void schnittSichern()}
+                >
+                  {schnittSaving ? "Wird gespeichert" : "Schnitt speichern"}
+                </Button>
+              </div>
+            </GlassCard>
+          )}
+        </div>
+      </div>
+
+      {/* Darunter die Feinarbeit: Text, Untertitel, Bildausschnitt. */}
+      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)] lg:items-start">
+        <div className="flex min-w-0 flex-col gap-5">
           {hasText ? (
             <ClipTextEditor
               words={words}
@@ -682,7 +757,6 @@ export function ClipDetail({
             onChange={setStil}
             vorlagen={vorlagen}
             onVorlagenChange={setVorlagen}
-            laengstesWort={laengstesWort}
             canEdit={canEdit}
             gespeichert={!stilGeaendert}
             speichern={() => void stilSpeichern()}
@@ -724,68 +798,23 @@ export function ClipDetail({
             </GlassCard>
           )}
         </div>
-      </div>
-
-      {/* Die Timeline bekommt die volle Breite unter Vorschau und Einstellungen. In der schmalen
-        * Spalte waren Marker und Zeiten abgeschnitten, und Schneiden braucht Platz. */}
-      <div className="mt-5">
-        <Timeline
-          bereichVonS={bereichVon}
-          bereichBisS={bereichBis}
-          schnitt={schnitt}
-          onSchnitt={(neu) => schnittSetzen(neu)}
-          onZiehen={schnittZiehen}
-          onZiehenFertig={schnittLoslassen}
-          quelleDauerS={quelleDauerS}
-          zeit={currentTime}
-          onSeek={seek}
-          laeuft={laeuft}
-          onPlayPause={() => setSpielen((n) => n + 1)}
-          wellenform={wellenform}
-          filmstreifen={streifenBilder}
-          shots={shots}
-          zeitmarken={marken}
-          onMarkeWeg={(abS) => markenAendern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
-          onMarkeVerschieben={(vonS, nachS) =>
-            markenAendern((vorher) =>
-              vorher
-                .map((x) => (Math.abs(x.ab_s - vonS) < 1e-6 ? { ...x, ab_s: Math.round(nachS * 100) / 100 } : x))
-                .sort((a, b) => a.ab_s - b.ab_s),
-            )
-          }
-          markeBeschriftung={(m) => markeBeschreibung(m, auswahlAusShots)}
-          canEdit={canEdit}
-          kannZurueck={zurueckStapel.length > 0}
-          kannVor={vorStapel.length > 0}
-          onZurueck={zurueck}
-          onVor={vor}
-        />
-
-        {canEdit && (
-          <GlassCard padding="md" className="mt-3" selected={schnittGeaendert}>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-col gap-1">
-                <p className="text-sm text-text">
-                  {schnittGeaendert
-                    ? `Schnitt geändert, noch nicht gespeichert. Neue Länge ${neueDauer.toFixed(1).replace(".", ",")} s.`
-                    : schnittVeraltet
-                      ? "Gespeichert. Das gebaute Video zeigt noch den alten Schnitt."
-                      : `Gespeichert. Länge ${neueDauer.toFixed(1).replace(".", ",")} s.`}
-                </p>
-                {(schnittGeaendert || schnittVeraltet) && (
-                  <p className="text-sm text-text-2">Die Vorschau links zeigt bereits den neuen Schnitt.</p>
-                )}
-              </div>
-              <Button
-                variant={schnittGeaendert ? "primary" : "ghost"}
-                disabled={!schnittGeaendert || schnittSaving}
-                onClick={() => void schnittSichern()}
-              >
-                {schnittSaving ? "Wird gespeichert" : "Schnitt speichern"}
-              </Button>
+        <div className="flex min-w-0 flex-col gap-5">
+            <div className="mt-4">
+              <Bildausschnitt
+                zeit={currentTime}
+                shots={shots}
+                zeitmarken={marken}
+                onMarke={(m) =>
+                  markenAendern((vorher) =>
+                    [...vorher.filter((x) => Math.abs(x.ab_s - m.ab_s) > 0.35), m].sort((a, b) => a.ab_s - b.ab_s),
+                  )
+                }
+                onMarkeWeg={(abS) => markenAendern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
+                quelleBreite={quelleBreite}
+                canEdit={canEdit}
+              />
             </div>
-          </GlassCard>
-        )}
+        </div>
       </div>
 
       <Modal

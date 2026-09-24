@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/Button";
@@ -18,7 +19,16 @@ import {
   maxZeichen,
   mitVorgabe,
 } from "@/lib/clips/caption-style";
-import { befundSatz, MAX_CPS, pruefen, tempo, type Befund } from "@/lib/clips/untertitel-pruefung";
+import {
+  befundSatz,
+  karten,
+  korrektur,
+  MAX_CPS,
+  pruefen,
+  tempo,
+  type Befund,
+  type Korrektur,
+} from "@/lib/clips/untertitel-pruefung";
 
 export interface GespeicherteVorlage {
   id: string;
@@ -37,35 +47,6 @@ const SAFE_UNTEN: Record<string, number> = {
 };
 const BILD_H = 1920;
 const BILD_B = 1080;
-
-/* Wörter in Einblendungen gruppieren.
- *
- * Bei einer festen Wortzahl ist das genau, was der Renderer tut (captions_de.build_cards). Ohne
- * feste Wortzahl gruppiert der Renderer nach Sinn, mit Silbentrennung und Sperrwörtern; das hier
- * ist dann eine Näherung über das Zeichenbudget. Sie zeigt die Größenverhältnisse richtig, die
- * Schnittstellen zwischen den Karten können abweichen. */
-function karten(woerter: TranscriptWord[], proKarte: number | undefined, budget: number): TranscriptWord[][] {
-  if (proKarte && proKarte > 0) {
-    const aus: TranscriptWord[][] = [];
-    for (let i = 0; i < woerter.length; i += proKarte) aus.push(woerter.slice(i, i + proKarte));
-    return aus;
-  }
-  const aus: TranscriptWord[][] = [];
-  let lauf: TranscriptWord[] = [];
-  let laenge = 0;
-  for (const w of woerter) {
-    const n = w.text.length + 1;
-    if (lauf.length && laenge + n > budget) {
-      aus.push(lauf);
-      lauf = [];
-      laenge = 0;
-    }
-    lauf.push(w);
-    laenge += n;
-  }
-  if (lauf.length) aus.push(lauf);
-  return aus;
-}
 
 interface VorschauProps {
   stil: CaptionStyle;
@@ -88,7 +69,13 @@ export function CaptionVorschau({ stil, woerter, zeit, onHoehe }: VorschauProps)
   const rahmen = useRef<HTMLDivElement | null>(null);
   const [zieht, setZieht] = useState(false);
   const budget = maxZeichen(s.font_px) * s.max_lines;
-  const gruppen = useMemo(() => karten(woerter, s.words_per_card, budget), [woerter, s.words_per_card, budget]);
+  /* Dieselbe Einteilung wie im Renderer: karten() ist der Spiegel von captions_de.build_cards,
+   * inklusive des Teilens zu langer Gruppen. Vorher hatte die Vorschau eine eigene Rechnung, und
+   * genau da kam der Unterschied zwischen Vorschau und fertigem Video her. */
+  const gruppen = useMemo(
+    () => karten(woerter, s.words_per_card, budget, s.all_caps).map((k) => k.woerter),
+    [woerter, s.words_per_card, budget, s.all_caps],
+  );
 
   const aktiv = useMemo(() => {
     if (!gruppen.length) return null;
@@ -205,7 +192,6 @@ interface StudioProps {
   vorlagen: GespeicherteVorlage[];
   onVorlagenChange: (next: GespeicherteVorlage[]) => void;
   /* Ein Beispielwort für die Längenwarnung, meist das längste im Clip. */
-  laengstesWort: string;
   canEdit: boolean;
   gespeichert: boolean;
   speichern: () => void;
@@ -232,7 +218,6 @@ export function CaptionStudio({
   onChange,
   vorlagen,
   onVorlagenChange,
-  laengstesWort,
   canEdit,
   gespeichert,
   speichern,
@@ -262,6 +247,8 @@ export function CaptionStudio({
    * letzten Render wäre es eine Aussage über ein Aussehen, das vielleicht gar nicht mehr gilt. */
   const befunde = useMemo(() => pruefen(woerter, stil), [woerter, stil]);
   const lesetempo = useMemo(() => tempo(woerter, stil), [woerter, stil]);
+  /* Die eine Einstellung, die alle „passt nicht"-Stellen auflöst. Ausgerechnet, nicht geraten. */
+  const behebung = useMemo(() => korrektur(woerter, stil), [woerter, stil]);
 
   const setzen = useCallback(
     (teil: Partial<CaptionStyle>) => {
@@ -282,14 +269,6 @@ export function CaptionStudio({
    * zeigen UND der Renderer einbrennen (scripts/sync-fonts.mjs spiegelt es aus workers/fonts). */
   const schriftFehlt = useCallback((name: string) => !schriftenVorhanden.includes(name), [schriftenVorhanden]);
   const fehlendeSchrift = schriftFehlt(s.font);
-
-  const zeichenGrenze = maxZeichen(s.font_px);
-  /* Gewarnt wird erst, wenn auch die Silbentrennung nicht mehr hilft. Der Renderer trennt lange
-   * Komposita an der Morphemgrenze (captions_de.hyphenate); ein Wort, das knapp ueber die Zeile
-   * geht, wird also sauber umbrochen. Beim ersten Versuch stand die Warnung schon im
-   * Ausgangszustand da, also bevor jemand etwas eingestellt hatte, und das Werkzeug beschwerte
-   * sich ueber sich selbst. */
-  const zuLang = laengstesWort.length > zeichenGrenze * 1.6;
 
   const vorlageSpeichern = async () => {
     const name = vorlageName.trim();
@@ -337,17 +316,22 @@ export function CaptionStudio({
           * Satz aus diesem Clip: „Wort Wort" sagt nichts darüber, wie der eigene Text wirkt. */}
         <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {LOOKS.map((l) => {
+            /* Ein Stil, dessen Schrift nicht vorliegt, ist nicht wählbar. Ihn anzubieten hiesse,
+             * eine Wahl zu ermöglichen, die im Export anders aussieht - und der Austausch fände
+             * still statt. */
             const fehlt = schriftFehlt(mitVorgabe(l.stil).font);
             return (
               <button
                 key={l.id}
                 type="button"
-                disabled={!canEdit}
+                disabled={!canEdit || fehlt}
                 onClick={() => setzen(l.stil)}
                 aria-pressed={look === l.id}
-                title={fehlt ? `Die Schrift ${mitVorgabe(l.stil).font} ist hier nicht installiert` : undefined}
+                title={fehlt ? `Für diesen Stil fehlt die Schrift ${mitVorgabe(l.stil).font}` : undefined}
                 className={cn(
-                  "transition-soft flex flex-col items-center gap-2 rounded-inner border p-3 disabled:opacity-60",
+                  "transition-soft flex flex-col items-center gap-2 rounded-inner border p-3",
+                  fehlt && "cursor-not-allowed opacity-50",
+                  !fehlt && "disabled:opacity-60",
                   look === l.id ? "border-white/60 bg-white/10" : "border-line hover:border-line-strong",
                 )}
               >
@@ -408,11 +392,6 @@ export function CaptionStudio({
             onChange={(e) => setzen({ font_px: Number(e.target.value) })}
             className="w-full accent-white disabled:opacity-60"
           />
-          {zuLang && (
-            <p className="text-sm text-attention">
-              „{laengstesWort}&ldquo; passt so nicht in eine Zeile. Kleiner stellen oder mehr Zeilen erlauben.
-            </p>
-          )}
         </section>
 
         {/* 4. Position im Bild. Ziehen geht auch direkt in der Vorschau; der Schieber ist der
@@ -478,8 +457,15 @@ export function CaptionStudio({
           )}
         </section>
 
-        {/* 7. Was nicht aufgeht. Anklickbar: die Warnung führt zur Stelle. */}
-        <Befunde befunde={befunde} onSeek={onSeek} tempo={lesetempo} />
+        {/* 7. Was nicht aufgeht, als durchgehbare Aufgabe mit ausführbarer Korrektur. */}
+        <Befunde
+          befunde={befunde}
+          onSeek={onSeek}
+          tempo={lesetempo}
+          behebung={behebung}
+          canEdit={canEdit}
+          onBeheben={(k) => setzen({ [k.feld]: k.wert } as Partial<CaptionStyle>)}
+        />
 
         {/* 8. Vorlagen. Bewusst vom Speichern getrennt: „für diesen Clip übernehmen" und „für
           * alle nächsten merken" sind zwei Entscheidungen, und wer sie verwechselt, ändert
@@ -673,37 +659,50 @@ function Schriftwahl({
       </select>
       {fehlende.length > 0 && (
         <p className="text-sm text-text-3">
-          {fehlende.length} von {FONTS.length} Schriften fehlen in dieser Installation. Sie stehen erst zur Wahl,
-          wenn ihre Datei vorliegt.
+          Nicht jede Schrift liegt hier vor. Eine eigene, lizenzierte Schrift kannst du unter{" "}
+          <Link href="/marke" className="underline underline-offset-4 hover:text-text">
+            Aussehen
+          </Link>{" "}
+          hochladen.
         </p>
       )}
     </div>
   );
 }
 
-/* Die gewaehlte Schrift gibt es hier nicht. Kein Vorwurf, sondern der Weg dorthin: die Datei
- * gehoert nach workers/fonts, danach spiegelt ein Skript sie in die Oberflaeche. Solange sie
- * fehlt, brennt der Renderer Inter ein - und dann soll auch die Vorschau Inter zeigen. */
-function SchriftFehltHinweis({ name, onInter, canEdit }: { name: string; onInter: () => void; canEdit: boolean }) {
-  const datei = FONTS.find((f) => f.id === name)?.datei ?? `${name}.ttf`;
+/* Die gewaehlte Schrift gibt es hier nicht.
+ *
+ * Kein Dateipfad und kein Terminalbefehl: wer diese Seite bedient, arbeitet nicht in der
+ * Kommandozeile. Zwei Wege, die er selbst gehen kann: eine andere Schrift nehmen oder die eigene
+ * hochladen. Solange nichts davon geschehen ist, zeigen Vorschau UND Export Inter - und das steht
+ * hier, statt still zu passieren. */
+function SchriftFehltHinweis({
+  name,
+  onInter,
+  canEdit,
+}: {
+  name: string;
+  onInter: () => void;
+  canEdit: boolean;
+}) {
   return (
     <div className="flex flex-col gap-2 rounded-inner border border-attention/50 bg-attention/10 p-3">
       <p className="text-sm text-text">
-        Die Schrift {name} ist hier nicht installiert. Vorschau und fertiger Clip zeigen stattdessen Inter.
-      </p>
-      <p className="text-sm text-text-2">
-        So kommt sie dazu: die Datei {datei} nach workers/fonts legen und einmal
-        <code className="mx-1 rounded bg-black/40 px-1.5 py-0.5 font-mono text-xs">node scripts/sync-fonts.mjs</code>
-        ausführen.
+        Die Schrift {name} liegt hier nicht vor. Vorschau und fertiger Clip nehmen deshalb Inter.
       </p>
       {canEdit && (
-        <button
-          type="button"
-          onClick={onInter}
-          className="transition-soft self-start text-sm text-text-2 underline underline-offset-4 hover:text-text"
-        >
-          Solange Inter nehmen
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={onInter}
+            className="transition-soft text-sm text-text underline underline-offset-4 hover:text-white"
+          >
+            Inter nehmen
+          </button>
+          <Link href="/marke" className="transition-soft text-sm text-text-2 underline underline-offset-4 hover:text-text">
+            Eigene Schrift hochladen
+          </Link>
+        </div>
       )}
     </div>
   );
@@ -721,10 +720,16 @@ function Befunde({
   befunde,
   onSeek,
   tempo: t,
+  behebung,
+  canEdit,
+  onBeheben,
 }: {
   befunde: Befund[];
   onSeek: (zeit: number) => void;
   tempo: { mittel: number; ueberGrenze: boolean };
+  behebung: Korrektur | null;
+  canEdit: boolean;
+  onBeheben: (k: Korrektur) => void;
 }) {
   const passtNicht = befunde.filter((b) => b.grund === "passt_nicht");
   const schnell = befunde.filter((b) => b.grund === "zu_schnell");
@@ -733,62 +738,127 @@ function Befunde({
   return (
     <section className="flex flex-col gap-4">
       {passtNicht.length > 0 && (
-        <div className="flex flex-col gap-2 rounded-inner border border-attention/50 bg-attention/10 p-3">
-          <p className="text-sm font-medium text-text">
-            {passtNicht.length === 1
-              ? "Eine Einblendung passt nicht ins Bild"
-              : `${passtNicht.length} Einblendungen passen nicht ins Bild`}
-          </p>
-          <p className="text-sm text-text-2">
-            Was nicht hineinpasst, fehlt im fertigen Clip. Das lässt sich hier beheben: mehr Zeilen, kleinere
-            Schrift oder weniger Wörter auf einmal.
-          </p>
-          <Stellen liste={passtNicht} onSeek={onSeek} />
-        </div>
+        <Aufgabe
+          ton="achtung"
+          titel={
+            passtNicht.length === 1
+              ? "Einen Untertitel anpassen"
+              : `${passtNicht.length} Untertitel anpassen`
+          }
+          satz="Diese Wörter sind länger, als in die erlaubten Zeilen passt. Sie ragen dann über den sicheren Bereich hinaus."
+          liste={passtNicht}
+          onSeek={onSeek}
+          aktion={
+            behebung && canEdit
+              ? { label: behebung.label, tun: () => onBeheben(behebung) }
+              : null
+          }
+        />
       )}
 
       {schnell.length > 0 && (
-        <div className="flex flex-col gap-2 rounded-inner border border-line p-3">
-          <p className="text-sm font-medium text-text">
-            {t.ueberGrenze
+        <Aufgabe
+          ton="ruhig"
+          titel={
+            t.ueberGrenze
               ? "Hier wird zügig gesprochen"
-              : `${schnell.length === 1 ? "Eine Stelle läuft" : `${schnell.length} Stellen laufen`} schnell durch`}
-          </p>
-          <p className="text-sm text-text-2">
-            {t.ueberGrenze
+              : `${schnell.length === 1 ? "Eine Stelle" : `${schnell.length} Stellen`} zum Straffen`
+          }
+          satz={
+            t.ueberGrenze
               ? `Im Schnitt ${Math.round(t.mittel)} Zeichen je Sekunde, mitlesen lassen sich etwa ${MAX_CPS}. Das hängt am Sprechtempo und nicht am Aussehen: keine Einstellung hier ändert es. Wer will, kann die Stelle im Text straffen oder in der Timeline herausnehmen.`
-              : "Beim Mitlesen ohne Ton könnte es an diesen Stellen eng werden. Straffen im Text oder Herausnehmen in der Timeline hilft."}
-          </p>
-          <Stellen liste={schnell} onSeek={onSeek} />
-        </div>
+              : "Beim Mitlesen ohne Ton könnte es hier eng werden. Straffen im Text oder Herausnehmen in der Timeline hilft."
+          }
+          liste={schnell}
+          onSeek={onSeek}
+          aktion={null}
+        />
       )}
     </section>
   );
 }
 
-/* Die betroffenen Stellen, hoechstens drei. Ein Klick springt hin. */
-function Stellen({ liste, onSeek }: { liste: Befund[]; onSeek: (zeit: number) => void }) {
-  const gezeigt = liste.slice(0, 3);
+/* Ein Befund als Aufgabe, die man abarbeiten kann.
+ *
+ * Vorher standen hier drei Stellen und darunter „Und 21 weitere". Eine Zahl, die man nicht
+ * erreichen kann, ist keine Aufgabe, sondern ein Vorwurf. Jetzt steht genau eine Stelle da, mit
+ * „Stelle 4 von 24" und zwei Pfeilen: man arbeitet sich durch und sieht, wo man ist. Wo es eine
+ * Einstellung gibt, die alle Stellen auf einmal auflöst, steht sie als Knopf daneben. */
+function Aufgabe({
+  ton,
+  titel,
+  satz,
+  liste,
+  onSeek,
+  aktion,
+}: {
+  ton: "achtung" | "ruhig";
+  titel: string;
+  satz: string;
+  liste: Befund[];
+  onSeek: (zeit: number) => void;
+  aktion: { label: string; tun: () => void } | null;
+}) {
+  const [nr, setNr] = useState(0);
+  /* Wird eine Stelle behoben, schrumpft die Liste unter den Zeiger. Ohne das Nachführen stünde
+   * eine leere Karte da. */
+  const i = Math.min(nr, liste.length - 1);
+  const b = liste[i];
+
   return (
-    <>
-      <ul className="flex flex-col gap-2">
-        {gezeigt.map((b, i) => (
-          <li key={`${b.karte.von}-${i}`}>
-            <button
-              type="button"
-              onClick={() => onSeek(b.karte.von)}
-              className="transition-soft w-full rounded-[8px] border border-line px-3 py-2 text-left hover:border-line-strong focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
-            >
-              <span className="block text-sm text-text">{`„${b.karte.text}“`}</span>
-              <span className="mt-0.5 block text-xs text-text-2">{befundSatz(b)} Zum Anhören anklicken.</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-      {liste.length > gezeigt.length && (
-        <p className="text-xs text-text-3">Und {liste.length - gezeigt.length} weitere.</p>
+    <div
+      className={cn(
+        "flex flex-col gap-2 rounded-inner border p-3",
+        ton === "achtung" ? "border-attention/50 bg-attention/10" : "border-line",
       )}
-    </>
+    >
+      <p className="text-sm font-medium text-text">{titel}</p>
+      <p className="text-sm text-text-2">{satz}</p>
+
+      <button
+        type="button"
+        onClick={() => onSeek(b.karte.von)}
+        className="transition-soft mt-1 w-full rounded-[8px] border border-line px-3 py-2 text-left hover:border-line-strong focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
+      >
+        <span className="block text-sm text-text">{`„${b.karte.text}“`}</span>
+        <span className="mt-0.5 block text-xs text-text-2">{befundSatz(b)} Zum Anhören anklicken.</span>
+      </button>
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {liste.length > 1 ? (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={i === 0}
+              onClick={() => setNr(Math.max(i - 1, 0))}
+              aria-label="Vorige Stelle"
+            >
+              Zurück
+            </Button>
+            <span className="text-xs tabular-nums text-text-3">
+              Stelle {i + 1} von {liste.length}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={i >= liste.length - 1}
+              onClick={() => setNr(Math.min(i + 1, liste.length - 1))}
+              aria-label="Nächste Stelle"
+            >
+              Weiter
+            </Button>
+          </div>
+        ) : (
+          <span />
+        )}
+        {aktion && (
+          <Button size="sm" onClick={aktion.tun}>
+            {aktion.label}
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 

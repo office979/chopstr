@@ -5,8 +5,8 @@
  * jemand etwas dagegen tun kann, und wird zu Rauschen. */
 
 import { describe, expect, it } from "vitest";
-import { befundSatz, karten, MAX_CPS, pruefen, tempo } from "@/lib/clips/untertitel-pruefung";
-import { LOOKS } from "@/lib/clips/caption-style";
+import { befundSatz, karten, korrektur, MAX_CPS, pruefen, tempo } from "@/lib/clips/untertitel-pruefung";
+import { LOOKS, maxZeichen } from "@/lib/clips/caption-style";
 import type { TranscriptWord } from "@/lib/repo/types";
 
 /* Wörter mit fester Dauer bauen. ``proSekunde`` steuert, wie schnell gesprochen wird. */
@@ -104,6 +104,25 @@ describe("pruefen", () => {
     expect(pruefen(woerter(text, 0.4), stil).filter((b) => b.grund === "zu_schnell")).toHaveLength(0);
   });
 
+  it("teilt zu lange Gruppen, statt sie zu melden", () => {
+    /* Der Kern der Korrektur: die feste Wortzahl ist eine Obergrenze. Eine Gruppe, die nicht in
+     * die Zeilen passt, wird geteilt - genau wie im Renderer. Vorher kam hier eine Warnung, und
+     * im fertigen Video stand der Rest in einer Zeile zu viel. */
+    const lang = woerter(["Personalgewinnung", "Unternehmensberatung", "Wirtschaftsprüfung"], 0.25);
+    const stil = { ...LOOKS[0].stil, words_per_card: 3, max_lines: 1, font_px: 60 };
+    const k = karten(lang, 3, 30);
+    expect(k.length).toBeGreaterThan(1);
+    expect(pruefen(lang, stil).filter((b) => b.grund === "passt_nicht")).toEqual([]);
+  });
+
+  it("meldet ein einzelnes Wort, das für sich zu lang ist", () => {
+    /* Das ist der Fall, den kein Teilen löst: ein Kompositum, das breiter ist als die Zeile. */
+    const w = woerter(["Donaudampfschifffahrtsgesellschaftskapitaensmuetze"], 0.2);
+    const b = pruefen(w, { ...LOOKS[0].stil, words_per_card: 1, max_lines: 1, font_px: 140 });
+    expect(b.map((x) => x.grund)).toContain("passt_nicht");
+    expect(befundSatz(b[0])).not.toContain("fehlt");
+  });
+
   it("meldet Text, der nicht in die erlaubten Zeilen passt", () => {
     /* Sechs lange Wörter auf einer Zeile bei großer Schrift: der Renderer lässt weg, was nicht
      * mehr hineinpasst, und das muss dastehen. */
@@ -159,5 +178,50 @@ describe("tempo", () => {
       mittel: 0,
       ueberGrenze: false,
     });
+  });
+});
+
+/* Die ausführbare Korrektur. Ein Befund ohne Knopf, der ihn auflöst, überlässt dem Nutzer das
+ * Ausrechnen: „mehr Zeilen, kleinere Schrift oder weniger Wörter" ist keine Handlung. */
+describe("korrektur", () => {
+  /* Ein Wort, das bei dieser Größe in genau zwei Zeilen passt, aber nicht in eine. */
+  const langesWort = (fontPx: number, zeilen: number) => "x".repeat(maxZeichen(fontPx) * zeilen);
+
+  it("schweigt, wenn alles passt", () => {
+    expect(korrektur(woerter(["kurz", "und", "gut"]), { font_px: 64, max_lines: 2 })).toBeNull();
+  });
+
+  it("schlägt zuerst eine Zeile mehr vor", () => {
+    /* Verkleinern träfe den ganzen Clip, auch die Stellen, die gepasst hätten. Eine Zeile mehr
+     * trifft nur die lange Stelle. */
+    const w = woerter([langesWort(64, 2)]);
+    const k = korrektur(w, { font_px: 64, max_lines: 1, words_per_card: 1 });
+    expect(k).toMatchObject({ feld: "max_lines", wert: 2 });
+    expect(k!.label).toContain("Zeilen");
+  });
+
+  it("verkleinert erst, wenn die Zeilen ausgereizt sind", () => {
+    const w = woerter([langesWort(64, 5)]);
+    const k = korrektur(w, { font_px: 64, max_lines: 4, words_per_card: 1 });
+    expect(k?.feld).toBe("font_px");
+    expect(k!.wert).toBeLessThan(64);
+  });
+
+  it("schlägt nur vor, was wirklich reicht", () => {
+    /* Ein Knopf, nach dem die Warnung stehen bleibt, ist schlimmer als kein Knopf. */
+    for (const zeilen of [1, 2, 3]) {
+      const stil = { font_px: 64, max_lines: zeilen, words_per_card: 1 };
+      const w = woerter([langesWort(64, 3)]);
+      const k = korrektur(w, stil);
+      if (!k) continue;
+      const danach = { ...stil, [k.feld]: k.wert };
+      expect(pruefen(w, danach).filter((b) => b.grund === "passt_nicht"), `${zeilen} Zeilen`).toHaveLength(0);
+    }
+  });
+
+  it("richtet sich nach der längsten Stelle", () => {
+    const w = woerter([langesWort(64, 2), "kurz", langesWort(64, 3)]);
+    const k = korrektur(w, { font_px: 64, max_lines: 1, words_per_card: 1 });
+    expect(k).toMatchObject({ feld: "max_lines", wert: 3 });
   });
 });

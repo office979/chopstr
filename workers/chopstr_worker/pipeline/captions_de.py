@@ -383,22 +383,73 @@ def wrap_lines(tokens: list[str], limit: int, max_lines: int = 2) -> list[str]:
     return out
 
 
+def _kartenlaenge(card: list[dict], text_field: str, all_caps: bool) -> int:
+    """Zeichen einer Karte, so wie sie im Bild stehen werden.
+
+    ``all_caps`` gehoert dazu: aus dem deutschen ``ß`` macht ``upper()`` ein ``SS``, also ein
+    Zeichen mehr. Wer die Laenge vor der Umwandlung misst, misst die falsche Karte.
+    """
+    stuecke = [word_text(w, text_field) for w in card]
+    if all_caps:
+        stuecke = [t.upper() for t in stuecke]
+    return len(" ".join(stuecke))
+
+
+def _passend_teilen(
+    card: list[dict], limit: int, max_lines: int, text_field: str, all_caps: bool
+) -> list[list[dict]]:
+    """Eine Karte so aufteilen, dass jeder Teil in die erlaubten Zeilen passt.
+
+    Geteilt wird gierig von links: es entstehen so wenige Karten wie moeglich, und die Zeiten
+    stimmen weiter, weil jede Teilkarte die Zeiten ihrer eigenen Woerter traegt.
+
+    Ein einzelnes Wort, das fuer sich schon zu lang ist, bleibt allein stehen: es weiter zu
+    zerlegen hiesse, mitten im Wort umzubrechen, und dafuer gibt es die Silbentrennung.
+    """
+    budget = max(1, limit * max_lines)
+    if len(card) <= 1 or _kartenlaenge(card, text_field, all_caps) <= budget:
+        return [card]
+    aus: list[list[dict]] = []
+    lauf: list[dict] = []
+    for w in card:
+        versuch = [*lauf, w]
+        if lauf and _kartenlaenge(versuch, text_field, all_caps) > budget:
+            aus.append(lauf)
+            lauf = [w]
+        else:
+            lauf = versuch
+    if lauf:
+        aus.append(lauf)
+    return aus
+
+
 def build_cards(
     words: list[dict],
     limit: int | None = None,
     max_lines: int = 2,
     text_field: str = "text",
     words_per_card: int | None = None,
+    all_caps: bool = False,
 ) -> list[list[dict]]:
     """Gruppiert Wörter zu Karten. Bricht an Satzzeichen, Konjunktionen, Pausen und vor langen Komposita.
     ``text_field`` bestimmt, welche Wortform Länge und Satzzeichen liefert (siehe ``word_text``).
 
     ``words_per_card`` schaltet auf feste Gruppengröße um: 1 bedeutet ein Wort je Einblendung, der
     Karaoke-Stil der Kurzformate. Satzzeichen bleiben am Wort, die Zeiten kommen unverändert aus dem
-    Transkript. Ohne den Parameter gilt die sinngemäße Gruppierung."""
-    if words_per_card and words_per_card > 0:
-        return [words[i : i + words_per_card] for i in range(0, len(words), words_per_card)]
+    Transkript. Ohne den Parameter gilt die sinngemäße Gruppierung.
+
+    Die feste Gruppengröße ist eine OBERGRENZE, keine Vorgabe: passt eine Gruppe nicht in die
+    erlaubten Zeilen, wird sie geteilt. Vorher entstand daraus eine Karte, deren Rest in die letzte
+    Zeile gequetscht wurde (siehe ``wrap_lines``) - der Text war dann nicht weg, stand aber über
+    die sichere Fläche hinaus oder in einer Zeile mehr, als eingestellt war. Beides sieht im Bild
+    falsch aus, und beides kann niemand von aussen reparieren."""
     limit = limit or PRESETS["tiktok_bold"].max_chars
+    if words_per_card and words_per_card > 0:
+        roh = [words[i : i + words_per_card] for i in range(0, len(words), words_per_card)]
+        aus: list[list[dict]] = []
+        for gruppe in roh:
+            aus.extend(_passend_teilen(gruppe, limit, max_lines, text_field, all_caps))
+        return aus
     cap = limit * max_lines
     cards: list[list[dict]] = []
     cur: list[dict] = []
@@ -517,7 +568,7 @@ def to_ass(
         "[Events]\nFormat: Layer, Start, End, Style, Text\n"
     )
     events = []
-    for card in build_cards(words, p.max_chars, p.max_lines, text_field, p.words_per_card):
+    for card in build_cards(words, p.max_chars, p.max_lines, text_field, p.words_per_card, p.all_caps):
         lines = card_lines(card, p, text_field)
         if not p.highlight_words:
             s, e = float(card[0]["start"]) - clip_start, float(card[-1]["end"]) - clip_start
@@ -574,7 +625,7 @@ def cards_for(
     text_field = check_text_field(text_field)
     p = preset if isinstance(preset, CaptionPreset) else preset_for(preset)
     out = []
-    for card in build_cards(words, p.max_chars, p.max_lines, text_field, p.words_per_card):
+    for card in build_cards(words, p.max_chars, p.max_lines, text_field, p.words_per_card, p.all_caps):
         lines = [" ".join(piece for _, piece in ln) for ln in card_lines(card, p, text_field)]
         out.append(
             {

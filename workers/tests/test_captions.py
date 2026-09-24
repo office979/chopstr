@@ -115,3 +115,44 @@ def test_to_ass_and_srt():
     srt = cap.to_srt(words)
     assert srt.startswith("1\n00:00:00,000 --> ")
     assert "nicht gut." in srt
+
+
+def test_build_cards_teilt_zu_lange_gruppen():
+    """Die feste Wortzahl ist eine Obergrenze, keine Vorgabe.
+
+    Vorher entstand aus vier langen Woertern eine Karte, deren Rest in die letzte Zeile gequetscht
+    wurde (wrap_lines). Der Text war dann nicht weg, stand aber ueber die sichere Flaeche hinaus
+    oder in einer Zeile mehr, als eingestellt war.
+    """
+    lang = _words(["Personalgewinnungsstrategie", "Unternehmensberatung", "Wirtschaftspruefung", "Vakanzkosten"])
+    karten = cap.build_cards(lang, limit=17, max_lines=1, words_per_card=4)
+    assert len(karten) > 1
+    for k in karten:
+        assert len(" ".join(w["text"] for w in k)) <= 17 or len(k) == 1
+
+
+def test_build_cards_laesst_passende_gruppen_in_ruhe():
+    kurz = _words(["Das", "ist", "gut", "so"])
+    karten = cap.build_cards(kurz, limit=40, max_lines=2, words_per_card=4)
+    assert len(karten) == 1
+    assert [w["text"] for w in karten[0]] == ["Das", "ist", "gut", "so"]
+
+
+def test_build_cards_rechnet_grossbuchstaben_mit():
+    """Aus dem deutschen ss wird bei all_caps ein Zeichen mehr, das kann die Karte sprengen."""
+    w = _words(["Strassenverkehrsordnung", "Massnahme"])
+    ohne = cap.build_cards(w, limit=24, max_lines=1, words_per_card=2, all_caps=False)
+    mit = cap.build_cards(w, limit=24, max_lines=1, words_per_card=2, all_caps=True)
+    assert len(mit) >= len(ohne)
+
+
+def test_karten_passen_immer_in_die_zeilen():
+    """Der Kern: nach card_lines darf nie mehr als max_lines herauskommen."""
+    worte = _words(["Eine", "unbesetzte", "Stelle", "im", "Vertrieb", "kostet", "vierzehntausend", "Euro"])
+    preset = cap.scaled_preset("tiktok_bold", 1080, 1920)
+    preset = cap.style_anwenden(preset, {"words_per_card": 4, "max_lines": 2, "font_px": 104}, skala=1.0)
+    for karte in cap.build_cards(worte, preset.max_chars, preset.max_lines, "text", preset.words_per_card, preset.all_caps):
+        zeilen = cap.card_lines(karte, preset)
+        assert len(zeilen) <= preset.max_lines
+        for z in zeilen:
+            assert len(" ".join(t for _, t in z)) <= preset.max_chars or len(z) == 1

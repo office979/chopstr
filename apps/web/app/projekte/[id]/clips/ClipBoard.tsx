@@ -621,15 +621,23 @@ export function ClipBoard({
         </div>
       </div>
 
-      {message && (
-        <p
-          role="status"
-          aria-live="polite"
-          className={cn("rounded-inner border px-4 py-3 text-sm", message.tone === "ok" ? "border-line text-text" : "border-attention/50 bg-attention/10 text-text")}
-        >
-          {message.text}
-        </p>
-      )}
+      {/* Der Meldebereich steht immer da, auch leer.
+       *
+       * Vorher entstand er erst mit der Meldung. Ein Screenreader kündigt eine Live-Region aber
+       * nur an, wenn sie schon im Baum war, bevor sich ihr Inhalt ändert (W3C, WCAG 2.2, 4.1.3
+       * Statusmeldungen). Wer nicht sieht, blieb also nach „12 Clips freigegeben" ohne Rückmeldung.
+       * Leer nimmt der Bereich keinen Platz ein. */}
+      <p
+        role="status"
+        aria-live="polite"
+        className={cn(
+          message && "rounded-inner border px-4 py-3 text-sm",
+          message?.tone === "ok" && "border-line text-text",
+          message && message.tone !== "ok" && "border-attention/50 bg-attention/10 text-text",
+        )}
+      >
+        {message?.text ?? ""}
+      </p>
 
       {/* Filter nach Zustand. Bei dreißig Clips ist „alle zeigen" keine Übersicht mehr, und die
           Frage lautet ohnehin fast immer „was muss ich noch ansehen". */}

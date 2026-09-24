@@ -109,12 +109,15 @@ export function BrandForm({
       <GlassCard padding="lg" className="flex flex-col gap-5">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-xs uppercase tracking-wide text-text-3">Schritt 2 von 3</p>
-            <h2 className="mt-0.5 text-lg font-medium">Sprache und Ansprache</h2>
+            {/* Keine Schrittzahlen mehr. „Schritt 2 von 3" verspricht eine Einrichtung mit
+                Weiter und Zurück; hier liegt alles auf einer Seite, und wer eine Marke pflegt,
+                springt ohnehin zu der Stelle, die er ändern will. Bereiche mit Namen sagen, wo
+                man ist, ohne eine Reihenfolge zu behaupten, die es nicht gibt. */}
+            <h2 className="text-lg font-medium">Sprache und Ansprache</h2>
           </div>
           {profile && <Badge>Fassung {profile.version}</Badge>}
         </div>
-        <Field label="Name des Profils" htmlFor="name" required error={state.errors.name}>
+        <Field label="Name der Marke" htmlFor="name" required error={state.errors.name}>
           <Input id="name" name="name" defaultValue={profile?.name ?? ""} placeholder="z. B. PLACEMedia Podcast" required />
         </Field>
         <div className="grid gap-5 sm:grid-cols-2">
@@ -180,8 +183,7 @@ export function BrandForm({
           sah man erst am fertigen Clip. */}
       <GlassCard padding="lg" className="flex flex-col gap-5">
         <div>
-          <p className="text-xs uppercase tracking-wide text-text-3">Schritt 3 von 3</p>
-          <h2 className="mt-0.5 text-lg font-medium">Clip-Stil</h2>
+          <h2 className="text-lg font-medium">Clip-Stil</h2>
           <p className="mt-1 text-sm text-text-2">
             So sehen deine Clips aus. Das Aussehen der App bleibt davon unberührt.
           </p>

@@ -951,10 +951,13 @@ export function ClipDetail({
                     {saving ? "Wird gespeichert" : "Text speichern"}
                   </Button>
                 </div>
-                {message && (
-                  <div role="status" aria-live="polite" className="mt-3 flex flex-wrap items-center gap-3">
+                {/* Immer im Baum, auch leer: ein Screenreader kündigt eine Live-Region nur an,
+                    wenn sie schon dastand, bevor sich ihr Inhalt ändert (WCAG 2.2, 4.1.3). */}
+                <div role="status" aria-live="polite" className={cn("flex flex-wrap items-center gap-3", message && "mt-3")}>
+                  {message && (
                     <p className={cn("text-sm", message.tone === "ok" ? "text-text" : "text-attention")}>{message.text}</p>
-                    {message.nochmal && (
+                  )}
+                  {message?.nochmal && (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -968,7 +971,6 @@ export function ClipDetail({
                       </Button>
                     )}
                   </div>
-                )}
               </GlassCard>
             )}
           </div>

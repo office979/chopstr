@@ -7,6 +7,7 @@ import { normalizeCapabilities } from "@/lib/publishing/capabilities";
 import { PATTERN_ORDER } from "@/lib/clips/labels";
 import type { Clip, HookPattern } from "@/lib/repo/types";
 import type {
+  CaptionPresetRow,
   ClipExtras,
   ClipWithExtras,
   Credentials,
@@ -191,6 +192,18 @@ function toExtras(r: Row): ClipExtras {
     series_id: (r.series_id as string | null) ?? null,
     series_index: num(r.series_index),
     reframe_override: (r.reframe_override as ClipExtras["reframe_override"]) ?? null,
+    caption_style: (r.caption_style as Record<string, unknown> | null) ?? {},
+  };
+}
+
+function toCaptionPreset(r: Row): CaptionPresetRow {
+  return {
+    id: r.id as string,
+    workspace_id: r.workspace_id as string,
+    name: r.name as string,
+    style: (r.style as Record<string, unknown> | null) ?? {},
+    created_at: iso(r.created_at) ?? "",
+    updated_at: iso(r.updated_at) ?? "",
   };
 }
 
@@ -415,7 +428,7 @@ const postgresPublishingRepo: PublishingRepo = {
     const session = await currentSession();
     return withContext(session, async (tx) => {
       const rows = await tx`
-        select c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override
+        select c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override, c.caption_style
         from clips c join sources s on s.id = c.source_id where c.id in ${tx(clipIds)} and s.workspace_id = ${session.workspaceId}`;
       return rows.map((r) => toExtras(r as Row));
     });
@@ -428,11 +441,47 @@ const postgresPublishingRepo: PublishingRepo = {
       for (const key of ["experiment_id", "variant", "series_id", "series_index", "reframe_override"] as const) {
         if (key in patch) data[key] = patch[key] ?? null;
       }
+      /* jsonb braucht die ausdrueckliche Umwandlung, und null ist hier das leere Objekt: die Spalte
+       * ist not null, und „nichts eingestellt" heisst {}, nicht fehlend. */
+      if ("caption_style" in patch) data.caption_style = tx.json((patch.caption_style ?? {}) as never);
       if (Object.keys(data).length === 0) return (await this.getClipExtras([clipId]))[0] ?? null;
       const rows = await tx`
         update clips c set ${tx(data)} from sources s where c.id = ${clipId} and s.id = c.source_id and s.workspace_id = ${session.workspaceId}
-        returning c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override`;
+        returning c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override, c.caption_style`;
       return rows.length ? toExtras(rows[0] as Row) : null;
+    });
+  },
+
+  async listCaptionPresets() {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`
+        select id, workspace_id, name, style, created_at, updated_at from caption_presets
+        where workspace_id = ${session.workspaceId} order by lower(name) asc`;
+      return rows.map((r) => toCaptionPreset(r as Row));
+    });
+  },
+
+  /* Gleicher Name heisst ueberschreiben, nicht ablehnen. Wer eine Vorlage nachschaerft, will sie
+   * aktualisieren; zwei Eintraege „Podcast fett" waeren in der Auswahl nicht zu unterscheiden. */
+  async saveCaptionPreset(name, style) {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`
+        insert into caption_presets (workspace_id, name, style, created_by)
+        values (${session.workspaceId}, ${name}, ${tx.json(style as never)}, ${session.userId})
+        on conflict (workspace_id, lower(btrim(name)))
+        do update set style = excluded.style, name = excluded.name
+        returning id, workspace_id, name, style, created_at, updated_at`;
+      return toCaptionPreset(rows[0] as Row);
+    });
+  },
+
+  async deleteCaptionPreset(id) {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`delete from caption_presets where id = ${id} and workspace_id = ${session.workspaceId} returning id`;
+      return rows.length > 0;
     });
   },
 

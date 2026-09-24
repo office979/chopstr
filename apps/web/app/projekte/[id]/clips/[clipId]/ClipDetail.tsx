@@ -11,6 +11,8 @@ import { ASPECT_LABELS, formatClipDuration } from "@/lib/clips/labels";
 import type { Aspect, TranscriptVersion, TranscriptWord } from "@/lib/repo/types";
 import { ClipPreview } from "./ClipPreview";
 import { ClipTextEditor } from "./ClipTextEditor";
+import { CaptionStudio, CaptionVorschau, type GespeicherteVorlage } from "./CaptionStudio";
+import type { CaptionStyle } from "@/lib/clips/caption-style";
 
 interface Correction {
   old_text: string;
@@ -33,6 +35,9 @@ interface Props {
   wordTo: number | null;
   speakerNames: Record<string, string>;
   canEdit: boolean;
+  captionStyle: CaptionStyle;
+  captionPresets: GespeicherteVorlage[];
+  clipId: string;
 }
 
 /* Ein Clip: oben Vorschau, daneben sein Text. Gespeichert wird mit einem Klick, ohne Rückfrage.
@@ -52,6 +57,9 @@ export function ClipDetail({
   wordTo,
   speakerNames,
   canEdit,
+  captionStyle,
+  captionPresets,
+  clipId,
 }: Props) {
   const router = useRouter();
   const backHref = `/projekte/${sourceId}/clips`;
@@ -65,7 +73,28 @@ export function ClipDetail({
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [leaveOpen, setLeaveOpen] = useState(false);
 
+  /* Untertitel: eigener Stand, eigener Speicherknopf. Bewusst getrennt vom Text, denn es sind zwei
+   * verschiedene Entscheidungen, und der Text schreibt das Transkript des ganzen Videos um. */
+  const [stil, setStil] = useState<CaptionStyle>(captionStyle);
+  const [stilGespeichert, setStilGespeichert] = useState<CaptionStyle>(captionStyle);
+  const [stilSaving, setStilSaving] = useState(false);
+  const [vorlagen, setVorlagen] = useState<GespeicherteVorlage[]>(captionPresets);
+
   const hasText = wordFrom != null && wordTo != null && wordTo >= wordFrom;
+
+  /* Nur die Wörter dieses Clips. Die Vorschau soll zeigen, was im Clip steht, nicht das ganze Video. */
+  const clipWords = useMemo(
+    () => (hasText ? words.slice(wordFrom, wordTo + 1) : []),
+    [hasText, words, wordFrom, wordTo],
+  );
+  const laengstesWort = useMemo(
+    () => clipWords.reduce((lang, w) => (w.text.length > lang.length ? w.text : lang), ""),
+    [clipWords],
+  );
+  const stilGeaendert = useMemo(
+    () => JSON.stringify(stil) !== JSON.stringify(stilGespeichert),
+    [stil, stilGespeichert],
+  );
 
   /* Liegt der fertige Clip vor, läuft er selbst. Sonst läuft das ganze Video und bleibt am Ende
    * der Stelle stehen. Fest im Speicher, sonst hinge der Effekt im Player an jedem Zeitschritt. */
@@ -154,8 +183,35 @@ export function ClipDetail({
     }
   };
 
+  const stilSpeichern = async () => {
+    setStilSaving(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/caption-style`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caption_style: stil }),
+      });
+      const data = (await res.json()) as { error?: string; caption_style?: CaptionStyle; needs_render?: boolean };
+      if (!res.ok) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
+      const gesichert = data.caption_style ?? stil;
+      setStil(gesichert);
+      setStilGespeichert(gesichert);
+      setMessage({
+        tone: "ok",
+        text: data.needs_render
+          ? "Untertitel gespeichert. Sie erscheinen, sobald der Clip neu gebaut wird."
+          : "Untertitel gespeichert.",
+      });
+    } catch (err) {
+      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt" });
+    } finally {
+      setStilSaving(false);
+    }
+  };
+
   const goBack = () => {
-    if (dirty) setLeaveOpen(true);
+    if (dirty || stilGeaendert) setLeaveOpen(true);
     else router.push(backHref);
   };
 
@@ -198,6 +254,7 @@ export function ClipDetail({
             trim={trim}
             onTime={setCurrentTime}
             seekTo={seekTo}
+            overlay={clipWords.length ? <CaptionVorschau stil={stil} woerter={clipWords} zeit={currentTime} /> : null}
           />
         </div>
 
@@ -221,6 +278,19 @@ export function ClipDetail({
               <p className="text-sm text-text-2">Zu diesem Clip steht kein Text bereit.</p>
             </GlassCard>
           )}
+
+          <CaptionStudio
+            stil={stil}
+            onChange={setStil}
+            vorlagen={vorlagen}
+            onVorlagenChange={setVorlagen}
+            laengstesWort={laengstesWort}
+            canEdit={canEdit}
+            gespeichert={!stilGeaendert}
+            speichern={() => void stilSpeichern()}
+            zuruecksetzen={() => setStil({})}
+            saving={stilSaving}
+          />
 
           {canEdit && hasText && (
             <GlassCard padding="md" selected={dirty}>

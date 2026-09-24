@@ -26,3 +26,6 @@ chopstr_worker.egg-info/
 *.egg-info/
 .local/
 apps/web/.env.local
+
+# Aus workers/fonts gespiegelt (scripts/sync-fonts.mjs), nicht doppelt im Repo halten
+apps/web/public/fonts/

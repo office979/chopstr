@@ -1,0 +1,71 @@
+{
+  "version": "caption_fonts_v1",
+  "hinweis": "Auswahlliste der Untertitel-Schriften. Wird von zwei Seiten gelesen: der Worker (pipeline/captions_de.py) prueft damit die Wahl und findet die Datei, die Oberflaeche (lib/clips/caption-fonts.ts) baut daraus die Auswahl. Eine Liste, damit beide Seiten nie auseinanderlaufen. Die Dateien liegen in workers/fonts; fehlt eine, faellt der Render auf Inter zurueck und schreibt einen Hinweis in den Plan.",
+  "lizenz": "Alle gelisteten Schriften stehen unter der SIL Open Font License 1.1 oder Apache 2.0. Beide erlauben Buendeln, Einbetten und gewerbliche Nutzung.",
+  "ruecklauf": "Inter",
+  "schriften": [
+    {
+      "id": "Inter",
+      "beschreibung": "Neutral, sehr gut lesbar",
+      "datei": "Inter-Bold.otf",
+      "grossbuchstaben_empfohlen": false,
+      "quelle": "https://github.com/rsms/inter"
+    },
+    {
+      "id": "Anton",
+      "beschreibung": "Schwer und schmal, laut",
+      "datei": "Anton-Regular.ttf",
+      "grossbuchstaben_empfohlen": true,
+      "quelle": "https://fonts.google.com/specimen/Anton"
+    },
+    {
+      "id": "Bebas Neue",
+      "beschreibung": "Hohe Versalien, schmal",
+      "datei": "BebasNeue-Regular.ttf",
+      "grossbuchstaben_empfohlen": true,
+      "quelle": "https://fonts.google.com/specimen/Bebas+Neue"
+    },
+    {
+      "id": "Archivo Black",
+      "beschreibung": "Sehr fett, breit",
+      "datei": "ArchivoBlack-Regular.ttf",
+      "grossbuchstaben_empfohlen": false,
+      "quelle": "https://fonts.google.com/specimen/Archivo+Black"
+    },
+    {
+      "id": "Montserrat",
+      "beschreibung": "Rund und geometrisch",
+      "datei": "Montserrat-Bold.ttf",
+      "grossbuchstaben_empfohlen": false,
+      "quelle": "https://fonts.google.com/specimen/Montserrat"
+    },
+    {
+      "id": "Oswald",
+      "beschreibung": "Schmal, sachlich",
+      "datei": "Oswald-Bold.ttf",
+      "grossbuchstaben_empfohlen": true,
+      "quelle": "https://fonts.google.com/specimen/Oswald"
+    },
+    {
+      "id": "Poppins",
+      "beschreibung": "Freundlich, kreisrund",
+      "datei": "Poppins-Bold.ttf",
+      "grossbuchstaben_empfohlen": false,
+      "quelle": "https://fonts.google.com/specimen/Poppins"
+    },
+    {
+      "id": "Playfair Display",
+      "beschreibung": "Serif, redaktionell",
+      "datei": "PlayfairDisplay-Bold.ttf",
+      "grossbuchstaben_empfohlen": false,
+      "quelle": "https://fonts.google.com/specimen/Playfair+Display"
+    },
+    {
+      "id": "Space Grotesk",
+      "beschreibung": "Technisch, eigenwillig",
+      "datei": "SpaceGrotesk-Bold.ttf",
+      "grossbuchstaben_empfohlen": false,
+      "quelle": "https://fonts.google.com/specimen/Space+Grotesk"
+    }
+  ]
+}

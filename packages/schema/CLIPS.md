@@ -43,6 +43,7 @@ Vertragsversion: `clips_v1`, `render_plan_v1`.
 | `cps_warnings` | Liste von Strings (Lesetempo über 17 Zeichen/Sekunde) |
 | `fidelity_warnings` | Ergebnis von `fidelity.check_cut` für die Komposition |
 | `speaker_positions` | aus der UI bestätigt oder vom Worker vorgeschlagen `{ "SPEAKER_00": 0, "SPEAKER_01": 1 }` |
+| `caption_style` | Untertitel-Stil dieses Clips (Migration 0008), `{}` heißt: nichts eingestellt. Felder: `preset`, `font`, `font_px`, `bold`, `all_caps`, `words_per_card` (1 bis 6), `max_lines`, `base_color`, `highlight_color`, `highlight_words`, `outline_px`, `box`, `bottom_margin_px`. Größen gelten für 1080x1920 und werden auf die Ausgabegröße umgerechnet. Grenzen und Prüfung: `captions_de.STIL_GRENZEN` / `style_anwenden`, gespiegelt in `apps/web/lib/clips/caption-style.ts`. Der Clipstil sticht den Stil des Markenprofils. |
 
 ## `render_plan` (`render_plan_v1`)
 
@@ -76,7 +77,7 @@ Vertragsversion: `clips_v1`, `render_plan_v1`.
   "hook_overlay": { "text": "Der teuerste Fehler meiner Karriere", "seconds": 3.0 } | null,
   "audio": { "preset": "master", "lufs": -16, "true_peak": -1.5, "micro_fade_ms": 20 },
   "sources": { "storage_key": "uploads/abc", "transcript_version": 3, "hook_version": 1, "candidate_id": "…" },
-  "versions": { "captions_de": "captions_v1", "render": "render_v1", "reframe": "reframe_v1" }
+  "versions": { "captions_de": "captions_v1", "render": "render_v1", "reframe": "reframe_v2" }
 }
 ```
 

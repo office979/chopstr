@@ -241,6 +241,20 @@ export interface ClipExtras {
   series_id: string | null;
   series_index: number | null;
   reframe_override: ReframeOverride | null;
+  /* Untertitel-Stil dieses Clips (Migration 0008). Leeres Objekt heisst: nichts eingestellt, es
+   * gilt das Markenprofil und was das Format vorgibt. Form siehe lib/clips/caption-style.ts. */
+  caption_style: Record<string, unknown>;
+}
+
+/* Gespeicherte Untertitel-Vorlage. Gehoert dem Workspace, nicht der Person: in einer Agentur stellt
+ * einer den Stil ein und alle arbeiten damit weiter. */
+export interface CaptionPresetRow {
+  id: string;
+  workspace_id: string;
+  name: string;
+  style: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 export type ClipWithExtras = Clip & ClipExtras;
@@ -294,6 +308,10 @@ export interface PublishingRepo {
   /* Clip-Zusatzspalten */
   getClipExtras(clipIds: string[]): Promise<ClipExtras[]>;
   updateClipExtras(clipId: string, patch: Partial<Omit<ClipExtras, "id">>): Promise<ClipExtras | null>;
+  /* Untertitel-Vorlagen des Workspace */
+  listCaptionPresets(): Promise<CaptionPresetRow[]>;
+  saveCaptionPreset(name: string, style: Record<string, unknown>): Promise<CaptionPresetRow>;
+  deleteCaptionPreset(id: string): Promise<boolean>;
   /* Experimente */
   createExperiment(input: { candidate_id: string | null; hypothesis: string | null }): Promise<Experiment>;
   listExperiments(): Promise<Experiment[]>;

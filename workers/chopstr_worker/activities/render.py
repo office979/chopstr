@@ -76,6 +76,8 @@ SQL_HOOK = (
 SQL_CAPTION_MAX = "select coalesce(max(version), 0) from caption_versions where clip_id = %s"
 SQL_REFRAME_OVERRIDE = "select reframe_override from clips where id = %s"
 NOTE_OVERRIDE_UNREADABLE = "Reframe-Override konnte nicht gelesen werden (Migration 0005 eingespielt?), Automatik verwendet"
+SQL_CAPTION_STYLE = "select caption_style from clips where id = %s"
+NOTE_STYLE_UNREADABLE = "Untertitel-Stil des Clips konnte nicht gelesen werden (Migration 0008 eingespielt?), Markenprofil verwendet"
 
 
 def _json(value: Any, default: Any) -> Any:
@@ -280,6 +282,55 @@ def _load_reframe_override(ctx: common.Context, clip_id: str) -> tuple[str | Non
     if value not in reframe.STRATEGIES:
         return None, f"Unbekannter Reframe-Override {value!r} ignoriert"
     return value, None
+
+
+def _load_caption_style(ctx: common.Context, clip_id: str) -> tuple[dict, str | None]:
+    """``clips.caption_style`` lesen. Liefert (Stil, Hinweis).
+
+    Ohne Spalte oder bei einem Lesefehler gilt weiter der Stil des Markenprofils. Ein Stil darf
+    keinen Render verhindern, er ist Geschmack und nicht Inhalt."""
+    try:
+        row = db.fetch_one(ctx.conn, SQL_CAPTION_STYLE, (clip_id,))
+    except Exception as exc:
+        log.warning("caption_style not readable clip=%s error=%s", clip_id, exc.__class__.__name__)
+        return {}, NOTE_STYLE_UNREADABLE
+    wert = _json(row[0], {}) if row else {}
+    return dict(wert or {}), None
+
+
+def caption_style_zusammen(marke: dict | None, clip: dict | None) -> dict:
+    """Markenstil und Clipstil uebereinanderlegen, der Clip sticht.
+
+    Der Markenstil ist die Hausschrift, der Clipstil die Ausnahme fuer diesen einen Ausschnitt. Wer
+    am Clip nichts eingestellt hat, bekommt unveraendert das, was vorher galt."""
+    return {**(marke or {}), **(clip or {})}
+
+
+def caption_basis_preset(destination: str, extra: dict, aspect: str | None, style: dict | None) -> str:
+    """Welches Preset die Grundlage ist. Eine Wahl im Clipstil sticht alles andere."""
+    gewaehlt = str((style or {}).get("preset") or "").strip()
+    if gewaehlt in captions_de.PRESETS:
+        return gewaehlt
+    return caption_preset_for(destination, extra, aspect)
+
+
+def caption_schrift(style: dict | None, marken_font: str | None) -> tuple[str | None, str | None]:
+    """Welche Schrift die Untertitel bekommen, und ein Hinweis falls die Datei fehlt.
+
+    Reihenfolge: eine Wahl am Clip sticht, sonst der Marken-Font aus den Assets, sonst das Preset.
+    Fehlt die Datei zur gewaehlten Schrift im Fontordner, faellt libass stillschweigend auf
+    irgendetwas zurueck - das sieht dann aus wie ein Fehler im Render. Deshalb pruefen wir es hier
+    und sagen es, statt es passieren zu lassen."""
+    gewaehlt = str((style or {}).get("font") or "").strip()
+    if not gewaehlt:
+        return marken_font, None
+    if gewaehlt not in captions_de.schrift_namen():
+        return marken_font, f"Unbekannte Schrift {gewaehlt!r} ignoriert"
+    datei = captions_de.schrift_datei(gewaehlt)
+    ordner = render.default_fonts_dir()
+    if datei and not (ordner / datei).is_file():
+        return marken_font, f"Schriftdatei {datei} fehlt in {ordner}, es bleibt bei der Vorgabe"
+    return gewaehlt, None
 
 
 def caption_text_field_for(style: dict | None) -> str:
@@ -521,9 +572,16 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     st.progress(0.35, "Captions auf der Ausgabe-Timeline", clip_id=clip_id, phase="captions")
     common.heartbeat("render", "captions")
     out_words = compose.remap_words(words, comp)
-    preset_name = caption_preset_for(destination, extra, aspect)
-    preset = captions_de.scaled_preset(preset_name, out_w, out_h)
-    style = extra.get("caption_style") or {}
+    clip_style, style_note = _load_caption_style(ctx, clip_id)
+    if style_note:
+        rf.notes.append(style_note)
+    style = caption_style_zusammen(extra.get("caption_style") or {}, clip_style)
+    preset_name = caption_basis_preset(destination, extra, aspect, style)
+    # Erst auf die Ausgabegroesse rechnen, dann den Stil auflegen: die eingestellten Werte gelten
+    # fuer 1080x1920, weil die Oberflaeche in dieser Groesse zeigt.
+    preset = captions_de.style_anwenden(
+        captions_de.scaled_preset(preset_name, out_w, out_h), style, out_h / captions_de.H
+    )
     text_field = caption_text_field_for(style)
     cards = captions_de.cards_for(out_words, preset, text_field=text_field)
     cps = captions_de.cps_warnings(
@@ -533,6 +591,9 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     hook_override = style.get("hook_overlay") if isinstance(style.get("hook_overlay"), bool) else None
     audio_preset = style.get("audio_preset") if style.get("audio_preset") in render_plan.AUDIO_PRESETS else "master"
     brand_assets = brand_assets_for(ctx, extra.get("ci") or {})
+    caption_font, schrift_note = caption_schrift(style, brand_assets["font_family"])
+    if schrift_note:
+        rf.notes.append(schrift_note)
     plan = render_plan.build_plan(
         platform=destination,
         aspect=aspect,
@@ -546,7 +607,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         onscreen_hook=hook["onscreen_hook"],
         hook_overlay=hook_override,
         audio_preset=audio_preset,
-        caption_font=brand_assets["font_family"],
+        caption_font=caption_font,
         brand={
             "font_asset_id": brand_assets["font_asset_id"],
             "logo_asset_id": brand_assets["logo_asset_id"],
@@ -577,7 +638,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     work = ctx.source_dir(source_id) / RENDER_PREFIX / clip_id
     work.mkdir(parents=True, exist_ok=True)
     paths = render.write_captions(
-        out_words, preset, (out_w, out_h), work, h, font_family=brand_assets["font_family"], text_field=text_field
+        out_words, preset, (out_w, out_h), work, h, font_family=caption_font, text_field=text_field
     )
     mp4 = work / f"{h}.mp4"
     fonts_dir = brand_assets["fonts_dir"] or s.render_fonts_dir or None

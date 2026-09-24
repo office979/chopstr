@@ -13,7 +13,10 @@ Regeln:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+import math
+import os
+from dataclasses import dataclass, field, replace
 
 from .dach_nlp import NEGATIONS
 
@@ -23,7 +26,6 @@ AVG_CHAR_EM = 0.56  # mittlere Zeichenbreite in em für Inter Bold; pro Font mes
 MAX_CPS = 17.0
 BREAK_WORDS = {"und", "aber", "weil", "dass", "denn", "oder", "wenn", "sondern", "also", "obwohl", "damit"}
 TEXT_FIELDS = ("text", "text_norm")
-
 
 def check_text_field(text_field: str | None) -> str:
     """``text`` oder ``text_norm``; alles andere ist ein Programmierfehler."""
@@ -156,6 +158,149 @@ def scaled_preset(preset: str | CaptionPreset, out_w: int, out_h: int) -> Captio
         words_per_card=p.words_per_card,
         extra=dict(p.extra),
     )
+
+
+# Untertitel-Stil, den ein Nutzer je Clip einstellen darf. Der Wertebereich steht hier und nicht in
+# der Oberflaeche: was der Renderer nicht annimmt, darf gar nicht erst eingestellt werden koennen.
+#
+# Die Grenzen sind keine Geschmacksfrage. Unter 28 Punkten ist auf einem Telefon nichts mehr zu
+# lesen, ueber 180 passt kein deutsches Wort mehr in eine Zeile. Mehr als sechs Woerter je
+# Einblendung ist kein Kurzformat mehr, und mehr als vier Zeilen verdecken das Bild.
+STIL_GRENZEN: dict[str, tuple[float, float]] = {
+    "font_px": (28, 180),
+    "words_per_card": (1, 6),
+    "max_lines": (1, 4),
+    "outline_px": (0, 20),
+    "bottom_margin_px": (0, 900),
+}
+STIL_SCHALTER = ("bold", "all_caps", "highlight_words", "box")
+STIL_FARBEN = ("base_color", "highlight_color")
+
+FONTS_DATEI = "caption_fonts.json"
+
+
+def _fonts_pfad() -> str:
+    """Pfad zur gemeinsamen Schriftenliste (packages/design/caption_fonts.json).
+
+    Wie bei der redaktionellen Grundlage liegt die Liste ausserhalb des Workers, damit Oberflaeche
+    und Renderer dieselbe lesen. ``CHOPSTR_CAPTION_FONTS`` sticht, damit ein Image sie woanders
+    ablegen kann.
+    """
+    env = (os.environ.get("CHOPSTR_CAPTION_FONTS") or "").strip()
+    if env:
+        return env
+    hier = os.path.dirname(os.path.abspath(__file__))
+    wurzel = os.path.abspath(os.path.join(hier, "..", "..", ".."))
+    return os.path.join(wurzel, "packages", "design", FONTS_DATEI)
+
+
+_fonts_zwischenspeicher: dict | None = None
+
+
+def schriften() -> dict:
+    """Die Schriftenliste, einmal gelesen und behalten."""
+    global _fonts_zwischenspeicher
+    if _fonts_zwischenspeicher is None:
+        with open(_fonts_pfad(), encoding="utf-8") as f:
+            _fonts_zwischenspeicher = json.load(f)
+    return _fonts_zwischenspeicher
+
+
+def schrift_namen() -> list[str]:
+    return [str(s["id"]) for s in schriften().get("schriften", [])]
+
+
+def schrift_datei(name: str) -> str | None:
+    """Dateiname der Schrift, oder None wenn der Name nicht in der Liste steht."""
+    for s in schriften().get("schriften", []):
+        if str(s["id"]) == name:
+            return str(s.get("datei") or "") or None
+    return None
+
+
+def ass_farbe(wert: str) -> str | None:
+    """``#RRGGBB`` in die ASS-Schreibweise ``&H00BBGGRR``. Bereits gesetzte ASS-Werte gehen durch.
+
+    ASS dreht die Reihenfolge um und stellt die Deckkraft voran. Ein falsch herum uebernommener
+    Wert faellt nicht auf, er sieht nur falsch aus: aus Rot wird Blau.
+    """
+    w = (wert or "").strip()
+    if not w:
+        return None
+    if w.upper().startswith("&H"):
+        return w
+    if w.startswith("#"):
+        w = w[1:]
+    if len(w) != 6 or any(c not in "0123456789abcdefABCDEF" for c in w):
+        return None
+    r, g, b = w[0:2], w[2:4], w[4:6]
+    return f"&H00{b}{g}{r}".upper()
+
+
+def _zahl_im_rahmen(wert, grenzen: tuple[float, float]) -> int | None:
+    """Zahl auf den erlaubten Bereich ziehen, oder None wenn es keine brauchbare Zahl ist.
+
+    NaN muss ausdruecklich abgefangen werden. ``min(180, nan)`` liefert 180, weil jeder Vergleich
+    mit NaN falsch ist - aus einem unsinnigen Wert wuerde damit stillschweigend die groesste
+    erlaubte Schrift. Ein Bool ist ebenfalls keine Zahl: ``True`` wuerde sonst zu 1.
+    """
+    if isinstance(wert, bool):
+        return None
+    try:
+        z = float(wert)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(z):
+        return None
+    unten, oben = grenzen
+    return int(round(max(unten, min(oben, z))))
+
+
+def style_anwenden(preset: CaptionPreset, style: dict | None, skala: float = 1.0) -> CaptionPreset:
+    """Nutzereinstellungen auf ein Preset legen. Unbekanntes und Unsinniges wird verworfen.
+
+    Die eingestellten Werte gelten immer fuer 1080x1920, weil die Oberflaeche in dieser Groesse
+    zeigt. ``skala`` ist ``out_h / H`` und rechnet sie auf die Ausgabegroesse um. Den Faktor aus dem
+    Preset zurueckzurechnen waere falsch: die Presets haben unterschiedliche Safe Zones, aus einem
+    Verhaeltnis von 1610 zu 1600 wuerde eine Skalierung von 1,006 statt 1,0.
+
+    Es wird NICHTS abgelehnt und nichts geworfen: ein unsinniger Wert darf keinen Render stoppen.
+    Er wird auf den erlaubten Bereich gezogen oder uebergangen, und das Ergebnis bleibt ein
+    brauchbares Preset.
+    """
+    if not style:
+        return preset
+    aenderungen: dict = {}
+
+    name = str(style.get("font") or "").strip()
+    if name and name in schrift_namen():
+        aenderungen["font"] = name
+
+    for feld, grenzen in STIL_GRENZEN.items():
+        if feld not in style:
+            continue
+        z = _zahl_im_rahmen(style[feld], grenzen)
+        if z is None:
+            continue
+        aenderungen[feld] = z if feld in ("words_per_card", "max_lines") else max(0, int(round(z * skala)))
+
+    for feld in STIL_SCHALTER:
+        if feld in style and isinstance(style[feld], bool):
+            aenderungen[feld] = style[feld]
+
+    for feld in STIL_FARBEN:
+        if feld in style:
+            farbe = ass_farbe(str(style[feld] or ""))
+            if farbe:
+                aenderungen[feld] = farbe
+
+    # Ein Wort je Einblendung kann nie zwei Zeilen fuellen. Das still mitzuziehen ist richtig: sonst
+    # rechnet ``max_chars`` mit einer Zeile, die es nicht gibt.
+    if aenderungen.get("words_per_card") == 1:
+        aenderungen["max_lines"] = 1
+    return replace(preset, **aenderungen) if aenderungen else preset
+
+
 
 
 def safe_zone_margins(p: CaptionPreset, out_w: int = W, out_h: int = H) -> dict[str, int]:
@@ -292,10 +437,18 @@ def _ass_escape(text: str) -> str:
 
 
 def card_lines(card: list[dict], preset: CaptionPreset, text_field: str = "text") -> list[list[tuple[dict, str]]]:
-    """Zeilen einer Karte als Liste von (Wort, Textstück)-Paaren, inklusive Silbentrennung."""
+    """Zeilen einer Karte als Liste von (Wort, Textstück)-Paaren, inklusive Silbentrennung.
+
+    ``all_caps`` wird hier angewendet und nicht erst beim Setzen: Grossbuchstaben brauchen mehr
+    Platz, und die Silbentrennung muss mit der Form rechnen, die spaeter im Bild steht. Beim
+    deutschen ``ß`` macht ``upper()`` daraus ``SS``, also ein Zeichen mehr - genau deshalb darf die
+    Umwandlung nicht hinter der Laengenrechnung passieren."""
     pieces: list[tuple[dict, str]] = []
     for w in card:
-        for piece in hyphenate(word_text(w, text_field), preset.max_chars):
+        text = word_text(w, text_field)
+        if preset.all_caps:
+            text = text.upper()
+        for piece in hyphenate(text, preset.max_chars):
             pieces.append((w, piece))
     tokens = [p for _, p in pieces]
     lines_text = wrap_lines(tokens, preset.max_chars, preset.max_lines)

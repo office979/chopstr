@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { PageShell } from "@/components/layout/PageShell";
 import { getRepo } from "@/lib/repo";
+import { getPublishingRepo } from "@/lib/repo/publishing";
+import { stilPruefen } from "@/lib/clips/caption-style";
 import { requireSession } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
 import { mediaUrl } from "@/lib/clips/labels";
@@ -26,9 +28,12 @@ export default async function ClipPage({ params }: Props) {
   const [source, clip] = await Promise.all([repo.getSource(id), repo.getClip(clipId)]);
   if (!source || !clip || clip.source_id !== id) notFound();
 
-  const [candidate, transcript] = await Promise.all([
+  const publishing = getPublishingRepo();
+  const [candidate, transcript, extras, captionPresets] = await Promise.all([
     clip.candidate_id ? repo.getCandidate(clip.candidate_id) : Promise.resolve(null),
     repo.getCurrentTranscript(id),
+    publishing.getClipExtras([clipId]),
+    publishing.listCaptionPresets(),
   ]);
 
   const mediaBase = process.env.NEXT_PUBLIC_MEDIA_BASE_URL ?? null;
@@ -68,6 +73,11 @@ export default async function ClipPage({ params }: Props) {
         wordTo={wordTo}
         speakerNames={transcript?.stats.speaker_names ?? {}}
         canEdit={can(session.role, "transcript.edit")}
+        clipId={clip.id}
+        /* Durch dieselbe Prüfung wie an der Schnittstelle: eine alte Zeile kann Felder enthalten,
+         * die es nicht mehr gibt, und die sollen nicht in die Oberfläche durchschlagen. */
+        captionStyle={stilPruefen(extras[0]?.caption_style)}
+        captionPresets={captionPresets.map((p) => ({ id: p.id, name: p.name, style: p.style }))}
       />
     </PageShell>
   );

@@ -3,6 +3,7 @@ import { currentSession } from "@/lib/session";
 import { demoRepo } from "@/lib/repo/demo";
 import type { Clip } from "@/lib/repo/types";
 import type {
+  CaptionPresetRow,
   ClipExtras,
   ClipWithExtras,
   ConnectionStatus,
@@ -29,6 +30,7 @@ interface DemoPublishingState {
   experiments: Experiment[];
   series: Series[];
   extras: Map<string, ClipExtras>;
+  captionPresets: CaptionPresetRow[];
   clones: Clip[];
   reports: WeeklyReport[];
   weeklyReportEnabled: boolean;
@@ -48,6 +50,7 @@ function state(): DemoPublishingState {
       experiments: [],
       series: [],
       extras: new Map(),
+      captionPresets: [],
       clones: [],
       reports: [],
       weeklyReportEnabled: true,
@@ -64,7 +67,7 @@ function extrasOf(id: string): ClipExtras {
   const s = state();
   const found = s.extras.get(id);
   if (found) return found;
-  const fresh: ClipExtras = { id, experiment_id: null, variant: null, series_id: null, series_index: null, reframe_override: null };
+  const fresh: ClipExtras = { id, experiment_id: null, variant: null, series_id: null, series_index: null, reframe_override: null, caption_style: {} };
   s.extras.set(id, fresh);
   return fresh;
 }
@@ -225,6 +228,35 @@ export const publishingDemoRepo: PublishingRepo & {
     const e = extrasOf(clipId);
     Object.assign(e, patch);
     return e;
+  },
+
+  async listCaptionPresets() {
+    return [...state().captionPresets].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+  },
+  async saveCaptionPreset(name, style) {
+    const vorhanden = state().captionPresets.find((p) => p.name.trim().toLowerCase() === name.trim().toLowerCase());
+    if (vorhanden) {
+      vorhanden.style = style;
+      vorhanden.name = name;
+      vorhanden.updated_at = now();
+      return vorhanden;
+    }
+    const row: CaptionPresetRow = {
+      id: randomUUID(),
+      workspace_id: (await currentSession()).workspaceId,
+      name,
+      style,
+      created_at: now(),
+      updated_at: now(),
+    };
+    state().captionPresets.unshift(row);
+    return row;
+  },
+  async deleteCaptionPreset(id) {
+    const i = state().captionPresets.findIndex((p) => p.id === id);
+    if (i < 0) return false;
+    state().captionPresets.splice(i, 1);
+    return true;
   },
 
   async createExperiment(input) {

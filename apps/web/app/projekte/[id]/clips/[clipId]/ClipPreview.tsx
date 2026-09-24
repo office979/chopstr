@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Mark } from "@/components/brand/Mark";
 import { Grain } from "@/components/ui/Grain";
@@ -26,11 +26,14 @@ interface Props {
   onTime: (secondsInSource: number) => void;
   /* Sprung an eine Stelle des ganzen Videos, von außen gesetzt */
   seekTo: { at: number; nonce: number } | null;
+  /* Über das Bild gelegt, zum Beispiel die Untertitel-Vorschau. Nimmt keine Klicks an, damit die
+   * Steuerung des Browsers erreichbar bleibt. */
+  overlay?: ReactNode;
 }
 
 /* Vorschau des Clips. Die Steuerung ist die des Browsers: abspielen, anhalten, schieben.
  * Mehr steht hier nicht, der Schnitt kommt später. */
-export function ClipPreview({ src, posterSrc, aspect, timeOffset, trim, onTime, seekTo }: Props) {
+export function ClipPreview({ src, posterSrc, aspect, timeOffset, trim, onTime, seekTo, overlay }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   /* Läuft das ganze Video, soll es dort beginnen, wo der Clip beginnt. */
@@ -63,34 +66,42 @@ export function ClipPreview({ src, posterSrc, aspect, timeOffset, trim, onTime, 
           <p className="relative max-w-[240px] px-4 text-center text-sm text-text-2">
             Der Clip ist noch nicht gebaut. Sobald er fertig ist, läuft er hier.
           </p>
+          {/* Der Untertitel-Stil gehört auch hierher: sonst könnte man ihn erst einstellen, wenn
+            * der Clip schon gebaut ist, und müsste ihn danach noch einmal bauen lassen. */}
+          {overlay}
         </div>
       </GlassCard>
     );
   }
 
+  /* Das Overlay muss genau auf dem Bild liegen, nicht auf der Karte: das Video ist hochkant und
+   * schmaler als die Karte. Deshalb ein Behälter in Bildbreite (w-fit) statt inset-0 auf der Karte. */
   return (
     <GlassCard padding="none" className="overflow-hidden">
-      <video
-        ref={videoRef}
-        src={src}
-        poster={posterSrc ?? undefined}
-        controls
-        playsInline
-        preload="metadata"
-        aria-label="Clip abspielen"
-        className="mx-auto max-h-[62dvh] w-auto bg-black"
-        style={{ aspectRatio: trim ? undefined : ASPECT_RATIO_CSS[aspect] }}
-        onTimeUpdate={(e) => {
-          const video = e.currentTarget;
-          if (trim && trim.end != null && video.currentTime > trim.end) {
-            video.pause();
-            video.currentTime = trim.end;
-          }
-          onTime(video.currentTime + timeOffset);
-        }}
-      >
-        Dein Browser kann dieses Video nicht abspielen.
-      </video>
+      <div className="relative mx-auto w-fit">
+        <video
+          ref={videoRef}
+          src={src}
+          poster={posterSrc ?? undefined}
+          controls
+          playsInline
+          preload="metadata"
+          aria-label="Clip abspielen"
+          className="block max-h-[62dvh] w-auto bg-black"
+          style={{ aspectRatio: trim ? undefined : ASPECT_RATIO_CSS[aspect] }}
+          onTimeUpdate={(e) => {
+            const video = e.currentTarget;
+            if (trim && trim.end != null && video.currentTime > trim.end) {
+              video.pause();
+              video.currentTime = trim.end;
+            }
+            onTime(video.currentTime + timeOffset);
+          }}
+        >
+          Dein Browser kann dieses Video nicht abspielen.
+        </video>
+        {overlay}
+      </div>
     </GlassCard>
   );
 }

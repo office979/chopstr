@@ -14,7 +14,8 @@
     "test": "npm run test --workspace apps/web --if-present && npm run test:worker",
     "test:worker": "cd workers && (uv run pytest -q || python3 -m pytest -q)",
     "migrate": "node scripts/migrate.mjs",
-    "residency:check": "cd workers && (uv run pytest -q tests/test_residency.py || python3 -m pytest -q tests/test_residency.py)"
+    "residency:check": "cd workers && (uv run pytest -q tests/test_residency.py || python3 -m pytest -q tests/test_residency.py)",
+    "fonts:sync": "node scripts/sync-fonts.mjs"
   },
   "engines": {
     "node": ">=20"

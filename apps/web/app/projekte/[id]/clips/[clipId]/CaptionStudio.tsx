@@ -119,9 +119,9 @@ export function CaptionVorschau({ stil, woerter, zeit }: VorschauProps) {
             /* Die Kontur von libass wird hier mit vier Schatten nachgestellt. Genau ist das nicht,
              * aber es zeigt, wie viel Gewicht die Kontur dem Text gibt. */
             textShadow: s.outline_px
-              ? `0 0 ${(s.outline_px / BILD_B) * 100}cqw #000, ${(s.outline_px / BILD_B) * 60}cqw 0 #000, -${(s.outline_px / BILD_B) * 60}cqw 0 #000, 0 ${(s.outline_px / BILD_B) * 60}cqw #000, 0 -${(s.outline_px / BILD_B) * 60}cqw #000`
+              ? `0 0 ${(s.outline_px / BILD_B) * 100}cqw ${s.outline_color}, ${(s.outline_px / BILD_B) * 60}cqw 0 ${s.outline_color}, -${(s.outline_px / BILD_B) * 60}cqw 0 ${s.outline_color}, 0 ${(s.outline_px / BILD_B) * 60}cqw ${s.outline_color}, 0 -${(s.outline_px / BILD_B) * 60}cqw ${s.outline_color}`
               : "none",
-            background: s.box ? "rgba(0,0,0,0.55)" : "transparent",
+            background: s.box ? s.box_color : "transparent",
             padding: s.box ? "0.12em 0.3em" : 0,
             borderRadius: s.box ? "0.1em" : 0,
           }}
@@ -441,6 +441,8 @@ export function CaptionStudio({
           <section className="flex flex-col gap-4 border-t border-line pt-5">
             <Schriftwahl wert={s.font} disabled={!canEdit} onChange={(v) => setzen({ font: v })} />
             <Farbwahl label="Textfarbe" wert={s.base_color} disabled={!canEdit} onChange={(v) => setzen({ base_color: v })} />
+            <Farbwahl label="Farbe der Kontur" wert={s.outline_color} disabled={!canEdit || s.outline_px === 0} onChange={(v) => setzen({ outline_color: v })} />
+            <Farbwahl label="Farbe des Kastens" wert={s.box_color} disabled={!canEdit || !s.box} onChange={(v) => setzen({ box_color: v })} />
             <Toggle checked={s.bold} disabled={!canEdit} onChange={(v) => setzen({ bold: v })} label="Fett" />
             <Toggle checked={s.all_caps} disabled={!canEdit} onChange={(v) => setzen({ all_caps: v })} label="Großbuchstaben" />
             <Toggle
@@ -520,10 +522,10 @@ function LookProbe({ look }: { look: Look }) {
     >
       <span
         style={{
-          background: v.box ? "rgba(0,0,0,0.6)" : "transparent",
+          background: v.box ? v.box_color : "transparent",
           padding: v.box ? "2px 6px" : 0,
           borderRadius: v.box ? 3 : 0,
-          textShadow: v.outline_px ? `0 0 ${Math.max(1, v.outline_px / 3)}px #000, 0 1px 2px #000` : "none",
+          textShadow: v.outline_px ? `0 0 ${Math.max(1, v.outline_px / 3)}px ${v.outline_color}, 0 1px 2px ${v.outline_color}` : "none",
         }}
       >
         Wort <span style={{ color: v.highlight_words ? v.highlight_color : v.base_color }}>Wort</span>

@@ -272,3 +272,33 @@ def test_ein_unveraenderter_stil_laesst_den_hash_stehen():
         return render_plan.plan_hash(plan, 1, 1)
 
     assert hash_fuer() == hash_fuer()
+
+
+# -- Kontur- und Kastenfarbe -----------------------------------------------------------------------
+def test_konturfarbe_landet_im_ass():
+    """Beides war fest schwarz; wer eine farbige Kontur wollte, kam nicht heran."""
+    p = c.style_anwenden(c.preset_for("tiktok_words"), {"outline_color": "#ff3b6b"})
+    ass = c.to_ass(_woerter(2), preset=p)
+    zeile = next(ln for ln in ass.splitlines() if ln.startswith("Style: Cap"))
+    assert c.ass_farbe("#ff3b6b") in zeile
+
+
+def test_kastenfarbe_wirkt_nur_mit_kasten():
+    mit = c.style_anwenden(c.preset_for("tiktok_words"), {"box": True, "box_color": "#0000ff"})
+    ohne = c.style_anwenden(c.preset_for("tiktok_words"), {"box": False, "box_color": "#0000ff"})
+    zeile_mit = next(ln for ln in c.to_ass(_woerter(2), preset=mit).splitlines() if ln.startswith("Style: Cap"))
+    zeile_ohne = next(ln for ln in c.to_ass(_woerter(2), preset=ohne).splitlines() if ln.startswith("Style: Cap"))
+    assert c.ass_farbe("#0000ff") in zeile_mit
+    assert c.ass_farbe("#0000ff") not in zeile_ohne
+
+
+def test_ohne_angabe_bleibt_die_kontur_schwarz():
+    zeile = next(ln for ln in c.to_ass(_woerter(2), preset=c.preset_for("tiktok_words")).splitlines() if ln.startswith("Style: Cap"))
+    assert "&H00000000" in zeile
+
+
+def test_die_neuen_farben_stehen_im_plan():
+    p = c.style_anwenden(c.scaled_preset("reels_words", 1080, 1920), {"outline_color": "#ff3b6b", "box_color": "#112233"}, 1.0)
+    block = render_plan.caption_block(p, 1080, 1920, cards=10, bereits_skaliert=True)
+    assert block["outline_color"] == c.ass_farbe("#ff3b6b")
+    assert block["box_color"] == c.ass_farbe("#112233")

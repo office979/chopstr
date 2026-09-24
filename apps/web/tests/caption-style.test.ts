@@ -168,6 +168,8 @@ describe("passtZumRender", () => {
     highlight: VORGABE.highlight_words,
     base_color: assFarbe(VORGABE.base_color),
     highlight_color: assFarbe(VORGABE.highlight_color),
+    outline_color: assFarbe(VORGABE.outline_color),
+    box_color: assFarbe(VORGABE.box_color),
     safe_zone: { top: 210, left: 60, right: 120, bottom: 310 },
     baseline_y: 1920 - 310 - VORGABE.bottom_margin_px,
   };
@@ -193,6 +195,7 @@ describe("passtZumRender", () => {
       { font: "Anton" },
       { base_color: "#00ff9c" },
       { highlight_color: "#ff3b6b" },
+      { outline_color: "#ff3b6b" },
       { bottom_margin_px: 420 },
     ];
     for (const a of aenderungen) {

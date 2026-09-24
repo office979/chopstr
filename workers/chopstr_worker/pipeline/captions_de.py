@@ -72,6 +72,10 @@ class CaptionPreset:
     max_lines: int = 2
     base_color: str = "&H00FFFFFF"
     highlight_color: str = "&H0000D7FF"
+    # Farbe der Kontur und des Kastens dahinter. Beides war fest schwarz; wer eine farbige Kontur
+    # oder einen farbigen Balken wollte, kam nicht heran.
+    outline_color: str = "&H00000000"
+    box_color: str = "&H80000000"
     outline_px: int = 5
     box: bool = False
     bottom_margin_px: int = 260  # Abstand der Textunterkante zur Unterkante der Safe Zone
@@ -150,6 +154,8 @@ def scaled_preset(preset: str | CaptionPreset, out_w: int, out_h: int) -> Captio
         max_lines=p.max_lines,
         base_color=p.base_color,
         highlight_color=p.highlight_color,
+        outline_color=p.outline_color,
+        box_color=p.box_color,
         outline_px=int(round(p.outline_px * fy)),
         box=p.box,
         bottom_margin_px=int(round(p.bottom_margin_px * fy)),
@@ -174,7 +180,7 @@ STIL_GRENZEN: dict[str, tuple[float, float]] = {
     "bottom_margin_px": (0, 900),
 }
 STIL_SCHALTER = ("bold", "all_caps", "highlight_words", "box")
-STIL_FARBEN = ("base_color", "highlight_color")
+STIL_FARBEN = ("base_color", "highlight_color", "outline_color", "box_color")
 
 FONTS_DATEI = "caption_fonts.json"
 
@@ -480,12 +486,13 @@ def to_ass(
     play_w, play_h = play_res
     margin_v = play_h - p.baseline_y
     border_style = 3 if p.box else 1
-    back = "&H80000000" if p.box else "&H64000000"
+    # Ohne Kasten dient BackColour dem Schatten; mit Kasten ist es der Balken hinter dem Text.
+    back = p.box_color if p.box else "&H64000000"
     head = (
         f"[Script Info]\nScriptType: v4.00+\nPlayResX: {play_w}\nPlayResY: {play_h}\nWrapStyle: 2\n\n"
         "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, "
         "Alignment, MarginL, MarginR, MarginV, Outline, Shadow, BorderStyle\n"
-        f"Style: Cap,{font},{p.font_px},{p.base_color},&H00000000,{back},{-1 if p.bold else 0},2,"
+        f"Style: Cap,{font},{p.font_px},{p.base_color},{p.outline_color},{back},{-1 if p.bold else 0},2,"
         f"{p.safe.left},{play_w - p.safe.right},{margin_v},{p.outline_px},0,{border_style}\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Text\n"
     )

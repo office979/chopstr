@@ -84,6 +84,12 @@ export default async function ClipPage({ params }: Props) {
         shots={clip.render_plan?.shots ?? []}
         quelleBreite={source.width ?? null}
         gerenderteCaptions={(clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null}
+        /* Die Vorschau rechnet den Ausschnitt selbst aus, dafuer braucht sie beide Groessen. Die
+         * Ausgabegroesse steht im Plan; ohne Plan gilt 1080x1920, das Format aller neuen Clips. */
+        srcW={source.width ?? null}
+        srcH={source.height ?? null}
+        outW={clip.render_plan?.output.width ?? 1080}
+        outH={clip.render_plan?.output.height ?? 1920}
       />
     </PageShell>
   );

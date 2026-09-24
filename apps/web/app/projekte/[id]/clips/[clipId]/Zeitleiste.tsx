@@ -47,6 +47,35 @@ export function personName(x: number, alle: number[]): string {
 /* Drei Stufen statt eines Schiebereglers. „Wie nah?" hat keine sinnvolle Zwischenstufe: entweder
  * das Bild steht wie es ist, oder es geht spuerbar naeher heran. Ein Regler von 1,0 bis 1,8 laedt
  * dazu ein, 1,07 einzustellen, und das sieht niemand. */
+export interface Abschnitt {
+  vonS: number;
+  bisS: number;
+  marke: Zeitmarke | null;
+}
+
+/* Die Marken als Abschnitte lesen: eine Marke gilt „ab hier bis zur naechsten".
+ *
+ * Das ist der Unterschied zu Keyframes, wie sie ein Schnittprogramm kennt. Dort ist ein Punkt ein
+ * Wert zu einem Zeitpunkt, und zwischen zwei Punkten wird gerechnet. Hier gilt eine Entscheidung
+ * unveraendert bis zur naechsten - das ist leichter zu verstehen und deckt ab, was ein Clip
+ * braucht. Deshalb werden die Marken auch als Abschnitte angezeigt und nicht als Punkte: die
+ * Anzeige soll das Modell zeigen, nicht ein anderes vortaeuschen. */
+export function abschnitte(marken: Zeitmarke[], dauerS: number): Abschnitt[] {
+  const sortiert = [...marken].filter((m) => m.ab_s < dauerS).sort((a, b) => a.ab_s - b.ab_s);
+  const aus: Abschnitt[] = [];
+  let von = 0;
+  let laufende: Zeitmarke | null = null;
+  for (const m of sortiert) {
+    if (m.ab_s > von + 1e-6) {
+      aus.push({ vonS: von, bisS: m.ab_s, marke: laufende });
+      von = m.ab_s;
+    }
+    laufende = m;
+  }
+  aus.push({ vonS: von, bisS: dauerS, marke: laufende });
+  return aus;
+}
+
 export const NAEHE = [
   { id: 1.0, name: "Normal" },
   { id: 1.3, name: "Näher" },
@@ -136,6 +165,13 @@ export function Zeitleiste({
   };
 
   const etwasGesetzt = gueltig.zoom > 1.0 || gueltig.geteilt || markeHier != null;
+  const stuecke = useMemo(() => abschnitte(zeitmarken, dauerS), [zeitmarken, dauerS]);
+  /* Fuer die Beschriftung reicht die Sitzordnung aus irgendeinem Abschnitt: sie aendert sich
+   * innerhalb eines Clips selten, und es geht nur um links/Mitte/rechts. */
+  const auswahlAllerShots = useMemo(
+    () => [...new Set(shots.flatMap((sh) => sh.auswahl ?? []))].sort((a, b) => a - b),
+    [shots],
+  );
 
   return (
     <div className="flex flex-col gap-3">
@@ -223,6 +259,34 @@ export function Zeitleiste({
       <div className="flex items-center justify-between text-sm text-text-2">
         <span className="tabular-nums">{sekunden(imClip)}</span>
         <span className="tabular-nums">{sekunden(dauerS)}</span>
+      </div>
+
+      {/* Die Abschnitte: was gilt wo. Ein duenner Strich auf dem Streifen sagt niemandem, dass er
+        * dort etwas gesetzt hat; eine beschriftete Flaeche schon. Breite nach Dauer, damit sich die
+        * Leiste mit dem Streifen darueber deckt. */}
+      <div className="flex w-full gap-[2px]" aria-label="Abschnitte">
+        {stuecke.map((a) => {
+          const hier = imClip >= a.vonS && imClip < a.bisS;
+          return (
+            <button
+              key={a.vonS}
+              type="button"
+              onClick={() => onSeek(clipStart + a.vonS + 0.05)}
+              title={`Ab ${sekunden(a.vonS)}`}
+              style={{ width: `${((a.bisS - a.vonS) / Math.max(dauerS, 1e-6)) * 100}%` }}
+              className={cn(
+                "transition-soft min-w-0 overflow-hidden rounded-[6px] border px-2 py-1.5 text-left",
+                hier ? "border-white/60 bg-white/10" : "border-line hover:border-line-strong",
+                a.marke ? "" : "border-dashed",
+              )}
+            >
+              <span className="block truncate text-xs tabular-nums text-text-2">{sekunden(a.vonS)}</span>
+              <span className={cn("block truncate text-xs", hier ? "text-text" : "text-text-3")}>
+                {beschreibung(a.marke, auswahlAllerShots)}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Was an dieser Stelle gilt, und was man daran aendern kann. Alles in einem Kasten, damit der
@@ -329,4 +393,15 @@ function Lage({ x, alle, breite }: { x: number; alle: number[]; breite: number |
       ))}
     </span>
   );
+}
+
+/* Was in diesem Abschnitt gilt, in einem kurzen Satz. „x=2582, zoom=1.3" hilft niemandem. */
+export function beschreibung(marke: Zeitmarke | null, auswahl: number[]): string {
+  if (!marke) return "Automatisch";
+  const teile: string[] = [];
+  if (marke.layout === "geteilt") teile.push("Beide");
+  else if (marke.x != null && auswahl.length > 1) teile.push(personName(marke.x, auswahl));
+  const n = NAEHE.find((x) => Math.abs(x.id - (marke.zoom ?? 1)) < 0.05);
+  if (n && n.id > 1) teile.push(n.name.toLowerCase());
+  return teile.length ? teile.join(", ") : "Von Hand";
 }

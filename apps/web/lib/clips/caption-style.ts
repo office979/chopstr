@@ -27,6 +27,9 @@ export type CaptionStyle = {
   max_lines?: number;
   base_color?: string;
   highlight_color?: string;
+  /* Farbe der Kontur und des Kastens dahinter. Beides war lange fest schwarz. */
+  outline_color?: string;
+  box_color?: string;
   highlight_words?: boolean;
   outline_px?: number;
   box?: boolean;
@@ -167,7 +170,7 @@ export function passtZumRender(stil: CaptionStyle, geplant: Record<string, unkno
     if (Boolean(geplant[dort]) !== Boolean(s[hier])) return false;
   }
   if (String(geplant.font ?? "") !== s.font) return false;
-  for (const [hier, dort] of [["base_color", "base_color"], ["highlight_color", "highlight_color"]] as const) {
+  for (const [hier, dort] of [["base_color", "base_color"], ["highlight_color", "highlight_color"], ["outline_color", "outline_color"]] as const) {
     if (!(dort in geplant)) return false;
     if (String(geplant[dort] ?? "").toUpperCase() !== assFarbe(s[hier])) return false;
   }
@@ -216,7 +219,7 @@ export function stilPruefen(roh: unknown): CaptionStyle {
   for (const feld of ["bold", "all_caps", "highlight_words", "box"] as const) {
     if (typeof q[feld] === "boolean") aus[feld] = q[feld] as boolean;
   }
-  for (const feld of ["base_color", "highlight_color"] as const) {
+  for (const feld of ["base_color", "highlight_color", "outline_color", "box_color"] as const) {
     const w = q[feld];
     if (typeof w === "string" && HEX.test(w)) aus[feld] = w.toLowerCase();
   }
@@ -236,6 +239,8 @@ export const VORGABE: Required<Omit<CaptionStyle, "preset">> = {
   max_lines: 1,
   base_color: "#ffffff",
   highlight_color: "#ffd700",
+  outline_color: "#000000",
+  box_color: "#000000",
   highlight_words: true,
   outline_px: 5,
   box: false,

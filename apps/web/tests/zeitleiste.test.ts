@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import { markenPruefen } from "@/app/api/projects/[id]/clips/[clipId]/zeitmarken/route";
-import { NAEHE, personName } from "@/app/projekte/[id]/clips/[clipId]/Zeitleiste";
+import { abschnitte, beschreibung, NAEHE, personName } from "@/app/projekte/[id]/clips/[clipId]/Zeitleiste";
 import { aktiverLook, LOOKS, mitVorgabe } from "@/lib/clips/caption-style";
 
 describe("markenPruefen", () => {
@@ -154,5 +154,69 @@ describe("Nähe-Stufen", () => {
     for (let i = 1; i < NAEHE.length; i += 1) {
       expect(NAEHE[i].id - NAEHE[i - 1].id).toBeGreaterThanOrEqual(0.25);
     }
+  });
+});
+
+describe("abschnitte", () => {
+  it("ohne Marken gibt es einen Abschnitt über den ganzen Clip", () => {
+    expect(abschnitte([], 40)).toEqual([{ vonS: 0, bisS: 40, marke: null }]);
+  });
+
+  it("eine Marke teilt in davor und danach", () => {
+    const m = { ab_s: 12, x: 400 };
+    expect(abschnitte([m], 40)).toEqual([
+      { vonS: 0, bisS: 12, marke: null },
+      { vonS: 12, bisS: 40, marke: m },
+    ]);
+  });
+
+  it("eine Marke bei null hat kein Davor", () => {
+    const m = { ab_s: 0, zoom: 1.3 };
+    expect(abschnitte([m], 40)).toEqual([{ vonS: 0, bisS: 40, marke: m }]);
+  });
+
+  it("mehrere Marken lösen sich der Reihe nach ab, egal wie sie ankommen", () => {
+    const a = { ab_s: 20, zoom: 1.6 };
+    const b = { ab_s: 8, x: 900 };
+    expect(abschnitte([a, b], 40).map((x) => [x.vonS, x.bisS, x.marke])).toEqual([
+      [0, 8, null],
+      [8, 20, b],
+      [20, 40, a],
+    ]);
+  });
+
+  it("die Abschnitte decken den Clip lückenlos ab", () => {
+    const s = abschnitte([{ ab_s: 5, x: 1 }, { ab_s: 22, zoom: 1.3 }], 40);
+    expect(s[0].vonS).toBe(0);
+    expect(s[s.length - 1].bisS).toBe(40);
+    for (let i = 1; i < s.length; i += 1) expect(s[i].vonS).toBe(s[i - 1].bisS);
+  });
+
+  it("übergeht Marken hinter dem Ende", () => {
+    /* Nach einem Kürzen des Clips kann eine Marke außerhalb liegen; ein Abschnitt mit negativer
+     * Breite wäre in der Anzeige unsichtbar und in der Rechnung Unsinn. */
+    expect(abschnitte([{ ab_s: 99, x: 400 }], 40)).toEqual([{ vonS: 0, bisS: 40, marke: null }]);
+  });
+});
+
+describe("beschreibung", () => {
+  it("ohne Marke entscheidet die Automatik", () => {
+    expect(beschreibung(null, [400, 1400])).toBe("Automatisch");
+  });
+
+  it("nennt Person und Nähe in einem Satz", () => {
+    expect(beschreibung({ ab_s: 1, x: 1400, zoom: 1.3 }, [400, 1400])).toBe("rechts, näher");
+  });
+
+  it("nennt beim geteilten Bild beide statt einer Person", () => {
+    expect(beschreibung({ ab_s: 1, x: 400, layout: "geteilt" }, [400, 1400])).toBe("Beide");
+  });
+
+  it("lässt die Person weg, wenn es gar keine Wahl gab", () => {
+    expect(beschreibung({ ab_s: 1, x: 400, zoom: 1.6 }, [400])).toBe("ganz nah");
+  });
+
+  it("sagt wenigstens, dass von Hand gesetzt wurde", () => {
+    expect(beschreibung({ ab_s: 1, zoom: 1 }, [])).toBe("Von Hand");
   });
 });

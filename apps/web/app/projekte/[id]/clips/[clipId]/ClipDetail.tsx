@@ -11,8 +11,9 @@ import { ASPECT_LABELS, formatClipDuration } from "@/lib/clips/labels";
 import type { Aspect, FilmstripMeta, RenderShot, TranscriptVersion, TranscriptWord, Zeitmarke } from "@/lib/repo/types";
 import { Zeitleiste } from "./Zeitleiste";
 import { ClipPreview } from "./ClipPreview";
+import { LiveVorschau } from "./LiveVorschau";
 import { ClipTextEditor } from "./ClipTextEditor";
-import { CaptionStudio, CaptionVorschau, type GespeicherteVorlage } from "./CaptionStudio";
+import { CaptionStudio, type GespeicherteVorlage } from "./CaptionStudio";
 import { passtZumRender, type CaptionStyle } from "@/lib/clips/caption-style";
 
 interface Correction {
@@ -41,6 +42,10 @@ interface Props {
   clipId: string;
   /* Der ``captions``-Block des Renderplans: was im Bild wirklich eingebrannt ist. */
   gerenderteCaptions: Record<string, unknown> | null;
+  srcW: number | null;
+  srcH: number | null;
+  outW: number;
+  outH: number;
   filmstripSrc: string | null;
   filmstripMeta: FilmstripMeta | null;
   zeitmarken: Zeitmarke[];
@@ -69,6 +74,10 @@ export function ClipDetail({
   captionPresets,
   clipId,
   gerenderteCaptions,
+  srcW,
+  srcH,
+  outW,
+  outH,
   filmstripSrc,
   filmstripMeta,
   zeitmarken: markenAnfang,
@@ -98,6 +107,9 @@ export function ClipDetail({
    * brauchen. Gespeichert wird sofort beim Setzen, nicht ueber einen zweiten Knopf: eine Marke ist
    * eine einzelne kleine Entscheidung, und wer sie trifft, will nicht danach noch speichern. */
   const [marken, setMarken] = useState<Zeitmarke[]>(markenAnfang);
+  /* Vorschau aus der Quelle (zeigt jede Aenderung sofort) oder das gebaute Video (zeigt das
+   * Ergebnis des letzten Laufs). Voreingestellt ist die Vorschau: wer hier ist, stellt etwas ein. */
+  const [zeigeGebautes, setZeigeGebautes] = useState(false);
 
   const hasText = wordFrom != null && wordTo != null && wordTo >= wordFrom;
 
@@ -118,8 +130,8 @@ export function ClipDetail({
    * Renderplan und nicht gegen den gespeicherten Stand: nach dem Speichern ist nichts mehr
    * „geaendert", im Bild stehen aber weiter die alten. */
   const captionsVeraltet = useMemo(
-    () => Boolean(clipSrc) && !passtZumRender(stil, gerenderteCaptions),
-    [clipSrc, stil, gerenderteCaptions],
+    () => Boolean(clipSrc) && zeigeGebautes && !passtZumRender(stil, gerenderteCaptions),
+    [clipSrc, zeigeGebautes, stil, gerenderteCaptions],
   );
 
   /* Liegt der fertige Clip vor, läuft er selbst. Sonst läuft das ganze Video und bleibt am Ende
@@ -295,7 +307,31 @@ export function ClipDetail({
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] lg:items-start">
         <div className="lg:sticky lg:top-8">
-          <ClipPreview
+          {clipSrc && (
+            <div className="mb-3 flex gap-1 rounded-pill border border-line p-1">
+              {[
+                { an: false, name: "Vorschau", titel: "Zeigt, was jetzt eingestellt ist" },
+                { an: true, name: "Gebautes Video", titel: "Das Ergebnis des letzten Bauens" },
+              ].map((w) => (
+                <button
+                  key={w.name}
+                  type="button"
+                  title={w.titel}
+                  onClick={() => setZeigeGebautes(w.an)}
+                  aria-pressed={zeigeGebautes === w.an}
+                  className={cn(
+                    "transition-soft flex-1 rounded-pill px-3 py-1.5 text-sm",
+                    zeigeGebautes === w.an ? "bg-white/10 text-text" : "text-text-2 hover:text-text",
+                  )}
+                >
+                  {w.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {clipSrc && zeigeGebautes ? (
+            <ClipPreview
             src={clipSrc ?? sourceSrc}
             posterSrc={posterSrc}
             aspect={aspect}
@@ -306,8 +342,28 @@ export function ClipDetail({
             seekTo={seekTo}
             /* Die Vorschau der Untertitel NUR, solange das Quellvideo laeuft. Im fertigen Clip sind
              * sie eingebrannt; beides zugleich ergibt zwei Texte uebereinander. */
-            overlay={!clipSrc && clipWords.length ? <CaptionVorschau stil={stil} woerter={clipWords} zeit={currentTime} /> : null}
-          />
+            overlay={null}
+            />
+          ) : (
+            <LiveVorschau
+              src={sourceSrc}
+              posterSrc={posterSrc}
+              aspect={aspect}
+              srcW={srcW}
+              srcH={srcH}
+              outW={outW}
+              outH={outH}
+              clipStart={clipStart}
+              clipEnd={clipEnd}
+              zeit={currentTime}
+              onTime={setCurrentTime}
+              seekTo={seekTo}
+              shots={shots}
+              zeitmarken={marken}
+              stil={stil}
+              woerter={clipWords}
+            />
+          )}
 
           {/* Im fertigen Clip sind die Untertitel eingebrannt. Wer den Stil danach aendert, sieht
             * im Bild weiter die alten - das muss dastehen, sonst wirkt es, als sei nichts passiert. */}

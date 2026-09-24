@@ -100,6 +100,8 @@ def caption_block(
         "box": bool(p.box),
         "base_color": p.base_color,
         "highlight_color": p.highlight_color,
+        "outline_color": p.outline_color,
+        "box_color": p.box_color,
     }
     if text_field and text_field != "text":
         block["text_field"] = captions_de.check_text_field(text_field)

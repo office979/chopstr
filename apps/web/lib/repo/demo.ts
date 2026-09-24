@@ -27,6 +27,7 @@ import type {
   Workspace,
   WorkspaceInvite,
   WorkspaceMember,
+  Zeitmarke,
 } from "@/lib/repo/types";
 import {
   DEMO_IDS,
@@ -776,6 +777,36 @@ export const demoRepo: Repo = {
     c.updated_at = nowIso();
     startRenderSimulation(c, 400);
     return { ...c };
+  },
+
+  async listClipStands() {
+    const st = state();
+    /* Im Testmodus liegt der eigene Untertitelstil in einer eigenen Ablage (publishing-demo).
+     * Gelesen wird er hier bewusst nicht: die Übersicht käme sonst an einen Stand, den die
+     * Clip-Seite anders sieht. Ohne eigenen Stil gilt der Stil aus dem Renderplan, und das ist
+     * genau das, was auch die Clip-Seite tut. */
+    return st.clips
+      .filter((c) => c.status !== "deleted" && !c.deleted_at)
+      .map((c) => ({
+        id: c.id,
+        source_id: c.source_id,
+        status: c.status,
+        review: c.review,
+        hat_datei: Boolean(c.file_key),
+        composition: c.composition,
+        zeitmarken: c.zeitmarken ?? [],
+        cps_warnings: c.cps_warnings ?? [],
+        fidelity_warnings: c.fidelity_warnings ?? [],
+        render_error: c.render_error,
+        plan_captions: (c.render_plan?.captions as unknown as Record<string, unknown>) ?? null,
+        plan_segments: (c.render_plan?.segments as Clip["composition"]) ?? null,
+        plan_zeitmarken: (c.render_plan?.zeitmarken as Zeitmarke[]) ?? null,
+        plan_transcript_version: c.render_plan?.sources?.transcript_version ?? null,
+        plan_output_height: c.render_plan?.output?.height ?? null,
+        caption_style: null,
+        transkript_version:
+          st.transcripts.filter((t) => t.source_id === c.source_id).reduce((m, t) => Math.max(m, t.version), 0) || null,
+      }));
   },
 
   async countClips(sourceId) {

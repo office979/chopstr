@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Timecode } from "@/components/ui/Timecode";
@@ -16,6 +16,7 @@ import {
   PROJEKT_RANG,
   type ProjektZustand,
 } from "@/lib/projekte/projekt-zustand";
+import { naechsteAufgabe, type VideoStand } from "@/lib/clips/pruefstand";
 import type { ClipCount, Source } from "@/lib/repo/types";
 
 export interface ProjektZeile {
@@ -23,8 +24,10 @@ export interface ProjektZeile {
   clips: ClipCount | null;
   /* Name des Markenprofils, also des Kunden. Null, wenn keins zugeordnet ist. */
   marke: string | null;
-  /* Vorschaubild aus einem gebauten Clip dieses Projekts. */
+  /* Vorschaubild aus einem gebauten Clip dieses Videos. */
   bildSrc: string | null;
+  /* Die Clips dieses Videos, gezählt mit demselben Modell wie auf der Prüfseite. */
+  stand: VideoStand | null;
 }
 
 interface Props {
@@ -116,7 +119,7 @@ export function Bibliothek({ zeilen, canDelete, canUpload }: Props) {
             onChange={(e) => setSortierung(e.target.value as Sortierung)}
             className="transition-soft rounded-inner border border-line bg-black/40 px-3 py-2 text-sm text-text hover:border-line-strong focus:border-white/50 focus:outline-none"
           >
-            <option value="geaendert">Was Arbeit macht zuerst</option>
+            <option value="geaendert">Handlungsbedarf zuerst</option>
             <option value="name">Nach Name</option>
           </select>
         </label>
@@ -167,7 +170,8 @@ export function Bibliothek({ zeilen, canDelete, canUpload }: Props) {
         </GlassCard>
       ) : (
         <ul className="flex flex-col gap-3">
-          {sichtbar.map(({ source: s, clips, marke, bildSrc, zustand }) => {
+          {sichtbar.map(({ source: s, clips, marke, bildSrc, zustand, stand }) => {
+            const aufgabe = stand ? naechsteAufgabe(stand) : null;
             const aktion = hauptaktion(zustand);
             return (
               <li key={s.id}>
@@ -202,27 +206,53 @@ export function Bibliothek({ zeilen, canDelete, canUpload }: Props) {
                       {marke && <span className="truncate text-sm text-text-2">{marke}</span>}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                      <ZustandPille zustand={zustand} />
-                      <span className="text-sm text-text-2">{projektSatz(zustand, clips)}</span>
-                    </div>
+                    {/* Solange es keine Clips gibt, zählt der Stand des Videos: hochladen,
+                        verarbeiten, nichts gefunden. Sobald es Clips gibt, sagt deren Aufteilung
+                        mehr, und der Videozustand wäre nur noch eine gröbere Wiederholung. */}
+                    {!(stand && stand.gesamt > 0) && (
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                        <ZustandPille zustand={zustand} />
+                        <span className="text-sm text-text-2">{projektSatz(zustand, clips)}</span>
+                      </div>
+                    )}
+
+                    {/* Die Clips nach Stand, jede Zahl ein Weg in ihre Liste. Vorher stand hier
+                        nur „14 Clips", und das beantwortet keine Frage. */}
+                    {stand && stand.gesamt > 0 && (
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                        {stand.fehler > 0 && (
+                          <ClipZahl href={`/projekte/${s.id}/clips#fehler`} ton="fehler">
+                            {stand.fehler} mit Fehler
+                          </ClipZahl>
+                        )}
+                        {stand.veraltet > 0 && (
+                          <ClipZahl href={`/projekte/${s.id}/clips#veraltet`} ton="achtung">
+                            {stand.veraltet} veraltet
+                          </ClipZahl>
+                        )}
+                        {stand.zuPruefen > 0 && (
+                          <ClipZahl href={`/projekte/${s.id}/clips#zu_pruefen`}>{stand.zuPruefen} zu prüfen</ClipZahl>
+                        )}
+                        {stand.postbereit > 0 && (
+                          <ClipZahl href={`/projekte/${s.id}/clips#postbereit`} ton="gut">
+                            {stand.postbereit} bereit zum Posten
+                          </ClipZahl>
+                        )}
+                        {stand.wirdGebaut > 0 && <span className="text-text-3">{stand.wirdGebaut} werden gebaut</span>}
+                      </div>
+                    )}
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-3">
                       <span>
                         Länge <Timecode seconds={s.duration_s} className="text-inherit" />
                       </span>
-                      {clips && clips.total > 0 && (
-                        <span>
-                          {clips.total} {clips.total === 1 ? "Clip" : "Clips"}
-                        </span>
-                      )}
                       <span>Zuletzt {formatDate(s.updated_at)}</span>
                     </div>
                   </div>
 
                   <div className="flex shrink-0 flex-col items-end justify-center gap-2">
-                    <ButtonLink href={`/projekte/${s.id}${aktion.pfad}`} size="sm">
-                      {aktion.label}
+                    <ButtonLink href={`/projekte/${s.id}${aufgabe ? aufgabe.pfad : aktion.pfad}`} size="sm">
+                      {aufgabe ? aufgabeKnopf(aufgabe.text) : aktion.label}
                     </ButtonLink>
                     {canDelete && <DeleteSourceButton sourceId={s.id} title={s.title} />}
                   </div>
@@ -267,4 +297,29 @@ function ZustandPille({ zustand }: { zustand: ProjektZustand }) {
       {PROJEKT_LABEL[zustand]}
     </span>
   );
+}
+
+/* Eine Clipzahl, die zu ihrer Liste führt. */
+function ClipZahl({ href, ton, children }: { href: string; ton?: "gut" | "achtung" | "fehler"; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "transition-soft rounded-pill border px-2.5 py-1 hover:border-line-strong",
+        ton === "fehler" && "border-danger/50 text-text",
+        ton === "achtung" && "border-attention/50 text-text",
+        ton === "gut" && "border-brand/50 text-text",
+        !ton && "border-line text-text-2",
+      )}
+    >
+      {children}
+    </Link>
+  );
+}
+
+/* Aus „3 Clips prüfen" wird auf dem Knopf „Prüfen": die Zahl steht schon daneben, und ein Knopf
+ * mit drei Wörtern in einer Zeile mit fünf anderen ist Lärm. */
+function aufgabeKnopf(text: string): string {
+  const ohneZahl = text.replace(/^\d+\s+/, "");
+  return ohneZahl.charAt(0).toUpperCase() + ohneZahl.slice(1);
 }

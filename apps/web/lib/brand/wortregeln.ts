@@ -5,7 +5,11 @@
  *   merken      Eigennamen und Produkte. Gehen als Hinweis in die Spracherkennung und werden
  *               danach in dieser Schreibweise gesetzt.
  *   behalten    Wörter, die nicht „korrigiert" werden dürfen: Jänner bleibt Jänner.
- *   vermeiden   Formulierungen, die weder im Einstieg noch in den Untertiteln vorkommen sollen.
+ *   vermeiden   Formulierungen, die der Computer nicht selbst schreiben soll. Sie gehen in die
+ *               Prüfung der automatisch verfassten Texte (copy_de.lint) und in den Prompt für
+ *               den Beitragstext. Auf Untertitel wirken sie NICHT: die kommen aus dem
+ *               gesprochenen Wort, und was jemand gesagt hat, wird nicht stillschweigend
+ *               geändert.
  *
  * Wer dasselbe Wort in zwei Listen schreibt, bekommt ein Ergebnis, das von der Reihenfolge der
  * Verarbeitung abhängt - also Zufall. Solche Fälle werden hier gefunden und benannt, statt sie
@@ -17,7 +21,7 @@ export type Liste = "merken" | "behalten" | "vermeiden";
 export const LISTEN_NAME: Record<Liste, string> = {
   merken: "So schreiben",
   behalten: "Nicht verändern",
-  vermeiden: "Nicht verwenden",
+  vermeiden: "Nicht selbst schreiben",
 };
 
 export interface Regeln {
@@ -55,7 +59,7 @@ export function pruefen(regeln: Regeln): Befund[] {
       innerhalb.add(k);
       const zuvor = gesehen.get(k);
       /* „So schreiben" und „Nicht verändern" vertragen sich: beide sagen „lass das Wort in
-       * Ruhe". Erst mit „Nicht verwenden" wird daraus ein Widerspruch. */
+       * Ruhe". Erst mit „Nicht selbst schreiben" wird daraus ein Widerspruch. */
       if (zuvor && (zuvor === "vermeiden" || liste === "vermeiden")) {
         aus.push({ art: "widerspruch", wort, hier: liste, dort: zuvor });
       }

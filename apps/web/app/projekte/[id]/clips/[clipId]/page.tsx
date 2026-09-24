@@ -118,6 +118,7 @@ export default async function ClipPage({ params }: Props) {
         schriftenVorhanden={vorhandeneSchriften()}
         quelleDauerS={source.duration_s ?? 0}
         wellenformSrc={mediaUrl(mediaBase, source.waveform_key)}
+        quelleFertig={source.status === "ready"}
         /* Die Vorschau rechnet den Ausschnitt selbst aus, dafuer braucht sie beide Groessen. Die
          * Ausgabegroesse steht im Plan; ohne Plan gilt 1080x1920, das Format aller neuen Clips. */
         srcW={source.width ?? null}

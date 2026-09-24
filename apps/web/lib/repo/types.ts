@@ -563,6 +563,41 @@ export interface CaptionVersion {
   created_at: string;
 }
 
+/* Die Felder, aus denen sich der Prüfstand eines Clips rechnen lässt, ohne den ganzen Clip zu
+ * laden.
+ *
+ * Der Anlass: die Startseite zählte mit einer eigenen, schwächeren Rechnung und zeigte deshalb
+ * „14 Clips zu prüfen" und gleichzeitig „14 Fertige Clips, bereit zum Posten" - beides über
+ * denselben vierzehn Clips. Wer das liest, weiss nicht, was stimmt. Jetzt rechnen Startseite und
+ * Prüfseite mit denselben Zahlen, und dafür braucht die Startseite genau diese Felder.
+ *
+ * Der Renderplan wird nicht ganz geladen, sondern nur die vier Teile, die für den Vergleich
+ * gebraucht werden: bei vielen Videos wäre der ganze Plan je Clip eine Menge Daten für eine
+ * Übersichtsseite. */
+export interface ClipStand {
+  id: string;
+  source_id: string;
+  status: ClipStatus;
+  review: Clip["review"];
+  hat_datei: boolean;
+  composition: Clip["composition"];
+  zeitmarken: Zeitmarke[];
+  cps_warnings: string[];
+  fidelity_warnings: unknown[];
+  render_error: string | null;
+  /* Aus dem Renderplan, jeweils der Teil, den vorschau-stand vergleicht. */
+  plan_captions: Record<string, unknown> | null;
+  plan_segments: Clip["composition"] | null;
+  plan_zeitmarken: Zeitmarke[] | null;
+  plan_transcript_version: number | null;
+  plan_output_height: number | null;
+  /* Der eigene Untertitelstil dieses Clips, falls einer gespeichert ist. */
+  caption_style: Record<string, unknown> | null;
+  /* Die neueste Transkriptfassung des Videos. Daran hängt, ob eine Textkorrektur schon im
+   * gebauten Video steckt. */
+  transkript_version: number | null;
+}
+
 export interface ClipCount {
   total: number;
   rendered: number;
@@ -619,6 +654,9 @@ export interface Repo extends AuthRepo, WorkspaceAdminRepo, BlockBRepo {
   /* Lokaler Testmodus: zu welchem Bucket gehört ein Medien-Key des Workspace (proxy, audio, original, Clip-Dateien)? null = unbekannt */
   resolveMediaBucket(key: string): Promise<"sources" | "derived" | null>;
   countClips(sourceId: string): Promise<ClipCount>;
+  /* Der Prüfstand aller Clips des Arbeitsbereichs in einer Abfrage. Für Übersichtsseiten, die
+   * über mehrere Videos zählen müssen, ohne je Video eine eigene Runde zu drehen. */
+  listClipStands(): Promise<ClipStand[]>;
   getCurrentHook(clipId: string): Promise<HookVersion | null>;
   listHookVersions(clipId: string): Promise<HookVersion[]>;
   /* Neue manuelle Version mit Lint-Hinweisen (lib/copy/lint.ts) und Claim-Issues (lib/copy/claims.ts) */

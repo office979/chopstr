@@ -174,3 +174,39 @@ export async function saveBrandProfileAction(_prev: BrandFormState, formData: Fo
   revalidatePath("/upload");
   return { ok: true, message: `Aussehen gespeichert (Version ${saved.version}).`, errors: {} };
 }
+
+/* Eine Marke für einen ähnlichen Kunden kopieren.
+ *
+ * Kopiert werden die Einstellungen: Land, Ansprache, Sprache, Schreibweisen, Untertitelstil,
+ * Zielplattform. NICHT kopiert werden die Dateien. Logo und Schrift hängen als Assets am
+ * Ursprungsprofil; ihre Kennungen mitzunehmen hiesse, zwei Kunden auf dieselbe Datei zeigen zu
+ * lassen - und wer sie beim einen löscht, nimmt sie dem anderen weg. Die neue Marke startet
+ * deshalb ohne Dateien, und das steht auch dabei.
+ *
+ * Die Wortlisten werden kopiert, aber als eigene Werte: sie stehen als Spalten am Profil, nicht
+ * als Verweis, und lassen sich danach unabhängig ändern.
+ */
+export async function duplicateBrandProfileAction(id: string): Promise<{ ok: boolean; message: string; id?: string }> {
+  try {
+    await requireRole("brand.edit");
+  } catch (err) {
+    if (isForbiddenError(err)) return { ok: false, message: "Dafür fehlt dir die Berechtigung." };
+    throw err;
+  }
+  const repo = getRepo();
+  const vorlage = (await repo.listBrandProfiles()).find((p) => p.id === id);
+  if (!vorlage) return { ok: false, message: "Diese Marke gibt es nicht." };
+
+  /* Nur die Einstellungen übernehmen. Die Felder, die zu EINEM Profil gehören, bleiben draussen. */
+  const rest = Object.fromEntries(
+    Object.entries(vorlage).filter(([k]) => !["id", "workspace_id", "version", "created_at", "updated_at"].includes(k)),
+  ) as Omit<typeof vorlage, "id" | "workspace_id" | "version" | "created_at" | "updated_at">;
+  const neu = await repo.saveBrandProfile({
+    ...rest,
+    name: `${vorlage.name} (Kopie)`,
+    /* Ohne Dateien: die Assets gehören dem Ursprungsprofil. */
+    ci: { ...rest.ci, logo_asset_id: null, primary_font_asset_id: null, secondary_font_asset_id: null, lower_third_bg_asset_id: null },
+  } as BrandProfileInput);
+  revalidatePath("/marke");
+  return { ok: true, message: `„${neu.name}" angelegt. Logo und Schriften fehlen noch: die gehören zur anderen Marke.`, id: neu.id };
+}

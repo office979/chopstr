@@ -16,7 +16,7 @@ export interface WellenformDaten {
  *
  * Es wird bewusst NICHT geglättet oder verschönert: wer an einer Pause schneiden will, muss die
  * Pause sehen, und eine dekorative Welle zeigt sie nicht. */
-export type WellenformStand = "da" | "laeuft" | "fehlt" | "fehler";
+export type WellenformStand = "da" | "laeuft" | "fehlt" | "keine" | "fehler";
 
 export function Wellenform({
   daten,
@@ -83,7 +83,9 @@ export function Wellenform({
             ? "Die Tonspur entsteht gerade. Sie erscheint hier, sobald das Video verarbeitet ist."
             : stand === "fehler"
               ? "Die Tonspur ließ sich nicht laden. Schneiden geht trotzdem, nur ohne Ausschlag."
-              : "Für dieses Video gibt es noch keine Tonspur. Sie entsteht beim Verarbeiten."}
+              : stand === "keine"
+                ? "Für dieses Video gibt es keine Tonspur. Sie entsteht erst seit einer Neuerung beim Verarbeiten, ältere Videos haben keine. Schneiden geht ohne."
+                : "Die Tonspur entsteht beim Verarbeiten. Das Video ist noch nicht so weit."}
         </span>
       )}
     </div>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { MarkeKopieren, MarkeLink } from "./MarkeWechsel";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/components/ui/cn";
@@ -15,8 +16,7 @@ export function BrandList({ profiles, activeId, isNew }: { profiles: BrandProfil
     <GlassCard padding="md" className="mb-5 flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-wide text-text-3">Schritt 1 von 3</p>
-          <h2 className="mt-0.5 text-lg font-medium">Marke wählen</h2>
+          <h2 className="text-lg font-medium">Marke wählen</h2>
           <p className="mt-0.5 text-sm text-text-2">
             Jedes Video gehört zu einer Marke. Sie bestimmt Anrede, Farben, Schrift und Untertitel.
             Wer für mehrere Kunden arbeitet, legt je Kunde eine an: Dateien und Wörter bleiben getrennt.
@@ -40,21 +40,23 @@ export function BrandList({ profiles, activeId, isNew }: { profiles: BrandProfil
           {profiles.map((p) => {
             const active = !isNew && p.id === activeId;
             return (
-              <li key={p.id}>
-                <Link
-                  href={`/marke?p=${p.id}`}
-                  aria-current={active ? "true" : undefined}
-                  className={cn(
-                    "transition-soft flex flex-wrap items-center gap-x-4 gap-y-1 rounded-inner border px-4 py-3",
-                    active ? "border-white/40 bg-white/10" : "border-line hover:border-line-strong hover:bg-white/5",
-                  )}
-                >
+              <li
+                key={p.id}
+                className={cn(
+                  "transition-soft flex flex-wrap items-center gap-x-4 gap-y-1 rounded-inner border px-4 py-3",
+                  active ? "border-white/40 bg-white/10" : "border-line hover:border-line-strong",
+                )}
+              >
+                <MarkeLink href={`/marke?p=${p.id}`} ariaCurrent={active} className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1">
                   <span className="min-w-0 flex-1 truncate font-medium text-text">{p.name}</span>
                   <span className="text-sm text-text-2">{COUNTRY_LABELS[p.country] ?? p.country}</span>
                   <span className="text-sm text-text-2">Anrede {p.address}</span>
                   <Badge>{PLATFORM_LABELS[p.default_platform]}</Badge>
-                  <span className="font-mono text-xs text-text-3">v{p.version}</span>
-                </Link>
+                  <span className="font-mono text-xs text-text-3">Fassung {p.version}</span>
+                </MarkeLink>
+                {/* Für den nächsten Kunden mit ähnlichen Regeln. Ohne Dateien, damit sich zwei
+                    Kunden nicht dasselbe Logo teilen. */}
+                <MarkeKopieren id={p.id} />
               </li>
             );
           })}

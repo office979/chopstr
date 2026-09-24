@@ -8,6 +8,7 @@ import type {
   Candidate,
   CaptionVersion,
   Clip,
+  ClipStatus,
   DeletionJob,
   DpaAcceptance,
   GuestApproval,
@@ -29,6 +30,7 @@ import type {
   WorkspaceExport,
   WorkspaceInvite,
   WorkspaceMember,
+  Zeitmarke,
 } from "@/lib/repo/types";
 import { sentencesFromWords } from "@/lib/transcript/sentences";
 import { buildRevision, isRevisionError } from "@/lib/candidates/revise";
@@ -947,6 +949,46 @@ export const postgresRepo: Repo = {
         ) hits order by prio limit 1`;
       const bucket = rows.length ? ((rows[0] as Row).bucket as string) : null;
       return bucket === "sources" || bucket === "derived" ? bucket : null;
+    });
+  },
+
+  /* Alle Clips des Arbeitsbereichs mit genau den Feldern, aus denen sich ihr Stand rechnen
+   * lässt. Eine Abfrage statt einer je Video, und vom Renderplan nur die vier verglichenen Teile
+   * statt des ganzen Plans. */
+  async listClipStands() {
+    return withContext(await currentSession(), async (tx) => {
+      const rows = await tx`
+        select c.id, c.source_id, c.status, c.review,
+               (c.file_key is not null) as hat_datei,
+               c.composition, c.zeitmarken, c.cps_warnings, c.fidelity_warnings, c.render_error,
+               c.render_plan->'captions'                 as plan_captions,
+               c.render_plan->'segments'                 as plan_segments,
+               c.render_plan->'zeitmarken'               as plan_zeitmarken,
+               c.render_plan->'sources'->>'transcript_version' as plan_tv,
+               c.render_plan->'output'->>'height'        as plan_h,
+               c.caption_style,
+               (select max(t.version) from transcript_versions t where t.source_id = c.source_id) as tv
+        from clips c
+        where c.status <> 'deleted' and c.deleted_at is null`;
+      return (rows as Row[]).map((r) => ({
+        id: r.id as string,
+        source_id: r.source_id as string,
+        status: r.status as ClipStatus,
+        review: ((r.review as string | null) ?? "offen") as Clip["review"],
+        hat_datei: Boolean(r.hat_datei),
+        composition: jsonValue<Clip["composition"]>(r.composition, []),
+        zeitmarken: jsonValue<Zeitmarke[]>(r.zeitmarken, []),
+        cps_warnings: jsonValue<string[]>(r.cps_warnings, []),
+        fidelity_warnings: jsonValue<unknown[]>(r.fidelity_warnings, []),
+        render_error: (r.render_error as string | null) ?? null,
+        plan_captions: jsonValue<Record<string, unknown> | null>(r.plan_captions, null),
+        plan_segments: jsonValue<Clip["composition"] | null>(r.plan_segments, null),
+        plan_zeitmarken: jsonValue<Zeitmarke[] | null>(r.plan_zeitmarken, null),
+        plan_transcript_version: num(r.plan_tv),
+        plan_output_height: num(r.plan_h),
+        caption_style: jsonValue<Record<string, unknown> | null>(r.caption_style, null),
+        transkript_version: num(r.tv),
+      }));
     });
   },
 

@@ -4,7 +4,7 @@
  * in zweien davon, hängt das Ergebnis an der Reihenfolge und nicht an der Absicht. */
 
 import { describe, expect, it } from "vitest";
-import { befundSatz, pruefen, type Regeln } from "@/lib/brand/wortregeln";
+import { befundSatz, LISTEN_NAME, pruefen, type Regeln } from "@/lib/brand/wortregeln";
 
 const leer: Regeln = { merken: [], behalten: [], vermeiden: [] };
 
@@ -60,11 +60,22 @@ describe("pruefen", () => {
     const b = pruefen({ merken: ["Synergie"], behalten: [], vermeiden: ["Synergie"] });
     const satz = befundSatz(b[0]);
     expect(satz).toContain("So schreiben");
-    expect(satz).toContain("Nicht verwenden");
+    expect(satz).toContain("Nicht selbst schreiben");
   });
 
   it("meldet jedes Paar nur einmal", () => {
     const b = pruefen({ merken: ["A"], behalten: ["A"], vermeiden: ["A"] });
     expect(b).toHaveLength(1);
+  });
+});
+
+/* Die Liste heisst, was sie tut. Nachgesehen im Renderlauf: banned_phrases geht in copy_de.lint
+ * und in den Prompt für den Beitragstext, also in Texte, die der Computer selbst schreibt.
+ * Untertitel entstehen aus dem gesprochenen Wort und werden nicht angefasst. Die alte
+ * Beschriftung „Nicht verwenden" mit dem Zusatz „auch in den Untertiteln" war ein Versprechen,
+ * das die Anwendung nicht hält. */
+describe("Beschriftung", () => {
+  it("verspricht keine Wirkung auf Untertitel", () => {
+    expect(LISTEN_NAME.vermeiden).toBe("Nicht selbst schreiben");
   });
 });

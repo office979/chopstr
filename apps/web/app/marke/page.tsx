@@ -10,7 +10,7 @@ import { BrandList } from "./BrandList";
 import { HistoryCard } from "./HistoryCard";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Aussehen" };
+export const metadata = { title: "Marken" };
 
 type Props = { searchParams: Promise<{ p?: string }> };
 
@@ -34,14 +34,21 @@ export default async function BrandPage({ searchParams }: Props) {
   const vorschauSchrift = profile ? await previewFontFor(repo, profile) : null;
   /* Wie viele Projekte dieses Profil schon benutzt haben. Daran hängt der Satz darüber, was eine
    * Änderung bewirkt: gebaute Clips behalten ihr Aussehen. */
-  const projekte = profile ? (await repo.listSources()).filter((s) => s.brand_profile_id === profile.id).length : 0;
+  const betroffen = profile
+    ? (await repo.listSources())
+        .filter((s) => s.brand_profile_id === profile.id)
+        .map((s) => ({ id: s.id, titel: s.title }))
+    : [];
 
   return (
     <PageShell backgroundWord="Marke">
+      {/* „Marke" durchgehend: so heisst der Punkt in der Navigation, so steht es im Pfad auf den
+          Clipseiten, und so heisst die Sache auch beim Kunden. „Aussehen" war ein vierter Name
+          für dasselbe. */}
       <PageHeader
-        eyebrow="Deine Marke"
-        title="Aussehen"
-        description="Farben, Logo, Schrift und Schreibweisen. Sie bestimmen, wie deine Clips aussehen und klingen. Alles bleibt in deinem Team."
+        eyebrow="Ein Profil je Kunde"
+        title="Marken"
+        description="Farben, Logo, Schrift und Schreibweisen. Sie bestimmen, wie die Clips einer Marke aussehen und klingen. Alles bleibt in deinem Team."
       />
       <BrandList profiles={profiles} activeId={profile?.id ?? null} isNew={isNew} />
       {/* key erzwingt ein frisches Formular beim Wechsel; sonst blieben die Eingaben des vorigen stehen */}
@@ -51,7 +58,7 @@ export default async function BrandPage({ searchParams }: Props) {
         assets={assets}
         canUploadAssets={can(session.role, "brand.assets")}
         vorschauSchrift={vorschauSchrift}
-        clipsMitProfil={projekte}
+        betroffeneVideos={betroffen}
       />
       {profile && !isNew && (
         <div className="mt-5">

@@ -6,7 +6,7 @@ import { cn } from "@/components/ui/cn";
 import type { Session } from "@/lib/session";
 import { can, type Action } from "@/lib/auth/permissions";
 
-export type SettingsTab = "allgemein" | "mitglieder" | "abrechnung" | "sicherheit" | "loeschung" | "audit" | "api" | "webhooks" | "verbindungen";
+export type SettingsTab = "allgemein" | "mitglieder" | "abrechnung" | "sicherheit" | "loeschung" | "audit" | "entwickler" | "api" | "webhooks" | "verbindungen";
 
 const TABS: { key: SettingsTab; href: string; label: string; action?: Action }[] = [
   { key: "allgemein", href: "/einstellungen", label: "Allgemein" },
@@ -16,6 +16,9 @@ const TABS: { key: SettingsTab; href: string; label: string; action?: Action }[]
   { key: "loeschung", href: "/einstellungen/loeschung", label: "Löschung" },
   { key: "audit", href: "/einstellungen/audit", label: "Audit-Log", action: "audit.read" },
   /* Phase 5: API-Schlüssel und Webhooks (5a), Plattform-Verbindungen (5b) */
+  /* „Für Entwickler" lag als gleichrangiger Punkt in der Hauptnavigation. Hier steht es bei
+   * allem anderen Technischen und bleibt für die, die es brauchen, einen Klick entfernt. */
+  { key: "entwickler", href: "/entwickler", label: "Für Entwickler", action: "api.manage" },
   { key: "api", href: "/einstellungen/api", label: "API", action: "api.manage" },
   { key: "webhooks", href: "/einstellungen/webhooks", label: "Webhooks", action: "api.manage" },
   { key: "verbindungen", href: "/einstellungen/verbindungen", label: "Verbindungen", action: "api.manage" },

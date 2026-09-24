@@ -30,7 +30,7 @@ interface ApiResponse {
 
 const UPLOAD_KINDS: { kind: BrandAssetKind; hint: string }[] = [
   { kind: "font", hint: "TTF, OTF oder WOFF2, max. 5 MB. Familienname und Gewicht werden aus der Datei gelesen." },
-  { kind: "logo", hint: "SVG oder PNG, max. 2 MB. PNG mit Transparenz für das Wasserzeichen; SVG nur für die Vorschau." },
+  { kind: "logo", hint: "PNG oder SVG, max. 2 MB. Für das Wasserzeichen im fertigen Video braucht es PNG mit Transparenz." },
   { kind: "lower_third_bg", hint: "SVG oder PNG, max. 2 MB. Hintergrund der Bauchbinde." },
 ];
 
@@ -62,6 +62,7 @@ export function AssetsCard({ profileId, assets: initialAssets, ci, canUpload }: 
 
   const fonts = assets.filter((a) => a.kind === "font");
   const logos = assets.filter((a) => a.kind === "logo");
+  const gewaehltesLogoSvg = logos.some((l) => l.id === logo && istSvg(l));
   const others = assets.filter((a) => a.kind !== "font" && a.kind !== "logo");
   const fileProblem = file ? validateAssetFile(kind, file.name, file.size) : null;
 
@@ -255,27 +256,54 @@ export function AssetsCard({ profileId, assets: initialAssets, ci, canUpload }: 
             ))}
           </Select>
         </Field>
-        <Field label="Logo" htmlFor={logoId} hint="Für das Wasserzeichen nutzt der Worker PNG; SVG nur in der Vorschau.">
+        {/* Ein SVG-Logo taugt fürs Ansehen, aber nicht fürs Video: der Renderer legt nur PNG ins
+            Bild und überspringt SVG. Vorher stand das als Nebensatz im Hinweistext („der Worker
+            nutzt PNG"), und wer trotzdem eine SVG-Datei wählte und das Wasserzeichen einschaltete,
+            bekam ein Video ohne Logo, ohne je zu erfahren warum. Jetzt steht es an der Datei, und
+            bei eingeschaltetem Wasserzeichen ist sie nicht wählbar. */}
+        <Field
+          label="Logo"
+          htmlFor={logoId}
+          hint={
+            watermark
+              ? "Das Wasserzeichen im fertigen Video braucht PNG. SVG-Dateien stehen deshalb hier nicht zur Wahl."
+              : "PNG legt sich als Wasserzeichen ins Video. SVG geht auch, aber nur zum Ansehen."
+          }
+        >
           <Select id={logoId} name="ci_logo" value={logo} onChange={(e) => setLogo(e.target.value)} disabled={logos.length === 0}>
             <option value="">Kein Logo</option>
             {logos.map((l) => (
-              <option key={l.id} value={l.id}>
+              <option key={l.id} value={l.id} disabled={watermark && istSvg(l)}>
                 {l.name}
+                {istSvg(l) ? " — SVG, nicht fürs Video" : ""}
               </option>
             ))}
           </Select>
         </Field>
-        <div className="flex items-center">
+        <div className="flex flex-col justify-center gap-2">
           <Toggle
             checked={watermark}
             onChange={setWatermark}
             name="ci_watermark_enabled"
-            label="Wasserzeichen im Render"
-            description={logo ? "Logo unten in der Safe Zone." : "Erst ein Logo wählen."}
+            label="Logo ins fertige Video legen"
+            description={logo ? "Unten im sicheren Bereich." : "Erst ein Logo wählen."}
             disabled={!logo}
           />
+          {/* Der Fall, der vorher stumm blieb: Wasserzeichen an, gewähltes Logo ist SVG. Das
+              Video kam dann ohne Logo heraus, und niemand erfuhr davon. */}
+          {watermark && gewaehltesLogoSvg && (
+            <p className="text-sm text-attention">
+              {"Das gewählte Logo ist eine SVG-Datei und kommt so nicht ins Video. Nimm eine PNG-Datei, oder lade eine hoch."}
+            </p>
+          )}
         </div>
       </div>
     </GlassCard>
   );
+}
+
+/* Eine SVG-Datei erkennen. Geprüft wird beides, Dateiendung und Medientyp: der Renderer prüft
+ * genauso, und was er überspringt, darf die Oberfläche nicht als fertig anbieten. */
+function istSvg(a: { storage_key: string; mime_type: string | null }): boolean {
+  return a.storage_key.toLowerCase().endsWith(".svg") || (a.mime_type ?? "").includes("svg");
 }

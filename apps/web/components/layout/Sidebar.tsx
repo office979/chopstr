@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Wordmark } from "@/components/brand/Wordmark";
-import { ROLE_LABELS, can, type Role } from "@/lib/auth/permissions";
+import { ROLE_LABELS, type Role } from "@/lib/auth/permissions";
 import { canExt } from "@/lib/auth/permissions-publishing";
 import { cn } from "@/components/ui/cn";
 
@@ -46,15 +46,21 @@ export function Sidebar({ user }: { user: NavUser | null }) {
   const main: NavItem[] = [
     { href: "/", label: "Meine Videos", icon: <IconGrid />, match: (p) => p === "/" || p.startsWith("/projekte") },
   ];
-  if (user?.canBrand) main.push({ href: "/marke", label: "Aussehen", icon: <IconBrand />, match: (p) => p.startsWith("/marke") });
+  /* „Marken" und nicht „Aussehen": die Seite verwaltet Kundenprofile, die Adresse heisst
+   * /marke, der Pfad auf den Clipseiten sagt „Marke", und drei Namen für eine Sache zwingen zum
+   * Raten. */
+  if (user?.canBrand) main.push({ href: "/marke", label: "Marken", icon: <IconBrand />, match: (p) => p.startsWith("/marke") });
 
   const publishing: NavItem[] = [];
   if (canExt(user?.role, "series.manage")) publishing.push({ href: "/serien", label: "Serien", icon: <IconStack />, match: (p) => p.startsWith("/serien") });
   if (canExt(user?.role, "experiments.manage")) publishing.push({ href: "/experimente", label: "Tests", icon: <IconFlask />, match: (p) => p.startsWith("/experimente") });
   if (user) publishing.push({ href: "/berichte", label: "Berichte", icon: <IconChart />, match: (p) => p.startsWith("/berichte") });
 
+  /* „Für Entwickler" stand als gleichrangiger Punkt in der Hauptnavigation. Für einen Creator ist
+   * das eine Tür, hinter der nichts für ihn liegt, und sie nimmt so viel Platz ein wie „Meine
+   * Videos". Die Seite bleibt erreichbar, aber dort, wo alles Technische liegt: unter den
+   * Einstellungen. */
   const tools: NavItem[] = [];
-  if (can(user?.role, "api.manage")) tools.push({ href: "/entwickler", label: "Für Entwickler", icon: <IconCode />, match: (p) => p.startsWith("/entwickler") });
 
   const settingsActive = pathname.startsWith("/einstellungen");
 
@@ -80,6 +86,7 @@ export function Sidebar({ user }: { user: NavUser | null }) {
             sie enthält genau das, was dort steht — Serien, Tests, Berichte. */}
         {publishing.length > 0 && <NavGroup title="Auswertung" items={publishing} pathname={pathname} />}
         {tools.length > 0 && <NavGroup title="Werkzeuge" items={tools} pathname={pathname} />}
+
       </nav>
 
       <div className="flex flex-col gap-1 border-t border-line pt-4">
@@ -284,12 +291,6 @@ const IconChart = () => (
     <path d="M8 16v-4" />
     <path d="M13 16V8" />
     <path d="M18 16v-7" />
-  </Svg>
-);
-const IconCode = () => (
-  <Svg>
-    <path d="m16 18 6-6-6-6" />
-    <path d="m8 6-6 6 6 6" />
   </Svg>
 );
 const IconSettings = () => (

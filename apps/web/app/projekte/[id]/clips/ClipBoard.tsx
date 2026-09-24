@@ -228,8 +228,19 @@ export function ClipBoard({
       }
       gelesen.current = true;
     };
-    /* Ein Tick später, damit das Lesen nicht mitten in den ersten Aufbau fällt. */
-    const t = window.setTimeout(holen, 0);
+    /* Kommt jemand über eine Zahl von der Übersicht, gilt deren Filter und nicht der gemerkte.
+     * „3 Clips prüfen" anzuklicken und dann die Liste von letzter Woche zu sehen, wäre eine
+     * Antwort auf eine andere Frage. */
+    const ausAdresse = window.location.hash.replace("#", "");
+    const t = window.setTimeout(
+      ausAdresse && (FILTER_ORDNUNG as string[]).includes(ausAdresse)
+        ? () => {
+            setFilter(ausAdresse as FilterId);
+            gelesen.current = true;
+          }
+        : holen,
+      0,
+    );
     window.addEventListener("pagehide", merken);
     return () => {
       window.clearTimeout(t);

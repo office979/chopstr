@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { TagInput } from "@/components/ui/TagInput";
@@ -11,6 +11,9 @@ import { Toggle } from "@/components/ui/Toggle";
 import type { BrandAsset, BrandProfile, CaptionPreset, Platform } from "@/lib/repo/types";
 import type { CaptionStyleExt } from "@/lib/repo/types-api";
 import type { PreviewFont } from "@/components/clips/SilentPreview";
+import Link from "next/link";
+import { cn } from "@/components/ui/cn";
+import { setzeUngespeichert } from "@/lib/brand/ungespeichert";
 import { AssetsCard } from "./AssetsCard";
 import { Beispielszene } from "./Beispielszene";
 import { PLATFORMS, PLATFORM_LABELS } from "@/lib/clips/labels";
@@ -25,7 +28,7 @@ export function BrandForm({
   assets,
   canUploadAssets,
   vorschauSchrift,
-  clipsMitProfil,
+  betroffeneVideos,
 }: {
   profile: BrandProfile | null;
   assets: BrandAsset[];
@@ -34,9 +37,34 @@ export function BrandForm({
   vorschauSchrift: PreviewFont | null;
   /* Wie viele gebaute Clips dieses Profil schon verwendet haben. Daran hängt der Satz darüber,
    * was eine Änderung bewirkt. */
-  clipsMitProfil: number;
+  /* Die Videos, die diese Marke benutzen. Als Liste und nicht als Zahl: „3 Projekte nutzen dieses
+   * Profil" beantwortet nicht die Frage, die man vor dem Speichern hat, nämlich WELCHE. */
+  betroffeneVideos: { id: string; titel: string }[];
 }) {
   const [state, action, pending] = useActionState(saveBrandProfileAction, initialState);
+  /* Ob etwas ungespeichert ist. Gemessen daran, dass jemand ein Feld angefasst hat - nicht an
+   * einem Vergleich aller Werte: das Formular hat über dreissig Felder, teils frei gesetzt, und
+   * ein halb richtiger Vergleich wäre schlimmer als eine ehrliche Faustregel. */
+  const [geaendert, setGeaendert] = useState(false);
+  /* Nach einem erfolgreichen Speichern ist nichts mehr offen. Gerechnet und nicht im Effekt
+   * gesetzt: ein setState im Effekt löst eine zweite Renderrunde aus. */
+  const offen = geaendert && !(state.ok && !pending);
+
+  /* Der Wert wird auch ausserhalb dieses Baums gebraucht: die Markenliste oben fragt ihn, bevor
+   * sie auf eine andere Marke wechselt. */
+  useEffect(() => {
+    setzeUngespeichert(offen);
+    return () => setzeUngespeichert(false);
+  }, [offen]);
+
+  /* Neuladen oder Schliessen mit offenen Änderungen: der Browser fragt. Für den Wechsel INNERHALB
+   * der Seite fragt die Markenliste, die denselben Wert liest. */
+  useEffect(() => {
+    if (!offen) return undefined;
+    const fragen = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", fragen);
+    return () => window.removeEventListener("beforeunload", fragen);
+  }, [offen]);
   const ci = profile?.ci ?? {};
   const style: CaptionStyleExt = profile?.caption_style ?? {};
   const [lowerThird, setLowerThird] = useState(ci.lower_third?.enabled ?? false);
@@ -69,7 +97,13 @@ export function BrandForm({
   });
 
   return (
-    <form action={action} className="flex flex-col gap-5" noValidate>
+    <form
+      action={action}
+      onInput={() => setGeaendert(true)}
+      onChange={() => setGeaendert(true)}
+      className="flex flex-col gap-5 pb-20"
+      noValidate
+    >
       {profile && <input type="hidden" name="id" value={profile.id} />}
 
       <GlassCard padding="lg" className="flex flex-col gap-5">
@@ -300,10 +334,18 @@ export function BrandForm({
             placeholder="z. B. Jänner"
           />
         </Field>
+        {/* Was diese Liste wirklich tut, nachgesehen im Renderlauf: banned_phrases geht in
+            copy_de.lint und in den Prompt für den Posttext. Sie wirkt damit auf Texte, die der
+            Computer selbst schreibt - Einstieg und Beitragstext. Untertitel entstehen aus dem
+            gesprochenen Wort und werden nicht angefasst.
+
+            Vorher stand hier „weder im Einstieg noch in den Untertiteln". Das war ein
+            Versprechen, das die Anwendung nicht hält, und es ging in die gefährlichere Richtung:
+            wer sich darauf verlässt, glaubt, ein Wort komme nicht ins Bild. */}
         <Field
-          label="Nicht verwenden"
+          label="Nicht selbst schreiben"
           htmlFor="banned_phrases"
-          hint="Formulierungen, die weder im Einstieg noch in den Untertiteln auftauchen. Beispiel: Game Changer."
+          hint="Formulierungen, die der Computer nicht verwenden soll, wenn er Einstieg oder Beitragstext schreibt. Beispiel: Game Changer. Gesprochene Wörter im Untertitel bleiben unberührt."
         >
           <TagInput
             id="banned_phrases"
@@ -381,20 +423,61 @@ export function BrandForm({
       <GlassCard padding="md" className="flex flex-col gap-2">
         <p className="text-sm font-medium text-text">Was ändert sich damit?</p>
         <p className="text-sm text-text-2">
-          Neue Clips bekommen dieses Aussehen sofort.{" "}
-          {clipsMitProfil > 0
-            ? `${clipsMitProfil === 1 ? "Ein Projekt nutzt" : `${clipsMitProfil} Projekte nutzen`} dieses Profil. Schon gebaute Clips behalten ihr Aussehen, bis du sie einzeln neu bauen lässt.`
-            : "Schon gebaute Clips behalten ihr Aussehen, bis du sie einzeln neu bauen lässt."}
+          Neue Clips bekommen dieses Aussehen sofort. Schon gebaute Clips behalten ihres, bis du
+          sie einzeln neu bauen lässt.
         </p>
+        {betroffeneVideos.length > 0 && (
+          <>
+            <p className="mt-1 text-sm text-text-2">
+              {betroffeneVideos.length === 1 ? "Dieses Video nutzt die Marke:" : `Diese ${betroffeneVideos.length} Videos nutzen die Marke:`}
+            </p>
+            <ul className="flex flex-wrap gap-2">
+              {betroffeneVideos.map((v) => (
+                <li key={v.id}>
+                  <Link
+                    href={`/projekte/${v.id}/clips`}
+                    className="transition-soft inline-block max-w-[280px] truncate rounded-pill border border-line px-3 py-1 text-xs text-text-2 hover:border-line-strong hover:text-text"
+                  >
+                    {v.titel}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </GlassCard>
 
-      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className={state.ok ? "text-sm text-text" : "text-sm text-attention"} role="status" aria-live="polite">
-          {state.message}
-        </p>
-        <Button type="submit" disabled={pending || befunde.some((b) => b.art === "widerspruch")}>
-          {pending ? "Wird gespeichert" : "Speichern"}
-        </Button>
+      {/* Speichern bleibt in Sicht.
+          Vorher stand der Knopf ganz unten hinter vier Karten: wer oben eine Farbe änderte, musste
+          erst durch die halbe Seite scrollen, um zu erfahren, ob das schon gilt. Jetzt steht am
+          unteren Rand, welche Marke bearbeitet wird, ob etwas offen ist, und der Knopf dazu. */}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-[#07070f]/95 backdrop-blur">
+        <div className="mx-auto flex max-w-[var(--shell-max,1200px)] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+          <div className="flex min-w-0 flex-col">
+            <span className="truncate text-sm font-medium text-text">
+              {profile?.name ?? "Neue Marke"}
+            </span>
+            <span
+              className={cn("text-xs", state.ok || !state.message ? "text-text-3" : "text-attention")}
+              role="status"
+              aria-live="polite"
+            >
+              {state.message || (offen ? "Nicht gespeichert" : "Alles gespeichert")}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+              className="text-sm text-text-2 underline underline-offset-4 hover:text-text"
+            >
+              Zur Markenübersicht
+            </button>
+            <Button type="submit" disabled={pending || befunde.some((b) => b.art === "widerspruch")}>
+              {pending ? "Wird gespeichert" : offen ? "Änderungen speichern" : "Speichern"}
+            </Button>
+          </div>
+        </div>
       </div>
     </form>
   );

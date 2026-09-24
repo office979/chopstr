@@ -14,7 +14,7 @@ import { VorschauStatus } from "./VorschauStatus";
 import { Bildausschnitt, beschreibung as markeBeschreibung } from "./Bildausschnitt";
 import { Timeline, luecken } from "./timeline/Timeline";
 import { useFilmstreifen } from "./useFilmstreifen";
-import type { WellenformDaten } from "./timeline/Wellenform";
+import type { WellenformDaten, WellenformStand } from "./timeline/Wellenform";
 import {
   dauer as schnittDauer,
   gleich as schnittGleich,
@@ -80,6 +80,9 @@ interface Props {
   gerenderteSegmente: Schnitt | null;
   quelleDauerS: number;
   wellenformSrc: string | null;
+  /* Ist das Video fertig analysiert? Ohne das lässt sich nicht sagen, ob eine fehlende Tonspur
+   * noch kommt oder nie kommen wird. */
+  quelleFertig: boolean;
   /* Der Plan des letzten Laufs: daran hängt, ob das gebaute Video noch aktuell ist. */
   renderPlan: RenderPlan | null;
   clipStatus: ClipStatus;
@@ -123,6 +126,7 @@ export function ClipDetail({
   gerenderteSegmente,
   quelleDauerS,
   wellenformSrc,
+  quelleFertig,
   renderPlan,
   clipStatus,
   renderFehler,
@@ -170,15 +174,18 @@ export function ClipDetail({
   const [wellenform, setWellenform] = useState<WellenformDaten | null>(null);
   /* Warum es (noch) keine Tonspur gibt: „wird noch erzeugt" ist etwas anderes als „liess sich
    * nicht laden", und der Nutzer soll den Unterschied sehen. */
-  const [wellenformStand, setWellenformStand] = useState<"da" | "laeuft" | "fehlt" | "fehler">(
-    wellenformSrc ? "laeuft" : "fehlt",
+  const [wellenformStand, setWellenformStand] = useState<WellenformStand>(
+    wellenformSrc ? "laeuft" : quelleFertig ? "keine" : "fehlt",
   );
   const [laeuft, setLaeuft] = useState(false);
   const [spielen, setSpielen] = useState(0);
 
   useEffect(() => {
     if (!wellenformSrc) {
-      setWellenformStand("fehlt");
+      /* Fertig verarbeitet und trotzdem keine Tonspur: dann kommt auch keine mehr. Der alte Satz
+       * „Sie entsteht beim Verarbeiten" stand genau an diesen Videos und versprach etwas, worauf
+       * man beliebig lange warten konnte. */
+      setWellenformStand(quelleFertig ? "keine" : "fehlt");
       return undefined;
     }
     let weg = false;
@@ -200,7 +207,7 @@ export function ClipDetail({
     return () => {
       weg = true;
     };
-  }, [wellenformSrc]);
+  }, [wellenformSrc, quelleFertig]);
 
   /* Der jeweils neueste Stand, auch mitten in einem Ziehen. Die Zustandsvariablen selbst taugen
    * dafuer nicht: waehrend eines Zugs kommen Dutzende Ereignisse, bevor React neu zeichnet. */

@@ -17,7 +17,8 @@
  */
 
 import { vorschauStand, type StandEingabe } from "@/lib/clips/vorschau-stand";
-import type { Clip, GuestApproval } from "@/lib/repo/types";
+import type { CaptionStyle } from "@/lib/clips/caption-style";
+import type { Clip, ClipStand, GuestApproval } from "@/lib/repo/types";
 
 /* 1. Redaktionell: was hat ein Mensch entschieden? */
 export type Redaktion = "vorgeschlagen" | "in_arbeit" | "freigegeben" | "verworfen";
@@ -387,3 +388,121 @@ export const FILTER_ORDNUNG: FilterId[] = [
   "freigegeben",
   "verworfen",
 ];
+
+/* Eine Clip-Zeile aus der Übersichtsabfrage in einen Prüfstand rechnen.
+ *
+ * Damit rechnet die Startseite mit demselben Modell wie die Prüfseite. Vorher zählte sie selbst:
+ * „Clips zu prüfen" waren gebaute Clips ohne Entscheidung, „Fertige Clips" waren gebaute Clips -
+ * zwei Namen für dieselben vierzehn Clips, und der zweite trug den Zusatz „bereit zum Posten",
+ * obwohl niemand sie freigegeben hatte. */
+export function standAusZeile(r: ClipStand, stil: CaptionStyle): Pruefstand {
+  const clip = {
+    status: r.status,
+    review: r.review,
+    file_key: r.hat_datei ? "x" : null,
+    composition: r.composition,
+    zeitmarken: r.zeitmarken,
+    cps_warnings: r.cps_warnings,
+    fidelity_warnings: r.fidelity_warnings,
+    render_error: r.render_error,
+  } as unknown as Clip;
+  return pruefstand({
+    clip,
+    freigabe: null,
+    stand: {
+      status: r.status,
+      hatDatei: r.hat_datei,
+      /* Nur die vier Teile, die verglichen werden. Der Rest des Plans wird für diese Frage nicht
+       * gebraucht und deshalb gar nicht erst geladen. */
+      plan: r.plan_captions
+        ? ({
+            captions: r.plan_captions,
+            segments: r.plan_segments ?? [],
+            zeitmarken: r.plan_zeitmarken ?? [],
+            sources: { transcript_version: r.plan_transcript_version },
+            output: { height: r.plan_output_height },
+          } as unknown as Clip["render_plan"])
+        : null,
+      renderFehler: r.render_error,
+      transkriptVersion: r.transkript_version,
+      stil,
+      schnitt: r.composition,
+      zeitmarken: r.zeitmarken,
+    },
+    bearbeitet: (r.caption_style != null && Object.keys(r.caption_style).length > 0) || r.zeitmarken.length > 0 || r.composition.length > 1,
+  });
+}
+
+/* Was an einem Video noch Arbeit macht, in den Worten der Prüfseite.
+ *
+ * Ein Clip kann in mehreren Zahlen stehen: ein freigegebener mit veraltetem Video ist freigegeben
+ * UND veraltet. Das ist kein Zählfehler, sondern die Folge davon, dass es drei Fragen sind. */
+export interface VideoStand {
+  gesamt: number;
+  zuPruefen: number;
+  fehler: number;
+  veraltet: number;
+  wirdGebaut: number;
+  postbereit: number;
+  freigegeben: number;
+  verworfen: number;
+}
+
+export function zaehlen(staende: Pruefstand[]): VideoStand {
+  const z: VideoStand = { gesamt: 0, zuPruefen: 0, fehler: 0, veraltet: 0, wirdGebaut: 0, postbereit: 0, freigegeben: 0, verworfen: 0 };
+  for (const p of staende) {
+    if (p.redaktion === "verworfen") {
+      z.verworfen += 1;
+      continue;
+    }
+    z.gesamt += 1;
+    /* Solange gebaut wird, wartet der Clip nicht auf eine Entscheidung, sondern auf die
+     * Maschine. Ihn in beide Zahlen zu zählen ergäbe „12 zu prüfen, 12 werden gebaut" über
+     * denselben zwölf Clips - und genau solche Doppelaussagen sollen hier verschwinden.
+     * Dieselbe Grenze zieht aktionStand: bei „wird gebaut" ist Freigeben gesperrt. */
+    if ((p.redaktion === "vorgeschlagen" || p.redaktion === "in_arbeit") && p.datei !== "wird_erstellt") {
+      z.zuPruefen += 1;
+    }
+    if (p.redaktion === "freigegeben") z.freigegeben += 1;
+    if (p.qualitaet === "fehler") z.fehler += 1;
+    if (p.datei === "veraltet") z.veraltet += 1;
+    if (p.datei === "wird_erstellt") z.wirdGebaut += 1;
+    if (p.postbereit) z.postbereit += 1;
+  }
+  return z;
+}
+
+/* Die eine Aufgabe, die an diesem Video als Nächstes ansteht, mit dem Weg dorthin.
+ *
+ * Auf der Übersicht soll nicht stehen, wie viele Clips es gibt, sondern was zu tun ist. „3 Clips
+ * prüfen" ist eine Aufgabe; „14 Clips" ist eine Zahl. */
+export interface Aufgabe {
+  text: string;
+  /* Pfad relativ zum Video, samt Filter. */
+  pfad: string;
+}
+
+export function naechsteAufgabe(z: VideoStand): Aufgabe | null {
+  if (z.fehler > 0) {
+    return { text: z.fehler === 1 ? "1 Fehler beheben" : `${z.fehler} Fehler beheben`, pfad: "/clips#fehler" };
+  }
+  if (z.veraltet > 0) {
+    return {
+      text: z.veraltet === 1 ? "1 Video neu bauen" : `${z.veraltet} Videos neu bauen`,
+      pfad: "/clips#veraltet",
+    };
+  }
+  if (z.zuPruefen > 0) {
+    return { text: z.zuPruefen === 1 ? "1 Clip prüfen" : `${z.zuPruefen} Clips prüfen`, pfad: "/clips#zu_pruefen" };
+  }
+  if (z.wirdGebaut > 0) {
+    return { text: z.wirdGebaut === 1 ? "1 Clip wird gebaut" : `${z.wirdGebaut} Clips werden gebaut`, pfad: "/clips" };
+  }
+  if (z.postbereit > 0) {
+    return {
+      text: z.postbereit === 1 ? "1 Clip herunterladen" : `${z.postbereit} Clips herunterladen`,
+      pfad: "/clips#postbereit",
+    };
+  }
+  return null;
+}

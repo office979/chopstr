@@ -89,7 +89,7 @@ export default async function ClipsPage({ params }: Props) {
           {brand ? (
             <>
               Marke{" "}
-              <Link href={`/marke?profil=${brand.id}`} className="text-text hover:underline">
+              <Link href={`/marke?p=${brand.id}`} className="text-text hover:underline">
                 {brand.name}
               </Link>
               {" · "}

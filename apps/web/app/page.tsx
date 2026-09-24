@@ -7,6 +7,8 @@ import { can } from "@/lib/auth/permissions";
 import { mediaUrl } from "@/lib/clips/labels";
 import { Bibliothek, type ProjektZeile } from "./Bibliothek";
 import { projektZustand } from "@/lib/projekte/projekt-zustand";
+import { naechsteAufgabe, standAusZeile, zaehlen, type Pruefstand } from "@/lib/clips/pruefstand";
+import { stilAusPlan, stilPruefen } from "@/lib/clips/caption-style";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +20,24 @@ export default async function ProjectsPage() {
   const canUpload = can(session.role, "source.upload");
   const repo = getRepo();
   const sources = await repo.listSources();
+  /* Der Stand aller Clips in einer Abfrage, gerechnet mit demselben Modell wie auf der
+   * Prüfseite. Vorher zählte diese Seite selbst, und zwar schwächer: „Clips zu prüfen" und
+   * „Fertige Clips, bereit zum Posten" standen beide auf vierzehn - über denselben vierzehn
+   * Clips, von denen keiner freigegeben war. */
+  const zeilenStand = await repo.listClipStands();
+  const staendeJeQuelle = new Map<string, Pruefstand[]>();
+  for (const r of zeilenStand) {
+    const eigener = stilPruefen(r.caption_style);
+    const stil = Object.keys(eigener).length
+      ? eigener
+      : stilAusPlan(r.plan_captions, r.plan_output_height ?? undefined);
+    const liste = staendeJeQuelle.get(r.source_id) ?? [];
+    liste.push(standAusZeile(r, stil));
+    staendeJeQuelle.set(r.source_id, liste);
+  }
+  const videoStaende = new Map(
+    sources.map((s) => [s.id, zaehlen(staendeJeQuelle.get(s.id) ?? [])] as const),
+  );
   const clipCounts = new Map(
     await Promise.all(sources.filter((s) => s.status === "ready").map(async (s) => [s.id, await repo.countClips(s.id)] as const)),
   );
@@ -53,6 +73,7 @@ export default async function ProjectsPage() {
     clips: clipCounts.get(s.id) ?? null,
     marke: s.brand_profile_id ? (marken.get(s.brand_profile_id) ?? null) : null,
     bildSrc: bilder.get(s.id) ?? null,
+    stand: videoStaende.get(s.id) ?? null,
   }));
 
   /* Vertragshinweis nur hier und am Clip, nicht mehr über jeder Seite (Bedienkonzept, Abschnitt 7) */
@@ -65,16 +86,34 @@ export default async function ProjectsPage() {
     }
   }
 
-  const readyCount = sources.filter((s) => s.status === "ready").length;
   const failedCount = sources.filter((s) => s.status === "failed").length;
+  /* Die Zahlen über alle Videos, aus denselben Ständen. */
+  const gesamt = [...videoStaende.values()].reduce(
+    (a, z) => ({
+      zuPruefen: a.zuPruefen + z.zuPruefen,
+      fehler: a.fehler + z.fehler,
+      veraltet: a.veraltet + z.veraltet,
+      postbereit: a.postbereit + z.postbereit,
+    }),
+    { zuPruefen: 0, fehler: 0, veraltet: 0, postbereit: 0 },
+  );
+  /* Das Video, bei dem die Arbeit anfängt: das dringendste zuerst. Ein Link auf „3 Clips prüfen"
+   * ohne Ziel wäre eine Zahl zum Anschauen. */
+  const dringend = [...videoStaende.entries()]
+    .map(([id, z]) => ({ id, z, auf: naechsteAufgabe(z) }))
+    .filter((x) => x.auf != null);
+  const zielFuer = (art: "fehler" | "veraltet" | "zu_pruefen" | "postbereit") => {
+    const treffer = dringend.find((x) =>
+      art === "fehler" ? x.z.fehler > 0 : art === "veraltet" ? x.z.veraltet > 0 : art === "postbereit" ? x.z.postbereit > 0 : x.z.zuPruefen > 0,
+    );
+    return treffer ? `/projekte/${treffer.id}/clips#${art}` : null;
+  };
   /* „In Arbeit" heisst hier dasselbe wie in der Liste: der Zustand aus projektZustand, damit
    * Kopfzahl und Karten nicht auseinanderlaufen. */
   const activeCount = zeilen.filter((z) => {
     const zu = projektZustand(z.source, z.clips);
     return zu === "verarbeitung" || zu === "upload";
   }).length;
-  const offeneClips = [...clipCounts.values()].reduce((n, c) => n + c.offen, 0);
-  const renderedClips = [...clipCounts.values()].reduce((n, c) => n + c.rendered, 0);
 
   return (
     <PageShell width="wide">
@@ -95,13 +134,34 @@ export default async function ProjectsPage() {
          * anfängt, das größte Element der Seite und sagen nichts. */}
         {sources.length > 0 && (
           <dl className="relative mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Stat label="Videos" value={sources.length} hint={`${readyCount} fertig analysiert`} />
-            <Stat label="Gerade in Arbeit" value={activeCount} hint={activeCount > 0 ? "der Computer rechnet" : "nichts in der Warteschlange"} />
-            {/* Vorher stand hier „Momente zu prüfen". Den Auswahlschritt für Momente gibt es nicht
-              * mehr; die Zahl zeigte auf eine Seite, die niemand öffnen kann. Gezählt wird jetzt,
-              * was wirklich auf eine Entscheidung wartet: gebaute Clips ohne Prüfstand. */}
-            <Stat label="Clips zu prüfen" value={offeneClips} hint="warten auf deine Entscheidung" />
-            <Stat label="Fertige Clips" value={renderedClips} hint={failedCount > 0 ? `bei ${failedCount} Video(s) ging etwas schief` : "bereit zum Posten"} />
+            {/* Vier Zahlen, die verschiedene Dinge zählen und jede zu ihrer Arbeitsliste führt.
+              * Vorher standen hier „Clips zu prüfen: 14" und „Fertige Clips: 14, bereit zum
+              * Posten" über denselben vierzehn Clips. Beides stand da, beides konnte nicht
+              * stimmen, und anklickbar war keines von beidem. */}
+            <Stat
+              label="Fehler beheben"
+              value={gesamt.fehler}
+              hint={gesamt.fehler > 0 ? "hier stimmt der Inhalt nicht" : "nichts zu beheben"}
+              href={zielFuer("fehler")}
+            />
+            <Stat
+              label="Clips prüfen"
+              value={gesamt.zuPruefen}
+              hint={gesamt.zuPruefen > 0 ? "warten auf deine Entscheidung" : "alles entschieden"}
+              href={zielFuer("zu_pruefen")}
+            />
+            <Stat
+              label="Videos neu bauen"
+              value={gesamt.veraltet}
+              hint={gesamt.veraltet > 0 ? "zeigen nicht, was eingestellt ist" : activeCount > 0 ? "der Computer rechnet" : "alle auf dem neuesten Stand"}
+              href={zielFuer("veraltet")}
+            />
+            <Stat
+              label="Bereit zum Posten"
+              value={gesamt.postbereit}
+              hint={failedCount > 0 ? `bei ${failedCount} ${failedCount === 1 ? "Video" : "Videos"} ging etwas schief` : "freigegeben und aktuell"}
+              href={zielFuer("postbereit")}
+            />
           </dl>
         )}
       </section>
@@ -131,12 +191,29 @@ export default async function ProjectsPage() {
   );
 }
 
-function Stat({ label, value, hint }: { label: string; value: number; hint: string }) {
-  return (
-    <div className="rounded-inner bg-black/45 p-4 backdrop-blur-sm sm:p-5">
+/* Eine Zahl mit dem Weg zu der Liste, die sie zählt. Ohne Ziel bleibt sie eine Zahl zum
+ * Anschauen, und dann kann man sie auch weglassen. */
+function Stat({ label, value, hint, href }: { label: string; value: number; hint: string; href?: string | null }) {
+  const inhalt = (
+    <>
       <dt className="text-sm text-text-2">{label}</dt>
       <dd className="mt-2 font-mono text-3xl font-medium tabular-nums text-text">{String(value).padStart(2, "0")}</dd>
       <dd className="mt-1 text-xs text-text-3">{hint}</dd>
+    </>
+  );
+  if (href && value > 0) {
+    return (
+      <Link
+        href={href}
+        className="transition-soft block rounded-inner bg-black/45 p-4 backdrop-blur-sm hover:bg-black/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 sm:p-5"
+      >
+        {inhalt}
+      </Link>
+    );
+  }
+  return (
+    <div className="rounded-inner bg-black/45 p-4 backdrop-blur-sm sm:p-5">
+      {inhalt}
     </div>
   );
 }

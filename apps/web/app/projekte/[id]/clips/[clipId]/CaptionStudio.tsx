@@ -756,13 +756,16 @@ function Befunde({
         />
       )}
 
+      {/* Die Zahl gehört in die Überschrift. Vorher stand dort „Hier wird zügig gesprochen" und
+          erst weiter unten „Stelle 1 von 27" - man sah den Umfang der Aufgabe erst, wenn man
+          schon mittendrin war. */}
       {schnell.length > 0 && (
         <Aufgabe
           ton="ruhig"
           titel={
-            t.ueberGrenze
-              ? "Hier wird zügig gesprochen"
-              : `${schnell.length === 1 ? "Eine Stelle" : `${schnell.length} Stellen`} zum Straffen`
+            schnell.length === 1
+              ? "1 Stelle mit schnellem Sprechen"
+              : `${schnell.length} Stellen mit schnellem Sprechen`
           }
           satz={
             t.ueberGrenze

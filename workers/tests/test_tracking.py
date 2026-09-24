@@ -355,3 +355,72 @@ def test_ziele_haben_keine_luecken_und_keine_ueberlappung():
     z = tr.ziele(_einstellungen(a), 1920)
     for vor, nach in zip(z, z[1:]):
         assert vor.ende_s == pytest.approx(nach.start_s)
+
+
+# -- Blickraum aus dem Kontext ---------------------------------------------------------------------
+def test_sprecher_mit_leuten_rechts_von_sich_bekommt_blickraum_nach_rechts():
+    assert tr.blickraum_anker(1000, 3840, andere=[2000, 2600]) == pytest.approx(1 / 3)
+
+
+def test_sprecher_mit_leuten_links_von_sich_bekommt_blickraum_nach_links():
+    assert tr.blickraum_anker(2600, 3840, andere=[700, 1300]) == pytest.approx(2 / 3)
+
+
+def test_sprecher_mitten_in_der_gruppe_bleibt_mittig():
+    """Der Fehler aus der Praxis: links der Bildmitte, aber mit drei Leuten links von sich."""
+    assert tr.blickraum_anker(1100, 3840, andere=[700, 1400, 2100, 2400, 3000]) == 0.5
+
+
+def test_ohne_andere_entscheidet_die_lage_im_bild():
+    assert tr.blickraum_anker(700, 3840) == pytest.approx(1 / 3)
+    assert tr.blickraum_anker(3100, 3840) == pytest.approx(2 / 3)
+
+
+def test_gruppenaufnahme_schiebt_den_ausschnitt_nicht_von_der_gruppe_weg():
+    """Sieben Personen, der Sprecher sitzt links der Bildmitte, aber nicht am Rand der Gruppe."""
+    xs = [700, 1100, 1400, 2100, 2400, 3000, 3400]
+    a = []
+    for i in range(20):
+        mund = [0.05] * len(xs)
+        mund[1] = 0.9  # der bei 1100 spricht
+        a.append(abt(i * 0.2, [box(x, b=140) for x in xs], 0.02, mund=mund))
+    a[0].bildwechsel = None
+    z = tr.ziele(_einstellungen(a), 3840)
+    assert len(z) == 1
+    assert z[0].cx == pytest.approx(1100, abs=30)
+    assert z[0].anker == 0.5, "Anker zieht den Ausschnitt aus der Gruppe heraus"
+
+
+# -- Ruhe ueber Schnitte hinweg --------------------------------------------------------------------
+def _einstellung_mit(start, cx, n=15, breite=400):
+    a = [abt(start + i * 0.2, [box(cx, b=breite)], 0.02) for i in range(n)]
+    a[0].bildwechsel = 0.9
+    return a
+
+
+def test_derselbe_mensch_nach_einem_schnitt_behaelt_seinen_ausschnitt():
+    """Gemessen an BP CW: 2062, 1924, 2152 - dreimal dieselbe Person, dreimal ein anderer Ausschnitt."""
+    a = _einstellung_mit(0.0, 2062)
+    a[0].bildwechsel = None
+    b = _einstellung_mit(3.0, 1924)
+    c = _einstellung_mit(6.0, 2152)
+    z = tr.ziele(_einstellungen([*a, *b, *c]), 3840)
+    assert len(z) == 3, "die Einstellungen sollen getrennt bleiben"
+    assert len({round(q.cx) for q in z}) == 1, [round(q.cx) for q in z]
+
+
+def test_ein_echter_wechsel_wird_nicht_wegberuhigt():
+    a = _einstellung_mit(0.0, 1300)
+    a[0].bildwechsel = None
+    b = _einstellung_mit(3.0, 2580)
+    z = tr.ziele(_einstellungen([*a, *b]), 3840)
+    assert [round(q.cx) for q in z] == [1300, 2580]
+
+
+def test_in_der_totale_gilt_ein_kleinerer_massstab():
+    """Kleine Gesichter heisst: zweihundert Punkte sind zwei Personen, nicht ein halbes Gesicht."""
+    a = _einstellung_mit(0.0, 1000, breite=120)
+    a[0].bildwechsel = None
+    b = _einstellung_mit(3.0, 1200, breite=120)
+    z = tr.ziele(_einstellungen([*a, *b]), 3840)
+    assert [round(q.cx) for q in z] == [1000, 1200]

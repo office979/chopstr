@@ -71,6 +71,13 @@ FENSTER_S = 1.2
 # Kuerzer darf kein Ausschnitt stehen. Ein Bild, das haeufiger springt, ist nicht mehr zu lesen.
 MIN_ZIEL_S = 1.2
 
+# Wie weit zwei aufeinanderfolgende Ziele auseinanderliegen duerfen und trotzdem als dieselbe
+# Einstellung gelten, in Vielfachen der Gesichtsbreite. An BP CW gemessen: drei Schnitte
+# hintereinander auf dieselbe Person ergaben die Bildstellen 2062, 1924 und 2152 - derselbe Mensch,
+# dieselbe Einstellungsgroesse, aber der Ausschnitt rutschte bei jedem Schnitt um gut 200 Punkte.
+# Genau das sieht im fertigen Clip nach Unruhe aus, ohne dass etwas passiert waere.
+RUHE_FAKTOR = 0.6
+
 # Mundbewegung, die nicht verglichen werden konnte (erstes Bild, direkt nach einem Schnitt, oder die
 # Box ist gesprungen). Ausdruecklich keine Aussage, nicht etwa „keine Bewegung".
 NICHT_MESSBAR = -1.0
@@ -117,6 +124,10 @@ class Ziel:
     cy: float | None = None
     anker: float = 0.5
     grund: str = "kein_gesicht"
+    # Typische Gesichtsbreite in dieser Einstellung. Massstab dafuer, was ein kleiner und was ein
+    # grosser Versatz ist: in einer Totale sind 200 Bildpunkte zwei Personen, in einer
+    # Naheinstellung ein halbes Gesicht.
+    breite: float = 0.0
 
     @property
     def dauer_s(self) -> float:
@@ -291,17 +302,40 @@ def sprecher_position(
 
 
 # -- Drittelregel, waagerecht ----------------------------------------------------------------------
-def blickraum_anker(gesicht_cx: float, quelle_breite: float, ab: float = BLICKRAUM_AB) -> float:
+def blickraum_anker(
+    gesicht_cx: float,
+    quelle_breite: float,
+    andere: list[float] | tuple[float, ...] = (),
+    ab: float = BLICKRAUM_AB,
+) -> float:
     """Wo im Ausschnitt soll das Gesicht sitzen? 0,33 links, 0,5 mittig, 0,67 rechts.
 
-    Wer links der Bildmitte sitzt, wendet sich in aller Regel nach rechts, zum Gegenüber. Dann
-    gehört er auf das linke Drittel, damit rechts Blickraum bleibt. Umgekehrt genauso. Nahe der
-    Mitte bleibt es bei der Mitte, dort gibt es keine Richtung.
+    Wer spricht, wendet sich an jemanden. Sitzt dieser jemand rechts von ihm, gehoert der Sprecher
+    auf das linke Drittel, damit der Angesprochene mit ins Bild kommt. Deshalb entscheidet die Lage
+    der ANDEREN Personen, nicht die Lage im Bild.
 
-    Ohne Blickrichtungserkennung ist die Sitzposition der beste verfügbare Anhaltspunkt. Das ist
-    eine Annahme, keine Messung, und sie ist bei einem Sprecher, der sich wegdreht, falsch.
+    An BP CW gemessen: in jeder Gruppenaufnahme stand der Anker auf 0,33, weil der Sprecher links
+    der Bildmitte sass - obwohl links von ihm noch drei Leute sassen. Der Ausschnitt schob sich
+    damit von der Gruppe weg, statt sie zu zeigen. Sitzen Leute auf beiden Seiten, gibt es keine
+    Richtung: dann bleibt der Sprecher mittig und man sieht links wie rechts gleich viel.
+
+    Ist niemand sonst im Bild, bleibt nur die Lage im Bild als Anhaltspunkt: wer am linken Rand
+    sitzt, schaut in aller Regel zu einem Gegenueber ausserhalb des Ausschnitts nach rechts.
+
+    Beides sind Annahmen, keine Messungen. Eine Blickrichtungserkennung gibt es nicht, und bei
+    einem Sprecher, der sich wegdreht, liegen sie falsch.
     """
     if quelle_breite <= 0:
+        return 0.5
+    if andere:
+        # Ein halbes Bildviertel Mindestabstand, damit jemand direkt daneben keine Richtung vorgibt.
+        mindest = quelle_breite * ab
+        links = any(x < gesicht_cx - mindest for x in andere)
+        rechts = any(x > gesicht_cx + mindest for x in andere)
+        if links and not rechts:
+            return 1.0 - DRITTEL
+        if rechts and not links:
+            return DRITTEL
         return 0.5
     versatz = (gesicht_cx - quelle_breite / 2.0) / quelle_breite
     if versatz < -ab:
@@ -309,7 +343,6 @@ def blickraum_anker(gesicht_cx: float, quelle_breite: float, ab: float = BLICKRA
     if versatz > ab:
         return 1.0 - DRITTEL
     return 0.5
-
 
 
 # -- Was wann im Bild stehen soll ------------------------------------------------------------------
@@ -402,6 +435,37 @@ def _zu_laeufen(fenster: list[list], min_ziel_s: float) -> list[list]:
     return laeufe
 
 
+def gesichtsbreite(einstellung: Einstellung) -> float:
+    """Typische Gesichtsbreite in dieser Einstellung (Median ueber alle Erkennungen)."""
+    breiten = sorted(bw for a in einstellung.abtastungen for _x, _y, bw, _bh in a.boxen)
+    if not breiten:
+        return 0.0
+    return float(breiten[len(breiten) // 2])
+
+
+def _beruhigen(aus: list[Ziel], faktor: float = RUHE_FAKTOR) -> list[Ziel]:
+    """Zwei Ziele dicht beieinander auf dieselbe Bildstelle legen.
+
+    Zwischen zwei Schnitten auf dieselbe Person wandert die erkannte Gesichtsmitte um ein paar
+    hundert Punkte. Uebernaehme der Ausschnitt das, ruckelte das Bild bei jedem Schnitt, ohne dass
+    sich etwas geaendert haette. Der Massstab ist die Gesichtsbreite der KLEINEREN der beiden
+    Einstellungen: in einer Totale sind zweihundert Punkte zwei verschiedene Personen, in einer
+    Naheinstellung ein halbes Gesicht.
+
+    Verglichen wird mit dem gehaltenen Wert, nicht mit dem gemessenen. Sonst wanderte der Ausschnitt
+    in vielen kleinen Schritten doch davon.
+    """
+    for vor, z in zip(aus, aus[1:]):
+        if vor.cx is None or z.cx is None:
+            continue
+        breiten = [b for b in (vor.breite, z.breite) if b > 0]
+        if not breiten:
+            continue
+        if abs(z.cx - vor.cx) <= min(breiten) * faktor:
+            z.cx, z.cy, z.anker, z.breite = vor.cx, vor.cy, vor.anker, vor.breite
+    return aus
+
+
 def ziele(
     einstellungen: list[Einstellung],
     quelle_breite: float,
@@ -426,6 +490,7 @@ def ziele(
     aus: list[Ziel] = []
     for e in einstellungen:
         pos = positionen(e)
+        breite = gesichtsbreite(e)
         if not pos:
             aus.append(Ziel(e.start_s, e.ende_s, None, None, 0.5, "kein_gesicht"))
             continue
@@ -433,25 +498,28 @@ def ziele(
             i = 0 if len(pos) == 1 else _haeufigste_position(e, pos)
             cx, cy = pos[i]
             grund = "einzige_person" if len(pos) == 1 else "haeufigste_person"
-            aus.append(Ziel(e.start_s, e.ende_s, cx, cy, blickraum_anker(cx, quelle_breite), grund))
+            andere = [p[0] for j, p in enumerate(pos) if j != i]
+            aus.append(Ziel(e.start_s, e.ende_s, cx, cy, blickraum_anker(cx, quelle_breite, andere), grund, breite))
             continue
 
         fenster = _fenster(e, pos, fenster_s)
         if not _luecken_fuellen(fenster):
             cx = sum(p[0] for p in pos) / len(pos)
             cy = sum(p[1] for p in pos) / len(pos)
-            aus.append(Ziel(e.start_s, e.ende_s, cx, cy, 0.5, "gruppe_unentschieden"))
+            aus.append(Ziel(e.start_s, e.ende_s, cx, cy, 0.5, "gruppe_unentschieden", breite))
             continue
         for start, ende, idx in _zu_laeufen(fenster, min_ziel_s):
             cx, cy = pos[idx]
-            aus.append(Ziel(start, ende, cx, cy, blickraum_anker(cx, quelle_breite), "sprecher"))
-    return aus
+            andere = [p[0] for j, p in enumerate(pos) if j != idx]
+            aus.append(Ziel(start, ende, cx, cy, blickraum_anker(cx, quelle_breite, andere), "sprecher", breite))
+    return _beruhigen(aus)
 
 
 __all__ = [
     "Abtastung",
     "FENSTER_S",
     "MIN_ZIEL_S",
+    "RUHE_FAKTOR",
     "Ziel",
     "BLICKRAUM_AB",
     "Einstellung",
@@ -464,6 +532,7 @@ __all__ = [
     "SCHNITT_SCHWELLE",
     "SPRECHER_VORSPRUNG",
     "blickraum_anker",
+    "gesichtsbreite",
     "in_einstellungen_teilen",
     "positionen",
     "schnitt_schwelle",

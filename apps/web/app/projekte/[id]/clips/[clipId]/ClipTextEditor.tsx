@@ -137,7 +137,7 @@ export function ClipTextEditor({
         {!canEdit
           ? "Klick ein Wort an, um dorthin zu springen."
           : korrigieren
-            ? "Klick das Wort an, dessen Schreibweise du ändern willst. Der Ton bleibt, wie er ist."
+            ? "Klick das Wort an, dessen Schreibweise du ändern willst. Nur der Untertitel ändert sich, gesagt bleibt gesagt. Soll ein Wort ganz raus, geht das unter „Schnitt“ mit „Teil entfernen“."
             : "Klick ein Wort an, um dorthin zu springen. Zum Ändern auf „Text korrigieren“."}
       </p>
 

@@ -89,6 +89,9 @@ interface Props {
    * ist. */
   markenFassung: Fassung | null;
   markenName: string | null;
+  /* Die Farben dieser Marke, als schnelle Wahl bei den Untertiteln. Eine Agentur soll die
+   * Kundenfarbe nicht bei jedem Clip aus einem Farbrad suchen. */
+  markenFarben: string[];
   /* Der Plan des letzten Laufs: daran hängt, ob das gebaute Video noch aktuell ist. */
   renderPlan: RenderPlan | null;
   clipStatus: ClipStatus;
@@ -149,6 +152,7 @@ export function ClipDetail({
   quelleFertig,
   markenFassung,
   markenName,
+  markenFarben,
   renderPlan,
   clipStatus,
   renderFehler,
@@ -1036,6 +1040,7 @@ export function ClipDetail({
               zuruecksetzen={() => setStil({})}
               saving={stilSaving}
               schriftenVorhanden={schriftenVorhanden}
+              markenFarben={markenFarben}
               woerter={clipWords}
               onSeek={seek}
             />

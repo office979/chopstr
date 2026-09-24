@@ -201,6 +201,8 @@ interface StudioProps {
   /* Die Schriften, für die in dieser Installation wirklich eine Datei vorliegt. Alles andere
    * kann weder die Vorschau zeigen noch der Renderer einbrennen. */
   schriftenVorhanden: string[];
+  /* Die Farben der Marke dieses Videos. Leer, wenn keine Marke zugeordnet ist. */
+  markenFarben: string[];
   /* Die Wörter dieses Clips. Daraus entstehen die Proben auf den Stilkarten und die Prüfung,
    * ob der Text lesbar durchläuft. */
   woerter: TranscriptWord[];
@@ -225,6 +227,7 @@ export function CaptionStudio({
   zuruecksetzen,
   saving,
   schriftenVorhanden,
+  markenFarben,
   woerter,
   onSeek,
 }: StudioProps) {
@@ -463,6 +466,33 @@ export function CaptionStudio({
                   >
                     {/* Ein Haken, nicht nur ein heller Rand: wer Farben nicht unterscheiden kann,
                         sieht sonst nicht, welche gewählt ist (WCAG 1.4.1, Nutzung von Farbe). */}
+                    {aktiv && (
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M3.5 8.5 6.5 11.5 12.5 4.5" stroke="#000" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+              {/* Die Farben der Marke, wenn es welche gibt. Eine Agentur soll die Kundenfarbe
+                  nicht bei jedem Clip aus einem Farbrad heraussuchen. */}
+              {markenFarben.map((f) => {
+                const aktiv = s.highlight_color.toLowerCase() === f.toLowerCase();
+                return (
+                  <button
+                    key={`marke-${f}`}
+                    type="button"
+                    disabled={!canEdit}
+                    onClick={() => setzen({ highlight_color: f })}
+                    aria-label={`Markenfarbe ${f}`}
+                    aria-pressed={aktiv}
+                    title="Farbe aus dem Markenprofil"
+                    className={cn(
+                      "transition-soft flex h-9 w-9 items-center justify-center rounded-[10px] border-2 disabled:opacity-60",
+                      aktiv ? "border-white" : "border-white/20 hover:border-white/50",
+                    )}
+                    style={{ background: f }}
+                  >
                     {aktiv && (
                       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M3.5 8.5 6.5 11.5 12.5 4.5" stroke="#000" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />

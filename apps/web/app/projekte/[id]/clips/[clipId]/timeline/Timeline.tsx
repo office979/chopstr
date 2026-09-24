@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
@@ -204,6 +204,32 @@ export function Timeline({
     } else if (e.key === "End") {
       e.preventDefault();
       onSeek(schnitt[schnitt.length - 1]?.end ?? bereichBisS);
+    } else if (e.key === "s" || e.key === "S") {
+      /* Schneiden an der Stelle des Abspielkopfs. Wer viele Clips schneidet, wechselt sonst für
+       * jeden Schnitt zwischen Tastatur und Maus - und das ist die Bewegung, die Schneiden
+       * langsam macht. Die Buchstaben sind die, die Schnittprogramme seit Jahrzehnten benutzen. */
+      if (!kannTeilen) return;
+      e.preventDefault();
+      onSchnitt(teilen(schnitt, zeit), "Geteilt");
+    } else if (e.key === "i" || e.key === "I") {
+      if (!istSichtbar(schnitt, zeit)) return;
+      e.preventDefault();
+      onSchnitt(anfangKuerzen(schnitt, zeit), "Anfang gekürzt");
+    } else if (e.key === "o" || e.key === "O") {
+      if (!istSichtbar(schnitt, zeit)) return;
+      e.preventDefault();
+      onSchnitt(endeKuerzen(schnitt, zeit), "Ende gekürzt");
+    } else if ((e.key === "Backspace" || e.key === "Delete") && kannEntfernen && gewaehlt != null) {
+      e.preventDefault();
+      onSchnitt(entfernen(schnitt, gewaehlt), "Teil entfernt");
+      setGewaehlt(null);
+    } else if ((e.key === "z" || e.key === "Z") && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      if (e.shiftKey) {
+        if (kannVor) onVor();
+      } else if (kannZurueck) {
+        onZurueck();
+      }
     }
   };
 
@@ -286,7 +312,7 @@ export function Timeline({
         tabIndex={0}
         onKeyDown={tastatur}
         role="group"
-        aria-label="Timeline, mit Pfeiltasten bewegen, Leertaste spielt ab"
+        aria-label="Timeline. Pfeiltasten bewegen, Leertaste spielt ab, S schneidet, I kürzt den Anfang, O das Ende, Entfernen löscht den gewählten Abschnitt"
         className="transition-soft mt-4 flex gap-2 rounded-inner border border-line p-2 focus:border-white/50 focus:outline-none"
       >
         {/* Die Namen der Spuren. Ohne sie stehen hier vier Streifen uebereinander und niemand
@@ -457,17 +483,18 @@ export function Timeline({
         </div>
       </div>
 
-      {/* Schnittwerkzeuge, benannt nach dem was sie tun */}
+      {/* Schnittwerkzeuge, benannt nach dem was sie tun. Die Tastenkürzel stehen an den Knöpfen:
+          ein Kürzel, das man nicht sieht, benutzt niemand. */}
       {canEdit && (
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <Button variant="ghost" size="sm" onClick={() => onSchnitt(anfangKuerzen(schnitt, zeit), "Anfang gekürzt")} disabled={!istSichtbar(schnitt, zeit)}>
-            Anfang kürzen
+            Anfang kürzen <Kuerzel>I</Kuerzel>
           </Button>
           <Button variant="ghost" size="sm" onClick={() => onSchnitt(endeKuerzen(schnitt, zeit), "Ende gekürzt")} disabled={!istSichtbar(schnitt, zeit)}>
-            Ende kürzen
+            Ende kürzen <Kuerzel>O</Kuerzel>
           </Button>
           <Button variant="ghost" size="sm" onClick={() => onSchnitt(teilen(schnitt, zeit), "Geteilt")} disabled={!kannTeilen}>
-            Hier schneiden
+            Hier schneiden <Kuerzel>S</Kuerzel>
           </Button>
           <Button
             variant={kannEntfernen ? "danger" : "ghost"}
@@ -479,7 +506,7 @@ export function Timeline({
             }}
             disabled={!kannEntfernen}
           >
-            Teil entfernen
+            Teil entfernen <Kuerzel>Entf</Kuerzel>
           </Button>
           <span className="text-sm text-text-2">
             {gewaehlt != null
@@ -576,5 +603,14 @@ function Griff({ seite, onPointer }: { seite: "links" | "rechts"; onPointer: (e:
     >
       <span className="mx-auto block h-full w-[3px] rounded-full bg-white/60" />
     </button>
+  );
+}
+
+/* Ein Tastenkürzel an einem Knopf. Klein und ruhig: es soll auffindbar sein, nicht laut. */
+function Kuerzel({ children }: { children: ReactNode }) {
+  return (
+    <kbd className="ml-1.5 rounded border border-line px-1 font-mono text-[10px] font-normal text-text-3">
+      {children}
+    </kbd>
   );
 }

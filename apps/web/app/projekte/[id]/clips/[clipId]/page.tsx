@@ -129,6 +129,9 @@ export default async function ClipPage({ params }: Props) {
             : null
         }
         markenName={marke?.name ?? null}
+        markenFarben={[marke?.ci?.colors?.primary, marke?.ci?.colors?.secondary, marke?.ci?.colors?.accent, marke?.caption_style?.highlight_color]
+          .filter((c): c is string => typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c))
+          .filter((c, i, alle) => alle.indexOf(c) === i)}
         /* Die Vorschau rechnet den Ausschnitt selbst aus, dafuer braucht sie beide Groessen. Die
          * Ausgabegroesse steht im Plan; ohne Plan gilt 1080x1920, das Format aller neuen Clips. */
         srcW={source.width ?? null}

@@ -13,6 +13,7 @@ import {
   FONT_RUECKLAUF,
   GRENZEN,
   HIGHLIGHT_FARBEN,
+  alsHex,
   LOOKS,
   type CaptionStyle,
   type Look,
@@ -420,6 +421,20 @@ export function CaptionStudio({
           </p>
         </section>
 
+        {/* Eine Textprobe, die sofort reagiert.
+         *
+         * Der Anlass war eine Meldung, die Farbauswahl sei „teilweise nicht benutzbar". Die
+         * Knöpfe funktionierten: der Zustand änderte sich, der Wert wurde gespeichert. Unsichtbar
+         * blieb die WIRKUNG. Die Hervorhebungsfarbe zeigt sich nur an dem Wort, das gerade
+         * gesprochen wird - steht der Abspielkopf in einer Lücke oder pausiert das Video an einer
+         * Stelle ohne Wort, ändert ein Klick sichtbar nichts. Wer dreimal klickt und nichts
+         * passieren sieht, hält den Knopf für kaputt, und er hat recht damit, das zu tun.
+         *
+         * Diese Probe steht bei den Farben, reagiert auf jeden Klick und braucht dafür weder
+         * Abspielposition noch Render. Sie zeigt alle vier Farben zugleich: Text, Kontur, Kasten
+         * und das hervorgehobene Wort. */}
+        <Textprobe stil={s} />
+
         {/* 5. Hervorhebung */}
         <section className="flex flex-col gap-3">
           <Toggle
@@ -429,22 +444,46 @@ export function CaptionStudio({
             label="Gesprochenes Wort hervorheben"
           />
           {s.highlight_words && (
-            <div className="flex flex-wrap gap-2">
-              {HIGHLIGHT_FARBEN.map((f) => (
-                <button
-                  key={f}
-                  type="button"
+            <div className="flex flex-wrap items-center gap-2">
+              {HIGHLIGHT_FARBEN.map((f) => {
+                const aktiv = s.highlight_color.toLowerCase() === f;
+                return (
+                  <button
+                    key={f}
+                    type="button"
+                    disabled={!canEdit}
+                    onClick={() => setzen({ highlight_color: f })}
+                    aria-label={`Farbe ${f}`}
+                    aria-pressed={aktiv}
+                    className={cn(
+                      "transition-soft flex h-9 w-9 items-center justify-center rounded-full border-2 disabled:opacity-60",
+                      aktiv ? "border-white" : "border-white/20 hover:border-white/50",
+                    )}
+                    style={{ background: f }}
+                  >
+                    {/* Ein Haken, nicht nur ein heller Rand: wer Farben nicht unterscheiden kann,
+                        sieht sonst nicht, welche gewählt ist (WCAG 1.4.1, Nutzung von Farbe). */}
+                    {aktiv && (
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M3.5 8.5 6.5 11.5 12.5 4.5" stroke="#000" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+              {/* Eine freie Farbe. Fünf feste Vorschläge decken das Übliche ab, aber eine Marke
+                  hat ihre eigene, und die soll nicht an einer Auswahlliste scheitern. */}
+              <label className="flex items-center gap-2">
+                <span className="sr-only">Eigene Hervorhebungsfarbe</span>
+                <input
+                  type="color"
+                  value={s.highlight_color}
                   disabled={!canEdit}
-                  onClick={() => setzen({ highlight_color: f })}
-                  aria-label={`Farbe ${f}`}
-                  aria-pressed={s.highlight_color.toLowerCase() === f}
-                  className={cn(
-                    "transition-soft h-9 w-9 rounded-full border-2 disabled:opacity-60",
-                    s.highlight_color.toLowerCase() === f ? "border-white" : "border-white/20 hover:border-white/50",
-                  )}
-                  style={{ background: f }}
+                  onChange={(e) => setzen({ highlight_color: e.target.value })}
+                  className="h-9 w-9 cursor-pointer rounded-full border-2 border-white/20 bg-transparent disabled:cursor-not-allowed disabled:opacity-60"
                 />
-              ))}
+                <span className="text-xs tabular-nums text-text-3">{s.highlight_color}</span>
+              </label>
             </div>
           )}
         </section>
@@ -940,5 +979,51 @@ function Farbwahl({
         <span className="text-sm text-text-2">{wert}</span>
       </div>
     </div>
+  );
+}
+
+/* Eine kleine Probe, die alle vier Farben zugleich zeigt und sofort reagiert.
+ *
+ * Bewusst kein Video und kein Render: die Probe soll genau dann etwas zeigen, wenn im Video
+ * gerade nichts zu sehen wäre - bei pausierter Wiedergabe, in einer Schnittlücke, oder an einer
+ * Stelle ohne gesprochenes Wort. Sie ist eine Probe und keine Vorschau, und das steht auch
+ * dabei: die verbindliche Vorschau ist das Bild links. */
+function Textprobe({ stil }: { stil: ReturnType<typeof mitVorgabe> }) {
+  const kontur = alsHex(stil.outline_color, "#000000");
+  const basis = alsHex(stil.base_color, "#ffffff");
+  const hervor = alsHex(stil.highlight_color, basis);
+  /* Die Kontur als vierfacher Schatten: so macht es auch der Renderer, nur dort in einem
+   * Zeichenbefehl statt in CSS. Bei Kontur 0 bleibt sie weg. */
+  const rand = Math.max(0, Math.min(3, Math.round(stil.outline_px / 4)));
+  const schatten = rand
+    ? [`${rand}px 0 ${kontur}`, `-${rand}px 0 ${kontur}`, `0 ${rand}px ${kontur}`, `0 -${rand}px ${kontur}`].join(", ")
+    : undefined;
+
+  return (
+    <section className="flex flex-col gap-1.5">
+      <p className="text-xs uppercase tracking-wide text-text-3">Probe</p>
+      <div className="flex items-center justify-center rounded-inner border border-line bg-black/60 px-4 py-5">
+        <p
+          className={cn("text-center text-lg leading-snug", stil.bold && "font-bold")}
+          style={{
+            color: basis,
+            textShadow: schatten,
+            backgroundColor: stil.box ? alsHex(stil.box_color, "#000000") : undefined,
+            padding: stil.box ? "0.15em 0.4em" : undefined,
+            borderRadius: stil.box ? "0.2em" : undefined,
+            fontFamily: `${stil.font}, Inter, sans-serif`,
+          }}
+        >
+          {stil.all_caps ? "SO SIEHT DEIN " : "So sieht dein "}
+          <span style={{ color: stil.highlight_words ? hervor : basis }}>
+            {stil.all_caps ? "TEXT" : "Text"}
+          </span>
+          {stil.all_caps ? " AUS" : " aus"}
+        </p>
+      </div>
+      <p className="text-xs text-text-3">
+        Zeigt Farben, Kontur und Kasten sofort. Wie es im Video sitzt, siehst du links in der Vorschau.
+      </p>
+    </section>
   );
 }

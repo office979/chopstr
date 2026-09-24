@@ -148,6 +148,18 @@ export function assFarbe(wert: string): string | null {
 }
 
 /* ``&H00BBGGRR`` zurueck nach ``#rrggbb``. Gegenstueck zu assFarbe. */
+/* Ein Farbwert als Hex, egal woher er kommt.
+ *
+ * In der Oberfläche stehen Farben als „#ff3b6b", im Renderplan als „&H006B3BFF". hexFarbe kennt
+ * nur die zweite Form und gibt für die erste null zurück - wer das übersieht, baut eine Anzeige,
+ * die still auf ihren Ersatzwert fällt. Genau das ist bei der Farbprobe passiert: sie stand weiss
+ * auf weiss, und die Farbwahl sah wieder nach „tut nichts" aus. */
+export function alsHex(wert: unknown, ersatz: string): string {
+  const w = String(wert ?? "").trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(w)) return w.toLowerCase();
+  return hexFarbe(w) ?? ersatz;
+}
+
 export function hexFarbe(wert: unknown): string | null {
   const w = String(wert ?? "").trim().toUpperCase();
   const m = /^&H[0-9A-F]{2}([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})$/.exec(w);

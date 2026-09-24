@@ -8,7 +8,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { assFarbe, BASIS_PRESETS, type CaptionStyle, FONTS, GRENZEN, maxZeichen, mitVorgabe, passtZumRender, stilPruefen, VORGABE } from "@/lib/clips/caption-style";
+import {
+  alsHex, assFarbe, BASIS_PRESETS, type CaptionStyle, FONTS, GRENZEN, maxZeichen, mitVorgabe, passtZumRender, stilPruefen, VORGABE } from "@/lib/clips/caption-style";
 import { MAX_CPS } from "@/lib/clips/untertitel-pruefung";
 
 const WURZEL = resolve(import.meta.dirname, "../../..");
@@ -216,5 +217,29 @@ describe("passtZumRender", () => {
     /* Lieber einmal zu viel darauf hinweisen als eine Änderung stillschweigend verschlucken. */
     const alt = { preset: "reels_words", font: "Inter", font_px: 92, max_chars: 17, baseline_y: 1350 };
     expect(passtZumRender({}, alt)).toBe(false);
+  });
+});
+
+/* Farbwerte kommen aus zwei Richtungen: aus der Oberfläche als „#ff3b6b", aus dem Renderplan als
+ * „&H006B3BFF". Eine Anzeige, die nur die zweite Form kennt, fällt für die erste still auf ihren
+ * Ersatzwert - und sieht dann aus, als täte die Farbwahl nichts. Genau das ist passiert. */
+describe("alsHex", () => {
+  it("nimmt einen Hexwert aus der Oberfläche unverändert", () => {
+    expect(alsHex("#FF3B6B", "#000000")).toBe("#ff3b6b");
+  });
+
+  it("wandelt eine ASS-Farbe aus dem Renderplan um", () => {
+    expect(alsHex("&H006B3BFF", "#000000")).toBe("#ff3b6b");
+  });
+
+  it("nimmt den Ersatzwert nur, wenn wirklich nichts Brauchbares dasteht", () => {
+    expect(alsHex(null, "#ffffff")).toBe("#ffffff");
+    expect(alsHex("blau", "#ffffff")).toBe("#ffffff");
+    expect(alsHex("", "#ffffff")).toBe("#ffffff");
+  });
+
+  it("fällt nicht auf den Ersatzwert, nur weil die Schreibweise anders ist", () => {
+    /* Der Fehler, der die Farbprobe weiss auf weiss stehen liess. */
+    expect(alsHex("#ffd700", "#ffffff")).not.toBe("#ffffff");
   });
 });

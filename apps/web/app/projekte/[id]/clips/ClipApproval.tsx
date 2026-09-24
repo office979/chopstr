@@ -19,6 +19,9 @@ interface Props {
   current: GuestApproval | null;
   /* Rolle guest_approval.request */
   canRequest: boolean;
+  /* Warum gerade nicht gefragt werden kann. Ein fehlender Knopf ohne Begründung sieht aus wie ein
+   * Fehler der Anwendung. */
+  gesperrtGrund?: string | null;
   /* Plan-Gate plans.features.guest_approval */
   planAllows: boolean;
   planName: string;
@@ -32,9 +35,13 @@ interface ApiResponse {
   mail?: { delivered: boolean; logged: boolean };
 }
 
-/* Freigabe je Clip-Karte: Status als Plakette, die Handlung als reines Zeichen (Person mit Plus).
- * Auf der Clip-Seite gibt es keine Textknöpfe mehr; das Hook-Studio benutzt weiter GuestApprovalDialog. */
-export function ClipApproval({ sourceId, clipId, clipLabel, guestApprovalRequired, current, canRequest, planAllows, planName, onRequested }: Props) {
+/* Freigabe je Clip-Karte: jemanden von aussen entscheiden lassen.
+ *
+ * Die Handlung stand hier als reines Personensymbol mit Plus. Ein Zeichen ohne Wort ist ein
+ * Rätsel: „Person mit Plus" kann genauso gut „Mitglied einladen" oder „Zuständigen setzen"
+ * heissen, und der Titel hilft nur, wer eine Maus hat und ahnt, dass dort etwas steht. Jetzt
+ * steht das Wort daneben. */
+export function ClipApproval({ sourceId, clipId, clipLabel, guestApprovalRequired, current, canRequest, gesperrtGrund, planAllows, planName, onRequested }: Props) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(current?.guest_name ?? "");
   const [email, setEmail] = useState(current?.guest_email ?? "");
@@ -49,8 +56,6 @@ export function ClipApproval({ sourceId, clipId, clipLabel, guestApprovalRequire
   const messageId = useId();
 
   const status = guestStatus({ guest_approval_required: guestApprovalRequired }, current ?? undefined);
-  /* Ein Zeichen, drei Bedeutungen. Der Titel sagt, was passiert, damit der Knopf ohne Text trägt. */
-  const actionLabel = status === "pending" ? "Neuen Freigabe-Link erstellen" : status === "none" ? "Jemanden um Freigabe bitten" : "Erneut um Freigabe bitten";
 
   const openDialog = () => {
     if (!planAllows) {
@@ -96,16 +101,19 @@ export function ClipApproval({ sourceId, clipId, clipLabel, guestApprovalRequire
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         {status !== "none" && <Badge tone={guestTone(status)}>{GUEST_STATUS_LABELS[status]}</Badge>}
-        {canRequest && (
+        {canRequest ? (
           <button
             type="button"
             onClick={openDialog}
-            title={actionLabel}
-            aria-label={actionLabel}
-            className="transition-soft inline-flex h-9 w-9 items-center justify-center rounded-pill border border-line-strong text-text-2 hover:border-white/40 hover:bg-white/5 hover:text-text"
+            className="transition-soft inline-flex h-9 items-center gap-2 rounded-pill border border-line-strong px-3.5 text-sm text-text-2 hover:border-white/40 hover:bg-white/5 hover:text-text"
           >
             <IconUserPlus />
+            {status === "none" ? "Jemanden um Freigabe bitten" : "Erneut um Freigabe bitten"}
           </button>
+        ) : (
+          gesperrtGrund && (
+            <span className="text-xs text-text-3">Freigabe von aussen: {gesperrtGrund}</span>
+          )
         )}
         {status !== "none" && current && (
           <span className="text-xs text-text-2">

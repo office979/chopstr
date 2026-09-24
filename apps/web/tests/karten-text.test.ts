@@ -68,3 +68,25 @@ describe("fortsetzung", () => {
     expect(fortsetzung("SPEAKER_00: Eins. SPEAKER_01: Zwei.")).not.toContain("SPEAKER");
   });
 });
+
+/* Interne Angaben gehören nicht in eine Überschrift. In der laufenden Anwendung stand an einer
+ * Karte „[33]" und an einer anderen der Sprecherschlüssel - beides sagt niemandem etwas. */
+describe("interne Marken", () => {
+  it("wirft Klammermarken weg", () => {
+    expect(thema("[33] Das ist der Denkfehler.")).toBe("Das ist der Denkfehler.");
+  });
+
+  it("wirft den Sprecherschlüssel weg, auch ohne Doppelpunkt", () => {
+    expect(thema("SPEAKER_00 Das ist der Denkfehler.")).toBe("Das ist der Denkfehler.");
+    expect(thema("SPEAKER_00: Das ist der Denkfehler.")).toBe("Das ist der Denkfehler.");
+  });
+
+  it("wirft Anmerkungen der Spracherkennung weg", () => {
+    expect(thema("[Musik] Wir haben nachgerechnet.")).toBe("Wir haben nachgerechnet.");
+  });
+
+  it("lässt echte Klammerinhalte im Satz nicht stehen bleiben als Lücke", () => {
+    /* Kein doppeltes Leerzeichen, kein Komma am Anfang. */
+    expect(thema("[33] , und dann kam die Rechnung.")).toBe("Und dann kam die Rechnung.");
+  });
+});

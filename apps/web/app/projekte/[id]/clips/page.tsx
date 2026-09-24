@@ -10,6 +10,7 @@ import { getQuota } from "@/lib/billing/quota";
 import { previewFontFor } from "@/lib/brand/preview-font";
 import { getPublishingRepo } from "@/lib/repo/publishing";
 import { canExt } from "@/lib/auth/permissions-publishing";
+import { mediaUrl } from "@/lib/clips/labels";
 import { ClipBoard } from "./ClipBoard";
 
 export const dynamic = "force-dynamic";
@@ -62,14 +63,40 @@ export default async function ClipsPage({ params }: Props) {
 
   return (
     <PageShell width="wide" backgroundWord="Clips">
+      {/* Der Weg hierher, als Pfad. Wer aus einem Clip zurückkommt, muss ohne Zurück-Taste des
+          Browsers wissen, wo er ist und wie er eine Ebene höher kommt. */}
+      <nav aria-label="Pfad" className="mb-4 flex flex-wrap items-center gap-1.5 text-sm text-text-2">
+        <Link href="/" className="hover:text-text hover:underline">
+          Meine Videos
+        </Link>
+        <span aria-hidden="true" className="text-text-3">
+          ›
+        </span>
+        <Link href={`/projekte/${source.id}`} className="max-w-[260px] truncate hover:text-text hover:underline">
+          {source.title}
+        </Link>
+        <span aria-hidden="true" className="text-text-3">
+          ›
+        </span>
+        <span className="text-text">Clips prüfen</span>
+      </nav>
+
       <div className="mb-6">
-        <p className="text-sm text-text-2">
-          <Link href={`/projekte/${source.id}`} className="hover:text-text hover:underline">
-            {source.title}
-          </Link>
+        <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Clips prüfen</h1>
+        {/* Marke und Video stehen einmal hier und nicht auf jeder Karte: auf dieser Seite sind sie
+            für alle Clips gleich, und vierzehnmal dasselbe ist keine Information. */}
+        <p className="mt-1 text-sm text-text-2">
+          {brand ? (
+            <>
+              Marke{" "}
+              <Link href={`/marke?profil=${brand.id}`} className="text-text hover:underline">
+                {brand.name}
+              </Link>
+              {" · "}
+            </>
+          ) : null}
+          Video {source.title}
         </p>
-        <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Clips</h1>
-        <p className="mt-1 text-sm text-text-2">Ansehen, herunterladen oder ändern.</p>
       </div>
       <ClipBoard
         sourceId={source.id}
@@ -78,6 +105,7 @@ export default async function ClipsPage({ params }: Props) {
         candidates={candidates.filter((c) => candidateIds.has(c.id))}
         initialEvents={events.filter((e) => e.step === "render")}
         mediaBase={process.env.NEXT_PUBLIC_MEDIA_BASE_URL ?? null}
+        quelleSrc={mediaUrl(process.env.NEXT_PUBLIC_MEDIA_BASE_URL ?? null, source.proxy_key)}
         demo={repo.kind === "demo"}
         highlightColor={brand?.caption_style?.highlight_color}
         lowerThird={brand?.ci?.lower_third?.enabled ? { name: brand.ci.lower_third.name ?? "", role: brand.ci.lower_third.role ?? "" } : null}

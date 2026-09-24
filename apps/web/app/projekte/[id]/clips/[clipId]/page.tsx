@@ -29,6 +29,15 @@ export default async function ClipPage({ params }: Props) {
   if (!source || !clip || clip.source_id !== id) notFound();
 
   const publishing = getPublishingRepo();
+  /* Die Geschwister dieses Clips, in der Reihenfolge, in der sie im Video vorkommen. Damit lässt
+   * sich von hier zum nächsten springen, ohne über die Liste zu gehen. Die Reihenfolge im Video
+   * ist die vorhersagbare: die Prüfliste sortiert nach Dringlichkeit, und „der nächste" wäre dann
+   * je nach Bearbeitungsstand ein anderer. */
+  const alleClips = await repo.listClips(id);
+  const geschwister = [...alleClips]
+    .sort((a, b) => (a.composition[0]?.start ?? 0) - (b.composition[0]?.start ?? 0))
+    .map((c) => c.id);
+
   const [candidate, transcript, extras, captionPresets] = await Promise.all([
     clip.candidate_id ? repo.getCandidate(clip.candidate_id) : Promise.resolve(null),
     repo.getCurrentTranscript(id),
@@ -66,6 +75,7 @@ export default async function ClipPage({ params }: Props) {
       <ClipDetail
         sourceId={source.id}
         sourceTitle={source.title}
+        geschwister={geschwister}
         aspect={clip.aspect}
         durationS={clip.duration_s ?? (clipEnd != null ? clipEnd - clipStart : null)}
         clipSrc={clipSrc}

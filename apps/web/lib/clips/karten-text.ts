@@ -13,12 +13,21 @@ import { HARD_FILLERS, normalize, SOFT_FILLERS } from "@/lib/transcript/fillers"
 
 /* Das Präfix der Spracherkennung. In einer Ergebnisübersicht hat es nichts verloren: „SPEAKER_00"
  * ist eine Kennung aus der Diarisierung und kein Name. */
-const SPRECHER = /(^|\s)SPEAKER_\d+:\s*/g;
+const SPRECHER = /(^|\s)SPEAKER_\d+:?\s*/g;
+
+/* Interne Marken in eckigen Klammern: [33], [SPEAKER_01], [inaudible], [Musik].
+ *
+ * Woher sie kommen, ist von Fall zu Fall verschieden - Wortindizes, Sprecherwechsel, Anmerkungen
+ * der Spracherkennung. Was sie gemeinsam haben: sie sind für die Maschine geschrieben. In einer
+ * Überschrift, an der ein Mensch einen Clip wiedererkennen soll, steht „[33]" einfach im Weg. */
+const MARKEN = /\[[^\]]{0,40}\]/g;
 
 function saeubern(text: string): string {
   return text
+    .replace(MARKEN, " ")
     .replace(SPRECHER, " ")
     .replace(/\s+/g, " ")
+    .replace(/^[\s,;:.–-]+/, "")
     .trim();
 }
 

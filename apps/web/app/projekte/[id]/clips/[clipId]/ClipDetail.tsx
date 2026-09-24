@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button, ButtonLink } from "@/components/ui/Button";
@@ -48,6 +49,8 @@ interface Correction {
 interface Props {
   sourceId: string;
   sourceTitle: string;
+  /* Alle Clips dieses Videos in Reihenfolge, für „voriger/nächster Clip". */
+  geschwister: string[];
   aspect: Aspect;
   durationS: number | null;
   clipSrc: string | null;
@@ -93,6 +96,7 @@ interface Props {
 export function ClipDetail({
   sourceId,
   sourceTitle,
+  geschwister,
   aspect,
   durationS,
   clipSrc,
@@ -543,8 +547,37 @@ export function ClipDetail({
     else router.push(backHref);
   };
 
+  /* Wo stehe ich in diesem Video, und wo geht es weiter? */
+  const nr = geschwister.indexOf(clipId);
+  const vorher = nr > 0 ? geschwister[nr - 1] : null;
+  const nachher = nr >= 0 && nr < geschwister.length - 1 ? geschwister[nr + 1] : null;
+
   return (
     <>
+      {/* Der Weg hierher. Er endet bei „Clips prüfen", und der Link dorthin führt in dieselbe
+          Liste zurück: Filter und Scrollstand werden dort wiederhergestellt. */}
+      <nav aria-label="Pfad" className="mb-4 flex flex-wrap items-center gap-1.5 text-sm text-text-2">
+        <Link href="/" className="hover:text-text hover:underline">
+          Meine Videos
+        </Link>
+        <span aria-hidden="true" className="text-text-3">
+          ›
+        </span>
+        <Link href={`/projekte/${sourceId}`} className="max-w-[220px] truncate hover:text-text hover:underline">
+          {sourceTitle}
+        </Link>
+        <span aria-hidden="true" className="text-text-3">
+          ›
+        </span>
+        <Link href={`/projekte/${sourceId}/clips`} className="hover:text-text hover:underline">
+          Clips prüfen
+        </Link>
+        <span aria-hidden="true" className="text-text-3">
+          ›
+        </span>
+        <span className="text-text">Clip bearbeiten</span>
+      </nav>
+
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3">
           {/* Ein Pfeil, ein Weg zurück. Kein zweiter Knopf, der wieder in die Tiefe führt. */}
@@ -568,9 +601,42 @@ export function ClipDetail({
             </p>
           </div>
         </div>
-        <ButtonLink href={`/projekte/${sourceId}/transkript`} variant="ghost" size="sm">
-          Transkript anzeigen
-        </ButtonLink>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Von Clip zu Clip, ohne über die Liste zu gehen. Wer vierzehn Clips durchsieht, will
+              nicht vierzehnmal scrollen und suchen. */}
+          {geschwister.length > 1 && (
+            <div className="flex items-center gap-1 rounded-pill border border-line px-1 py-1">
+              {vorher ? (
+                <Link
+                  href={`/projekte/${sourceId}/clips/${vorher}`}
+                  aria-label="Voriger Clip"
+                  className="transition-soft inline-flex h-7 items-center rounded-pill px-2.5 text-sm text-text-2 hover:bg-white/10 hover:text-text"
+                >
+                  Zurück
+                </Link>
+              ) : (
+                <span className="inline-flex h-7 items-center px-2.5 text-sm text-text-3">Zurück</span>
+              )}
+              <span className="px-1.5 text-xs tabular-nums text-text-3">
+                Clip {nr + 1} von {geschwister.length}
+              </span>
+              {nachher ? (
+                <Link
+                  href={`/projekte/${sourceId}/clips/${nachher}`}
+                  aria-label="Nächster Clip"
+                  className="transition-soft inline-flex h-7 items-center rounded-pill px-2.5 text-sm text-text-2 hover:bg-white/10 hover:text-text"
+                >
+                  Weiter
+                </Link>
+              ) : (
+                <span className="inline-flex h-7 items-center px-2.5 text-sm text-text-3">Weiter</span>
+              )}
+            </div>
+          )}
+          <ButtonLink href={`/projekte/${sourceId}/transkript`} variant="ghost" size="sm">
+            Transkript anzeigen
+          </ButtonLink>
+        </div>
       </div>
 
       {/* Arbeitsbereich: Vorschau und Timeline nebeneinander. Vorher lag die Timeline unter

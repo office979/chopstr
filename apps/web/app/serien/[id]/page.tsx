@@ -11,7 +11,7 @@ import { CADENCE_LABELS, calendarSlots } from "@/lib/series/variation";
 import { PLATFORM_LABELS, patternLabel } from "@/lib/clips/labels";
 import { STRUCTURE_LABELS } from "@/lib/candidates/labels";
 import { formatDate } from "@/lib/format";
-import { clipZustand } from "@/lib/clips/clip-zustand";
+import { pruefstand } from "@/lib/clips/pruefstand";
 import { stilPruefen } from "@/lib/clips/caption-style";
 import { SerieClips, type SerienClip } from "./SerieClips";
 
@@ -43,7 +43,7 @@ export default async function SeriesDetailPage({ params }: Props) {
    * Ohne den Renderplan-Vergleich (der braucht die Transkriptversion je Projekt) bleibt es bei
    * dem, was ohne Projektkontext sicher zu sagen ist. */
   const zustandVon = (c: (typeof clips)[number]) =>
-    clipZustand({
+    pruefstand({
       clip: c,
       freigabe: null,
       stand: {
@@ -66,7 +66,7 @@ export default async function SeriesDetailPage({ params }: Props) {
     dauerS: c.duration_s,
     slot: c.series_index,
     geaendert: c.updated_at,
-    zustand: zustandVon(c),
+    stand: zustandVon(c),
   });
 
   const zeilen = clips.map(zeile);

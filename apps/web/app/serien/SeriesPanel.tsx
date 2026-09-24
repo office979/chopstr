@@ -12,7 +12,6 @@ import type { HookPattern, Platform } from "@/lib/repo/types";
 import type { Series, SeriesCadence } from "@/lib/repo/types-publishing";
 import { PATTERN_LABELS, PATTERN_ORDER, PLATFORMS, PLATFORM_LABELS } from "@/lib/clips/labels";
 import { STRUCTURE_LABELS } from "@/lib/candidates/labels";
-import { PRESETS } from "@/lib/clips/presets";
 import { CADENCE_LABELS } from "@/lib/series/variation";
 import { CADENCES } from "@/lib/series/input";
 
@@ -28,6 +27,9 @@ interface ApiError {
 export function SeriesPanel({ initialSeries, brands }: Props) {
   const [series, setSeries] = useState(initialSeries);
   const [open, setOpen] = useState(false);
+  /* Gesetzt, wenn eine bestehende Serie bearbeitet wird. Derselbe Dialog, weil es dieselben
+   * Angaben sind; nur das Ziel ändert sich. */
+  const [bearbeitet, setBearbeitet] = useState<Series | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [name, setName] = useState("");
@@ -44,8 +46,8 @@ export function SeriesPanel({ initialSeries, brands }: Props) {
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch("/api/series", {
-        method: "POST",
+      const res = await fetch(bearbeitet ? `/api/series/${bearbeitet.id}` : "/api/series", {
+        method: bearbeitet ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
@@ -56,18 +58,51 @@ export function SeriesPanel({ initialSeries, brands }: Props) {
         }),
       });
       const data = (await res.json()) as ApiError & { series?: Series };
-      if (!res.ok || !data.series) throw new Error(data.error ?? "Anlegen fehlgeschlagen");
-      setSeries((prev) => [data.series!, ...prev]);
+      if (!res.ok || !data.series) throw new Error(data.error ?? "Speichern fehlgeschlagen");
+      setSeries((prev) => (bearbeitet ? prev.map((x) => (x.id === data.series!.id ? data.series! : x)) : [data.series!, ...prev]));
       setOpen(false);
       setName("");
       setDescription("");
-      setMessage({ tone: "ok", text: `Serie „${data.series.name}“ angelegt.` });
+      setMessage({
+        tone: "ok",
+        text: bearbeitet
+          ? `„${data.series.name}" gespeichert. An fertigen Clips ändert das nichts.`
+          : `Serie „${data.series.name}" angelegt.`,
+      });
+      setBearbeitet(null);
     } catch (err) {
-      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Anlegen fehlgeschlagen" });
+      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Speichern fehlgeschlagen" });
     } finally {
       setBusy(false);
     }
-  }, [name, description, brand, cadence, structure, preset, platforms, patterns]);
+  }, [bearbeitet, name, description, brand, cadence, structure, preset, platforms, patterns]);
+
+  /* Den Dialog mit den Werten einer bestehenden Serie öffnen. */
+  const bearbeiten = useCallback((s: Series) => {
+    setBearbeitet(s);
+    setName(s.name);
+    setDescription(s.description ?? "");
+    setBrand(s.brand_profile_id ?? "");
+    setCadence(s.cadence);
+    setStructure(s.rules.structure ?? "");
+    setPreset(s.rules.caption_preset ?? "");
+    setPlatforms(s.rules.platforms ?? [...PLATFORMS]);
+    setPatterns(s.rules.hook_patterns ?? []);
+    setOpen(true);
+  }, []);
+
+  const neu = useCallback(() => {
+    setBearbeitet(null);
+    setName("");
+    setDescription("");
+    setBrand("");
+    setCadence("weekly");
+    setStructure("");
+    setPreset("");
+    setPlatforms([...PLATFORMS]);
+    setPatterns([]);
+    setOpen(true);
+  }, []);
 
   const toggleActive = useCallback(async (s: Series) => {
     try {
@@ -82,7 +117,7 @@ export function SeriesPanel({ initialSeries, brands }: Props) {
 
   return (
     <div className="flex flex-col gap-5">
-      <Modal open={open} onClose={() => !busy && setOpen(false)} title="Serie anlegen" description="Name, Marke, Kadenz und Regeln. Die Regeln dienen der Variations-Prüfung und dem Kalender." className="max-w-[720px]">
+      <Modal open={open} onClose={() => !busy && setOpen(false)} title={bearbeitet ? "Serie ändern" : "Serie anlegen"} description="Name, Marke, Rhythmus und ein paar Formatregeln. Die Regeln steuern nur den Kalender und die Ähnlichkeitsprüfung; an fertigen Clips ändern sie nichts." className="max-w-[720px]">
         <form
           className="flex flex-col gap-4"
           onSubmit={(e) => {
@@ -107,7 +142,7 @@ export function SeriesPanel({ initialSeries, brands }: Props) {
                 ))}
               </Select>
             </Field>
-            <Field label="Kadenz" htmlFor={ids.cadence}>
+            <Field label="Rhythmus" htmlFor={ids.cadence} hint="Optional. Ohne Rhythmus gibt es keinen Kalender.">
               <Select id={ids.cadence} value={cadence} onChange={(e) => setCadence(e.target.value as SeriesCadence)}>
                 {CADENCES.map((c) => (
                   <option key={c} value={c}>
@@ -116,7 +151,7 @@ export function SeriesPanel({ initialSeries, brands }: Props) {
                 ))}
               </Select>
             </Field>
-            <Field label="Struktur" htmlFor={ids.structure} hint="Regel für die Variations-Prüfung.">
+            <Field label="Aufbau" htmlFor={ids.structure} hint="Wird für die Ähnlichkeitsprüfung verglichen.">
               <Select id={ids.structure} value={structure} onChange={(e) => setStructure(e.target.value)}>
                 <option value="">Frei</option>
                 {Object.entries(STRUCTURE_LABELS).map(([k, v]) => (
@@ -126,19 +161,23 @@ export function SeriesPanel({ initialSeries, brands }: Props) {
                 ))}
               </Select>
             </Field>
-            <Field label="Caption-Preset" htmlFor={ids.preset}>
+            {/* Die Kennungen der Vorlagen („tiktok_bold") sagen niemandem etwas. Dieselben Namen
+                wie im Clip-Editor, damit es dasselbe Wort für dieselbe Sache gibt. */}
+            <Field label="Untertitel" htmlFor={ids.preset} hint="Wird für die Ähnlichkeitsprüfung verglichen.">
               <Select id={ids.preset} value={preset} onChange={(e) => setPreset(e.target.value)}>
                 <option value="">Nach Plattform</option>
-                {Object.keys(PRESETS).map((k) => (
-                  <option key={k} value={k}>
-                    {k}
-                  </option>
-                ))}
+                <option value="tiktok_words">Ein Wort nach dem anderen, sehr groß</option>
+                <option value="reels_words">Ein Wort nach dem anderen, groß</option>
+                <option value="tiktok_bold">Zwei Zeilen, fett mit Rand</option>
+                <option value="reels_clean">Zwei Zeilen, schlicht</option>
+                <option value="linkedin_static">Zwei Zeilen, ruhig auf Fläche</option>
+                <option value="corporate_third">Bauchbinde unten, ruhig und klein</option>
               </Select>
             </Field>
           </div>
           <fieldset className="flex flex-col gap-2">
             <legend className="text-sm font-medium">Plattformen</legend>
+            <p className="text-sm text-text-2">Wofür diese Serie gedacht ist.</p>
             <div className="flex flex-wrap gap-3">
               {PLATFORMS.map((p) => (
                 <label key={p} className="flex items-center gap-2 text-sm">
@@ -149,7 +188,7 @@ export function SeriesPanel({ initialSeries, brands }: Props) {
             </div>
           </fieldset>
           <fieldset className="flex flex-col gap-2">
-            <legend className="text-sm font-medium">Hook-Muster</legend>
+            <legend className="text-sm font-medium">Art des Einstiegs</legend>
             <div className="flex flex-wrap gap-3">
               {PATTERN_ORDER.map((p) => (
                 <label key={p} className="flex items-center gap-2 text-sm">
@@ -164,18 +203,25 @@ export function SeriesPanel({ initialSeries, brands }: Props) {
               Abbrechen
             </Button>
             <Button type="submit" disabled={busy || name.trim().length < 2}>
-              {busy ? "Wird angelegt" : "Anlegen"}
+              {busy ? "Wird gespeichert" : bearbeitet ? "Speichern" : "Anlegen"}
             </Button>
           </div>
         </form>
       </Modal>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-text-2">{series.length === 0 ? "Noch keine Serie." : `${series.length} ${series.length === 1 ? "Serie" : "Serien"}.`}</p>
-        <Button size="sm" onClick={() => setOpen(true)}>
-          Serie anlegen
-        </Button>
-      </div>
+      {/* Der Zähler nur, wenn es etwas zu zählen gibt. Vorher stand „Noch keine Serie." hier UND
+          „Noch keine Serie" in der Karte darunter: zweimal dieselbe Auskunft, und keine davon
+          sagte, was eine Serie überhaupt ist. */}
+      {series.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-text-2">
+            {series.length} {series.length === 1 ? "Serie" : "Serien"}.
+          </p>
+          <Button size="sm" onClick={neu}>
+            Serie anlegen
+          </Button>
+        </div>
+      )}
       {message && (
         <p role="status" aria-live="polite" className={cn("rounded-inner border px-4 py-3 text-sm", message.tone === "ok" ? "border-line text-text" : "border-attention/50 bg-attention/10 text-text")}>
           {message.text}
@@ -183,8 +229,13 @@ export function SeriesPanel({ initialSeries, brands }: Props) {
       )}
       {series.length === 0 ? (
         <GlassCard padding="lg" className="text-center">
-          <p className="text-lg font-medium">Noch keine Serie</p>
-          <p className="mx-auto mt-2 max-w-md text-text-2">Lege ein wiederkehrendes Format an und ordne Clips über die Clip-Karte („Serie zuordnen“) zu.</p>
+          <p className="text-lg font-medium">Eine Serie ist ein wiederkehrendes Format</p>
+          <p className="mx-auto mt-2 max-w-lg text-text-2">
+            {'Zum Beispiel „Montagstipp“ oder „Kundenstimme“: immer dieselbe Marke, dieselbe Plattform, derselbe Aufbau. Du ordnest Clips einer Serie zu und siehst auf einen Blick, was schon draußen ist und was noch fehlt. Wenn du willst, in einem festen Rhythmus.'}
+          </p>
+          <div className="mt-6 flex justify-center">
+            <Button onClick={neu}>Erste Serie anlegen</Button>
+          </div>
         </GlassCard>
       ) : (
         <ul className="grid gap-3 md:grid-cols-2">
@@ -197,7 +248,8 @@ export function SeriesPanel({ initialSeries, brands }: Props) {
                       {s.name}
                     </Link>
                     <p className="mt-0.5 text-xs text-text-2">
-                      {CADENCE_LABELS[s.cadence]} · {s.brand_profile_name ?? "alle Marken"} · {s.clip_count ?? 0} Clips
+                      {CADENCE_LABELS[s.cadence]} · {s.brand_profile_name ?? "alle Marken"} ·{" "}
+                      {s.clip_count ?? 0} {s.clip_count === 1 ? "Clip" : "Clips"}
                     </p>
                   </div>
                   <Badge tone={s.active ? "ok" : "neutral"} className="h-6 px-2.5 text-[11px]">
@@ -207,7 +259,7 @@ export function SeriesPanel({ initialSeries, brands }: Props) {
                 {s.description && <p className="line-clamp-2 text-sm text-text-2">{s.description}</p>}
                 <div className="flex flex-wrap gap-1.5 text-[11px]">
                   {s.rules.structure && <Badge className="h-6 px-2.5 text-[11px]">{STRUCTURE_LABELS[s.rules.structure]}</Badge>}
-                  {s.rules.caption_preset && <Badge className="h-6 px-2.5 font-mono text-[11px]">{s.rules.caption_preset}</Badge>}
+                  {s.rules.caption_preset && <Badge className="h-6 px-2.5 text-[11px]">{PRESET_NAME[s.rules.caption_preset] ?? s.rules.caption_preset}</Badge>}
                   {(s.rules.platforms ?? []).map((p) => (
                     <Badge key={p} className="h-6 px-2.5 text-[11px]">
                       {PLATFORM_LABELS[p]}
@@ -216,8 +268,11 @@ export function SeriesPanel({ initialSeries, brands }: Props) {
                 </div>
                 <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-3">
                   <Link href={`/serien/${s.id}`} className="transition-soft inline-flex h-9 items-center rounded-pill bg-text px-4 text-sm font-medium text-black hover:bg-white">
-                    Kalender
+                    Öffnen
                   </Link>
+                  <Button size="sm" variant="ghost" onClick={() => bearbeiten(s)}>
+                    Ändern
+                  </Button>
                   <Button size="sm" variant="ghost" onClick={() => toggleActive(s)}>
                     {s.active ? "Pausieren" : "Aktivieren"}
                   </Button>
@@ -230,3 +285,16 @@ export function SeriesPanel({ initialSeries, brands }: Props) {
     </div>
   );
 }
+
+/* Verständliche Namen für die Untertitel-Vorlagen. Spiegel der Auswahl oben und im Clip-Editor:
+ * dieselbe Sache soll überall gleich heissen. */
+const PRESET_NAME: Record<string, string> = {
+  tiktok_words: "Ein Wort nach dem anderen, sehr groß",
+  reels_words: "Ein Wort nach dem anderen, groß",
+  shorts_words: "Ein Wort nach dem anderen, groß",
+  tiktok_bold: "Zwei Zeilen, fett mit Rand",
+  reels_clean: "Zwei Zeilen, schlicht",
+  shorts_clean: "Zwei Zeilen, schlicht",
+  linkedin_static: "Zwei Zeilen, ruhig auf Fläche",
+  corporate_third: "Bauchbinde unten, ruhig und klein",
+};

@@ -14,7 +14,7 @@ export default async function SeriesPage() {
   const [series, brands] = await Promise.all([getPublishingRepo().listSeries(), getRepo().listBrandProfiles()]);
   return (
     <PageShell width="default" backgroundWord="Serie">
-      <PageHeader eyebrow={`Team · ${session.workspaceName}`} title="Serien" description="Wiederkehrende Formate mit Kadenz und Regeln. Die Variations-Prüfung warnt, wenn ein Clip den letzten neun zu ähnlich ist." />
+      <PageHeader eyebrow={`Team · ${session.workspaceName}`} title="Serien" description="Wiederkehrende Formate für deine Clips. Wenn ein neuer Clip den letzten sehr ähnelt, sagt chopstr Bescheid." />
       <SeriesPanel initialSeries={series} brands={brands.map((b) => ({ id: b.id, name: b.name }))} />
     </PageShell>
   );

@@ -329,6 +329,11 @@ export interface PublishingRepo {
   createSeries(input: SeriesInput): Promise<Series>;
   updateSeries(id: string, patch: Partial<SeriesInput> & { active?: boolean }): Promise<Series | null>;
   listSeriesClips(seriesId: string): Promise<ClipWithExtras[]>;
+  /* Gebaute Clips, die dieser Serie noch nicht zugeordnet sind. Für das Zuordnen aus der
+   * Serienansicht heraus; ohne das ginge es nur über die Clip-Karte, also nur, wenn man weiss,
+   * in welchem Projekt der Clip liegt. Gehört die Serie zu einer Marke, kommen auch nur deren
+   * Clips infrage: sonst landete ein Kundenclip in der Serie eines anderen Kunden. */
+  listZuordenbareClips(seriesId: string, limit?: number): Promise<ClipWithExtras[]>;
   /* Berichte */
   listWeeklyReports(): Promise<WeeklyReport[]>;
   setWeeklyReportEnabled(enabled: boolean): Promise<boolean>;

@@ -1,18 +1,19 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageShell } from "@/components/layout/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { GlassCard } from "@/components/ui/GlassCard";
-import { Badge } from "@/components/ui/Badge";
 import { ButtonLink } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { getRepo } from "@/lib/repo";
 import { getPublishingRepo } from "@/lib/repo/publishing";
 import { requirePublishingPage } from "@/lib/publishing/auth";
 import { CADENCE_LABELS, calendarSlots } from "@/lib/series/variation";
-import { CLIP_STATUS_LABELS, PLATFORM_LABELS, formatClipDuration, patternLabel } from "@/lib/clips/labels";
+import { PLATFORM_LABELS, patternLabel } from "@/lib/clips/labels";
 import { STRUCTURE_LABELS } from "@/lib/candidates/labels";
-import { formatDate, formatDateTime } from "@/lib/format";
+import { formatDate } from "@/lib/format";
+import { clipZustand } from "@/lib/clips/clip-zustand";
+import { stilPruefen } from "@/lib/clips/caption-style";
+import { SerieClips, type SerienClip } from "./SerieClips";
 
 export const dynamic = "force-dynamic";
 
@@ -33,11 +34,49 @@ export default async function SeriesDetailPage({ params }: Props) {
   if (!series) notFound();
   const clips = await pub.listSeriesClips(id);
   const repo = getRepo();
-  const hooks = await Promise.all(clips.map((c) => repo.getCurrentHook(c.id)));
   const sources = new Map<string, string>();
   await Promise.all([...new Set(clips.map((c) => c.source_id))].map(async (sid) => sources.set(sid, (await repo.getSource(sid))?.title ?? "Projekt")));
   const slots = calendarSlots(series, clips);
   const gaps = slots.filter((s) => s.gap).length;
+
+  /* Der Zustand je Clip wie in der Clip-Übersicht, damit dieselbe Sache überall gleich heisst.
+   * Ohne den Renderplan-Vergleich (der braucht die Transkriptversion je Projekt) bleibt es bei
+   * dem, was ohne Projektkontext sicher zu sagen ist. */
+  const zustandVon = (c: (typeof clips)[number]) =>
+    clipZustand({
+      clip: c,
+      freigabe: null,
+      stand: {
+        status: c.status,
+        hatDatei: Boolean(c.file_key),
+        plan: c.render_plan,
+        renderFehler: c.render_error,
+        transkriptVersion: c.render_plan?.sources?.transcript_version ?? null,
+        stil: stilPruefen(c.caption_style),
+        schnitt: c.composition,
+        zeitmarken: c.zeitmarken,
+      },
+    });
+
+  const zeile = (c: (typeof clips)[number]): SerienClip => ({
+    id: c.id,
+    sourceId: c.source_id,
+    projekt: sources.get(c.source_id) ?? "Projekt",
+    plattform: c.platform,
+    dauerS: c.duration_s,
+    slot: c.series_index,
+    geaendert: c.updated_at,
+    zustand: zustandVon(c),
+  });
+
+  const zeilen = clips.map(zeile);
+  const zurWahl = await pub.listZuordenbareClips(series.id, 50);
+  await Promise.all(
+    [...new Set(zurWahl.map((c) => c.source_id))].map(async (sid) => {
+      if (!sources.has(sid)) sources.set(sid, (await repo.getSource(sid))?.title ?? "Projekt");
+    }),
+  );
+  const wahlZeilen = zurWahl.map(zeile);
 
   return (
     <PageShell width="default" backgroundWord="Serie">
@@ -84,45 +123,48 @@ export default async function SeriesDetailPage({ params }: Props) {
         </GlassCard>
 
         <GlassCard padding="lg">
-          <h2 className="text-lg font-medium">Regeln</h2>
+          <h2 className="text-lg font-medium">Format dieser Serie</h2>
           <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-            <dt className="text-text-2">Struktur</dt>
+            <dt className="text-text-2">Aufbau</dt>
             <dd>{series.rules.structure ? STRUCTURE_LABELS[series.rules.structure] : "frei"}</dd>
             <dt className="text-text-2">Plattformen</dt>
             <dd>{(series.rules.platforms ?? []).map((p) => PLATFORM_LABELS[p]).join(", ") || "alle"}</dd>
-            <dt className="text-text-2">Caption-Preset</dt>
-            <dd className="font-mono">{series.rules.caption_preset ?? "nach Plattform"}</dd>
-            <dt className="text-text-2">Hook-Muster</dt>
+            <dt className="text-text-2">Untertitel</dt>
+            <dd>{series.rules.caption_preset ? (PRESET_NAME[series.rules.caption_preset] ?? series.rules.caption_preset) : "nach Plattform"}</dd>
+            <dt className="text-text-2">Einstieg</dt>
             <dd>{(series.rules.hook_patterns ?? []).map((p) => patternLabel(p)).join(", ") || "frei"}</dd>
           </dl>
-          <p className="mt-4 text-xs text-text-2">Clips ordnest du auf der Clip-Karte zu („Serie zuordnen“). Die Variations-Prüfung vergleicht Caption-Preset, Hook-Muster, Struktur und Länge (±15 %) mit den letzten neun Clips.</p>
+          {/* Was eine Änderung bewirkt, bevor jemand sie macht. Die Antwort ist hier angenehm
+            * klar: die Regeln steuern den Kalender und den Ähnlichkeitsvergleich, sonst nichts.
+            * Ein fertiger Clip ändert sich davon nicht - auch nicht heimlich. */}
+          <p className="mt-4 text-sm text-text-2">
+            Diese Angaben ändern nichts an fertigen Clips. Sie sagen nur, was in diese Serie passt:
+            Der Ähnlichkeitsvergleich nimmt sie als Maßstab, wenn du einen Clip hinzufügst.
+          </p>
         </GlassCard>
       </div>
 
-      <GlassCard padding="lg" className="mt-5">
-        <h2 className="text-lg font-medium">Clips der Serie</h2>
-        {clips.length === 0 ? (
-          <p className="mt-2 text-sm text-text-2">Noch kein Clip zugeordnet.</p>
-        ) : (
-          <ul className="mt-3 flex flex-col gap-2">
-            {clips.map((c, i) => (
-              <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 rounded-inner border border-line px-4 py-3 text-sm">
-                <div className="min-w-0">
-                  <Link href={`/projekte/${c.source_id}/clips`} className="font-medium hover:underline">
-                    {sources.get(c.source_id)} · {PLATFORM_LABELS[c.platform]}
-                  </Link>
-                  <p className="mt-0.5 text-xs text-text-2">
-                    Slot {c.series_index ?? "?"} · {patternLabel(hooks[i]?.pattern)} · {formatClipDuration(c.duration_s)} · {formatDateTime(c.updated_at)}
-                  </p>
-                </div>
-                <Badge tone={c.status === "rendered" || c.status === "exported" ? "ok" : "neutral"} className="h-6 px-2.5 text-[11px]">
-                  {CLIP_STATUS_LABELS[c.status]}
-                </Badge>
-              </li>
-            ))}
-          </ul>
-        )}
-      </GlassCard>
+      <SerieClips
+        serieId={series.id}
+        serieName={series.name}
+        zugeordnet={zeilen}
+        zurWahl={wahlZeilen}
+        canEdit
+      />
+
     </PageShell>
   );
 }
+
+/* Verständliche Namen für die Untertitel-Vorlagen. Spiegel der Liste in SeriesPanel und im
+ * Clip-Editor: dieselbe Sache soll überall gleich heissen. */
+const PRESET_NAME: Record<string, string> = {
+  tiktok_words: "Ein Wort nach dem anderen, sehr groß",
+  reels_words: "Ein Wort nach dem anderen, groß",
+  shorts_words: "Ein Wort nach dem anderen, groß",
+  tiktok_bold: "Zwei Zeilen, fett mit Rand",
+  reels_clean: "Zwei Zeilen, schlicht",
+  shorts_clean: "Zwei Zeilen, schlicht",
+  linkedin_static: "Zwei Zeilen, ruhig auf Fläche",
+  corporate_third: "Bauchbinde unten, ruhig und klein",
+};

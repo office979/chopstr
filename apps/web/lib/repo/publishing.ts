@@ -630,6 +630,24 @@ const postgresPublishingRepo: PublishingRepo = {
     });
   },
 
+  async listZuordenbareClips(seriesId, limit = 50) {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`
+        select c.* from clips c
+        join sources s on s.id = c.source_id
+        join series se on se.id = ${seriesId}
+        where s.workspace_id = ${session.workspaceId}
+          and c.status in ('rendered', 'exported')
+          and c.review <> 'verworfen'
+          and (c.series_id is null or c.series_id <> ${seriesId})
+          and (se.brand_profile_id is null or s.brand_profile_id = se.brand_profile_id)
+        order by c.updated_at desc
+        limit ${limit}`;
+      return rows.map((r) => toClipWithExtras(r as Row));
+    });
+  },
+
   async listWeeklyReports() {
     const session = await currentSession();
     return withContext(session, async (tx) => {

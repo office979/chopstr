@@ -373,6 +373,26 @@ export const publishingDemoRepo: PublishingRepo & {
     return this.listClipsByIds(ids);
   },
 
+  async listZuordenbareClips(seriesId, limit = 50) {
+    /* Im Testmodus über die Projekte gehen: einen gemeinsamen Clip-Speicher gibt es nicht.
+     * Die Einschränkung auf die Marke der Serie greift wie in Postgres. */
+    const serie = state().series.find((x) => x.id === seriesId) ?? null;
+    const quellen = await demoRepo.listSources();
+    const aus: string[] = [];
+    for (const q of quellen) {
+      if (serie?.brand_profile_id && q.brand_profile_id !== serie.brand_profile_id) continue;
+      for (const c of await demoRepo.listClips(q.id)) {
+        if (c.status !== "rendered" && c.status !== "exported") continue;
+        if (c.review === "verworfen") continue;
+        if (extrasOf(c.id).series_id === seriesId) continue;
+        aus.push(c.id);
+        if (aus.length >= limit) break;
+      }
+      if (aus.length >= limit) break;
+    }
+    return this.listClipsByIds(aus);
+  },
+
   async listWeeklyReports() {
     return state().reports;
   },

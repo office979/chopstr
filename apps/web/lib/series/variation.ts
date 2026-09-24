@@ -12,7 +12,13 @@ export interface ClipFeatures {
   duration_s: number | null;
 }
 
-export const FEATURE_LABELS = { caption_preset: "Caption-Preset", hook_pattern: "Hook-Muster", structure: "Struktur", duration: "Länge (±15 %)" } as const;
+/* Worin sich zwei Clips gleichen können, in Worten, die jemand ohne Schnittkenntnisse versteht. */
+export const FEATURE_LABELS = {
+  caption_preset: "derselbe Untertitel-Stil",
+  hook_pattern: "dieselbe Art Einstieg",
+  structure: "derselbe Aufbau",
+  duration: "fast dieselbe Länge",
+} as const;
 export type FeatureKey = keyof typeof FEATURE_LABELS;
 
 export function clipFeaturesFor(clip: Clip, hookPattern: HookPattern | null, structure: CandidateStructure | null): ClipFeatures {

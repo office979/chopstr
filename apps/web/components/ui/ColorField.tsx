@@ -13,11 +13,18 @@ interface ColorFieldProps {
   hint?: string;
   error?: string;
   disabled?: boolean;
+  /* Wer den Wert auch ausserhalb braucht (etwa fuer eine Vorschau), meldet sich hier an. Das
+   * Feld verwaltet ihn weiterhin selbst; ``onChange`` ist nur ein Mithoeren. */
+  onChange?: (wert: string) => void;
 }
 
 /* Hex-Feld mit Farbvorschau und WCAG-AA-Prüfung gegen Weiß und Schwarz (4,5 : 1 für normalen Text) */
-export function ColorField({ id, name, label, defaultValue = "", hint, error, disabled }: ColorFieldProps) {
+export function ColorField({ id, name, label, defaultValue = "", hint, error, disabled, onChange }: ColorFieldProps) {
   const [value, setValue] = useState(defaultValue);
+  const setzen = (neu: string) => {
+    setValue(neu);
+    onChange?.(neu);
+  };
   const hintId = useId();
   const hex = normalizeHex(value);
   const verdict = hex ? contrastVerdict(hex) : null;
@@ -40,7 +47,7 @@ export function ColorField({ id, name, label, defaultValue = "", hint, error, di
           id={id}
           name={name}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => setzen(e.target.value)}
           placeholder="#020cf5"
           spellCheck={false}
           autoComplete="off"

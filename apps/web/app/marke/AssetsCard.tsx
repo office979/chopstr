@@ -84,7 +84,7 @@ export function AssetsCard({ profileId, assets: initialAssets, ci, canUpload }: 
       if (fileRef.current) fileRef.current.value = "";
       setMessage({
         tone: "ok",
-        text: `${ASSET_KIND_LABELS[asset.kind]} „${asset.name}“ hochgeladen${asset.font_family ? ` (${asset.font_family}${asset.font_weight ? `, ${asset.font_weight}` : ""})` : ""}. ${data.storage === "memory" ? "Speicher: nur im Prozess (kein S3)." : "Speicher: S3."} Auswahl unten mit „Speichern“ übernehmen.`,
+        text: `${ASSET_KIND_LABELS[asset.kind]} „${asset.name}“ hochgeladen${asset.font_family ? ` (${asset.font_family}${asset.font_weight ? `, ${asset.font_weight}` : ""})` : ""}. ${data.storage === "memory" ? "Liegt nur im laufenden Betrieb, nicht dauerhaft." : "Dauerhaft gespeichert."} Unten auswählen und dann speichern.`,
       });
     } catch (err) {
       setMessage({ tone: "error", text: err instanceof Error ? err.message : "Upload fehlgeschlagen" });
@@ -117,9 +117,11 @@ export function AssetsCard({ profileId, assets: initialAssets, ci, canUpload }: 
   return (
     <GlassCard padding="lg" className="flex flex-col gap-5">
       <div>
-        <h2 className="text-lg font-medium">Assets</h2>
+        <h2 className="text-lg font-medium">Eigene Dateien</h2>
         <p className="mt-1 text-sm text-text-2">
-          Eigene Schrift für Captions und Bauchbinde, Logo als Wasserzeichen. Der Worker lädt die Dateien aus dem EU-Objektspeicher; ohne Auswahl rendert er mit Inter.
+          Eigene Schrift für Untertitel und Namenseinblendung, Logo als Wasserzeichen im Bild. Die Dateien
+          gehören zu diesem Profil und werden nur für dessen Clips verwendet. Ohne eigene Schrift
+          nehmen die Clips Inter.
         </p>
       </div>
 
@@ -174,7 +176,7 @@ export function AssetsCard({ profileId, assets: initialAssets, ci, canUpload }: 
       )}
 
       {profileId && assets.length > 0 && (
-        <ul className="flex flex-col gap-2" aria-label="Hochgeladene Assets">
+        <ul className="flex flex-col gap-2" aria-label="Hochgeladene Dateien">
           {[...fonts, ...logos, ...others].map((a) => {
             const url = assetUrl(profileId, a);
             const family = a.font_family ?? a.name;

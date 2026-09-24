@@ -4,6 +4,7 @@ import { getRepo } from "@/lib/repo";
 import { requirePageRole } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
 import { buildHistory } from "@/lib/brand/history";
+import { previewFontFor } from "@/lib/brand/preview-font";
 import { BrandForm } from "./BrandForm";
 import { BrandList } from "./BrandList";
 import { HistoryCard } from "./HistoryCard";
@@ -28,13 +29,19 @@ export default async function BrandPage({ searchParams }: Props) {
     ? await Promise.all([repo.listBrandAssets(profile.id), repo.listBrandProfileVersions(profile.id)])
     : [[], []];
   const history = profile ? buildHistory(versions, profile) : [];
+  /* Die Marken-Schrift für die Beispielszene: sie ist an dieses Profil gebunden (die Prüfung
+   * steckt in previewFontFor), damit sich zwei Kundenprofile nicht ins Gehege kommen. */
+  const vorschauSchrift = profile ? await previewFontFor(repo, profile) : null;
+  /* Wie viele Projekte dieses Profil schon benutzt haben. Daran hängt der Satz darüber, was eine
+   * Änderung bewirkt: gebaute Clips behalten ihr Aussehen. */
+  const projekte = profile ? (await repo.listSources()).filter((s) => s.brand_profile_id === profile.id).length : 0;
 
   return (
     <PageShell backgroundWord="Marke">
       <PageHeader
         eyebrow="Deine Marke"
         title="Aussehen"
-        description="Farben, Logo, Schrift und Wörterbuch. Sie bestimmen, wie deine Clips aussehen und klingen. Alles bleibt in deinem Team."
+        description="Farben, Logo, Schrift und Schreibweisen. Sie bestimmen, wie deine Clips aussehen und klingen. Alles bleibt in deinem Team."
       />
       <BrandList profiles={profiles} activeId={profile?.id ?? null} isNew={isNew} />
       {/* key erzwingt ein frisches Formular beim Wechsel; sonst blieben die Eingaben des vorigen stehen */}
@@ -43,6 +50,8 @@ export default async function BrandPage({ searchParams }: Props) {
         profile={profile}
         assets={assets}
         canUploadAssets={can(session.role, "brand.assets")}
+        vorschauSchrift={vorschauSchrift}
+        clipsMitProfil={projekte}
       />
       {profile && !isNew && (
         <div className="mt-5">

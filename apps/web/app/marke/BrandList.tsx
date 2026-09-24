@@ -15,9 +15,11 @@ export function BrandList({ profiles, activeId, isNew }: { profiles: BrandProfil
     <GlassCard padding="md" className="mb-5 flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-medium">Dein Aussehen</h2>
+          <p className="text-xs uppercase tracking-wide text-text-3">Schritt 1 von 3</p>
+          <h2 className="mt-0.5 text-lg font-medium">Marke wählen</h2>
           <p className="mt-0.5 text-sm text-text-2">
-            Jedes Video nutzt eines davon. Es steuert Anrede, Farben, Schrift und Untertitel-Stil.
+            Jedes Video gehört zu einer Marke. Sie bestimmt Anrede, Farben, Schrift und Untertitel.
+            Wer für mehrere Kunden arbeitet, legt je Kunde eine an: Dateien und Wörter bleiben getrennt.
           </p>
         </div>
         <Link
@@ -27,12 +29,12 @@ export function BrandList({ profiles, activeId, isNew }: { profiles: BrandProfil
             isNew ? "bg-text text-black" : "border border-line-strong text-text hover:border-white/40 hover:bg-white/5",
           )}
         >
-          Neues Aussehen
+          Neue Marke
         </Link>
       </div>
 
       {profiles.length === 0 ? (
-        <p className="text-sm text-text-2">Noch keins angelegt. Leg dein erstes an, dann kannst du Videos hochladen.</p>
+        <p className="text-sm text-text-2">Noch keine angelegt. Leg deine erste an, dann kannst du Videos hochladen.</p>
       ) : (
         <ul className="flex flex-col gap-1.5">
           {profiles.map((p) => {

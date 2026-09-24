@@ -13,7 +13,7 @@ import { Zeitleiste } from "./Zeitleiste";
 import { ClipPreview } from "./ClipPreview";
 import { ClipTextEditor } from "./ClipTextEditor";
 import { CaptionStudio, CaptionVorschau, type GespeicherteVorlage } from "./CaptionStudio";
-import type { CaptionStyle } from "@/lib/clips/caption-style";
+import { passtZumRender, type CaptionStyle } from "@/lib/clips/caption-style";
 
 interface Correction {
   old_text: string;
@@ -39,6 +39,8 @@ interface Props {
   captionStyle: CaptionStyle;
   captionPresets: GespeicherteVorlage[];
   clipId: string;
+  /* Der ``captions``-Block des Renderplans: was im Bild wirklich eingebrannt ist. */
+  gerenderteCaptions: Record<string, unknown> | null;
   filmstripSrc: string | null;
   filmstripMeta: FilmstripMeta | null;
   zeitmarken: Zeitmarke[];
@@ -66,6 +68,7 @@ export function ClipDetail({
   captionStyle,
   captionPresets,
   clipId,
+  gerenderteCaptions,
   filmstripSrc,
   filmstripMeta,
   zeitmarken: markenAnfang,
@@ -110,6 +113,13 @@ export function ClipDetail({
   const stilGeaendert = useMemo(
     () => JSON.stringify(stil) !== JSON.stringify(stilGespeichert),
     [stil, stilGespeichert],
+  );
+  /* Zeigt das Video noch die Untertitel, die jetzt eingestellt sind? Verglichen wird gegen den
+   * Renderplan und nicht gegen den gespeicherten Stand: nach dem Speichern ist nichts mehr
+   * „geaendert", im Bild stehen aber weiter die alten. */
+  const captionsVeraltet = useMemo(
+    () => Boolean(clipSrc) && !passtZumRender(stil, gerenderteCaptions),
+    [clipSrc, stil, gerenderteCaptions],
   );
 
   /* Liegt der fertige Clip vor, läuft er selbst. Sonst läuft das ganze Video und bleibt am Ende
@@ -294,8 +304,18 @@ export function ClipDetail({
             trim={trim}
             onTime={setCurrentTime}
             seekTo={seekTo}
-            overlay={clipWords.length ? <CaptionVorschau stil={stil} woerter={clipWords} zeit={currentTime} /> : null}
+            /* Die Vorschau der Untertitel NUR, solange das Quellvideo laeuft. Im fertigen Clip sind
+             * sie eingebrannt; beides zugleich ergibt zwei Texte uebereinander. */
+            overlay={!clipSrc && clipWords.length ? <CaptionVorschau stil={stil} woerter={clipWords} zeit={currentTime} /> : null}
           />
+
+          {/* Im fertigen Clip sind die Untertitel eingebrannt. Wer den Stil danach aendert, sieht
+            * im Bild weiter die alten - das muss dastehen, sonst wirkt es, als sei nichts passiert. */}
+          {captionsVeraltet && (
+            <p className="mt-3 text-sm text-attention">
+              Im Bild sind noch die alten Untertitel. Neu bauen, um die neuen zu sehen.
+            </p>
+          )}
 
           <div className="mt-4">
             <Zeitleiste

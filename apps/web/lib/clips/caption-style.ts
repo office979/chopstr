@@ -127,6 +127,60 @@ export function aktiverLook(stil: CaptionStyle): string | null {
   return treffer?.id ?? null;
 }
 
+/* ``#RRGGBB`` in die ASS-Schreibweise ``&H00BBGGRR``. Spiegel von captions_de.ass_farbe.
+ *
+ * ASS dreht die Reihenfolge um und stellt die Deckkraft voran. Gebraucht wird das hier, um den
+ * eingestellten Stil mit dem zu vergleichen, was im Renderplan steht: dort stehen ASS-Werte. */
+export function assFarbe(wert: string): string | null {
+  let w = (wert || "").trim();
+  if (!w) return null;
+  if (w.toUpperCase().startsWith("&H")) return w.toUpperCase();
+  if (w.startsWith("#")) w = w.slice(1);
+  if (!/^[0-9a-fA-F]{6}$/.test(w)) return null;
+  return `&H00${w.slice(4, 6)}${w.slice(2, 4)}${w.slice(0, 2)}`.toUpperCase();
+}
+
+/* Zeigt das gerenderte Video noch dieselben Untertitel, die jetzt eingestellt sind?
+ *
+ * Im fertigen Clip sind die Untertitel eingebrannt. Wer den Stil danach aendert, sieht im Bild
+ * weiter die alten - ohne diesen Vergleich wirkt es, als sei die Aenderung folgenlos geblieben.
+ *
+ * Verglichen wird gegen den ``captions``-Block des Renderplans, der seit dem Anschluss der
+ * Untertitel den ANGEWENDETEN Stil traegt und nicht mehr die Preset-Vorgaben. Was dort fehlt
+ * (aelterer Plan), gilt als unbekannt und damit als abweichend: lieber einmal zu viel darauf
+ * hinweisen als eine Aenderung stillschweigend verschlucken. */
+export function passtZumRender(stil: CaptionStyle, geplant: Record<string, unknown> | null | undefined): boolean {
+  if (!geplant) return true; // noch nichts gerendert: es gibt nichts, was veraltet sein koennte
+  const s = mitVorgabe(stil);
+  const zahlen: [keyof typeof s, string][] = [
+    ["font_px", "font_px"],
+    ["words_per_card", "words_per_card"],
+    ["max_lines", "max_lines"],
+    ["outline_px", "outline_px"],
+  ];
+  for (const [hier, dort] of zahlen) {
+    if (!(dort in geplant)) return false;
+    if (Number(geplant[dort] ?? NaN) !== Number(s[hier])) return false;
+  }
+  for (const [hier, dort] of [["bold", "bold"], ["all_caps", "all_caps"], ["box", "box"], ["highlight_words", "highlight"]] as const) {
+    if (!(dort in geplant)) return false;
+    if (Boolean(geplant[dort]) !== Boolean(s[hier])) return false;
+  }
+  if (String(geplant.font ?? "") !== s.font) return false;
+  for (const [hier, dort] of [["base_color", "base_color"], ["highlight_color", "highlight_color"]] as const) {
+    if (!(dort in geplant)) return false;
+    if (String(geplant[dort] ?? "").toUpperCase() !== assFarbe(s[hier])) return false;
+  }
+  /* Die Hoehe steckt im Plan als Grundlinie, also Safe-Zone-Unterkante minus Abstand. */
+  const safe = (geplant.safe_zone as { bottom?: number } | undefined)?.bottom;
+  const grundlinie = Number(geplant.baseline_y ?? NaN);
+  if (Number.isFinite(grundlinie) && typeof safe === "number") {
+    const gemeint = 1920 - safe - s.bottom_margin_px;
+    if (Math.abs(grundlinie - gemeint) > 2) return false;
+  }
+  return true;
+}
+
 /* Mittlere Zeichenbreite in em, gemessen an Inter Bold. Spiegel von captions_de.AVG_CHAR_EM. */
 export const AVG_CHAR_EM = 0.56;
 export const SAFE_BREITE_STANDARD = 1080 - 180;

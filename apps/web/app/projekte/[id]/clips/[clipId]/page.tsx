@@ -83,6 +83,7 @@ export default async function ClipPage({ params }: Props) {
         zeitmarken={clip.zeitmarken}
         shots={clip.render_plan?.shots ?? []}
         quelleBreite={source.width ?? null}
+        gerenderteCaptions={(clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null}
       />
     </PageShell>
   );

@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { BASIS_PRESETS, FONTS, GRENZEN, maxZeichen, mitVorgabe, stilPruefen, VORGABE } from "@/lib/clips/caption-style";
+import { assFarbe, BASIS_PRESETS, type CaptionStyle, FONTS, GRENZEN, maxZeichen, mitVorgabe, passtZumRender, stilPruefen, VORGABE } from "@/lib/clips/caption-style";
 
 const WURZEL = resolve(import.meta.dirname, "../../..");
 
@@ -131,5 +131,78 @@ describe("Gleichstand mit dem Worker", () => {
   it("liest dieselbe Schriftenliste wie der Worker", () => {
     const datei = JSON.parse(readFileSync(resolve(WURZEL, "packages/design/caption_fonts.json"), "utf8"));
     expect(FONTS.map((f) => f.id)).toEqual(datei.schriften.map((s: { id: string }) => s.id));
+  });
+});
+
+describe("assFarbe", () => {
+  it("dreht die Reihenfolge wie ASS es erwartet", () => {
+    /* Spiegel von captions_de.ass_farbe. Falsch herum faellt nicht auf, es sieht nur falsch aus:
+     * aus Rot wird Blau. */
+    expect(assFarbe("#ffd700")).toBe("&H0000D7FF");
+    expect(assFarbe("#FF0000")).toBe("&H000000FF");
+    expect(assFarbe("#0000FF")).toBe("&H00FF0000");
+  });
+
+  it("lässt bereits gesetzte ASS-Werte durch", () => {
+    expect(assFarbe("&H0000D7FF")).toBe("&H0000D7FF");
+  });
+
+  it("verwirft Unbrauchbares", () => {
+    for (const w of ["", "  ", "#abc", "rot", "#GGGGGG"]) expect(assFarbe(w)).toBeNull();
+  });
+});
+
+describe("passtZumRender", () => {
+  /* Was der Plan traegt, wenn mit der Vorgabe gerendert wurde. Entspricht dem captions-Block aus
+   * render_plan.caption_block fuer das Preset reels_words. */
+  const gerendert = {
+    preset: "reels_words",
+    font: VORGABE.font,
+    font_px: VORGABE.font_px,
+    words_per_card: VORGABE.words_per_card,
+    max_lines: VORGABE.max_lines,
+    outline_px: VORGABE.outline_px,
+    bold: VORGABE.bold,
+    all_caps: VORGABE.all_caps,
+    box: VORGABE.box,
+    highlight: VORGABE.highlight_words,
+    base_color: assFarbe(VORGABE.base_color),
+    highlight_color: assFarbe(VORGABE.highlight_color),
+    safe_zone: { top: 210, left: 60, right: 120, bottom: 310 },
+    baseline_y: 1920 - 310 - VORGABE.bottom_margin_px,
+  };
+
+  it("ohne Render gibt es nichts, was veraltet sein könnte", () => {
+    expect(passtZumRender({ font_px: 150 }, null)).toBe(true);
+  });
+
+  it("unveränderter Stil passt zum Render", () => {
+    expect(passtZumRender({}, gerendert)).toBe(true);
+  });
+
+  it("erkennt jede Änderung, die man im Bild sähe", () => {
+    const aenderungen: CaptionStyle[] = [
+      { font_px: 120 },
+      { words_per_card: 3 },
+      { max_lines: 2 },
+      { outline_px: 12 },
+      { bold: !VORGABE.bold },
+      { all_caps: true },
+      { box: true },
+      { highlight_words: false },
+      { font: "Anton" },
+      { base_color: "#00ff9c" },
+      { highlight_color: "#ff3b6b" },
+      { bottom_margin_px: 420 },
+    ];
+    for (const a of aenderungen) {
+      expect(passtZumRender(a, gerendert), JSON.stringify(a)).toBe(false);
+    }
+  });
+
+  it("ein alter Plan ohne die neuen Felder gilt als abweichend", () => {
+    /* Lieber einmal zu viel darauf hinweisen als eine Änderung stillschweigend verschlucken. */
+    const alt = { preset: "reels_words", font: "Inter", font_px: 92, max_chars: 17, baseline_y: 1350 };
+    expect(passtZumRender({}, alt)).toBe(false);
   });
 });

@@ -568,6 +568,13 @@ export interface ClipCount {
   rendered: number;
   rendering: number;
   failed: number;
+  /* Gebaute Clips, über die noch niemand entschieden hat (review = 'offen'). Daran hängt, ob ein
+   * Projekt in der Übersicht „Bitte prüfen" oder „Bereit" ist. */
+  offen: number;
+  /* Als bereit markiert oder von aussen freigegeben. */
+  bereit: number;
+  /* Aussortiert. Zählt weder als offen noch als bereit. */
+  verworfen: number;
 }
 
 export interface AuditEntry {

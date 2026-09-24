@@ -786,6 +786,9 @@ export const demoRepo: Repo = {
       rendered: list.filter((c) => c.status === "rendered" || c.status === "exported").length,
       rendering: list.filter((c) => c.status === "rendering").length,
       failed: list.filter((c) => c.status === "failed").length,
+      offen: list.filter((c) => (c.status === "rendered" || c.status === "exported") && c.review === "offen").length,
+      bereit: list.filter((c) => c.review === "bereit").length,
+      verworfen: list.filter((c) => c.review === "verworfen").length,
     };
   },
 

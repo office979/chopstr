@@ -957,10 +957,21 @@ export const postgresRepo: Repo = {
           count(*)::int as total,
           count(*) filter (where status in ('rendered', 'exported'))::int as rendered,
           count(*) filter (where status = 'rendering')::int as rendering,
-          count(*) filter (where status = 'failed')::int as failed
+          count(*) filter (where status = 'failed')::int as failed,
+          count(*) filter (where status in ('rendered', 'exported') and review = 'offen')::int as offen,
+          count(*) filter (where review = 'bereit')::int as bereit,
+          count(*) filter (where review = 'verworfen')::int as verworfen
         from clips where source_id = ${sourceId} and status <> 'deleted'`;
       const r = (rows[0] ?? {}) as Row;
-      return { total: num(r.total) ?? 0, rendered: num(r.rendered) ?? 0, rendering: num(r.rendering) ?? 0, failed: num(r.failed) ?? 0 };
+      return {
+        total: num(r.total) ?? 0,
+        rendered: num(r.rendered) ?? 0,
+        rendering: num(r.rendering) ?? 0,
+        failed: num(r.failed) ?? 0,
+        offen: num(r.offen) ?? 0,
+        bereit: num(r.bereit) ?? 0,
+        verworfen: num(r.verworfen) ?? 0,
+      };
     });
   },
 

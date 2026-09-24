@@ -1140,6 +1140,7 @@ export const demoRepo: Repo = {
       expires_at: input.expires_at,
       decision: null,
       comment: null,
+      comment_at_s: null,
       decided_at: null,
       viewed_at: null,
       created_at: nowIso(),
@@ -1194,12 +1195,13 @@ export const demoRepo: Repo = {
     if (g && !g.viewed_at) g.viewed_at = nowIso();
   },
 
-  async decideGuestApproval(token, decision, comment, ip) {
+  async decideGuestApproval(token, decision, comment, beiS, ip) {
     const s = state();
     const g = s.guestApprovals.find((x) => x.token === token);
     if (!g || g.decision || (g.expires_at && Date.parse(g.expires_at) <= Date.now())) return null;
     g.decision = decision;
     g.comment = comment;
+    g.comment_at_s = beiS;
     g.decided_at = nowIso();
     g.viewed_at ??= g.decided_at;
     s.audit.push({

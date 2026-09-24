@@ -42,13 +42,17 @@ export async function GET(_request: NextRequest, { params }: Params) {
   return Response.json(publicView(view), { headers: { "Cache-Control": "no-store" } });
 }
 
-/* POST { decision, comment }: Entscheidung des Gastes; Änderungen und Ablehnen brauchen einen Kommentar */
+/* POST { decision, comment, comment_at_s }: Entscheidung des Gastes.
+ *
+ * ``comment_at_s`` ist die Sekunde im fertigen Clip, an der der Gast gerade stand, als er den
+ * Kommentar schrieb. Ohne sie steht beim Team „der Schnitt am Ende passt nicht" und die Suche
+ * beginnt von vorn - bei zwanzig Clips in der Woche zwanzigmal. */
 export async function POST(request: NextRequest, { params }: Params) {
   const { token } = await params;
   if (!isTokenShape(token)) return Response.json({ error: "Link ungültig" }, { status: 404 });
-  let body: { decision?: unknown; comment?: unknown };
+  let body: { decision?: unknown; comment?: unknown; comment_at_s?: unknown };
   try {
-    body = (await request.json()) as { decision?: unknown; comment?: unknown };
+    body = (await request.json()) as { decision?: unknown; comment?: unknown; comment_at_s?: unknown };
   } catch {
     return Response.json({ error: "Ungültiger JSON-Body" }, { status: 400 });
   }
@@ -57,13 +61,18 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (body.decision !== "approved" && !comment) {
     return Response.json({ error: "Bitte kurz beschreiben, was geändert werden soll oder warum du ablehnst." }, { status: 400 });
   }
+  /* Nur eine Sekunde innerhalb des Clips ergibt Sinn. Alles andere zeigt später auf eine Stelle,
+   * die es nicht gibt - und das ist schlimmer als gar keine Angabe. */
+  const roh = typeof body.comment_at_s === "number" ? body.comment_at_s : null;
+  const beiS = roh != null && Number.isFinite(roh) && roh >= 0 ? Math.round(roh * 10) / 10 : null;
+
   const repo = getRepo();
   const view = await repo.getGuestApprovalByToken(token);
   if (!view) return Response.json({ error: "Link ungültig oder zurückgezogen" }, { status: 404 });
   if (view.approval.decision) return Response.json({ error: "Diese Freigabe wurde bereits entschieden.", code: "decided" }, { status: 409 });
   if (isExpired(view.approval)) return Response.json({ error: "Dieser Link ist abgelaufen. Bitte um einen neuen Link.", code: "expired" }, { status: 410 });
 
-  const decided = await repo.decideGuestApproval(token, body.decision, comment || null, clientIp(request.headers));
+  const decided = await repo.decideGuestApproval(token, body.decision, comment || null, comment ? beiS : null, clientIp(request.headers));
   if (!decided) return Response.json({ error: "Diese Freigabe konnte nicht gespeichert werden." }, { status: 409 });
   /* Phase 5a: Webhook-Ereignis (nur IDs, Entscheidung, Name; kein Kommentar, kein Transkript) */
   await emitOutbox(view.workspace_id, "guest_approval.decided", "guest_approval", decided.id, {

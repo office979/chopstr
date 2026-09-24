@@ -10,7 +10,13 @@ import { SilentPreview, type PreviewFont } from "@/components/clips/SilentPrevie
 import { Modal } from "@/components/ui/Modal";
 import { ClipApproval } from "./ClipApproval";
 import type { Aspect, Candidate, CaptionVersion, Clip, GuestApproval, HookVersion, PipelineEvent } from "@/lib/repo/types";
-import { EXPORT_BLOCKED_MESSAGE, exportBlocked, latestByClip } from "@/lib/guest/approval";
+import {
+  EXPORT_BLOCKED_MESSAGE,
+  exportBlocked,
+  FREIGABE_VERALTET_MESSAGE,
+  freigabeVeraltet,
+  latestByClip,
+} from "@/lib/guest/approval";
 import { stilAusPlan, stilPruefen } from "@/lib/clips/caption-style";
 import { RUBRIC_LABELS, RUBRIC_ORDER, structureLabel } from "@/lib/candidates/labels";
 import {
@@ -820,6 +826,9 @@ export function ClipBoard({
           const progress = clip.status === "rendering" ? (ev?.progress ?? 0) : isDone(clip) ? 1 : 0;
           const approval = approvals.get(clip.id);
           const blocked = exportBlocked(clip, approval);
+          /* Wurde der Clip nach der Freigabe noch angefasst? Dann hat die Person eine andere
+           * Fassung gesehen als die, die jetzt herauskäme. */
+          const freigabeAlt = freigabeVeraltet(approval, clip.updated_at);
           const mp4 = clip.file_key && mediaBase ? `/api/projects/${sourceId}/clips/${clip.id}/download?kind=mp4` : null;
           /* Jede Handlung fragt denselben Rechner. Vorher entschied jeder Knopf für sich, ob er
            * anklickbar ist, und daher stand „Korrektur nötig" neben einem offenen „Freigeben". */
@@ -1123,6 +1132,9 @@ export function ClipBoard({
                     {/* Was aus dem Clip geworden ist. Ohne diese Zeile endete die Kette am
                         fertigen Clip: Posten und Kennzahlen gab es nur als Schnittstelle, und
                         „Tests" und „Berichte" konnten deshalb nie etwas zeigen. */}
+                    {freigabeAlt && (
+                      <p className="w-full text-xs text-attention">{FREIGABE_VERALTET_MESSAGE}</p>
+                    )}
                     {p.redaktion === "freigegeben" && (
                       <Gepostet sourceId={sourceId} clipId={clip.id} plattform={clip.platform} canPublish={canPublish} />
                     )}

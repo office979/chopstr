@@ -433,6 +433,7 @@ function toGuestApproval(r: Row): GuestApproval {
     expires_at: isoOrNull(r.expires_at),
     decision: (r.decision as GuestApproval["decision"]) ?? null,
     comment: (r.comment as string | null) ?? null,
+    comment_at_s: num(r.comment_at_s),
     decided_at: isoOrNull(r.decided_at),
     viewed_at: isoOrNull(r.viewed_at),
     created_at: isoOrNull(r.created_at) ?? "",
@@ -1514,10 +1515,11 @@ export const postgresRepo: Repo = {
     });
   },
 
-  async decideGuestApproval(token, decision, comment, ip) {
+  async decideGuestApproval(token, decision, comment, beiS, ip) {
     return withAuthContext(async (tx) => {
       const rows = await tx`
-        update guest_approvals set decision = ${decision}, comment = ${comment}, decided_at = now(), viewed_at = coalesce(viewed_at, now())
+        update guest_approvals set decision = ${decision}, comment = ${comment}, comment_at_s = ${beiS},
+               decided_at = now(), viewed_at = coalesce(viewed_at, now())
         where token = ${token} and decision is null and (expires_at is null or expires_at > now())
         returning *`;
       if (!rows.length) return null;
@@ -1528,7 +1530,7 @@ export const postgresRepo: Repo = {
       await tx`
         insert into audit_log (workspace_id, actor_id, actor_type, action, entity, entity_id, payload, ip)
         values (${workspaceId}, null, 'guest', 'guest_approval.decided', 'guest_approvals', ${approval.id},
-                ${tx.json({ clip_id: approval.clip_id, decision, comment, guest_name: approval.guest_name } as never)}, ${ip}::inet)`;
+                ${tx.json({ clip_id: approval.clip_id, decision, comment, comment_at_s: beiS, guest_name: approval.guest_name } as never)}, ${ip}::inet)`;
       return approval;
     });
   },

@@ -935,6 +935,10 @@ export interface GuestApproval {
   expires_at: string | null;
   decision: GuestDecision | null;
   comment: string | null;
+  /* Die Sekunde IM FERTIGEN CLIP, auf die sich die Anmerkung bezieht. Null heisst: sie gilt dem
+   * ganzen Clip. Der Gast sieht nur den Clip und kennt das lange Video nicht; die Umrechnung in
+   * die Quellzeit macht die Oberfläche des Teams, die den Schnitt kennt. */
+  comment_at_s: number | null;
   decided_at: string | null;
   viewed_at: string | null;
   created_at: string;
@@ -1073,7 +1077,7 @@ export interface BlockBRepo {
   getGuestApprovalByToken(token: string): Promise<GuestApprovalView | null>;
   markGuestApprovalViewed(token: string): Promise<void>;
   /* Entscheidung des Gastes (ohne Sitzung); null wenn Token unbekannt, abgelaufen oder schon entschieden */
-  decideGuestApproval(token: string, decision: GuestDecision, comment: string | null, ip: string | null): Promise<GuestApproval | null>;
+  decideGuestApproval(token: string, decision: GuestDecision, comment: string | null, beiS: number | null, ip: string | null): Promise<GuestApproval | null>;
 
   /* Abrechnung */
   listPlans(): Promise<Plan[]>;

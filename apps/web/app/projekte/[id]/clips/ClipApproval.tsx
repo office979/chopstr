@@ -122,11 +122,24 @@ export function ClipApproval({ sourceId, clipId, clipLabel, guestApprovalRequire
           </span>
         )}
       </div>
+      {/* Der Wunsch des Kunden, und wo er hingehört.
+          Vorher stand hier nur der Satz. „Das Ende passt nicht" hiess: Clip öffnen, abspielen,
+          suchen. Jetzt führt ein Klick an die genannte Stelle. */}
       {current?.comment && (current.decision === "changes" || current.decision === "rejected") && (
-        <p className="rounded-[12px] border border-line px-3 py-2 text-xs text-text">
-          <span className="text-text-2">Kommentar des Gastes: </span>
-          {current.comment}
-        </p>
+        <div className="rounded-[12px] border border-line px-3 py-2 text-xs text-text">
+          <p>
+            <span className="text-text-2">{current.guest_name ? `${current.guest_name} schreibt: ` : "Rückmeldung: "}</span>
+            {current.comment}
+          </p>
+          {current.comment_at_s != null && (
+            <Link
+              href={`/projekte/${sourceId}/clips/${clipId}?bei=${current.comment_at_s}`}
+              className="mt-1 inline-block text-text-2 underline underline-offset-4 hover:text-text"
+            >
+              Zur Stelle bei {Math.floor(current.comment_at_s / 60)}:{String(Math.floor(current.comment_at_s % 60)).padStart(2, "0")}
+            </Link>
+          )}
+        </div>
       )}
       {gateNotice && !planAllows && (
         <p role="status" className="rounded-[12px] border border-line px-3 py-2 text-xs text-text-2">

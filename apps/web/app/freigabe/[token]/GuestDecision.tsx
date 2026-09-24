@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -38,7 +38,12 @@ interface ApiResponse {
   approval?: { decision: Decision | null; comment: string | null; decided_at: string | null };
 }
 
-/* Drei Entscheidungen: Freigeben, Änderungen wünschen (Kommentar Pflicht), Ablehnen (Kommentar Pflicht) */
+/* Drei Entscheidungen: Freigeben, Änderungen wünschen (Kommentar Pflicht), Ablehnen (Kommentar Pflicht).
+ *
+ * Ein Wunsch hängt fast immer an einer Stelle: „das Ende passt nicht", „hier fehlt ein Schnitt".
+ * Bis hierher ging nur der Satz mit, nicht die Stelle - und wer ihn las, suchte sie von Hand.
+ * Deshalb wird beim Schreiben die Stelle mitgenommen, an der das Video gerade steht. Der Gast
+ * muss dafür nichts tun ausser anhalten. */
 export function GuestDecision({ token, view }: { token: string; view: GuestView }) {
   const [mode, setMode] = useState<Exclude<Decision, "approved"> | null>(null);
   const [comment, setComment] = useState("");
@@ -48,6 +53,10 @@ export function GuestDecision({ token, view }: { token: string; view: GuestView 
     view.decision ? { decision: view.decision, comment: view.comment, decided_at: view.decided_at } : null,
   );
   const commentId = useId();
+  /* Die Stelle, an der das Video steht, während der Wunsch geschrieben wird. */
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [stelle, setStelle] = useState<number | null>(null);
+  const [stelleMitschicken, setStelleMitschicken] = useState(true);
 
   const send = async (decision: Decision) => {
     setBusy(true);
@@ -56,7 +65,11 @@ export function GuestDecision({ token, view }: { token: string; view: GuestView 
       const res = await fetch(`/api/freigabe/${token}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision, comment: decision === "approved" ? "" : comment }),
+        body: JSON.stringify({
+          decision,
+          comment: decision === "approved" ? "" : comment,
+          comment_at_s: decision === "changes" && stelleMitschicken ? stelle : null,
+        }),
       });
       const data = (await res.json()) as ApiResponse;
       if (!res.ok) throw new Error(data.error ?? "Entscheidung konnte nicht gespeichert werden");
@@ -79,7 +92,16 @@ export function GuestDecision({ token, view }: { token: string; view: GuestView 
           style={{ aspectRatio: view.aspect.replace(":", " / "), maxWidth: portrait ? 300 : undefined }}
         >
           {view.video_url ? (
-            <video src={view.video_url} poster={view.poster_url ?? undefined} controls playsInline preload="metadata" className="h-full w-full object-contain" />
+            <video
+              ref={videoRef}
+              src={view.video_url}
+              poster={view.poster_url ?? undefined}
+              controls
+              playsInline
+              preload="metadata"
+              onTimeUpdate={(e) => setStelle(Math.round(e.currentTarget.currentTime * 10) / 10)}
+              className="h-full w-full object-contain"
+            />
           ) : view.poster_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={view.poster_url} alt={`Poster ${PLATFORM_LABELS[view.platform]}`} className="h-full w-full object-cover" />
@@ -179,7 +201,21 @@ export function GuestDecision({ token, view }: { token: string; view: GuestView 
                   <label htmlFor={commentId} className="text-sm font-medium">
                     {mode === "changes" ? "Was soll geändert werden?" : "Warum lehnst du ab?"} <span className="text-text-2">(Pflicht)</span>
                   </label>
-                  <Textarea id={commentId} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={mode === "changes" ? "z. B. Bitte den Satz ab Sekunde 12 herausnehmen." : "z. B. Ich möchte in diesem Kontext nicht zitiert werden."} />
+                  <Textarea id={commentId} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={mode === "changes" ? "z. B. Bitte diesen Satz herausnehmen." : "z. B. Ich möchte in diesem Kontext nicht zitiert werden."} />
+                  {/* Die Stelle geht mit. Der Gast muss dafür nichts tun ausser anhalten, und das
+                      Team muss sie später nicht suchen. Abschaltbar, denn manche Rückmeldung gilt
+                      dem ganzen Clip. */}
+                  {mode === "changes" && stelle != null && stelle > 0 && (
+                    <label className="flex items-center gap-2 text-sm text-text-2">
+                      <input
+                        type="checkbox"
+                        checked={stelleMitschicken}
+                        onChange={(e) => setStelleMitschicken(e.target.checked)}
+                        className="h-4 w-4 cursor-pointer rounded border border-line-strong bg-black/40 accent-white"
+                      />
+                      Auf die Stelle bei {sekunden(stelle)} beziehen
+                    </label>
+                  )}
                   <div className="flex flex-wrap justify-end gap-2">
                     <Button type="button" variant="ghost" size="sm" onClick={() => setMode(null)} disabled={busy}>
                       Abbrechen
@@ -201,4 +237,10 @@ export function GuestDecision({ token, view }: { token: string; view: GuestView 
       </div>
     </div>
   );
+}
+
+/* Eine Sekundenangabe, wie sie ein Mensch sagt: 0:07, 1:24. */
+function sekunden(s: number): string {
+  const ganz = Math.floor(s);
+  return `${Math.floor(ganz / 60)}:${String(ganz % 60).padStart(2, "0")}`;
 }

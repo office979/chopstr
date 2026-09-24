@@ -51,4 +51,24 @@ export function exportBlocked(clip: Pick<Clip, "guest_approval_required">, lates
   return latest?.decision !== "approved";
 }
 
+/* Gilt die Freigabe noch für das, was jetzt herauskäme?
+ *
+ * Ein Gast gibt eine bestimmte Fassung frei - die, die er gesehen hat. Wird danach geschnitten,
+ * der Text korrigiert oder das Aussehen geändert, ist das eine andere Fassung, und seine Zusage
+ * deckt sie nicht mehr. Das ist nicht bloss unsauber: die Person hat der Veröffentlichung von
+ * etwas zugestimmt, das so nicht mehr existiert.
+ *
+ * Gemessen am Zeitpunkt der Entscheidung gegen die letzte Änderung am Clip. Beides steht schon
+ * da; verglichen wurde es bisher nicht. */
+export function freigabeVeraltet(
+  latest: GuestApproval | undefined,
+  clipGeaendertAm: string | null | undefined,
+): boolean {
+  if (!latest?.decided_at || latest.decision !== "approved" || !clipGeaendertAm) return false;
+  /* Eine Sekunde Luft: das Speichern der Entscheidung selbst rührt den Clip an. */
+  return Date.parse(clipGeaendertAm) > Date.parse(latest.decided_at) + 1000;
+}
+
 export const EXPORT_BLOCKED_MESSAGE = "Noch gesperrt: Du wartest auf die Antwort der Person, die du gefragt hast.";
+export const FREIGABE_VERALTET_MESSAGE =
+  "Der Clip wurde nach der Freigabe geändert. Die Person hat eine andere Fassung gesehen - bitte noch einmal fragen.";

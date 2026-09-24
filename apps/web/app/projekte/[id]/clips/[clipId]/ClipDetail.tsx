@@ -507,6 +507,20 @@ export function ClipDetail({
     });
   }, []);
 
+  /* Kommt jemand über „Zur Stelle bei 0:12" aus einer Kundenrückmeldung, steht die Sekunde in
+   * der Adresse - und zwar im FERTIGEN CLIP gezählt, denn nur den hat der Kunde gesehen. Hier
+   * wird sie in die Quellzeit umgerechnet, in der Vorschau und Timeline rechnen. */
+  useEffect(() => {
+    const roh = new URLSearchParams(window.location.search).get("bei");
+    const imClip = roh == null ? NaN : Number(roh);
+    if (!Number.isFinite(imClip) || imClip < 0) return;
+    const ziel = clipStart + imClip;
+    setSeekTo({ at: ziel, nonce: Date.now() });
+    setCurrentTime(ziel);
+    /* Nur beim Öffnen. Danach gehört die Abspielposition dem Nutzer. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const seek = useCallback((at: number) => {
     setSeekTo({ at, nonce: Date.now() });
     setCurrentTime(at);

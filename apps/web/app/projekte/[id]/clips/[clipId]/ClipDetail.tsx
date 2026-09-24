@@ -83,6 +83,8 @@ interface Props {
   transkriptVersion: number | null;
   /* Ohne Markenprofil gibt es kein Wörterbuch, in das eine Schreibweise wandern könnte. */
   markeVorhanden: boolean;
+  /* Die Schriften, für die in dieser Installation wirklich eine Datei vorliegt. */
+  schriftenVorhanden: string[];
 }
 
 /* Ein Clip: oben Vorschau, daneben sein Text. Gespeichert wird mit einem Klick, ohne Rückfrage.
@@ -121,6 +123,7 @@ export function ClipDetail({
   renderFehler,
   transkriptVersion,
   markeVorhanden,
+  schriftenVorhanden,
 }: Props) {
   const router = useRouter();
   const backHref = `/projekte/${sourceId}/clips`;
@@ -611,6 +614,7 @@ export function ClipDetail({
               zeitmarken={marken}
               stil={stil}
               woerter={clipWords}
+              onCaptionHoehe={canEdit ? (px) => setStil((v) => ({ ...v, bottom_margin_px: px })) : undefined}
             />
           )}
 
@@ -684,6 +688,9 @@ export function ClipDetail({
             speichern={() => void stilSpeichern()}
             zuruecksetzen={() => setStil({})}
             saving={stilSaving}
+            schriftenVorhanden={schriftenVorhanden}
+            woerter={clipWords}
+            onSeek={seek}
           />
 
           {canEdit && hasText && (

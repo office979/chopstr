@@ -40,6 +40,10 @@ interface Props {
   zeitmarken: Zeitmarke[];
   stil: CaptionStyle;
   woerter: TranscriptWord[];
+  /* Die Höhe der Untertitel lässt sich direkt im Bild ziehen. Ohne diese Rückmeldung bleibt es
+   * bei einem Schieber, und „wo steht der Text" ist eine Frage, die man sehen und nicht rechnen
+   * will. */
+  onCaptionHoehe?: (bottomMarginPx: number) => void;
 }
 
 /* Die Vorschau aus dem Quellvideo, mit allem was gerade eingestellt ist.
@@ -71,6 +75,7 @@ export function LiveVorschau({
   zeitmarken,
   stil,
   woerter,
+  onCaptionHoehe,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [laeuft, setLaeuft] = useState(false);
@@ -187,7 +192,9 @@ export function LiveVorschau({
         >
           Dein Browser kann dieses Video nicht abspielen.
         </video>
-        {woerter.length > 0 && <CaptionVorschau stil={stil} woerter={woerter} zeit={zeit} />}
+        {woerter.length > 0 && (
+          <CaptionVorschau stil={stil} woerter={woerter} zeit={zeit} onHoehe={onCaptionHoehe} />
+        )}
         {/* Das geteilte Bild zeigt die Vorschau nicht: dafuer braeuchte es zwei Videoelemente aus
           * derselben Quelle, synchron gehalten. Ein Hinweis ist ehrlicher als ein Einzelbild, das
           * so tut, als sei nichts eingestellt. */}
@@ -205,7 +212,7 @@ export function LiveVorschau({
             if (v.paused) void v.play();
             else v.pause();
           }}
-          className="transition-soft absolute inset-0 flex items-center justify-center text-white/0 hover:text-white/90 focus:text-white/90 focus:outline-none"
+          className="transition-soft absolute inset-0 z-10 flex items-center justify-center text-white/0 hover:text-white/90 focus:text-white/90 focus:outline-none"
         >
           <span className="flex h-14 w-14 items-center justify-center rounded-full bg-black/55 backdrop-blur-sm">
             {laeuft ? (

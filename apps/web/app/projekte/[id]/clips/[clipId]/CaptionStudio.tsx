@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/Button";
 import { Toggle } from "@/components/ui/Toggle";
@@ -9,6 +9,7 @@ import type { TranscriptWord } from "@/lib/repo/types";
 import {
   aktiverLook,
   FONTS,
+  FONT_RUECKLAUF,
   GRENZEN,
   HIGHLIGHT_FARBEN,
   LOOKS,
@@ -17,6 +18,7 @@ import {
   maxZeichen,
   mitVorgabe,
 } from "@/lib/clips/caption-style";
+import { befundSatz, MAX_CPS, pruefen, tempo, type Befund } from "@/lib/clips/untertitel-pruefung";
 
 export interface GespeicherteVorlage {
   id: string;
@@ -70,6 +72,9 @@ interface VorschauProps {
   woerter: TranscriptWord[];
   /* Stelle im ganzen Video, an der der Player gerade steht. */
   zeit: number;
+  /* Verschieben erlaubt? Nur mit Bearbeitungsrecht und nur, wenn es jemanden gibt, der die neue
+   * Höhe entgegennimmt. */
+  onHoehe?: (bottomMarginPx: number) => void;
 }
 
 /* Die Untertitel, wie sie im fertigen Clip stehen, über das laufende Bild gelegt.
@@ -77,9 +82,11 @@ interface VorschauProps {
  * Gerechnet wird in Bildpunkten bei 1080x1920 und mit Containereinheiten ausgegeben, damit die
  * Vorschau in jeder Größe stimmt: 1 cqw ist ein Hundertstel der Breite des Videos. So braucht es
  * keinen Messcode, der bei jeder Fenstergröße neu laufen müsste. */
-export function CaptionVorschau({ stil, woerter, zeit }: VorschauProps) {
+export function CaptionVorschau({ stil, woerter, zeit, onHoehe }: VorschauProps) {
   const s = mitVorgabe(stil);
   const safeUnten = SAFE_UNTEN[stil.preset ?? ""] ?? 1600;
+  const rahmen = useRef<HTMLDivElement | null>(null);
+  const [zieht, setZieht] = useState(false);
   const budget = maxZeichen(s.font_px) * s.max_lines;
   const gruppen = useMemo(() => karten(woerter, s.words_per_card, budget), [woerter, s.words_per_card, budget]);
 
@@ -98,10 +105,61 @@ export function CaptionVorschau({ stil, woerter, zeit }: VorschauProps) {
   if (!aktiv?.length) return null;
   const grundlinie = ((BILD_H - (safeUnten - s.bottom_margin_px)) / BILD_H) * 100;
 
+  /* Ziehen: die Mausposition im Rahmen wird in „Bildpunkte über der Unterkante der sicheren
+   * Fläche" zurückgerechnet und auf den erlaubten Bereich gezogen. Der Text kann so nie in einen
+   * Bereich rutschen, in dem ihn Plattform-Elemente verdecken. */
+  const ziehen = (e: React.PointerEvent) => {
+    if (!onHoehe) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setZieht(true);
+    const bewegen = (ev: PointerEvent) => {
+      const el = rahmen.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (r.height <= 0) return;
+      const yImBild = ((ev.clientY - r.top) / r.height) * BILD_H;
+      const roh = safeUnten - yImBild;
+      const [min, max] = GRENZEN.bottom_margin_px;
+      onHoehe(Math.round(Math.max(min, Math.min(max, roh)) / 10) * 10);
+    };
+    const ende = () => {
+      setZieht(false);
+      window.removeEventListener("pointermove", bewegen);
+      window.removeEventListener("pointerup", ende);
+    };
+    window.addEventListener("pointermove", bewegen);
+    window.addEventListener("pointerup", ende);
+  };
+
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ containerType: "inline-size" }}>
+    <div
+      ref={rahmen}
+      className="pointer-events-none absolute inset-0 z-20 overflow-hidden"
+      style={{ containerType: "inline-size" }}
+    >
+      {/* Die sichere Fläche, solange gezogen wird. Ohne sie ist „geht nicht weiter" ein Rätsel. */}
+      {zieht && (
+        <div
+          aria-hidden="true"
+          className="absolute rounded-[4px] border border-dashed border-white/40"
+          style={{
+            left: `${(60 / BILD_B) * 100}%`,
+            right: `${(120 / BILD_B) * 100}%`,
+            top: `${((safeUnten - GRENZEN.bottom_margin_px[1]) / BILD_H) * 100}%`,
+            bottom: `${((BILD_H - safeUnten) / BILD_H) * 100}%`,
+          }}
+        />
+      )}
       <div
-        className="absolute flex justify-center text-center"
+        /* Über der Fläche, die Start und Pause schaltet: sonst schluckt die den Griff, und das
+         * Ziehen startet nur das Video. Nur dieser Streifen liegt darüber, der Rest des Bildes
+         * bleibt Start und Pause. */
+        className={cn(
+          "absolute z-20 flex justify-center text-center",
+          onHoehe && "pointer-events-auto cursor-ns-resize",
+        )}
+        onPointerDown={ziehen}
         style={{
           left: `${(60 / BILD_B) * 100}%`,
           right: `${(120 / BILD_B) * 100}%`,
@@ -153,6 +211,14 @@ interface StudioProps {
   speichern: () => void;
   zuruecksetzen: () => void;
   saving: boolean;
+  /* Die Schriften, für die in dieser Installation wirklich eine Datei vorliegt. Alles andere
+   * kann weder die Vorschau zeigen noch der Renderer einbrennen. */
+  schriftenVorhanden: string[];
+  /* Die Wörter dieses Clips. Daraus entstehen die Proben auf den Stilkarten und die Prüfung,
+   * ob der Text lesbar durchläuft. */
+  woerter: TranscriptWord[];
+  /* Zu einer Stelle springen, wenn jemand eine Warnung anklickt. */
+  onSeek: (quellzeit: number) => void;
 }
 
 /* Untertitel einstellen, auf das Nötige gebracht.
@@ -172,15 +238,30 @@ export function CaptionStudio({
   speichern,
   zuruecksetzen,
   saving,
+  schriftenVorhanden,
+  woerter,
+  onSeek,
 }: StudioProps) {
   const s = mitVorgabe(stil);
   const [mehr, setMehr] = useState(false);
   const [vorlageName, setVorlageName] = useState("");
   const [vorlageMeldung, setVorlageMeldung] = useState<string | null>(null);
-  const [fehlendeSchrift, setFehlendeSchrift] = useState(false);
   const idWoerter = useId();
   const idGroesse = useId();
+  const idPosition = useId();
   const look = aktiverLook(stil);
+
+  /* Ein echter Satz aus diesem Clip für die Proben. Sechs Wörter reichen, um Schrift, Farbe und
+   * Großschreibung zu beurteilen, und passen in eine Kachel. */
+  const probeSatz = useMemo(
+    () => woerter.slice(0, 6).map((w) => w.text).join(" ") || "So sieht dein Text aus",
+    [woerter],
+  );
+
+  /* Was am eingestellten Stil nicht aufgeht, gerechnet auf den GERADE eingestellten Stil. Aus dem
+   * letzten Render wäre es eine Aussage über ein Aussehen, das vielleicht gar nicht mehr gilt. */
+  const befunde = useMemo(() => pruefen(woerter, stil), [woerter, stil]);
+  const lesetempo = useMemo(() => tempo(woerter, stil), [woerter, stil]);
 
   const setzen = useCallback(
     (teil: Partial<CaptionStyle>) => {
@@ -193,40 +274,14 @@ export function CaptionStudio({
     [stil, onChange],
   );
 
-  /* Ob die gewählte Schrift im Browser überhaupt vorliegt. Tut sie es nicht, zeigt die Vorschau
-   * Inter, und das muss dastehen statt den Nutzer raten zu lassen.
+  /* Ob die gewählte Schrift wirklich vorliegt, weiß der Server: er sieht den Schriftordner.
+   * Im Browser zu messen war ein Umweg mit falschem Ergebnis - der Browser kann jeden Text mit
+   * einer Ersatzschrift setzen, und der Renderer hat davon ohnehin nichts.
    *
-   * Der naheliegende Weg über document.fonts.check() taugt dafür nicht: der gibt auch für eine
-   * Schrift true zurück, die es gar nicht gibt, weil der Browser den Text ja mit der Ersatzschrift
-   * darstellen kann. An „Anton" geprüft: kam true, obwohl keine Datei vorlag.
-   *
-   * Deshalb gemessen: derselbe Text einmal mit der gesuchten Schrift vor einer Ersatzschrift und
-   * einmal nur mit der Ersatzschrift. Sind beide Breiten gleich, wurde sie nicht verwendet. */
-  useEffect(() => {
-    let abgebrochen = false;
-    const pruefen = async () => {
-      try {
-        await document.fonts.ready;
-        const ctx = document.createElement("canvas").getContext("2d");
-        if (!ctx) return;
-        const probe = "HAMBURGEFONSTIV hamburgefonstiv 0123456789";
-        const vorhanden = ["monospace", "serif"].some((ersatz) => {
-          ctx.font = `700 48px ${ersatz}`;
-          const ohne = ctx.measureText(probe).width;
-          ctx.font = `700 48px "${s.font}", ${ersatz}`;
-          return Math.abs(ctx.measureText(probe).width - ohne) > 0.5;
-        });
-        if (!abgebrochen) setFehlendeSchrift(!vorhanden);
-      } catch {
-        /* Im Zweifel nichts behaupten: eine falsche Warnung ist schlimmer als keine. */
-        if (!abgebrochen) setFehlendeSchrift(false);
-      }
-    };
-    void pruefen();
-    return () => {
-      abgebrochen = true;
-    };
-  }, [s.font]);
+   * Dieselbe Liste gilt für beide Seiten: was in apps/web/public/fonts liegt, kann die Vorschau
+   * zeigen UND der Renderer einbrennen (scripts/sync-fonts.mjs spiegelt es aus workers/fonts). */
+  const schriftFehlt = useCallback((name: string) => !schriftenVorhanden.includes(name), [schriftenVorhanden]);
+  const fehlendeSchrift = schriftFehlt(s.font);
 
   const zeichenGrenze = maxZeichen(s.font_px);
   /* Gewarnt wird erst, wenn auch die Silbentrennung nicht mehr hilft. Der Renderer trennt lange
@@ -278,26 +333,37 @@ export function CaptionStudio({
       </div>
 
       <div className="mt-5 flex flex-col gap-6">
-        {/* 1. Wie soll es aussehen? Vier Karten, eine Berührung. */}
+        {/* 1. Wie soll es aussehen? Vier Karten, eine Berührung. Die Probe zeigt einen echten
+          * Satz aus diesem Clip: „Wort Wort" sagt nichts darüber, wie der eigene Text wirkt. */}
         <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {LOOKS.map((l) => (
-            <button
-              key={l.id}
-              type="button"
-              disabled={!canEdit}
-              onClick={() => setzen(l.stil)}
-              aria-pressed={look === l.id}
-              className={cn(
-                "transition-soft flex flex-col items-center gap-2 rounded-inner border p-3 disabled:opacity-60",
-                look === l.id ? "border-white/60 bg-white/10" : "border-line hover:border-line-strong",
-              )}
-            >
-              <LookProbe look={l} />
-              <span className={cn("text-sm font-medium", look === l.id ? "text-text" : "text-text-2")}>{l.name}</span>
-              <span className="text-center text-xs text-text-3">{l.hinweis}</span>
-            </button>
-          ))}
+          {LOOKS.map((l) => {
+            const fehlt = schriftFehlt(mitVorgabe(l.stil).font);
+            return (
+              <button
+                key={l.id}
+                type="button"
+                disabled={!canEdit}
+                onClick={() => setzen(l.stil)}
+                aria-pressed={look === l.id}
+                title={fehlt ? `Die Schrift ${mitVorgabe(l.stil).font} ist hier nicht installiert` : undefined}
+                className={cn(
+                  "transition-soft flex flex-col items-center gap-2 rounded-inner border p-3 disabled:opacity-60",
+                  look === l.id ? "border-white/60 bg-white/10" : "border-line hover:border-line-strong",
+                )}
+              >
+                <LookProbe look={l} probe={probeSatz} ersatzschrift={fehlt} />
+                <span className={cn("text-sm font-medium", look === l.id ? "text-text" : "text-text-2")}>{l.name}</span>
+                <span className="text-center text-xs text-text-3">
+                  {fehlt ? `Schrift ${mitVorgabe(l.stil).font} fehlt` : l.hinweis}
+                </span>
+              </button>
+            );
+          })}
         </section>
+
+        {fehlendeSchrift && (
+          <SchriftFehltHinweis name={s.font} onInter={() => setzen({ font: FONT_RUECKLAUF })} canEdit={canEdit} />
+        )}
 
         {/* 2. Wie viele Wörter auf einmal */}
         <section className="flex flex-col gap-2">
@@ -349,10 +415,41 @@ export function CaptionStudio({
           )}
         </section>
 
-        {/* 4. Farbe der Hervorhebung */}
-        {s.highlight_words && (
-          <section className="flex flex-col gap-2">
-            <p className="text-sm font-medium text-text">Farbe des gesprochenen Worts</p>
+        {/* 4. Position im Bild. Ziehen geht auch direkt in der Vorschau; der Schieber ist der
+          * genaue Weg und der, den man mit der Tastatur bedienen kann. */}
+        <section className="flex flex-col gap-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <label htmlFor={idPosition} className="text-sm font-medium text-text">
+              Position
+            </label>
+            <span className="text-sm tabular-nums text-text-2">{s.bottom_margin_px} px über der Kante</span>
+          </div>
+          <input
+            id={idPosition}
+            type="range"
+            min={GRENZEN.bottom_margin_px[0]}
+            max={GRENZEN.bottom_margin_px[1]}
+            step={10}
+            value={s.bottom_margin_px}
+            disabled={!canEdit}
+            onChange={(e) => setzen({ bottom_margin_px: Number(e.target.value) })}
+            className="w-full accent-white disabled:opacity-60"
+          />
+          <p className="text-sm text-text-2">
+            Du kannst den Text auch in der Vorschau nach oben und unten ziehen. Weiter nach unten geht es nicht:
+            dort liegen auf den Plattformen Bedienleiste und Beschreibung über dem Bild.
+          </p>
+        </section>
+
+        {/* 5. Hervorhebung */}
+        <section className="flex flex-col gap-3">
+          <Toggle
+            checked={s.highlight_words}
+            disabled={!canEdit}
+            onChange={(v) => setzen({ highlight_words: v })}
+            label="Gesprochenes Wort hervorheben"
+          />
+          {s.highlight_words && (
             <div className="flex flex-wrap gap-2">
               {HIGHLIGHT_FARBEN.map((f) => (
                 <button
@@ -370,20 +467,29 @@ export function CaptionStudio({
                 />
               ))}
             </div>
-          </section>
-        )}
+          )}
+        </section>
 
-        {fehlendeSchrift && (
-          <p className="text-sm text-attention">
-            Die Schrift dieses Looks liegt in deinem Browser nicht vor, die Vorschau zeigt Inter. Im fertigen Clip wird
-            sie verwendet, sobald die Datei im Schriftordner des Workers liegt.
-          </p>
-        )}
+        {/* 6. Hintergrund */}
+        <section className="flex flex-col gap-3">
+          <Toggle checked={s.box} disabled={!canEdit} onChange={(v) => setzen({ box: v })} label="Kasten hinter dem Text" />
+          {s.box && (
+            <Farbwahl label="Farbe des Kastens" wert={s.box_color} disabled={!canEdit} onChange={(v) => setzen({ box_color: v })} />
+          )}
+        </section>
 
-        {/* 5. Vorlagen */}
+        {/* 7. Was nicht aufgeht. Anklickbar: die Warnung führt zur Stelle. */}
+        <Befunde befunde={befunde} onSeek={onSeek} tempo={lesetempo} />
+
+        {/* 8. Vorlagen. Bewusst vom Speichern getrennt: „für diesen Clip übernehmen" und „für
+          * alle nächsten merken" sind zwei Entscheidungen, und wer sie verwechselt, ändert
+          * ungewollt das Aussehen aller künftigen Clips. */}
         {(vorlagen.length > 0 || canEdit) && (
           <section className="flex flex-col gap-2 border-t border-line pt-5">
             <p className="text-sm font-medium text-text">Vorlagen</p>
+            <p className="text-sm text-text-2">
+              Eine Vorlage ist ein gemerktes Aussehen. Sie ändert nichts an schon gebauten Clips.
+            </p>
             {vorlagen.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {vorlagen.map((v) => (
@@ -417,7 +523,7 @@ export function CaptionStudio({
                   className="transition-soft min-w-[180px] flex-1 rounded-inner border border-line bg-black/40 px-4 py-3 text-[15px] text-text placeholder:text-text-3 hover:border-line-strong focus:border-white/50 focus:outline-none"
                 />
                 <Button variant="ghost" disabled={!vorlageName.trim()} onClick={() => void vorlageSpeichern()}>
-                  Merken
+                  Als Vorlage speichern
                 </Button>
               </div>
             )}
@@ -434,24 +540,20 @@ export function CaptionStudio({
           onClick={() => setMehr((v) => !v)}
           className="transition-soft self-start text-sm text-text-2 underline underline-offset-4 hover:text-text"
         >
-          {mehr ? "Weniger einstellen" : "Mehr einstellen"}
+          {mehr ? "Fein einstellen schließen" : "Fein einstellen"}
         </button>
 
         {mehr && (
           <section className="flex flex-col gap-4 border-t border-line pt-5">
-            <Schriftwahl wert={s.font} disabled={!canEdit} onChange={(v) => setzen({ font: v })} />
+            <Schriftwahl
+              wert={s.font}
+              disabled={!canEdit}
+              vorhanden={schriftenVorhanden}
+              onChange={(v) => setzen({ font: v })}
+            />
             <Farbwahl label="Textfarbe" wert={s.base_color} disabled={!canEdit} onChange={(v) => setzen({ base_color: v })} />
-            <Farbwahl label="Farbe der Kontur" wert={s.outline_color} disabled={!canEdit || s.outline_px === 0} onChange={(v) => setzen({ outline_color: v })} />
-            <Farbwahl label="Farbe des Kastens" wert={s.box_color} disabled={!canEdit || !s.box} onChange={(v) => setzen({ box_color: v })} />
             <Toggle checked={s.bold} disabled={!canEdit} onChange={(v) => setzen({ bold: v })} label="Fett" />
             <Toggle checked={s.all_caps} disabled={!canEdit} onChange={(v) => setzen({ all_caps: v })} label="Großbuchstaben" />
-            <Toggle
-              checked={s.highlight_words}
-              disabled={!canEdit}
-              onChange={(v) => setzen({ highlight_words: v })}
-              label="Gesprochenes Wort hervorheben"
-            />
-            <Toggle checked={s.box} disabled={!canEdit} onChange={(v) => setzen({ box: v })} label="Kasten hinter dem Text" />
             <Regler
               label="Kontur"
               einheit="px"
@@ -461,16 +563,7 @@ export function CaptionStudio({
               disabled={!canEdit}
               onChange={(v) => setzen({ outline_px: v })}
             />
-            <Regler
-              label="Höhe im Bild"
-              einheit="px über der Kante"
-              wert={s.bottom_margin_px}
-              min={GRENZEN.bottom_margin_px[0]}
-              max={GRENZEN.bottom_margin_px[1]}
-              schritt={10}
-              disabled={!canEdit}
-              onChange={(v) => setzen({ bottom_margin_px: v })}
-            />
+            <Farbwahl label="Farbe der Kontur" wert={s.outline_color} disabled={!canEdit || s.outline_px === 0} onChange={(v) => setzen({ outline_color: v })} />
             {s.words_per_card > 1 && (
               <Regler
                 label="Zeilen"
@@ -494,7 +587,7 @@ export function CaptionStudio({
               Zurücksetzen
             </button>
             <Button variant={gespeichert ? "ghost" : "primary"} disabled={gespeichert || saving} onClick={speichern}>
-              {saving ? "Wird gespeichert" : gespeichert ? "Gespeichert" : "Untertitel speichern"}
+              {saving ? "Wird gespeichert" : gespeichert ? "Gespeichert" : "Nur für diesen Clip speichern"}
             </Button>
           </div>
         )}
@@ -503,20 +596,25 @@ export function CaptionStudio({
   );
 }
 
-/* Eine kleine Probe des Looks: das Wort „Aa" so gesetzt, wie die Untertitel aussehen werden.
- * Ein Bild sagt hier mehr als der Name der Schrift. */
-function LookProbe({ look }: { look: Look }) {
+/* Eine Probe des Looks mit einem echten Satz aus diesem Clip.
+ *
+ * Vorher stand hier „Wort Wort". Das zeigt Schrift und Farbe, aber nicht, wie der eigene Text
+ * wirkt - und genau darum geht es bei der Wahl. Liegt die Schrift nicht vor, wird mit Inter
+ * gesetzt und das steht daneben; eine Probe, die etwas anderes zeigt als der Export, ist
+ * schlimmer als keine. */
+function LookProbe({ look, probe, ersatzschrift }: { look: Look; probe: string; ersatzschrift: boolean }) {
   const v = mitVorgabe(look.stil);
   return (
     <span
       aria-hidden="true"
-      className="flex h-10 w-full items-center justify-center overflow-hidden rounded-[6px] bg-black/60"
+      className="flex h-10 w-full items-center justify-center overflow-hidden rounded-[6px] bg-black/60 px-1"
       style={{
-        fontFamily: `"${v.font}", "Inter", system-ui, sans-serif`,
+        fontFamily: ersatzschrift ? `"Inter", system-ui, sans-serif` : `"${v.font}", "Inter", system-ui, sans-serif`,
         fontWeight: v.bold ? 800 : 500,
         color: v.base_color,
         textTransform: v.all_caps ? "uppercase" : "none",
-        fontSize: 17,
+        fontSize: 13,
+        lineHeight: 1.15,
         letterSpacing: v.all_caps ? "0.02em" : undefined,
       }}
     >
@@ -528,14 +626,33 @@ function LookProbe({ look }: { look: Look }) {
           textShadow: v.outline_px ? `0 0 ${Math.max(1, v.outline_px / 3)}px ${v.outline_color}, 0 1px 2px ${v.outline_color}` : "none",
         }}
       >
-        Wort <span style={{ color: v.highlight_words ? v.highlight_color : v.base_color }}>Wort</span>
+        <span className="line-clamp-2 text-center">
+          {probe.split(" ").map((w, i) => (
+            <span key={i} style={{ color: i === 1 && v.highlight_words ? v.highlight_color : v.base_color }}>
+              {w}{" "}
+            </span>
+          ))}
+        </span>
       </span>
     </span>
   );
 }
 
-function Schriftwahl({ wert, onChange, disabled }: { wert: string; onChange: (v: string) => void; disabled?: boolean }) {
+/* Die Schriftwahl. Nicht installierte Schriften bleiben sichtbar, aber nicht waehlbar: sie
+ * verschweigen waere eine zweite Unwahrheit, und wer sie sucht, soll erfahren, warum sie fehlt. */
+function Schriftwahl({
+  wert,
+  onChange,
+  disabled,
+  vorhanden,
+}: {
+  wert: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  vorhanden: string[];
+}) {
   const id = useId();
+  const fehlende = FONTS.filter((f) => !vorhanden.includes(f.id));
   return (
     <div className="flex flex-col gap-2">
       <label htmlFor={id} className="text-sm font-medium text-text">
@@ -549,12 +666,129 @@ function Schriftwahl({ wert, onChange, disabled }: { wert: string; onChange: (v:
         className="transition-soft w-full rounded-inner border border-line bg-black/40 px-4 py-3 text-[15px] text-text hover:border-line-strong focus:border-white/50 focus:outline-none disabled:opacity-60"
       >
         {FONTS.map((f) => (
-          <option key={f.id} value={f.id}>
-            {f.id} — {f.beschreibung}
+          <option key={f.id} value={f.id} disabled={!vorhanden.includes(f.id)}>
+            {f.id} — {vorhanden.includes(f.id) ? f.beschreibung : "hier nicht installiert"}
           </option>
         ))}
       </select>
+      {fehlende.length > 0 && (
+        <p className="text-sm text-text-3">
+          {fehlende.length} von {FONTS.length} Schriften fehlen in dieser Installation. Sie stehen erst zur Wahl,
+          wenn ihre Datei vorliegt.
+        </p>
+      )}
     </div>
+  );
+}
+
+/* Die gewaehlte Schrift gibt es hier nicht. Kein Vorwurf, sondern der Weg dorthin: die Datei
+ * gehoert nach workers/fonts, danach spiegelt ein Skript sie in die Oberflaeche. Solange sie
+ * fehlt, brennt der Renderer Inter ein - und dann soll auch die Vorschau Inter zeigen. */
+function SchriftFehltHinweis({ name, onInter, canEdit }: { name: string; onInter: () => void; canEdit: boolean }) {
+  const datei = FONTS.find((f) => f.id === name)?.datei ?? `${name}.ttf`;
+  return (
+    <div className="flex flex-col gap-2 rounded-inner border border-attention/50 bg-attention/10 p-3">
+      <p className="text-sm text-text">
+        Die Schrift {name} ist hier nicht installiert. Vorschau und fertiger Clip zeigen stattdessen Inter.
+      </p>
+      <p className="text-sm text-text-2">
+        So kommt sie dazu: die Datei {datei} nach workers/fonts legen und einmal
+        <code className="mx-1 rounded bg-black/40 px-1.5 py-0.5 font-mono text-xs">node scripts/sync-fonts.mjs</code>
+        ausführen.
+      </p>
+      {canEdit && (
+        <button
+          type="button"
+          onClick={onInter}
+          className="transition-soft self-start text-sm text-text-2 underline underline-offset-4 hover:text-text"
+        >
+          Solange Inter nehmen
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* Was am eingestellten Stil nicht aufgeht, als anklickbare Liste. Ein Klick springt zur Stelle:
+ * eine Warnung, die man nicht finden kann, ist nur ein schlechtes Gefuehl. */
+/* Was an den eingestellten Untertiteln nicht aufgeht, mit dem Weg zur Stelle.
+ *
+ * Getrennt nach dem, was hier zu beheben ist (Text passt nicht in die Zeilen), und dem, was am
+ * Sprechtempo haengt. Die Trennung ist der Punkt: die alte Warnung „Untertitel laufen schnell
+ * durch" stand an 86 Prozent aller Einblendungen und liess sich durch keine Einstellung
+ * abstellen. Eine Warnung, gegen die es nichts zu tun gibt, ist keine Warnung. */
+function Befunde({
+  befunde,
+  onSeek,
+  tempo: t,
+}: {
+  befunde: Befund[];
+  onSeek: (zeit: number) => void;
+  tempo: { mittel: number; ueberGrenze: boolean };
+}) {
+  const passtNicht = befunde.filter((b) => b.grund === "passt_nicht");
+  const schnell = befunde.filter((b) => b.grund === "zu_schnell");
+  if (!passtNicht.length && !schnell.length) return null;
+
+  return (
+    <section className="flex flex-col gap-4">
+      {passtNicht.length > 0 && (
+        <div className="flex flex-col gap-2 rounded-inner border border-attention/50 bg-attention/10 p-3">
+          <p className="text-sm font-medium text-text">
+            {passtNicht.length === 1
+              ? "Eine Einblendung passt nicht ins Bild"
+              : `${passtNicht.length} Einblendungen passen nicht ins Bild`}
+          </p>
+          <p className="text-sm text-text-2">
+            Was nicht hineinpasst, fehlt im fertigen Clip. Das lässt sich hier beheben: mehr Zeilen, kleinere
+            Schrift oder weniger Wörter auf einmal.
+          </p>
+          <Stellen liste={passtNicht} onSeek={onSeek} />
+        </div>
+      )}
+
+      {schnell.length > 0 && (
+        <div className="flex flex-col gap-2 rounded-inner border border-line p-3">
+          <p className="text-sm font-medium text-text">
+            {t.ueberGrenze
+              ? "Hier wird zügig gesprochen"
+              : `${schnell.length === 1 ? "Eine Stelle läuft" : `${schnell.length} Stellen laufen`} schnell durch`}
+          </p>
+          <p className="text-sm text-text-2">
+            {t.ueberGrenze
+              ? `Im Schnitt ${Math.round(t.mittel)} Zeichen je Sekunde, mitlesen lassen sich etwa ${MAX_CPS}. Das hängt am Sprechtempo und nicht am Aussehen: keine Einstellung hier ändert es. Wer will, kann die Stelle im Text straffen oder in der Timeline herausnehmen.`
+              : "Beim Mitlesen ohne Ton könnte es an diesen Stellen eng werden. Straffen im Text oder Herausnehmen in der Timeline hilft."}
+          </p>
+          <Stellen liste={schnell} onSeek={onSeek} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* Die betroffenen Stellen, hoechstens drei. Ein Klick springt hin. */
+function Stellen({ liste, onSeek }: { liste: Befund[]; onSeek: (zeit: number) => void }) {
+  const gezeigt = liste.slice(0, 3);
+  return (
+    <>
+      <ul className="flex flex-col gap-2">
+        {gezeigt.map((b, i) => (
+          <li key={`${b.karte.von}-${i}`}>
+            <button
+              type="button"
+              onClick={() => onSeek(b.karte.von)}
+              className="transition-soft w-full rounded-[8px] border border-line px-3 py-2 text-left hover:border-line-strong focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
+            >
+              <span className="block text-sm text-text">{`„${b.karte.text}“`}</span>
+              <span className="mt-0.5 block text-xs text-text-2">{befundSatz(b)} Zum Anhören anklicken.</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {liste.length > gezeigt.length && (
+        <p className="text-xs text-text-3">Und {liste.length - gezeigt.length} weitere.</p>
+      )}
+    </>
   );
 }
 

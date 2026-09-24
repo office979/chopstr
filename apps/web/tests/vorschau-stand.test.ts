@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { standSatz, vorschauStand, wasAbweicht, type StandEingabe } from "@/lib/clips/vorschau-stand";
-import { assFarbe, LOOKS, mitVorgabe } from "@/lib/clips/caption-style";
+import { assFarbe, LOOKS, mitVorgabe, stilAusPlan } from "@/lib/clips/caption-style";
 import type { RenderPlan } from "@/lib/repo/types";
 
 const STIL = LOOKS[0].stil;
@@ -142,5 +142,37 @@ describe("standSatz", () => {
 
   it("sagt bei aktuell, dass die Vorschau zeigt was eingestellt ist", () => {
     expect(standSatz("aktuell", wasAbweicht(eingabe()))).toContain("bereit");
+  });
+});
+
+describe("stilAusPlan", () => {
+  it("rechnet die Größen auf die Bezugsgröße der Oberfläche zurück", () => {
+    /* Der Plan trägt Bildpunkte der AUSGABE. Bei 4:5 (1080x1350) ist das 0,703 von 1920. Ohne das
+     * Zurückrechnen stünden im Editor plausible, aber falsche Zahlen, und beim Speichern wären
+     * sie die neue Wahrheit. */
+    const plan = { font_px: Math.round(104 * (1350 / 1920)), outline_px: Math.round(5 * (1350 / 1920)), words_per_card: 3 };
+    const zurueck = stilAusPlan(plan, 1350);
+    expect(zurueck.font_px).toBe(104);
+    /* Kleine Werte kommen nicht auf den Punkt zurück: 5 wird zu 4 gerundet und daraus wieder 6.
+     * Das ist der Preis dafür, dass im Plan ganze Bildpunkte stehen, und bei einer Kontur von
+     * einem Bildpunkt Unterschied sieht das niemand. */
+    expect(zurueck.outline_px).toBeGreaterThanOrEqual(4);
+    expect(zurueck.outline_px).toBeLessThanOrEqual(6);
+    /* Wortzahl ist keine Länge und wird nicht skaliert, genau wie im Worker. */
+    expect(zurueck.words_per_card).toBe(3);
+  });
+
+  it("lässt Hochformat unverändert", () => {
+    expect(stilAusPlan({ font_px: 92 }, 1920).font_px).toBe(92);
+  });
+
+  it("rechnet auch die Höhe im Bild zurück", () => {
+    /* bottom_margin = 1920 - safe_zone.bottom/skala - baseline_y, alles in Ausgabegröße. */
+    /* Der Plan trägt die Grundlinie und die Safe Zone in Ausgabegröße. Zurückgerechnet muss
+     * wieder der eingestellte Abstand herauskommen, hier 260 px über der Kante. */
+    const skala = 1350 / 1920;
+    const plan = { baseline_y: Math.round((1600 - 260) * skala), safe_zone: { bottom: Math.round(320 * skala) } };
+    expect(stilAusPlan(plan, 1350).bottom_margin_px).toBeGreaterThan(255);
+    expect(stilAusPlan(plan, 1350).bottom_margin_px).toBeLessThan(265);
   });
 });

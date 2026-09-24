@@ -392,7 +392,7 @@ export function ClipBoard({
                 transkriptVersion,
                 stil: Object.keys(gespeicherterStil).length
                   ? gespeicherterStil
-                  : stilAusPlan((clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null),
+                  : stilAusPlan((clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null, clip.render_plan?.output.height),
                 schnitt: clip.composition,
                 zeitmarken: clip.zeitmarken,
               };
@@ -488,13 +488,20 @@ export function ClipBoard({
                     </div>
                   )}
 
-                  {/* Kurzes Zeichen statt Erklärsatz: das ist ein echtes Problem am Clip, der volle
-                      Wortlaut steht im Titel. */}
+                  {/* Kurzes Zeichen statt Erklärsatz, aber mit einem Weg dorthin: im Clip stehen
+                      die Stellen einzeln, anklickbar und mit dem, was dagegen hilft. Eine Warnung
+                      ohne Ausgang ist nur ein schlechtes Gefühl. */}
                   {clip.cps_warnings.length > 0 && (
-                    <p className="flex items-center gap-1.5 text-xs text-text-2" title={clip.cps_warnings.join("\n")}>
+                    <Link
+                      href={`/projekte/${sourceId}/clips/${clip.id}`}
+                      title={clip.cps_warnings.join("\n")}
+                      className="transition-soft flex items-center gap-1.5 text-xs text-text-2 underline-offset-4 hover:text-text hover:underline"
+                    >
                       <IconWarn />
-                      Untertitel laufen schnell durch
-                    </p>
+                      {clip.cps_warnings.length === 1
+                        ? "Eine Stelle läuft schnell durch"
+                        : `${clip.cps_warnings.length} Stellen laufen schnell durch`}
+                    </Link>
                   )}
 
                   {blocked && (

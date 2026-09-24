@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { assFarbe, BASIS_PRESETS, type CaptionStyle, FONTS, GRENZEN, maxZeichen, mitVorgabe, passtZumRender, stilPruefen, VORGABE } from "@/lib/clips/caption-style";
+import { MAX_CPS } from "@/lib/clips/untertitel-pruefung";
 
 const WURZEL = resolve(import.meta.dirname, "../../..");
 
@@ -115,6 +116,14 @@ describe("Gleichstand mit dem Worker", () => {
     for (const px of [28, 60, 78, 104, 180]) {
       expect(maxZeichen(px)).toBe(nachPython(px, 1080 - 180));
     }
+  });
+
+  it("warnt ab derselben Lesegeschwindigkeit wie der Worker", () => {
+    /* Sonst meldet die Oberfläche eine Stelle als zu schnell, die im Renderbericht keine ist,
+     * oder umgekehrt. Zwei Zahlen für dieselbe Sache sind eine zu viel. */
+    const cps = python.match(/^MAX_CPS = ([\d.]+)/m);
+    expect(cps, "MAX_CPS nicht gefunden").toBeTruthy();
+    expect(MAX_CPS).toBe(Number(cps![1]));
   });
 
   it("bietet nur Grundlagen an, die der Worker auch kennt", () => {

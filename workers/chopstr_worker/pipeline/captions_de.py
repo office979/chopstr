@@ -24,6 +24,8 @@ W, H = 1080, 1920
 NEWLINE = "\\N"  # ASS-Zeilenumbruch
 AVG_CHAR_EM = 0.56  # mittlere Zeichenbreite in em für Inter Bold; pro Font messen
 MAX_CPS = 17.0
+# Hoechstens so viele Tempo-Hinweise je Clip, die schnellsten zuerst.
+MAX_WARNUNGEN = 20
 BREAK_WORDS = {"und", "aber", "weil", "dass", "denn", "oder", "wenn", "sondern", "also", "obwohl", "damit"}
 TEXT_FIELDS = ("text", "text_norm")
 
@@ -423,13 +425,31 @@ def build_cards(
 
 
 def cps_warnings(cards: list[list[dict]], max_cps: float = MAX_CPS, text_field: str = "text") -> list[str]:
-    out = []
+    """Karten, die schneller durchlaufen, als sich lesen laesst.
+
+    Nur fuer Karten mit MEHREREN Woertern. Dort muss der Zuschauer einen Block lesen, waehrend die
+    Stimme weiterlaeuft; schafft er das nicht, ist der Untertitel wertlos.
+
+    Bei EINEM Wort je Einblendung gibt es nichts zu melden. Das Wort steht genau so lange, wie es
+    gesprochen wird, und der Zuschauer folgt der Stimme statt vorauszulesen. An echtem Material
+    gemessen: von 2007 Woertern lagen 1574 ueber der Grenze, darunter "Der" mit drei Buchstaben.
+    Das ist keine Aussage ueber den Clip, sondern ueber normales Sprechtempo - und eine Warnung,
+    die an zwei Dritteln aller Woerter haengt, nimmt niemand mehr ernst.
+    """
+    treffer: list[tuple[float, str]] = []
     for c in cards:
-        chars = sum(len(word_text(w, text_field)) for w in c)
+        if len(c) < 2:
+            continue
         dur = max(float(c[-1]["end"]) - float(c[0]["start"]), 0.01)
-        if chars / dur > max_cps:
-            out.append(f"Zu schnell ({chars / dur:.0f} Z/s): '{' '.join(word_text(w, text_field) for w in c)}'")
-    return out
+        chars = sum(len(word_text(w, text_field)) for w in c)
+        cps = chars / dur
+        if cps > max_cps:
+            treffer.append((cps, f"Zu schnell ({cps:.0f} Z/s): '{' '.join(word_text(w, text_field) for w in c)}'"))
+    # Die schnellsten zuerst und hoechstens MAX_WARNUNGEN. Bei einem zuegigen Sprecher liegt die
+    # halbe Folge ueber der Grenze; eine Liste mit vierhundert Eintraegen ist keine Aufgabenliste
+    # mehr, sondern Rauschen. Wer die schlimmsten Stellen entschaerft, hat das Meiste getan.
+    treffer.sort(key=lambda x: -x[0])
+    return [t for _, t in treffer[:MAX_WARNUNGEN]]
 
 
 def _fmt_t(t: float) -> str:
@@ -570,6 +590,7 @@ __all__ = [
     "AVG_CHAR_EM",
     "BREAK_WORDS",
     "MAX_CPS",
+    "MAX_WARNUNGEN",
     "PLATFORM_DEFAULT_PRESET",
     "PRESETS",
     "TEXT_FIELDS",

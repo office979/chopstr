@@ -3,6 +3,7 @@ import { PageShell } from "@/components/layout/PageShell";
 import { getRepo } from "@/lib/repo";
 import { getPublishingRepo } from "@/lib/repo/publishing";
 import { stilAusPlan, stilPruefen } from "@/lib/clips/caption-style";
+import { vorhandeneSchriften } from "@/lib/clips/schriften-vorhanden";
 import { requireSession } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
 import { mediaUrl } from "@/lib/clips/labels";
@@ -48,7 +49,7 @@ export default async function ClipPage({ params }: Props) {
   const gespeicherterStil = stilPruefen(extras[0]?.caption_style);
   const eigenerStil = Object.keys(gespeicherterStil).length
     ? gespeicherterStil
-    : stilAusPlan((clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null);
+    : stilAusPlan((clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null, clip.render_plan?.output.height);
 
   const sentences = transcript ? sentencesFromWords(transcript.words) : [];
   const inClip =
@@ -103,6 +104,8 @@ export default async function ClipPage({ params }: Props) {
          * hängt, ob eine Textkorrektur schon im Bild ist. */
         transkriptVersion={transcript?.version ?? null}
         markeVorhanden={Boolean(source.brand_profile_id)}
+        /* Vom Server, weil nur er den Schriftordner sieht. */
+        schriftenVorhanden={vorhandeneSchriften()}
         quelleDauerS={source.duration_s ?? 0}
         wellenformSrc={mediaUrl(mediaBase, source.waveform_key)}
         /* Die Vorschau rechnet den Ausschnitt selbst aus, dafuer braucht sie beide Groessen. Die

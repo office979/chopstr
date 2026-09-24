@@ -52,6 +52,10 @@ export const FONTS: CaptionFont[] = (fontsJson.schriften as CaptionFont[]).map((
 }));
 export const FONT_RUECKLAUF = String(fontsJson.ruecklauf);
 
+/* Die Bezugsgroesse der Oberflaeche. Alle eingestellten Zahlen gelten fuer 1080x1920; der Worker
+ * rechnet sie auf die tatsaechliche Ausgabegroesse um. */
+export const BILD_HOEHE = 1920;
+
 export const GRENZEN = {
   font_px: [28, 180],
   words_per_card: [1, 6],
@@ -157,15 +161,34 @@ export function hexFarbe(wert: unknown): string | null {
  * Gebraucht fuer Clips ohne eigenen Stil. Die zeigten bisher die Vorgaben der Oberflaeche, gebaut
  * wurde aber mit dem Plattform-Preset - andere Schriftgroesse, andere Konturstaerke. Die Folge:
  * ein Clip, an dem niemand etwas geaendert hatte, meldete sich als veraltet, und der Regler stand
- * auf einem Wert, der im Bild nicht vorkam. */
-export function stilAusPlan(geplant: Record<string, unknown> | null | undefined): CaptionStyle {
+ * auf einem Wert, der im Bild nicht vorkam.
+ *
+ * ``ausgabeHoehe`` ist die Hoehe des gebauten Videos. Alle Groessen im Plan gelten fuer diese
+ * Hoehe, die Oberflaeche rechnet dagegen immer in 1080x1920 (captions_de.style_anwenden
+ * multipliziert mit out_h/1920). Ohne das Zurueckrechnen stuenden bei einem Clip im Format 4:5
+ * plausible, aber falsche Zahlen: 44 px Schrift statt 62, 710 px Hoehe statt 1010. */
+export function stilAusPlan(
+  geplant: Record<string, unknown> | null | undefined,
+  ausgabeHoehe = BILD_HOEHE,
+): CaptionStyle {
   if (!geplant) return {};
+  const skala = ausgabeHoehe > 0 ? ausgabeHoehe / BILD_HOEHE : 1;
   const aus: CaptionStyle = {};
-  const zahl = (k: string) => (typeof geplant[k] === "number" ? (geplant[k] as number) : null);
+  /* Zahlen zurueck auf die Bezugsgroesse der Oberflaeche. Wortzahl und Zeilen sind keine
+   * Laengen und werden nicht skaliert - genauso wie im Worker. */
+  const zahl = (k: string, laenge = true) => {
+    const v = geplant[k];
+    if (typeof v !== "number") return null;
+    return laenge ? Math.round(v / skala) : v;
+  };
   const bool = (k: string) => (typeof geplant[k] === "boolean" ? (geplant[k] as boolean) : null);
   if (typeof geplant.font === "string" && geplant.font) aus.font = geplant.font;
-  for (const k of ["font_px", "words_per_card", "max_lines", "outline_px"] as const) {
+  for (const k of ["font_px", "outline_px"] as const) {
     const v = zahl(k);
+    if (v != null) aus[k] = v;
+  }
+  for (const k of ["words_per_card", "max_lines"] as const) {
+    const v = zahl(k, false);
     if (v != null) aus[k] = v;
   }
   for (const [hier, dort] of [["bold", "bold"], ["all_caps", "all_caps"], ["box", "box"], ["highlight_words", "highlight"]] as const) {
@@ -176,10 +199,13 @@ export function stilAusPlan(geplant: Record<string, unknown> | null | undefined)
     const v = hexFarbe(geplant[dort]);
     if (v) aus[hier] = v;
   }
-  /* Der Abstand nach unten steckt im Plan als Grundlinie: Bildhoehe minus Grundlinie. */
+  /* Der Abstand nach unten steckt im Plan als Grundlinie: Unterkante der sicheren Flaeche minus
+   * Grundlinie, beides in Ausgabegroesse und deshalb ebenfalls zurueckgerechnet. */
   const grundlinie = zahl("baseline_y");
-  const safe = (geplant.safe_zone as { bottom?: number } | undefined)?.bottom;
-  if (grundlinie != null && typeof safe === "number") aus.bottom_margin_px = Math.round(1920 - safe - grundlinie);
+  const safeRoh = (geplant.safe_zone as { bottom?: number } | undefined)?.bottom;
+  if (grundlinie != null && typeof safeRoh === "number") {
+    aus.bottom_margin_px = Math.round(BILD_HOEHE - safeRoh / skala - grundlinie);
+  }
   return stilPruefen(aus);
 }
 

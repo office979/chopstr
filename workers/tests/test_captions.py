@@ -81,10 +81,25 @@ def test_build_cards_breaks_on_punctuation_pause_and_long_compound():
 
 
 def test_cps_warnings():
-    fast = [{"text": "Donaudampfschifffahrtsgesellschaft", "start": 0.0, "end": 0.5}]
+    fast = [
+        {"text": "Donaudampfschifffahrtsgesellschaft", "start": 0.0, "end": 0.3},
+        {"text": "steigt", "start": 0.3, "end": 0.5},
+    ]
     assert cap.cps_warnings([fast])
-    slow = [{"text": "Hallo", "start": 0.0, "end": 2.0}]
+    slow = [{"text": "Hallo", "start": 0.0, "end": 1.0}, {"text": "Welt", "start": 1.0, "end": 2.0}]
     assert cap.cps_warnings([slow]) == []
+
+
+def test_cps_warnings_schweigt_bei_einem_wort_je_einblendung():
+    """Wort fuer Wort ist ein eigener Stil und kein Fehler.
+
+    Bei einem Wort je Einblendung steht jedes Wort genau so lange, wie es gesprochen wird. Die
+    Lesegeschwindigkeit ganzer Saetze sagt darueber nichts. An echtem Material gemessen lagen mit
+    der alten Rechnung 1574 von 2007 Woertern ueber der Grenze; die Warnung war damit eine Aussage
+    ueber normales Sprechtempo und nicht ueber den Clip.
+    """
+    schnell = [[{"text": "Der", "start": 0.0, "end": 0.08}], [{"text": "Empfaenger", "start": 0.08, "end": 0.35}]]
+    assert cap.cps_warnings(schnell) == []
 
 
 def test_to_ass_and_srt():

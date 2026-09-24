@@ -301,6 +301,7 @@ export function ClipDetail({
             <Zeitleiste
               filmstripSrc={filmstripSrc}
               filmstripMeta={filmstripMeta}
+              videoSrc={sourceSrc}
               clipStart={clipStart}
               dauerS={durationS ?? (clipEnd != null ? clipEnd - clipStart : 0)}
               zeit={currentTime}

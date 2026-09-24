@@ -13,6 +13,11 @@ type Params = { params: Promise<{ id: string; clipId: string }> };
  * und die Zeitleiste würde unlesbar. */
 const MAX_MARKEN = 60;
 
+/* Spiegel von tracking.ZOOM_MIN / ZOOM_MAX. Unter 1,0 waere Herauszoomen, und dafuer gibt es keine
+ * Bildpunkte mehr: der Ausschnitt nutzt bereits die volle Hoehe der Quelle. */
+const ZOOM_MIN = 1.0;
+const ZOOM_MAX = 1.8;
+
 /* Marken aus fremder Hand auf das Brauchbare zurechtschneiden: Zahlen, aufsteigend, keine zwei an
  * derselben Stelle. Der Renderer prüft ein zweites Mal, denn die API ist offen. */
 export function markenPruefen(roh: unknown): Zeitmarke[] {
@@ -22,9 +27,16 @@ export function markenPruefen(roh: unknown): Zeitmarke[] {
     if (!m || typeof m !== "object") continue;
     const q = m as Record<string, unknown>;
     const ab = alsZahl(q.ab_s);
+    if (ab == null || ab < 0) continue;
+    const marke: Zeitmarke = { ab_s: Math.round(ab * 100) / 100 };
     const x = alsZahl(q.x);
-    if (ab == null || x == null || ab < 0 || x < 0) continue;
-    sauber.push({ ab_s: Math.round(ab * 100) / 100, x: Math.round(x) });
+    if (x != null && x >= 0) marke.x = Math.round(x);
+    const zoom = alsZahl(q.zoom);
+    if (zoom != null) marke.zoom = Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom)) * 100) / 100;
+    if (q.layout === "einzel" || q.layout === "geteilt") marke.layout = q.layout;
+    /* Nur eine Sekunde und sonst nichts ist keine Entscheidung. */
+    if (Object.keys(marke).length < 2) continue;
+    sauber.push(marke);
   }
   sauber.sort((a, b) => a.ab_s - b.ab_s);
   /* Zwei Marken an derselben Sekunde: die spätere gewinnt, sonst hinge das Ergebnis an der

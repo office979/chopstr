@@ -64,6 +64,12 @@ DRITTEL = 1.0 / 3.0
 # Eine Haeufung mit weniger Rueckhalt als das gilt als Fehlerkennung, nicht als Person.
 MINDEST_ANTEIL = 0.12
 
+# Grenzen fuer das Heranzoomen. Unter 1,0 waere ein Herauszoomen, und dafuer gibt es keine Bildpunkte
+# mehr: der Ausschnitt nutzt bereits die volle Hoehe der Quelle. Ueber 1,8 wird aus 4K-Material ein
+# sichtbar weiches Bild, und der Kopf passt nicht mehr ins Hochformat.
+ZOOM_MIN = 1.0
+ZOOM_MAX = 1.8
+
 # Wie fein innerhalb EINER Einstellung nach dem Sprecher gesucht wird. Feiner reagiert schneller auf
 # einen Sprecherwechsel, kostet aber Ruhe im Bild; die Mindestdauer darunter faengt das wieder ab.
 FENSTER_S = 1.2
@@ -132,6 +138,11 @@ class Ziel:
     # Oberflaeche baut daraus die Auswahl „wer soll im Bild sein"; ohne diese Liste koennte sie nur
     # anzeigen, was die Automatik entschieden hat, aber keine Alternative anbieten.
     auswahl: list[float] = field(default_factory=list)
+    # Wie nah herangegangen wird. 1,0 ist der volle Ausschnitt, 1,4 zeigt noch gut zwei Drittel
+    # davon. Ein Zoom ist hier kein Filter, sondern schlicht ein engerer Ausschnitt.
+    zoom: float = 1.0
+    # "einzel" oder "geteilt" (zwei Personen uebereinander).
+    layout: str = "einzel"
 
     @property
     def dauer_s(self) -> float:
@@ -535,10 +546,19 @@ def zeitmarken_anwenden(ziele_liste: list[Ziel], marken: list[dict], quelle_brei
     Die Marke gewinnt immer. Wer von Hand entscheidet, will nicht von der Automatik ueberstimmt
     werden, auch nicht wenn sie sich sicher ist.
     """
-    sauber = sorted(
-        ({"ab_s": float(m["ab_s"]), "x": float(m["x"])} for m in marken if m.get("ab_s") is not None and m.get("x") is not None),
-        key=lambda m: m["ab_s"],
-    )
+    def eine(m: dict) -> dict | None:
+        if m.get("ab_s") is None:
+            return None
+        aus: dict = {"ab_s": float(m["ab_s"])}
+        if m.get("x") is not None:
+            aus["x"] = float(m["x"])
+        if m.get("zoom") is not None:
+            aus["zoom"] = max(ZOOM_MIN, min(ZOOM_MAX, float(m["zoom"])))
+        if m.get("layout") in ("einzel", "geteilt"):
+            aus["layout"] = str(m["layout"])
+        return aus if len(aus) > 1 else None
+
+    sauber = sorted((q for q in (eine(m) for m in marken) if q is not None), key=lambda m: m["ab_s"])
     if not sauber or not ziele_liste:
         return ziele_liste
 
@@ -563,9 +583,13 @@ def zeitmarken_anwenden(ziele_liste: list[Ziel], marken: list[dict], quelle_brei
         for a, b in zip(grenzen, grenzen[1:]):
             if b <= a:
                 continue
-            teil = Ziel(a, b, z.cx, z.cy, z.anker, z.grund, z.breite, list(z.auswahl))
+            teil = Ziel(a, b, z.cx, z.cy, z.anker, z.grund, z.breite, list(z.auswahl), z.zoom, z.layout)
             m = marke_bei(a)
-            if m is not None:
+            if m is not None and "zoom" in m:
+                teil.zoom = m["zoom"]
+            if m is not None and "layout" in m:
+                teil.layout = m["layout"]
+            if m is not None and "x" in m:
                 # Auf die naechste erkannte Person einrasten, damit eine Marke auch nach einer neuen
                 # Erkennung noch auf einem Gesicht sitzt und nicht daneben.
                 ziel_x = min(teil.auswahl, key=lambda x: abs(x - m["x"])) if teil.auswahl else m["x"]
@@ -579,6 +603,8 @@ def zeitmarken_anwenden(ziele_liste: list[Ziel], marken: list[dict], quelle_brei
 
 __all__ = [
     "Abtastung",
+    "ZOOM_MAX",
+    "ZOOM_MIN",
     "FENSTER_S",
     "MIN_ZIEL_S",
     "RUHE_FAKTOR",

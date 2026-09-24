@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Select } from "@/components/ui/Field";
 import { Timecode } from "@/components/ui/Timecode";
@@ -65,7 +65,24 @@ export function ClipTextEditor({
   onSeek,
 }: Props) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [ganz, setGanz] = useState(false);
   const blocks = blocksInRange(words, wordFrom, wordTo);
+  const kasten = useRef<HTMLDivElement | null>(null);
+  const aktivesWort = useRef<HTMLButtonElement | null>(null);
+
+  /* Das gesprochene Wort in Sicht halten. Der Text ist lang, die Stelle wandert, und wer zusieht
+   * soll nicht scrollen muessen um zu lesen, was gerade gesagt wird.
+   *
+   * Gescrollt wird im Kasten selbst und nicht mit scrollIntoView: das zieht sonst die ganze Seite
+   * mit, und die Vorschau oben springt aus dem Bild. */
+  useEffect(() => {
+    if (ganz || editingIndex != null) return;
+    const box = kasten.current;
+    const wort = aktivesWort.current;
+    if (!box || !wort) return;
+    const ziel = wort.offsetTop - box.clientHeight / 2 + wort.offsetHeight / 2;
+    box.scrollTo({ top: Math.max(0, ziel), behavior: "smooth" });
+  }, [currentTime, ganz, editingIndex]);
 
   if (blocks.length === 0) {
     return (
@@ -76,20 +93,39 @@ export function ClipTextEditor({
   }
 
   return (
-    <GlassCard padding="lg">
-      <p className="mb-5 text-sm text-text-2">
+    <GlassCard padding="md">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-lg font-semibold">Text</h2>
+        <button
+          type="button"
+          onClick={() => setGanz((v) => !v)}
+          className="transition-soft text-sm text-text-2 underline underline-offset-4 hover:text-text"
+        >
+          {ganz ? "Nur die Stelle zeigen" : "Ganzen Text zeigen"}
+        </button>
+      </div>
+      <p className="mb-3 text-sm text-text-2">
         {canEdit
-          ? "Klick ein Wort an, um zu der Stelle zu springen. Doppelklick, wenn du es ändern willst."
-          : "Klick ein Wort an, um zu der Stelle zu springen."}
+          ? "Klick ein Wort an, um dorthin zu springen. Doppelklick, wenn du es ändern willst."
+          : "Klick ein Wort an, um dorthin zu springen."}
       </p>
 
-      <div className="flex flex-col gap-6">
+      {/* Zusammengeklappt nur rund drei Zeilen, die mit dem Ton mitlaufen. Der ganze Text stand
+        * vorher offen da und hat die halbe Seite gefuellt, obwohl fast immer nur die Stelle
+        * interessiert, die gerade laeuft. */}
+      <div
+        ref={kasten}
+        className={cn(
+          "flex flex-col gap-5 overflow-y-auto pr-1",
+          ganz ? "max-h-[60dvh]" : "max-h-[8.6rem]",
+        )}
+      >
         {blocks.map((b, bi) => {
           const label = speakerNames[b.speaker] ?? b.speaker;
           return (
             <section key={`${b.speaker}-${bi}`} aria-label={`${label} ab ${Math.floor(b.start)} Sekunden`}>
-              <div className="mb-2 flex flex-wrap items-center gap-3">
-                <div className="w-[200px]">
+              <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                <div className="w-[150px]">
                   <Select
                     aria-label={`Wer spricht ab ${Math.floor(b.start)} Sekunden`}
                     value={b.speaker}
@@ -113,7 +149,7 @@ export function ClipTextEditor({
                 </button>
               </div>
 
-              <p className="text-[17px] leading-[1.9] text-text">
+              <p className="text-[16px] leading-[1.75] text-text">
                 {b.indices.map((i) => {
                   const w = words[i];
                   const changed = original[i] != null && original[i].text !== w.text;
@@ -148,6 +184,7 @@ export function ClipTextEditor({
                   return (
                     <button
                       key={i}
+                      ref={active ? aktivesWort : undefined}
                       type="button"
                       onClick={() => onSeek(w.start)}
                       onDoubleClick={() => canEdit && setEditingIndex(i)}

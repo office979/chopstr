@@ -29,3 +29,8 @@ apps/web/.env.local
 
 # Aus workers/fonts gespiegelt (scripts/sync-fonts.mjs), nicht doppelt im Repo halten
 apps/web/public/fonts/
+
+# Ausnahme fuer den Demo-Modus: ein synthetisches Testbild-Video und sein Filmstreifen, damit die
+# App ohne Datenbank und ohne Worker etwas zeigen kann. Bewusst aus ffmpeg testsrc2 erzeugt und
+# nicht aus echtem Material: in ein oeffentliches Repository gehoeren keine erkennbaren Menschen.
+!apps/web/public/demo/video.mp4

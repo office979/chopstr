@@ -57,7 +57,10 @@ SLIDE_MIN_CONFIDENCE = 0.6  # darunter kein automatisches slide_pip
 SLIDE_ASPECT_RANGE = (0.75, 2.6)  # Breite/Höhe des Rechtecks: halbes 16:9-Bild (0,89) bis 21:9, keine schmalen Streifen
 SLIDE_MAX_HEIGHT_RATIO = 0.55  # Folie belegt höchstens 55 % der Ausgabehöhe
 SLIDE_CAPTION_GAP_RATIO = 0.02  # Abstand der Caption-Safe-Zone unter der Folie (Anteil der Ausgabehöhe)
-SLIDE_NEUTRAL_STRIP_MIN = 0.2  # Reststreifen neben der Folie zählt erst ab 20 % der Quellbreite als Sprecherfläche
+SLIDE_NEUTRAL_STRIP_MIN = 0.2
+# Wie viele Gesichtshoehen eine Haelfte des geteilten Bildes hoch ist. Fuenf ist die uebliche
+# Rahmung fuer Kopf und Schultern; weniger schneidet Stirn oder Kinn an, mehr zeigt vor allem Tisch.
+SPLIT_GESICHTER = 5.0  # Reststreifen neben der Folie zählt erst ab 20 % der Quellbreite als Sprecherfläche
 
 
 def yunet_model_path() -> str:
@@ -116,6 +119,9 @@ class Shot:
     # Bild sein". Ohne die Auswahl koennte sie zeigen, was entschieden wurde, aber nichts anbieten.
     quelle_x: float | None = None
     auswahl: list[float] = field(default_factory=list)
+    zoom: float = 1.0
+    # Bei ``layout = "geteilt"``: die zwei Ausschnitte, die uebereinander gestapelt werden.
+    geteilt: list[dict] = field(default_factory=list)
     # "sprecher" | "einzige_person" | "gruppe_unentschieden" | "von_hand" | "kein_gesicht"
     grund: str = ""
 
@@ -677,16 +683,77 @@ def plan_shots_aus_zielen(
         for z, a, b in zip(zl, grenzen, grenzen[1:]):
             if b <= a:
                 continue
-            x, y = crop_origin(src_w, src_h, crop_w, crop_h, z.cx, z.cy, z.anker)
+            # Naeher heran heisst enger schneiden. Es braucht keinen Filter dafuer: der Ausschnitt
+            # wird kleiner, und das Skalieren auf die Ausgabegroesse macht daraus den Zoom. Das
+            # Seitenverhaeltnis bleibt, sonst waere das Bild verzerrt.
+            zw, zh = crop_w, crop_h
+            if z.zoom > 1.0:
+                zw = max(16, _even(crop_w / z.zoom))
+                zh = max(16, _even(crop_h / z.zoom))
+            x, y = crop_origin(src_w, src_h, zw, zh, z.cx, z.cy, z.anker)
             # Ein Kameraschnitt zwischen zwei gleich gerahmten Naheinstellungen ergibt denselben
             # Ausschnitt. Ihn zweimal zu planen legt eine Schnittmarke, hinter der sich nichts
             # aendert. An BP CW kam das zweimal in 48 Sekunden vor.
             vor = shots[-1] if shots else None
-            if vor is not None and vor.end == a and abs(vor.crop_x - x) <= GLEICHER_AUSSCHNITT_PX and abs(vor.crop_y - y) <= GLEICHER_AUSSCHNITT_PX:
+            gleich = (
+                vor is not None
+                and vor.end == a
+                and (vor.crop_w, vor.crop_h) == (zw, zh)
+                and abs(vor.crop_x - x) <= GLEICHER_AUSSCHNITT_PX
+                and abs(vor.crop_y - y) <= GLEICHER_AUSSCHNITT_PX
+            )
+            if gleich and vor is not None:
                 vor.end = b
                 continue
-            shots.append(Shot(a, b, x, y, crop_w, crop_h, quelle_x=z.cx, auswahl=list(z.auswahl), grund=z.grund))
+            layout, zwei = "single", []
+            if z.layout == "geteilt" and len(z.auswahl) >= 2:
+                zwei = geteilte_ausschnitte(src_w, src_h, out_w, out_h, z)
+                if zwei:
+                    layout = "geteilt"
+            shots.append(
+                Shot(
+                    a, b, x, y, zw, zh, layout=layout, quelle_x=z.cx, auswahl=list(z.auswahl),
+                    grund=z.grund, zoom=round(z.zoom, 3), geteilt=zwei,
+                )
+            )  # fmt: skip
     return shots
+
+
+def geteilte_ausschnitte(src_w: int, src_h: int, out_w: int, out_h: int, z: tracking.Ziel) -> list[dict]:
+    """Zwei Ausschnitte fuer das geteilte Bild: die beiden Personen, die am weitesten auseinander sind.
+
+    Bei mehr als zwei erkannten Personen waere jede Wahl willkuerlich; die aeusseren beiden zeigen
+    am meisten von der Runde. Die ausgewaehlte Person ist immer dabei, sonst zeigte das geteilte
+    Bild ausgerechnet nicht den, den jemand von Hand gewaehlt hat.
+
+    Jede Haelfte ist so breit wie die Ausgabe und halb so hoch, das Seitenverhaeltnis also doppelt
+    so breit wie das Ausgabeformat. Aus 16:9 laesst sich das muehelos schneiden.
+    """
+    if len(z.auswahl) < 2:
+        return []
+    links, rechts = min(z.auswahl), max(z.auswahl)
+    if z.cx is not None:
+        # Die gewaehlte Person muss dabei sein; die andere ist die am weitesten entfernte.
+        andere = max(z.auswahl, key=lambda x: abs(x - z.cx))
+        links, rechts = sorted((z.cx, andere))
+    verhaeltnis = out_w / (out_h / 2)  # eine Haelfte: volle Breite, halbe Hoehe
+    # Die Haelfte wird an der Gesichtsgroesse ausgerichtet, nicht am Quellbild. Wer von der Quelle
+    # ausgeht, schneidet bei 4K zwei Drittel der Breite heraus, und dann sitzen zwei kleine Koepfe
+    # in viel Tisch. Fuenf Gesichtshoehen sind die uebliche Rahmung fuer Kopf und Schultern.
+    grund_h = (z.breite * SPLIT_GESICHTER) if z.breite > 0 else src_h * 0.5
+    h = int(max(out_h / 2, min(src_h, grund_h)))
+    w = int(min(src_w, h * verhaeltnis))
+    if w > src_w:  # sehr breite Haelfte: dann entscheidet die Breite
+        w, h = src_w, int(src_w / verhaeltnis)
+    w, h = _even(w), _even(h)
+    aus = []
+    for cx in (links, rechts):
+        x = int(max(0, min(src_w - w, round(cx - w / 2))))
+        # Senkrecht auf die Gesichtshoehe, sonst sitzt der Kopf in einem Streifen am Rand.
+        cy = z.cy if z.cy is not None else src_h * 0.45
+        y = int(max(0, min(src_h - h, round(cy - h * EYE_LINE))))
+        aus.append({"x": x, "y": y, "w": w, "h": h})
+    return aus
 
 
 def verfolgen(
@@ -913,6 +980,7 @@ __all__ = [
     "SlideRegion",
     "aspect_ratio",
     "crop_geometry",
+    "geteilte_ausschnitte",
     "crop_origin",
     "detect_slide_region",
     "detector_available",

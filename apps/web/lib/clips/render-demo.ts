@@ -198,10 +198,11 @@ export function buildDemoRenderPatch(clip: Clip, source: Source, brand: BrandPro
     srt_key: null,
     vtt_key: null,
     poster_key: null,
-    /* Ein echter Filmstreifen aus einem gerenderten Clip, damit die Zeitleiste im Demo-Modus
-     * Einzelbilder zeigt statt eines leeren Kastens. */
+    /* Filmstreifen zum Demo-Video, damit die Zeitleiste Einzelbilder zeigt statt eines leeren
+     * Kastens. Beides ist ein synthetisches Testbild und kein echtes Material: in ein
+     * oeffentliches Repository gehoeren keine erkennbaren Menschen. */
     filmstrip_key: "/demo/streifen.jpg",
-    filmstrip_meta: { bilder: 20, breite: 60, hoehe: 108, dauer_s: 33.28 },
+    filmstrip_meta: { bilder: 20, breite: 60, hoehe: 108, dauer_s: 38 },
   };
 }
 

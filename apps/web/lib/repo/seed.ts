@@ -100,7 +100,11 @@ const baseSource = {
   source_url: null,
   created_by: DEMO_IDS.actor,
   temporal_workflow_id: null as string | null,
-  proxy_key: null as string | null,
+  /* Im Demo-Modus gibt es keinen Speicher und keinen Worker. Ohne ein Video stuende im Clip-Editor
+   * dauerhaft „noch nicht gebaut", der Player bliebe leer und die Zeitleiste koennte keine
+   * Einzelbilder zeichnen. Die Datei liegt in public/ und ist ein synthetisches Testbild aus
+   * ffmpeg, kein echtes Material. */
+  proxy_key: "/demo/video.mp4" as string | null,
 };
 
 export const seedSources: Source[] = [

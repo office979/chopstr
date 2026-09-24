@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import { markenPruefen } from "@/app/api/projects/[id]/clips/[clipId]/zeitmarken/route";
-import { personName } from "@/app/projekte/[id]/clips/[clipId]/Zeitleiste";
+import { NAEHE, personName } from "@/app/projekte/[id]/clips/[clipId]/Zeitleiste";
 import { aktiverLook, LOOKS, mitVorgabe } from "@/lib/clips/caption-style";
 
 describe("markenPruefen", () => {
@@ -103,5 +103,56 @@ describe("Looks", () => {
   it("die Looks haben verschiedene Kennungen und Namen", () => {
     expect(new Set(LOOKS.map((l) => l.id)).size).toBe(LOOKS.length);
     expect(new Set(LOOKS.map((l) => l.name)).size).toBe(LOOKS.length);
+  });
+});
+
+describe("Marken mit Zoom und geteiltem Bild", () => {
+  it("nimmt Zoom und Layout an", () => {
+    expect(markenPruefen([{ ab_s: 5, x: 400, zoom: 1.3, layout: "geteilt" }])).toEqual([
+      { ab_s: 5, x: 400, zoom: 1.3, layout: "geteilt" },
+    ]);
+  });
+
+  it("zieht den Zoom auf das Mögliche", () => {
+    /* Unter 1,0 wäre Herauszoomen, und dafür gibt es keine Bildpunkte mehr. Spiegel von
+     * tracking.ZOOM_MIN / ZOOM_MAX. */
+    expect(markenPruefen([{ ab_s: 1, zoom: 9 }])[0].zoom).toBe(1.8);
+    expect(markenPruefen([{ ab_s: 1, zoom: 0.2 }])[0].zoom).toBe(1);
+  });
+
+  it("übergeht unbekannte Layouts", () => {
+    expect(markenPruefen([{ ab_s: 1, x: 400, layout: "karussell" }])[0].layout).toBeUndefined();
+  });
+
+  it("eine Marke ohne Inhalt ist keine Entscheidung", () => {
+    expect(markenPruefen([{ ab_s: 5 }])).toEqual([]);
+  });
+
+  it("eine Marke darf auch nur den Zoom setzen", () => {
+    /* Wer näher heran will, muss nicht auch die Person wählen. */
+    expect(markenPruefen([{ ab_s: 5, zoom: 1.3 }])).toEqual([{ ab_s: 5, zoom: 1.3 }]);
+  });
+
+  it("verwirft unsinnige Zoomwerte, statt sie zu raten", () => {
+    for (const z of [null, "viel", NaN, [], {}]) {
+      expect(markenPruefen([{ ab_s: 1, x: 5, zoom: z }])[0].zoom).toBeUndefined();
+    }
+  });
+});
+
+describe("Nähe-Stufen", () => {
+  it("fängt bei Normal an und bleibt im erlaubten Bereich", () => {
+    expect(NAEHE[0].id).toBe(1.0);
+    for (const n of NAEHE) {
+      expect(n.id).toBeGreaterThanOrEqual(1.0);
+      expect(n.id).toBeLessThanOrEqual(1.8);
+    }
+  });
+
+  it("die Stufen sind deutlich genug auseinander, um sie zu sehen", () => {
+    /* Ein Regler von 1,0 bis 1,8 lädt dazu ein, 1,07 einzustellen, und das sieht niemand. */
+    for (let i = 1; i < NAEHE.length; i += 1) {
+      expect(NAEHE[i].id - NAEHE[i - 1].id).toBeGreaterThanOrEqual(0.25);
+    }
   });
 });

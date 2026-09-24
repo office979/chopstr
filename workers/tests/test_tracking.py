@@ -488,3 +488,51 @@ def test_die_drittelregel_gilt_auch_fuer_eine_marke():
     """Wird von Hand die rechte Person gewaehlt, gehoert der Blickraum nach links."""
     aus = tr.zeitmarken_anwenden([_ziel(0.0, 10.0, 400.0, [400.0, 1400.0])], [{"ab_s": 0.0, "x": 1400.0}], 1920)
     assert aus[0].anker == pytest.approx(2 / 3)
+
+
+# -- Zoom und geteiltes Bild ueber Zeitmarken ------------------------------------------------------
+def test_eine_marke_kann_nur_den_zoom_setzen():
+    """Wer naeher heran will, muss nicht auch die Person waehlen."""
+    z = [_ziel(0.0, 10.0, 400.0, [400.0, 1400.0])]
+    aus = tr.zeitmarken_anwenden(z, [{"ab_s": 4.0, "zoom": 1.4}], 1920)
+    assert [(round(x.start_s, 1), x.cx, x.zoom) for x in aus] == [(0.0, 400.0, 1.0), (4.0, 400.0, 1.4)]
+
+
+def test_der_zoom_wird_auf_das_moegliche_begrenzt():
+    """Unter 1,0 waere Herauszoomen, und dafuer gibt es keine Bildpunkte mehr."""
+    z = [_ziel(0.0, 10.0, 400.0, [400.0])]
+    assert tr.zeitmarken_anwenden(z, [{"ab_s": 0.0, "zoom": 9.0}], 1920)[0].zoom == tr.ZOOM_MAX
+    assert tr.zeitmarken_anwenden(z, [{"ab_s": 0.0, "zoom": 0.2}], 1920)[0].zoom == tr.ZOOM_MIN
+
+
+def test_eine_marke_kann_das_geteilte_bild_schalten():
+    z = [_ziel(0.0, 10.0, 400.0, [400.0, 1400.0])]
+    aus = tr.zeitmarken_anwenden(z, [{"ab_s": 3.0, "layout": "geteilt"}], 1920)
+    assert [x.layout for x in aus] == ["einzel", "geteilt"]
+
+
+def test_unbekannte_layouts_werden_uebergangen():
+    z = [_ziel(0.0, 10.0, 400.0, [400.0, 1400.0])]
+    assert tr.zeitmarken_anwenden(z, [{"ab_s": 3.0, "layout": "karussell"}], 1920)[0].layout == "einzel"
+
+
+def test_eine_marke_ohne_inhalt_bewirkt_nichts():
+    """Nur eine Sekunde und sonst nichts ist keine Entscheidung."""
+    z = [_ziel(0.0, 10.0, 400.0, [400.0, 1400.0])]
+    assert tr.zeitmarken_anwenden(z, [{"ab_s": 3.0}], 1920) is z
+
+
+def test_person_zoom_und_layout_in_einer_marke():
+    z = [_ziel(0.0, 10.0, 400.0, [400.0, 1400.0])]
+    aus = tr.zeitmarken_anwenden(z, [{"ab_s": 5.0, "x": 1400.0, "zoom": 1.3, "layout": "geteilt"}], 1920)
+    letzte = aus[-1]
+    assert (letzte.cx, letzte.zoom, letzte.layout, letzte.grund) == (1400.0, 1.3, "geteilt", "von_hand")
+
+
+def test_eine_spaetere_marke_erbt_nicht_vom_vorgaenger():
+    """Wer bei 8 s nur die Person wechselt, soll den Zoom von 4 s behalten - aber nicht andersherum."""
+    z = [_ziel(0.0, 12.0, 400.0, [400.0, 1400.0])]
+    aus = tr.zeitmarken_anwenden(z, [{"ab_s": 4.0, "zoom": 1.5}, {"ab_s": 8.0, "x": 1400.0}], 1920)
+    bei8 = next(x for x in aus if round(x.start_s, 1) == 8.0)
+    assert bei8.cx == 1400.0
+    assert bei8.zoom == 1.0, "die Marke bei 8 s sagt nichts ueber den Zoom, also gilt wieder die Vorgabe"

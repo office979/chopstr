@@ -273,6 +273,36 @@ def pip_shot_filter(plan: dict, index: int, shot: dict) -> str:
     )
 
 
+def geteilt_shot_filter(plan: dict, index: int, shot: dict) -> str:
+    """Zwei Personen uebereinander, beide aus DEMSELBEN Quellbild geschnitten.
+
+    Das ist der Unterschied zum Reaktionsformat, wo ein zweites Video dazukommt: hier gibt es nur
+    eine Kamera, und das Bild wird zweimal verschieden ausgeschnitten. Genau das loest die Stelle,
+    an der die Automatik nicht entscheiden kann, wer spricht - dann zeigt man eben beide.
+
+    Jede Haelfte bekommt die halbe Ausgabehoehe. Damit ein Gesicht darin nicht auf einen Streifen
+    zusammengedrueckt wird, ist der Ausschnitt je Haelfte doppelt so breit wie hoch gemessen am
+    Ausgabeformat; das Quellbild liefert diese Breite bei 16:9 muehelos.
+    """
+    out_w, out_h = int(plan["output"]["width"]), int(plan["output"]["height"])
+    haelfte = max(2, int(out_h / 2) // 2 * 2)  # gerade Zahl, sonst mag es der Encoder nicht
+    zwei = shot.get("geteilt") or []
+    if len(zwei) != 2:
+        raise RenderError("Shot mit Layout geteilt, aber der Plan nennt nicht zwei Ausschnitte")
+    teile = []
+    for n, t in enumerate(zwei):
+        teile.append(
+            f"[g{index}_{n}]crop={int(t['w'])}:{int(t['h'])}:{int(t['x'])}:{int(t['y'])},"
+            f"scale={out_w}:{haelfte}:force_original_aspect_ratio=increase:flags=lanczos,"
+            f"crop={out_w}:{haelfte},setsar=1[gt{index}_{n}];"
+        )
+    return (
+        f"[{index}:v]setpts=PTS-STARTPTS,split=2[g{index}_0][g{index}_1];"
+        + "".join(teile)
+        + f"[gt{index}_0][gt{index}_1]vstack=inputs=2,scale={out_w}:{out_h}:flags=lanczos,setsar=1[v{index}];"
+    )
+
+
 def zoom_filter(out_w: int, out_h: int, fps: float, duration: float, zoom_to: float) -> str:
     """Langsamer Push-in über eine Einstellung: linear von 1,0 auf ``zoom_to``, mittig.
 
@@ -311,6 +341,10 @@ def video_chain(
             if not caps.get("vstack", True):
                 raise RenderError("ffmpeg ohne split/pad/vstack-Filter, Layout pip nicht möglich")
             parts.append(pip_shot_filter(plan, i, s))
+        elif s.get("layout") == "geteilt":
+            if not caps.get("vstack", True):
+                raise RenderError("ffmpeg ohne split/vstack-Filter, geteiltes Bild nicht möglich")
+            parts.append(geteilt_shot_filter(plan, i, s))
         else:
             crop = f"crop={int(s['crop_w'])}:{int(s['crop_h'])}:{int(s['crop_x'])}:{int(s['crop_y'])}"
             duration = float(s.get("end", 0.0)) - float(s.get("start", 0.0))
@@ -357,15 +391,43 @@ def needs_compressor(measured_lra: float | None) -> bool:
 
 
 # -- ffmpeg-Aufrufe -----------------------------------------------------------------------------
+# Meldungen, die ffmpeg bei ERFOLGREICHEM Lauf ausgibt und die trotzdem bedeuten, dass das Ergebnis
+# nicht in Ordnung ist. ffmpeg beendet sich in diesen Faellen mit 0, schreibt die Warnung nach
+# stderr und niemand liest sie.
+STILLE_WARNUNGEN = (
+    "Invalid NAL unit",
+    "error while decoding",
+    "corrupt",
+    "Non-monotonous DTS",
+    "Past duration",
+    "buffer underflow",
+    "decode_slice_header error",
+    "missing picture",
+    "Conversion failed",
+)
+
+
 def _run(cmd: list[str], what: str, level: str = "error") -> subprocess.CompletedProcess:
     full = ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-v", level, "-nostats", *cmd]
     try:
-        return subprocess.run(full, check=True, capture_output=True, text=True)
+        r = subprocess.run(full, check=True, capture_output=True, text=True)
     except FileNotFoundError as exc:
         raise RenderError("ffmpeg ist nicht installiert") from exc
     except subprocess.CalledProcessError as exc:
         tail = [ln for ln in (exc.stderr or "").strip().splitlines() if ln.strip()][-3:]
         raise RenderError(f"{what} fehlgeschlagen: {' | '.join(tail) or exc}") from exc
+    # Erfolgreich beendet heisst nicht fehlerfrei. Beim Nachgehen eines kaputten Bildstroms kam
+    # heraus, dass genau hier die Spur endete: ffmpeg lief durch, meldete den Schaden nach stderr,
+    # und capture_output hat ihn verschluckt. Zwei von vierzehn Clips waren betroffen.
+    meldungen = (r.stderr or "").strip()
+    if meldungen:
+        auffaellig = [w for w in STILLE_WARNUNGEN if w in meldungen]
+        zeilen = [ln.strip() for ln in meldungen.splitlines() if ln.strip()][:3]
+        if auffaellig:
+            log.warning("ffmpeg %s meldet trotz Erfolg: %s | %s", what, ", ".join(auffaellig), " | ".join(zeilen))
+        else:
+            log.info("ffmpeg %s: %s", what, " | ".join(zeilen))
+    return r
 
 
 def measure_loudnorm(src_path: str | os.PathLike, plan: dict, compressor: bool = False) -> dict[str, float]:
@@ -594,8 +656,17 @@ def bitstrom_pruefen(out_path: str | os.PathLike) -> list[str]:
     return [f"Bildstrom beschaedigt ({', '.join(treffer)}): {erste[:120]}"]
 
 
-def regression_checks(out_path: str | os.PathLike, expected_duration: float, expected_w: int, expected_h: int) -> list[str]:
-    """Dauer (±0,3 s), Auflösung, keine Schwarzbilder über 0,5 s, Audiospur vorhanden, Bildstrom lesbar."""
+def regression_checks(
+    out_path: str | os.PathLike,
+    expected_duration: float,
+    expected_w: int,
+    expected_h: int,
+    bitstrom: bool = True,
+) -> list[str]:
+    """Dauer (±0,3 s), Auflösung, keine Schwarzbilder über 0,5 s, Audiospur vorhanden, Bildstrom lesbar.
+
+    ``bitstrom=False``, wenn der Aufrufer den Bildstrom schon selbst geprüft hat: das Dekodieren
+    ist der teuerste Teil und muss nicht zweimal laufen."""
     from .. import ingest
 
     warnings: list[str] = []
@@ -614,7 +685,8 @@ def regression_checks(out_path: str | os.PathLike, expected_duration: float, exp
     else:
         for a, b in black_intervals(p):
             warnings.append(f"Schwarzbild von {a:.2f} s bis {b:.2f} s")
-        warnings.extend(bitstrom_pruefen(p))
+        if bitstrom:
+            warnings.extend(bitstrom_pruefen(p))
     return warnings
 
 
@@ -677,6 +749,7 @@ __all__ = [
     "measure_loudnorm",
     "needs_compressor",
     "overlay_filters",
+    "geteilt_shot_filter",
     "pip_shot_filter",
     "regression_checks",
     "render_from_plan",

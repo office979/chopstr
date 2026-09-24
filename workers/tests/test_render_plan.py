@@ -44,7 +44,7 @@ def test_plan_has_all_contract_keys_and_is_json():
     # zu dieser Zeit zur Wahl stand und warum die Automatik so entschieden hat. Ohne sie koennte
     # die Zeitleiste anzeigen, was entschieden wurde, aber nichts anbieten.
     assert set(plan["shots"][0]) == {
-        "start", "end", "crop_x", "crop_y", "crop_w", "crop_h", "layout", "quelle_x", "auswahl", "grund",
+        "start", "end", "crop_x", "crop_y", "crop_w", "crop_h", "layout", "quelle_x", "auswahl", "grund", "zoom", "geteilt",
     }
     assert set(plan["captions"]) == {
         "preset", "font", "font_px", "max_chars", "baseline_y", "safe_zone", "cards", "highlight",

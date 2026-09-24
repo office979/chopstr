@@ -272,7 +272,9 @@ export function CaptionStudio({
     <GlassCard padding="md" selected={!gespeichert}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-lg font-semibold">Untertitel</h2>
-        <p className="text-sm text-text-2">Wirkt beim nächsten Render</p>
+        {/* Der Unterschied zur Zeitleiste muss dastehen: dort gilt etwas ab einer Stelle, hier
+          * fuer den ganzen Clip. Ohne diesen Satz sieht beides gleich aus. */}
+        <p className="text-sm text-text-2">Für den ganzen Clip</p>
       </div>
 
       <div className="mt-5 flex flex-col gap-6">

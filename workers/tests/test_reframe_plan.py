@@ -201,3 +201,102 @@ def test_gleicher_ausschnitt_wird_nicht_ueber_segmentgrenzen_zusammengezogen():
     zl = [[_ziel(10.0, 20.0, 500.0)], [_ziel(30.0, 36.0, 500.0)]]
     shots = reframe.plan_shots_aus_zielen(SEGS, zl, SRC_W, SRC_H, 1080, 1920)
     assert [(s.start, s.end) for s in shots] == [(10.0, 20.0), (30.0, 36.0)]
+
+
+# -- Zoom: naeher heran heisst enger schneiden -----------------------------------------------------
+def _ziel_zoom(a, b, cx, zoom, anker=0.5):
+    return tracking.Ziel(start_s=a, ende_s=b, cx=cx, cy=300.0, anker=anker, grund="sprecher", zoom=zoom)
+
+
+def test_ohne_zoom_bleibt_der_ausschnitt_voll():
+    s = reframe.plan_shots_aus_zielen(SEGS[:1], [[_ziel_zoom(10.0, 20.0, 960.0, 1.0)]], SRC_W, SRC_H, 1080, 1920)[0]
+    voll = reframe.crop_geometry(SRC_W, SRC_H, 1080, 1920)
+    assert (s.crop_w, s.crop_h) == voll
+    assert s.zoom == 1.0
+
+
+def test_zoom_verkleinert_den_ausschnitt_um_denselben_faktor():
+    voll_w, voll_h = reframe.crop_geometry(SRC_W, SRC_H, 1080, 1920)
+    s = reframe.plan_shots_aus_zielen(SEGS[:1], [[_ziel_zoom(10.0, 20.0, 960.0, 1.4)]], SRC_W, SRC_H, 1080, 1920)[0]
+    assert s.crop_w == pytest.approx(voll_w / 1.4, abs=2)
+    assert s.crop_h == pytest.approx(voll_h / 1.4, abs=2)
+
+
+def test_zoom_haelt_das_seitenverhaeltnis():
+    """Sonst waere das Bild verzerrt, und das faellt sofort auf."""
+    voll_w, voll_h = reframe.crop_geometry(SRC_W, SRC_H, 1080, 1920)
+    s = reframe.plan_shots_aus_zielen(SEGS[:1], [[_ziel_zoom(10.0, 20.0, 960.0, 1.6)]], SRC_W, SRC_H, 1080, 1920)[0]
+    assert s.crop_w / s.crop_h == pytest.approx(voll_w / voll_h, abs=0.01)
+
+
+def test_der_zoom_bleibt_im_quellbild():
+    for cx in (60.0, 960.0, 1880.0):
+        s = reframe.plan_shots_aus_zielen(SEGS[:1], [[_ziel_zoom(10.0, 20.0, cx, 1.6)]], SRC_W, SRC_H, 1080, 1920)[0]
+        assert s.crop_x >= 0 and s.crop_x + s.crop_w <= SRC_W
+        assert s.crop_y >= 0 and s.crop_y + s.crop_h <= SRC_H
+
+
+def test_ein_zoomwechsel_trennt_die_abschnitte():
+    """Gleiche Bildstelle, andere Naehe: das muessen zwei Abschnitte bleiben."""
+    zl = [[_ziel_zoom(10.0, 15.0, 960.0, 1.0), _ziel_zoom(15.0, 20.0, 960.0, 1.4)]]
+    shots = reframe.plan_shots_aus_zielen(SEGS[:1], zl, SRC_W, SRC_H, 1080, 1920)
+    assert len(shots) == 2
+    assert shots[0].crop_w > shots[1].crop_w
+
+
+# -- Geteiltes Bild --------------------------------------------------------------------------------
+def _ziel_geteilt(cx, auswahl, breite=300.0):
+    return tracking.Ziel(
+        start_s=10.0, ende_s=20.0, cx=cx, cy=800.0, anker=0.5, grund="von_hand",
+        breite=breite, auswahl=list(auswahl), layout="geteilt",
+    )  # fmt: skip
+
+
+def test_geteilt_liefert_zwei_gleich_grosse_ausschnitte():
+    zwei = reframe.geteilte_ausschnitte(3840, 2160, 1080, 1920, _ziel_geteilt(1306.0, [1306.0, 2582.0]))
+    assert len(zwei) == 2
+    assert {(t["w"], t["h"]) for t in zwei} == {(zwei[0]["w"], zwei[0]["h"])}, "beide Haelften gleich gross"
+
+
+def test_eine_haelfte_hat_das_verhaeltnis_der_halben_ausgabe():
+    """Sonst waere das Bild in der Haelfte verzerrt."""
+    zwei = reframe.geteilte_ausschnitte(3840, 2160, 1080, 1920, _ziel_geteilt(1306.0, [1306.0, 2582.0]))
+    soll = 1080 / (1920 / 2)
+    assert zwei[0]["w"] / zwei[0]["h"] == pytest.approx(soll, abs=0.02)
+
+
+def test_die_haelften_richten_sich_nach_der_gesichtsgroesse():
+    """Wer vom Quellbild ausgeht, schneidet bei 4K zwei Drittel der Breite heraus, und dann sitzen
+    zwei kleine Koepfe in viel Tisch."""
+    klein = reframe.geteilte_ausschnitte(3840, 2160, 1080, 1920, _ziel_geteilt(1306.0, [1306.0, 2582.0], breite=200.0))
+    gross = reframe.geteilte_ausschnitte(3840, 2160, 1080, 1920, _ziel_geteilt(1306.0, [1306.0, 2582.0], breite=500.0))
+    assert klein[0]["h"] < gross[0]["h"]
+
+
+def test_die_gewaehlte_person_ist_immer_dabei():
+    """Sonst zeigte das geteilte Bild ausgerechnet nicht den, den jemand von Hand gewaehlt hat."""
+    z = _ziel_geteilt(2582.0, [700.0, 1306.0, 2582.0, 3400.0])
+    zwei = reframe.geteilte_ausschnitte(3840, 2160, 1080, 1920, z)
+    mitten = [t["x"] + t["w"] / 2 for t in zwei]
+    assert any(abs(m - 2582.0) < t["w"] / 2 for m, t in zip(mitten, zwei))
+
+
+def test_die_ausschnitte_bleiben_im_quellbild():
+    for cx, auswahl in ((100.0, [100.0, 3700.0]), (3700.0, [100.0, 3700.0])):
+        zwei = reframe.geteilte_ausschnitte(3840, 2160, 1080, 1920, _ziel_geteilt(cx, auswahl))
+        for t in zwei:
+            assert t["x"] >= 0 and t["x"] + t["w"] <= 3840
+            assert t["y"] >= 0 and t["y"] + t["h"] <= 2160
+
+
+def test_ohne_zweite_person_gibt_es_kein_geteiltes_bild():
+    assert reframe.geteilte_ausschnitte(3840, 2160, 1080, 1920, _ziel_geteilt(1306.0, [1306.0])) == []
+    shots = reframe.plan_shots_aus_zielen(SEGS[:1], [[_ziel_geteilt(1306.0, [1306.0])]], 3840, 2160, 1080, 1920)
+    assert shots[0].layout == "single"
+
+
+def test_geteilt_landet_als_layout_im_shot():
+    shots = reframe.plan_shots_aus_zielen(
+        SEGS[:1], [[_ziel_geteilt(1306.0, [1306.0, 2582.0])]], 3840, 2160, 1080, 1920
+    )  # fmt: skip
+    assert shots[0].layout == "geteilt" and len(shots[0].geteilt) == 2

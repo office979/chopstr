@@ -666,15 +666,39 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     )
     mp4 = work / f"{h}.mp4"
     fonts_dir = brand_assets["fonts_dir"] or s.render_fonts_dir or None
-    result = render.render_from_plan(
-        plan, local_src, paths["ass"], mp4,
-        fonts_dir=fonts_dir, x264_preset=s.render_x264_preset,
-        font_path=brand_assets["font_path"], logo_path=brand_assets["logo_path"],
-    )  # fmt: skip
+    def einmal_rendern():
+        return render.render_from_plan(
+            plan, local_src, paths["ass"], mp4,
+            fonts_dir=fonts_dir, x264_preset=s.render_x264_preset,
+            font_path=brand_assets["font_path"], logo_path=brand_assets["logo_path"],
+        )  # fmt: skip
+
+    result = einmal_rendern()
+    # Ein beschaedigter Bildstrom kommt vor, selten und ohne erkennbares Muster: zwei von vierzehn
+    # Dateien auf der Platte waren betroffen, beide liessen sich mit unveraendertem Plan sauber neu
+    # rendern. Eine Ursache habe ich nicht gefunden; ffmpeg lief jedes Mal mit Erfolg durch.
+    #
+    # Deshalb hier das, was gegen einen zeitweisen Fehler hilft: einmal wiederholen. Bleibt der
+    # Schaden, ist er nicht zufaellig, und dann soll der Render scheitern statt eine Datei
+    # auszuliefern, die mittendrin stehenbleibt.
+    wiederholt = False
+    schaden = render.bitstrom_pruefen(mp4)
+    if schaden:
+        log.warning("clip=%s beschaedigter Bildstrom, wird einmal wiederholt: %s", clip_id, schaden[0])
+        result = einmal_rendern()
+        wiederholt = True
+        schaden = render.bitstrom_pruefen(mp4)
+        if schaden:
+            raise RuntimeError(f"Der Render ist zweimal beschaedigt herausgekommen: {schaden[0]}")
+
     notes = [*rf.notes, *brand_assets["notes"], *result.notes]
+    if wiederholt:
+        notes.append("Der Bildstrom war beschaedigt, der Render wurde einmal wiederholt")
     loud = render.measure_loudness(mp4)
     loudness = {"integrated_lufs": loud["integrated_lufs"], "true_peak_dbtp": loud["true_peak_dbtp"], "preset": plan["audio"]["preset"]}
-    checks = render.regression_checks(mp4, duration, out_w, out_h)
+    # Der Bildstrom ist oben schon geprueft worden; ihn hier noch einmal zu dekodieren waere
+    # dieselbe Arbeit zweimal.
+    checks = render.regression_checks(mp4, duration, out_w, out_h, bitstrom=False)
     notes.extend(f"Regressionstest: {c}" for c in checks)
     poster = work / f"{h}.jpg"
     render.make_poster(mp4, poster, 1.0)

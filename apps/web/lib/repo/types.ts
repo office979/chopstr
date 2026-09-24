@@ -120,7 +120,11 @@ export interface FilmstripMeta {
  * eine Person mehr oder weniger findet. */
 export interface Zeitmarke {
   ab_s: number;
-  x: number;
+  /* Bildstelle der Person, die zu sehen sein soll. Fehlt sie, entscheidet die Automatik. */
+  x?: number;
+  /* 1,0 ist der volle Ausschnitt, groesser heisst naeher heran. */
+  zoom?: number;
+  layout?: "einzel" | "geteilt";
 }
 
 export interface CaptionStyle {
@@ -398,12 +402,16 @@ export interface RenderShot {
   crop_y: number;
   crop_w: number;
   crop_h: number;
-  layout: "single" | "split";
+  layout: "single" | "split" | "pip" | "geteilt";
   /* Auf welche Bildstelle der Quelle dieser Ausschnitt zielt und welche Personen zu dieser Zeit
    * zur Wahl standen. Nur zur Anzeige: die Zeitleiste baut daraus „wer soll im Bild sein". */
   quelle_x?: number | null;
   auswahl?: number[];
   grund?: string;
+  /* 1,0 ist der volle Ausschnitt, groesser heisst naeher heran. */
+  zoom?: number;
+  /* Bei ``layout = "geteilt"``: die beiden Ausschnitte, die uebereinander gestapelt werden. */
+  geteilt?: { x: number; y: number; w: number; h: number }[];
 }
 
 export interface RenderPlan {

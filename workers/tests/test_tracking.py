@@ -424,3 +424,67 @@ def test_in_der_totale_gilt_ein_kleinerer_massstab():
     b = _einstellung_mit(3.0, 1200, breite=120)
     z = tr.ziele(_einstellungen([*a, *b]), 3840)
     assert [round(q.cx) for q in z] == [1000, 1200]
+
+
+# -- Zeitmarken von Hand ---------------------------------------------------------------------------
+def _ziel(a, b, cx, auswahl=(), grund="sprecher"):
+    return tr.Ziel(start_s=a, ende_s=b, cx=cx, cy=400.0, anker=0.5, grund=grund, breite=200.0, auswahl=list(auswahl))
+
+
+def test_ohne_marken_bleibt_alles_wie_es_war():
+    z = [_ziel(0.0, 10.0, 400.0, [400.0, 1400.0])]
+    assert tr.zeitmarken_anwenden(z, [], 1920) is z
+
+
+def test_eine_marke_setzt_die_person_ab_ihrer_sekunde():
+    z = [_ziel(0.0, 10.0, 400.0, [400.0, 1400.0])]
+    aus = tr.zeitmarken_anwenden(z, [{"ab_s": 4.0, "x": 1400.0}], 1920)
+    assert [(round(x.start_s, 1), round(x.ende_s, 1), x.cx) for x in aus] == [(0.0, 4.0, 400.0), (4.0, 10.0, 1400.0)]
+    assert aus[1].grund == "von_hand"
+
+
+def test_eine_marke_wirkt_nicht_erst_beim_naechsten_schnitt():
+    """Ohne das Trennen mitten im Ziel wuerde eine Marke bei 4 s erst bei 10 s greifen."""
+    aus = tr.zeitmarken_anwenden([_ziel(0.0, 10.0, 400.0, [400.0, 1400.0])], [{"ab_s": 4.0, "x": 1400.0}], 1920)
+    assert len(aus) == 2 and aus[1].start_s == 4.0
+
+
+def test_die_marke_rastet_auf_die_naechste_erkannte_person_ein():
+    """Nach einer neuen Erkennung liegt die Person ein paar Punkte anders. Die Marke muss mit."""
+    aus = tr.zeitmarken_anwenden([_ziel(0.0, 10.0, 400.0, [402.0, 1396.0])], [{"ab_s": 0.0, "x": 1400.0}], 1920)
+    assert aus[0].cx == 1396.0
+
+
+def test_ohne_erkannte_person_gilt_die_bildstelle_der_marke():
+    aus = tr.zeitmarken_anwenden([_ziel(0.0, 10.0, None, [])], [{"ab_s": 0.0, "x": 900.0}], 1920)
+    assert aus[0].cx == 900.0
+
+
+def test_die_marke_schlaegt_die_automatik():
+    """Wer von Hand entscheidet, will nicht ueberstimmt werden."""
+    aus = tr.zeitmarken_anwenden([_ziel(0.0, 10.0, 400.0, [400.0, 1400.0], grund="sprecher")], [{"ab_s": 0.0, "x": 1400.0}], 1920)
+    assert aus[0].cx == 1400.0 and aus[0].grund == "von_hand"
+
+
+def test_mehrere_marken_loesen_sich_der_reihe_nach_ab():
+    z = [_ziel(0.0, 12.0, 400.0, [400.0, 900.0, 1400.0])]
+    aus = tr.zeitmarken_anwenden(z, [{"ab_s": 8.0, "x": 900.0}, {"ab_s": 4.0, "x": 1400.0}], 1920)
+    assert [(round(x.start_s, 1), x.cx) for x in aus] == [(0.0, 400.0), (4.0, 1400.0), (8.0, 900.0)]
+
+
+def test_eine_marke_wirkt_ueber_mehrere_einstellungen_hinweg():
+    z = [_ziel(0.0, 5.0, 400.0, [400.0, 1400.0]), _ziel(5.0, 10.0, 400.0, [400.0, 1400.0])]
+    aus = tr.zeitmarken_anwenden(z, [{"ab_s": 2.0, "x": 1400.0}], 1920)
+    assert all(x.cx == 1400.0 for x in aus if x.start_s >= 2.0)
+
+
+def test_unbrauchbare_marken_werden_uebergangen():
+    z = [_ziel(0.0, 10.0, 400.0, [400.0, 1400.0])]
+    aus = tr.zeitmarken_anwenden(z, [{"ab_s": None, "x": 1400.0}, {"x": 900.0}, {"ab_s": 3.0}], 1920)
+    assert len(aus) == 1 and aus[0].cx == 400.0
+
+
+def test_die_drittelregel_gilt_auch_fuer_eine_marke():
+    """Wird von Hand die rechte Person gewaehlt, gehoert der Blickraum nach links."""
+    aus = tr.zeitmarken_anwenden([_ziel(0.0, 10.0, 400.0, [400.0, 1400.0])], [{"ab_s": 0.0, "x": 1400.0}], 1920)
+    assert aus[0].anker == pytest.approx(2 / 3)

@@ -40,7 +40,12 @@ def test_plan_has_all_contract_keys_and_is_json():
     assert plan["segments"] == SEGMENTS and plan["filler_cuts"] is False
     assert set(plan["reframe"]) == {"strategy", "detector", "faces_detected", "positions", "min_shot_s"}
     assert plan["reframe"]["min_shot_s"] == 1.2
-    assert set(plan["shots"][0]) == {"start", "end", "crop_x", "crop_y", "crop_w", "crop_h", "layout"}
+    # quelle_x, auswahl und grund tragen keine Bildinformation, sondern sagen der Oberflaeche, wer
+    # zu dieser Zeit zur Wahl stand und warum die Automatik so entschieden hat. Ohne sie koennte
+    # die Zeitleiste anzeigen, was entschieden wurde, aber nichts anbieten.
+    assert set(plan["shots"][0]) == {
+        "start", "end", "crop_x", "crop_y", "crop_w", "crop_h", "layout", "quelle_x", "auswahl", "grund",
+    }
     assert set(plan["captions"]) == {
         "preset", "font", "font_px", "max_chars", "baseline_y", "safe_zone", "cards", "highlight",
         "bold", "all_caps", "max_lines", "words_per_card", "outline_px", "box", "base_color", "highlight_color",

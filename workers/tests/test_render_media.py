@@ -163,3 +163,44 @@ def test_zoom_filter_expression_and_chain():
     # Ohne zoompan im ffmpeg bleibt es beim statischen Ausschnitt
     plain, _, _, _, _, _ = r.video_chain(plan, None, None, {"zoompan": False, "vstack": True}, None)
     assert "zoompan=" not in plain
+
+
+# -- Ein kaputter Bildstrom darf nicht unbemerkt durchgehen ----------------------------------------
+def test_bitstrom_pruefen_meldet_eine_fehlende_datei():
+    from chopstr_worker.pipeline import render as r
+
+    assert r.bitstrom_pruefen("/gibt/es/nicht.mp4") == ["Ausgabedatei fehlt"]
+
+
+def test_bitstrom_pruefen_haelt_eine_heile_datei_fuer_heil(tmp_path):
+    """Gegenstueck zum Fund an echten Clips: zwei von sechs hatten einen kaputten H.264-Strom,
+    bei dem nur rund 60 Prozent der Bilder dekodierten. Dauer, Aufloesung, Ton und Schwarzbild
+    waren dabei alle in Ordnung, denn die Laenge steht im Container und nicht im Bildstrom."""
+    from chopstr_worker.pipeline import render as r
+
+    mp4 = tmp_path / "heil.mp4"
+    r._run(
+        ["-f", "lavfi", "-i", "testsrc=duration=1:size=64x64:rate=10",
+         "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-shortest",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(mp4)],
+        "Testvideo",
+    )  # fmt: skip
+    assert r.bitstrom_pruefen(mp4) == []
+
+
+def test_bitstrom_pruefen_meldet_eine_zerschossene_datei(tmp_path):
+    """Mitten in den Bildstrom geschriebener Muell muss auffallen."""
+    from chopstr_worker.pipeline import render as r
+
+    mp4 = tmp_path / "kaputt.mp4"
+    r._run(
+        ["-f", "lavfi", "-i", "testsrc=duration=2:size=64x64:rate=10",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(mp4)],
+        "Testvideo",
+    )  # fmt: skip
+    roh = bytearray(mp4.read_bytes())
+    # Die Mitte ueberschreiben: der Container bleibt heil, der Bildstrom nicht.
+    mitte = len(roh) // 2
+    roh[mitte : mitte + 2000] = b"\x00" * 2000
+    mp4.write_bytes(bytes(roh))
+    assert r.bitstrom_pruefen(mp4), "ein zerschossener Bildstrom wurde fuer heil gehalten"

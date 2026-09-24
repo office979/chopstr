@@ -128,6 +128,10 @@ class Ziel:
     # grosser Versatz ist: in einer Totale sind 200 Bildpunkte zwei Personen, in einer
     # Naheinstellung ein halbes Gesicht.
     breite: float = 0.0
+    # Alle Sitzpositionen, die in dieser Einstellung zu sehen waren, von links nach rechts. Die
+    # Oberflaeche baut daraus die Auswahl „wer soll im Bild sein"; ohne diese Liste koennte sie nur
+    # anzeigen, was die Automatik entschieden hat, aber keine Alternative anbieten.
+    auswahl: list[float] = field(default_factory=list)
 
     @property
     def dauer_s(self) -> float:
@@ -491,6 +495,7 @@ def ziele(
     for e in einstellungen:
         pos = positionen(e)
         breite = gesichtsbreite(e)
+        alle_x = [round(p[0], 1) for p in pos]
         if not pos:
             aus.append(Ziel(e.start_s, e.ende_s, None, None, 0.5, "kein_gesicht"))
             continue
@@ -499,20 +504,77 @@ def ziele(
             cx, cy = pos[i]
             grund = "einzige_person" if len(pos) == 1 else "haeufigste_person"
             andere = [p[0] for j, p in enumerate(pos) if j != i]
-            aus.append(Ziel(e.start_s, e.ende_s, cx, cy, blickraum_anker(cx, quelle_breite, andere), grund, breite))
+            aus.append(Ziel(e.start_s, e.ende_s, cx, cy, blickraum_anker(cx, quelle_breite, andere), grund, breite, alle_x))
             continue
 
         fenster = _fenster(e, pos, fenster_s)
         if not _luecken_fuellen(fenster):
             cx = sum(p[0] for p in pos) / len(pos)
             cy = sum(p[1] for p in pos) / len(pos)
-            aus.append(Ziel(e.start_s, e.ende_s, cx, cy, 0.5, "gruppe_unentschieden", breite))
+            aus.append(Ziel(e.start_s, e.ende_s, cx, cy, 0.5, "gruppe_unentschieden", breite, alle_x))
             continue
         for start, ende, idx in _zu_laeufen(fenster, min_ziel_s):
             cx, cy = pos[idx]
             andere = [p[0] for j, p in enumerate(pos) if j != idx]
-            aus.append(Ziel(start, ende, cx, cy, blickraum_anker(cx, quelle_breite, andere), "sprecher", breite))
+            aus.append(Ziel(start, ende, cx, cy, blickraum_anker(cx, quelle_breite, andere), "sprecher", breite, alle_x))
     return _beruhigen(aus)
+
+
+
+# -- Zeitmarken von Hand --------------------------------------------------------------------------
+def zeitmarken_anwenden(ziele_liste: list[Ziel], marken: list[dict], quelle_breite: float) -> list[Ziel]:
+    """Ziele an den Stellen ueberschreiben, an denen jemand von Hand entschieden hat.
+
+    Eine Marke ist ``{"ab_s": 12.4, "x": 2582}`` und heisst: ab dieser Sekunde soll die Person an
+    der Bildstelle x zu sehen sein, bis die naechste Marke kommt.
+
+    Bewusst ueber die Bildstelle und nicht ueber einen Index: Indizes verschieben sich, sobald die
+    Erkennung beim naechsten Lauf eine Person mehr oder weniger findet, und dann zeigte der Clip
+    auf einmal jemand anderen. Eine Bildstelle bleibt eine Bildstelle.
+
+    Die Marke gewinnt immer. Wer von Hand entscheidet, will nicht von der Automatik ueberstimmt
+    werden, auch nicht wenn sie sich sicher ist.
+    """
+    sauber = sorted(
+        ({"ab_s": float(m["ab_s"]), "x": float(m["x"])} for m in marken if m.get("ab_s") is not None and m.get("x") is not None),
+        key=lambda m: m["ab_s"],
+    )
+    if not sauber or not ziele_liste:
+        return ziele_liste
+
+    def marke_bei(t: float) -> dict | None:
+        treffer = None
+        for m in sauber:
+            if m["ab_s"] <= t + 1e-6:
+                treffer = m
+            else:
+                break
+        return treffer
+
+    # An jeder Marke, die mitten in einem Ziel liegt, wird getrennt: davor gilt, was galt, danach
+    # die Marke. Ohne das Trennen wuerde eine Marke erst beim naechsten Kameraschnitt wirken.
+    zerlegt: list[Ziel] = []
+    for z in ziele_liste:
+        grenzen = [z.start_s]
+        for m in sauber:
+            if z.start_s < m["ab_s"] < z.ende_s:
+                grenzen.append(m["ab_s"])
+        grenzen.append(z.ende_s)
+        for a, b in zip(grenzen, grenzen[1:]):
+            if b <= a:
+                continue
+            teil = Ziel(a, b, z.cx, z.cy, z.anker, z.grund, z.breite, list(z.auswahl))
+            m = marke_bei(a)
+            if m is not None:
+                # Auf die naechste erkannte Person einrasten, damit eine Marke auch nach einer neuen
+                # Erkennung noch auf einem Gesicht sitzt und nicht daneben.
+                ziel_x = min(teil.auswahl, key=lambda x: abs(x - m["x"])) if teil.auswahl else m["x"]
+                andere = [x for x in teil.auswahl if abs(x - ziel_x) > 1e-6]
+                teil.cx = ziel_x
+                teil.anker = blickraum_anker(ziel_x, quelle_breite, andere)
+                teil.grund = "von_hand"
+            zerlegt.append(teil)
+    return zerlegt
 
 
 __all__ = [
@@ -538,5 +600,6 @@ __all__ = [
     "schnitt_schwelle",
     "schnitte_finden",
     "sprecher_position",
+    "zeitmarken_anwenden",
     "ziele",
 ]

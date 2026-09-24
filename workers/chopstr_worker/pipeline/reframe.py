@@ -111,6 +111,13 @@ class Shot:
     crop_w: int
     crop_h: int
     layout: str = "single"  # "single" | "split" | "pip" (Sprecher-Crop unter der Folie)
+    # Auf welche Bildstelle der Quelle dieser Ausschnitt zielt, und welche Personen zu dieser Zeit
+    # ueberhaupt zur Wahl standen. Beides nur zur Anzeige: die Oberflaeche baut daraus „wer soll im
+    # Bild sein". Ohne die Auswahl koennte sie zeigen, was entschieden wurde, aber nichts anbieten.
+    quelle_x: float | None = None
+    auswahl: list[float] = field(default_factory=list)
+    # "sprecher" | "einzige_person" | "gruppe_unentschieden" | "von_hand" | "kein_gesicht"
+    grund: str = ""
 
     @property
     def duration(self) -> float:
@@ -678,7 +685,7 @@ def plan_shots_aus_zielen(
             if vor is not None and vor.end == a and abs(vor.crop_x - x) <= GLEICHER_AUSSCHNITT_PX and abs(vor.crop_y - y) <= GLEICHER_AUSSCHNITT_PX:
                 vor.end = b
                 continue
-            shots.append(Shot(a, b, x, y, crop_w, crop_h))
+            shots.append(Shot(a, b, x, y, crop_w, crop_h, quelle_x=z.cx, auswahl=list(z.auswahl), grund=z.grund))
     return shots
 
 
@@ -687,6 +694,7 @@ def verfolgen(
     segments: list[dict],
     src_w: int,
     folgen: bool = True,
+    zeitmarken: list[dict] | None = None,
 ) -> tuple[list[list[tracking.Ziel]], list[tuple[float, float]], int, int]:
     """Das Video abtasten und daraus ableiten, wer wann im Ausschnitt steht.
 
@@ -710,7 +718,10 @@ def verfolgen(
             max_personen = max(max_personen, len(p))
             if p and (laengste is None or e.dauer_s > laengste[0]):
                 laengste = (e.dauer_s, p)
-        ziele_je_segment.append(tracking.ziele(einst, float(src_w), folgen=folgen))
+        ziel_liste = tracking.ziele(einst, float(src_w), folgen=folgen)
+        if zeitmarken:
+            ziel_liste = tracking.zeitmarken_anwenden(ziel_liste, zeitmarken, float(src_w))
+        ziele_je_segment.append(ziel_liste)
     return ziele_je_segment, (laengste[1] if laengste else []), einstellungen, max_personen
 
 
@@ -730,6 +741,7 @@ def plan_reframe(
     src_h: int | None = None,
     out_size: tuple[int, int] | None = None,
     reframe_override: str | None = None,
+    zeitmarken: list[dict] | None = None,
 ) -> ReframeResult:
     """Kompletter Reframe-Plan: Detektor (wenn vorhanden), Positionen, Folie, Strategie, Shots.
 
@@ -766,7 +778,7 @@ def plan_reframe(
             # Bei Override talking_head soll der Ausschnitt innerhalb einer Einstellung stehen
             # bleiben; Kameraschnitte werden trotzdem beachtet.
             ziele_je_segment, centers, einstellungen, max_personen = verfolgen(
-                video_path, segments, src_w, folgen=(reframe_override != "talking_head")
+                video_path, segments, src_w, folgen=(reframe_override != "talking_head"), zeitmarken=zeitmarken
             )
             detector = "yunet"
             positions = [c[0] for c in centers]
@@ -783,6 +795,9 @@ def plan_reframe(
                     notes.append(f"Bis zu {max_personen} Personen im Bild, Sprecher über die Mundbewegung bestimmt")
                 if offen:
                     notes.append(f"{offen} Abschnitte ohne eindeutigen Sprecher, dort bleibt die Gruppenmitte im Bild")
+            von_hand = sum(1 for zl in ziele_je_segment or [] for z in zl if z.grund == "von_hand")
+            if von_hand:
+                notes.append(f"{von_hand} Abschnitte von Hand gesetzt")
         except Exception as exc:  # Detektor darf den Render nie stoppen
             notes.append(f"Gesichtsdetektion fehlgeschlagen ({exc.__class__.__name__}), Reframe läuft neutral")
             detector, positions, face_y, ziele_je_segment = "none", [], [], None

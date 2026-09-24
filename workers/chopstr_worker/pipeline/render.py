@@ -486,6 +486,54 @@ def make_poster(video_path: str | os.PathLike, jpg_path: str | os.PathLike, at_s
     return str(jpg_path)
 
 
+# Filmstreifen fuer die Zeitleiste: ein einziges Bild mit vielen kleinen Einzelbildern nebeneinander.
+# Bewusst eine Datei und nicht hundert: ein Streifen ist ein Bildabruf, hundert Einzelbilder waeren
+# hundert, und die Zeitleiste soll sofort dastehen und nicht nachladen, waehrend man schiebt.
+STREIFEN_BILDER = 40  # so viele Einzelbilder ueber den ganzen Clip
+STREIFEN_HOEHE = 96  # Hoehe je Einzelbild in Bildpunkten; die Breite ergibt sich aus dem Format
+
+
+def make_filmstreifen(
+    video_path: str | os.PathLike,
+    jpg_path: str | os.PathLike,
+    bilder: int = STREIFEN_BILDER,
+    hoehe: int = STREIFEN_HOEHE,
+) -> dict | None:
+    """Einzelbilder ueber die ganze Laenge in EIN JPG nebeneinander legen.
+
+    Zurueck kommt, was die Oberflaeche zum Rechnen braucht: wie viele Bilder, wie breit eines ist
+    und wie hoch. Ohne diese Angaben muesste sie das Bild erst laden und vermessen.
+
+    Bei einem Fehler kommt None. Ein fehlender Streifen kostet Bedienkomfort, aber der Clip ist
+    fertig; ihn deswegen scheitern zu lassen waere falsch herum.
+    """
+    from .. import ingest
+
+    try:
+        pr = ingest.probe(video_path)
+        dauer = float(pr.duration_s or 0.0)
+        if dauer <= 0:
+            return None
+        n = max(1, min(int(bilder), 120))
+        # fps so waehlen, dass ueber die ganze Laenge genau n Bilder herauskommen.
+        fps = n / dauer
+        breite = max(2, int(round(hoehe * (pr.width or 16) / (pr.height or 9))) // 2 * 2)
+        _run(
+            [
+                "-i", str(video_path),
+                "-vf", f"fps={fps:.6f},scale={breite}:{hoehe},tile={n}x1",
+                "-frames:v", "1", "-q:v", "4",
+                str(jpg_path),
+            ],
+            "Filmstreifen",
+        )  # fmt: skip
+        if not os.path.isfile(jpg_path) or os.path.getsize(jpg_path) == 0:
+            return None
+        return {"bilder": n, "breite": breite, "hoehe": hoehe, "dauer_s": round(dauer, 3)}
+    except Exception:
+        return None
+
+
 def black_intervals(path: str | os.PathLike, min_s: float = BLACK_MIN_S) -> list[tuple[float, float]]:
     r = _run(["-i", str(path), "-vf", f"blackdetect=d={min_s}:pix_th=0.10", "-an", "-f", "null", "-"], "Schwarzbild-Prüfung", level="info")
     out = []
@@ -494,8 +542,54 @@ def black_intervals(path: str | os.PathLike, min_s: float = BLACK_MIN_S) -> list
     return out
 
 
+# Meldungen, an denen ein kaputter H.264-Strom zu erkennen ist. Sie tauchen auch beim blossen
+# Umkopieren auf, also ohne zu dekodieren, und sind damit billig zu pruefen.
+BITSTROM_FEHLER = (
+    "Invalid NAL unit",
+    "Error splitting the input",
+    "missing picture in access unit",
+    "corrupt",
+    "error while decoding",
+    "Invalid data found",
+    "decode_slice_header error",
+    "no frame!",
+)
+
+
+def bitstrom_pruefen(out_path: str | os.PathLike) -> list[str]:
+    """Laesst sich die Datei ueberhaupt von vorne bis hinten lesen?
+
+    Gemessen an echten Ergebnissen: zwei von sechs gerenderten Clips hatten einen kaputten
+    H.264-Strom („Invalid NAL unit size"), bei dem nur rund 60 Prozent der Bilder dekodierten. Der
+    Player bleibt dann mittendrin stehen. Die bisherigen Pruefungen haben das nicht gesehen, weil
+    Dauer, Aufloesung, Ton und Schwarzbild alle in Ordnung waren - die Laenge steht im Container,
+    nicht im Bildstrom.
+
+    Geprueft wird mit vollem Dekodieren. Der naheliegende, billigere Weg ueber ``-c copy`` findet
+    zwar den echten Fall (kaputte Laengenangaben der NAL-Einheiten), aber nicht einen beschaedigten
+    Bildinhalt: dort stimmen die Laengen, nur die Daten nicht. Dekodieren laeuft bei einem
+    Kurzformat-Clip mit rund dem Neunzigfachen der Echtzeit, kostet also unter einer Sekunde.
+    """
+    p = Path(out_path)
+    if not p.is_file():
+        return ["Ausgabedatei fehlt"]
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-nostdin", "-hide_banner", "-v", "error", "-i", str(p), "-f", "null", "-"],
+            capture_output=True, text=True, check=False,
+        )  # fmt: skip
+    except FileNotFoundError:
+        return []
+    meldungen = r.stderr or ""
+    treffer = sorted({m for m in BITSTROM_FEHLER if m in meldungen})
+    if not treffer:
+        return []
+    erste = next((ln.strip() for ln in meldungen.splitlines() if ln.strip()), "")
+    return [f"Bildstrom beschaedigt ({', '.join(treffer)}): {erste[:120]}"]
+
+
 def regression_checks(out_path: str | os.PathLike, expected_duration: float, expected_w: int, expected_h: int) -> list[str]:
-    """Dauer (±0,3 s), Auflösung, keine Schwarzbilder über 0,5 s, Audiospur vorhanden. Liefert Warnungen."""
+    """Dauer (±0,3 s), Auflösung, keine Schwarzbilder über 0,5 s, Audiospur vorhanden, Bildstrom lesbar."""
     from .. import ingest
 
     warnings: list[str] = []
@@ -514,6 +608,7 @@ def regression_checks(out_path: str | os.PathLike, expected_duration: float, exp
     else:
         for a, b in black_intervals(p):
             warnings.append(f"Schwarzbild von {a:.2f} s bis {b:.2f} s")
+        warnings.extend(bitstrom_pruefen(p))
     return warnings
 
 
@@ -560,6 +655,7 @@ __all__ = [
     "RenderError",
     "RenderResult",
     "audio_chain",
+    "bitstrom_pruefen",
     "black_intervals",
     "capabilities",
     "default_fonts_dir",
@@ -569,6 +665,7 @@ __all__ = [
     "font_file",
     "input_args",
     "loudnorm_pass2",
+    "make_filmstreifen",
     "make_poster",
     "measure_loudness",
     "measure_loudnorm",

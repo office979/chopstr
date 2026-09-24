@@ -126,6 +126,26 @@ export function randSetzen(schnitt: Schnitt, index: number, rand: 0 | 1, quellze
   return kopie;
 }
 
+/* Abschnitte, die in der Quelle aneinander liegen, zu einem zusammenziehen.
+ *
+ * Spiegel von render_plan.normalize_segments. Der Renderer macht das beim Bauen, weil jeder
+ * Abschnitt eine Tonblende von 20 ms bekommt und eine Naht ohne entfernten Teil sonst hoerbar
+ * waere. Hier gebraucht wird es zum Vergleichen: sonst gaelte ein geteilter, aber sofort
+ * gebauter Clip fuer immer als „noch nicht gebaut", weil im Plan ein Abschnitt steht und im
+ * Editor zwei. */
+export function zusammenziehen(schnitt: Schnitt): Schnitt {
+  const aus: Schnitt = [];
+  for (const a of schnitt) {
+    const vor = aus[aus.length - 1];
+    if (vor && vor.role === a.role && Math.abs(a.start - vor.end) < 1e-3) {
+      vor.end = a.end;
+      continue;
+    }
+    aus.push({ ...a });
+  }
+  return aus;
+}
+
 /* Zwei Schnitte vergleichen, damit „geaendert" nicht an der Objektgleichheit haengt. */
 export function gleich(a: Schnitt, b: Schnitt): boolean {
   if (a.length !== b.length) return false;

@@ -34,40 +34,48 @@ describe("marken_abschnitte", () => {
   const SCHNITT: Schnitt = [A(10, 40)];
 
   it("gibt ohne Marker einen automatischen Abschnitt über die ganze Länge", () => {
-    const a = marken_abschnitte([], SCHNITT);
-    expect(a).toEqual([{ vonQuelle: 10, bisQuelle: 40, marke: null }]);
+    expect(marken_abschnitte([], SCHNITT)).toEqual([{ vonQuelle: 10, bisQuelle: 40, marke: null }]);
   });
 
-  it("rechnet Clipzeit in Quellzeit um", () => {
-    /* Der Marker steht bei Sekunde 5 des Clips; der Clip fängt bei 10 an. */
-    const m = { ab_s: 5, x: 400 };
+  it("nimmt die Zeit des Markers so, wie sie in der Quelle liegt", () => {
+    /* Marker liegen in Quellzeit, nicht in Clipzeit: eine Marke zeigt auf eine Stelle im Video.
+     * Genau so liest sie der Renderer (tracking.zeitmarken_anwenden), und nur so bleibt der
+     * Bildausschnitt stehen, wenn vorne etwas weggeschnitten wird. */
+    const m = { ab_s: 15, x: 400 };
     expect(marken_abschnitte([m], SCHNITT)).toEqual([
       { vonQuelle: 10, bisQuelle: 15, marke: null },
       { vonQuelle: 15, bisQuelle: 40, marke: m },
     ]);
   });
 
-  it("rechnet über eine entfernte Lücke hinweg richtig", () => {
-    /* Zwei Abschnitte, dazwischen fehlen 10 s. Sekunde 12 des Clips liegt hinter der Naht. */
-    const zwei: Schnitt = [A(10, 20), A(30, 40)];
-    const m = { ab_s: 12, zoom: 1.3 };
-    const a = marken_abschnitte([m], zwei);
-    expect(a[1].vonQuelle).toBe(32);
+  it("verschiebt sich nicht, wenn der Anfang gekürzt wird", () => {
+    /* Der Kern der Sache: derselbe Marker, ein um fünf Sekunden späterer Clipanfang, und der
+     * Marker sitzt weiter bei Quellsekunde 25. */
+    const m = { ab_s: 25, zoom: 1.3 };
+    expect(marken_abschnitte([m], [A(10, 40)])[1].vonQuelle).toBe(25);
+    expect(marken_abschnitte([m], [A(15, 40)])[1].vonQuelle).toBe(25);
   });
 
-  it("ein Marker bei null ersetzt den automatischen Anfang", () => {
-    const m = { ab_s: 0, zoom: 1.6 };
+  it("ein Marker auf dem Clipanfang ersetzt den automatischen Anfang", () => {
+    const m = { ab_s: 10, zoom: 1.6 };
+    expect(marken_abschnitte([m], SCHNITT)).toEqual([{ vonQuelle: 10, bisQuelle: 40, marke: m }]);
+  });
+
+  it("ein Marker vor dem Clipanfang gilt trotzdem, denn er ist die letzte Entscheidung", () => {
+    /* Nach einem Kürzen am Anfang kann eine gesetzte Marke davor liegen. Sie einfach fallen zu
+     * lassen hiesse, eine Entscheidung stillschweigend zurückzunehmen. */
+    const m = { ab_s: 4, zoom: 1.6 };
     expect(marken_abschnitte([m], SCHNITT)).toEqual([{ vonQuelle: 10, bisQuelle: 40, marke: m }]);
   });
 
   it("übergeht Marker hinter dem Ende des Clips", () => {
-    /* Nach einem Kürzen kann ein Marker draußen liegen; ein Abschnitt mit negativer Breite wäre
-     * unsichtbar und in der Rechnung Unsinn. */
     expect(marken_abschnitte([{ ab_s: 99, x: 1 }], SCHNITT)).toEqual([{ vonQuelle: 10, bisQuelle: 40, marke: null }]);
   });
 
   it("die Abschnitte liegen lückenlos hintereinander", () => {
-    const a = marken_abschnitte([{ ab_s: 5, x: 1 }, { ab_s: 18, zoom: 1.3 }], SCHNITT);
-    for (let i = 1; i < a.length; i += 1) expect(a[i].vonQuelle).toBeCloseTo(a[i - 1].bisQuelle, 5);
+    const a = marken_abschnitte([{ ab_s: 15, x: 1 }, { ab_s: 28, zoom: 1.3 }], SCHNITT);
+    expect(a[0].vonQuelle).toBe(10);
+    expect(a[a.length - 1].bisQuelle).toBe(40);
+    for (let i = 1; i < a.length; i += 1) expect(a[i].vonQuelle).toBe(a[i - 1].bisQuelle);
   });
 });

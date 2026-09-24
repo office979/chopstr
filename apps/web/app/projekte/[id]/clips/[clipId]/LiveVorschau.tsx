@@ -109,10 +109,10 @@ export function LiveVorschau({
   /* Was gilt an dieser Stelle? Eine Marke von Hand schlaegt den Plan; ohne Marke gilt, was die
    * Automatik beim letzten Lauf entschieden hat. */
   const jetzt = useMemo(() => {
-    const imClip = zeit - clipStart;
     const shot = shots.find((s) => zeit >= s.start && zeit < s.end) ?? null;
+    /* Marken liegen in QUELLZEIT, genau wie hier gemessen wird und wie der Renderer sie liest. */
     const marke = [...zeitmarken]
-      .filter((m) => m.ab_s <= imClip + 1e-6)
+      .filter((m) => m.ab_s <= zeit + 1e-6)
       .sort((a, b) => a.ab_s - b.ab_s)
       .pop();
     const auswahl = shot?.auswahl ?? [];
@@ -126,7 +126,7 @@ export function LiveVorschau({
       geteilt: (marke?.layout ?? (shot?.layout === "geteilt" ? "geteilt" : "einzel")) === "geteilt",
       auswahl,
     };
-  }, [zeit, clipStart, shots, zeitmarken, srcW, srcH]);
+  }, [zeit, shots, zeitmarken, srcW, srcH]);
 
   const ausschnitt = useMemo(() => {
     if (!srcW || !srcH) return null;

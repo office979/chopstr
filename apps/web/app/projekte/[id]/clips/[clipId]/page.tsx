@@ -77,7 +77,6 @@ export default async function ClipPage({ params }: Props) {
          * die es nicht mehr gibt, und die sollen nicht in die Oberfläche durchschlagen. */
         captionStyle={stilPruefen(extras[0]?.caption_style)}
         captionPresets={captionPresets.map((p) => ({ id: p.id, name: p.name, style: p.style }))}
-        filmstripSrc={mediaUrl(mediaBase, clip.filmstrip_key)}
         /* Aus den Extras und nicht aus der Clip-Zeile: geschrieben wird ueber updateClipExtras,
          * und gelesen werden muss dieselbe Stelle. Im Testmodus sind das zwei getrennte Ablagen,
          * dort waren gesetzte Marken nach dem Neuladen sonst weg. */

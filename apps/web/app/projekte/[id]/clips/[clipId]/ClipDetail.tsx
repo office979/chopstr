@@ -9,16 +9,33 @@ import { cn } from "@/components/ui/cn";
 import { reclassify } from "@/lib/transcript/fillers";
 import { ASPECT_LABELS, formatClipDuration } from "@/lib/clips/labels";
 import type { Aspect, RenderShot, TranscriptVersion, TranscriptWord, Zeitmarke } from "@/lib/repo/types";
-import { Zeitleiste, beschreibung as markeBeschreibung } from "./Zeitleiste";
+import { Bildausschnitt, beschreibung as markeBeschreibung } from "./Bildausschnitt";
 import { Timeline, luecken } from "./timeline/Timeline";
 import { useFilmstreifen } from "./useFilmstreifen";
 import type { WellenformDaten } from "./timeline/Wellenform";
-import { dauer as schnittDauer, gleich as schnittGleich, type Schnitt } from "@/lib/clips/schnitt";
+import {
+  dauer as schnittDauer,
+  gleich as schnittGleich,
+  zusammenziehen,
+  type Schnitt,
+} from "@/lib/clips/schnitt";
 import { ClipPreview } from "./ClipPreview";
 import { LiveVorschau } from "./LiveVorschau";
 import { ClipTextEditor } from "./ClipTextEditor";
 import { CaptionStudio, type GespeicherteVorlage } from "./CaptionStudio";
 import { passtZumRender, type CaptionStyle } from "@/lib/clips/caption-style";
+
+/* Eine Fassung im Verlauf: Schnitt und Marken gehoeren zusammen, weil „Rueckgaengig" den
+ * letzten Schritt meint und nicht den letzten Schritt einer bestimmten Sorte. */
+interface Stand {
+  schnitt: Schnitt;
+  marken: Zeitmarke[];
+}
+
+function markenGleich(a: Zeitmarke[], b: Zeitmarke[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((m, i) => JSON.stringify(m) === JSON.stringify(b[i]));
+}
 
 interface Correction {
   old_text: string;
@@ -50,7 +67,6 @@ interface Props {
   srcH: number | null;
   outW: number;
   outH: number;
-  filmstripSrc: string | null;
   zeitmarken: Zeitmarke[];
   shots: RenderShot[];
   quelleBreite: number | null;
@@ -88,7 +104,6 @@ export function ClipDetail({
   srcH,
   outW,
   outH,
-  filmstripSrc,
   zeitmarken: markenAnfang,
   shots,
   quelleBreite,
@@ -124,12 +139,13 @@ export function ClipDetail({
    * Ergebnis des letzten Laufs). Voreingestellt ist die Vorschau: wer hier ist, stellt etwas ein. */
   const [zeigeGebautes, setZeigeGebautes] = useState(false);
 
-  /* Der Schnitt mit Verlauf. Rueckgaengig und Wiederherstellen brauchen nur zwei Listen alter
-   * Fassungen; ein Diff waere hier Aufwand ohne Nutzen, die Listen sind winzig. */
+  /* Der Verlauf fuer Rueckgaengig und Wiederherstellen. Eine Fassung ist Schnitt UND Marken
+   * zusammen: wer einen Marker verschiebt und dann „Rueckgaengig" drueckt, meint den Marker.
+   * Zwei Listen alter Fassungen reichen; ein Diff waere Aufwand ohne Nutzen, sie sind winzig. */
   const [schnitt, setSchnitt] = useState<Schnitt>(komposition);
   const [gesichert, setGesichert] = useState<Schnitt>(komposition);
-  const [zurueckStapel, setZurueckStapel] = useState<Schnitt[]>([]);
-  const [vorStapel, setVorStapel] = useState<Schnitt[]>([]);
+  const [zurueckStapel, setZurueckStapel] = useState<Stand[]>([]);
+  const [vorStapel, setVorStapel] = useState<Stand[]>([]);
   const [schnittSaving, setSchnittSaving] = useState(false);
   const [wellenform, setWellenform] = useState<WellenformDaten | null>(null);
   const [laeuft, setLaeuft] = useState(false);
@@ -149,43 +165,133 @@ export function ClipDetail({
     };
   }, [wellenformSrc]);
 
+  /* Der jeweils neueste Stand, auch mitten in einem Ziehen. Die Zustandsvariablen selbst taugen
+   * dafuer nicht: waehrend eines Zugs kommen Dutzende Ereignisse, bevor React neu zeichnet. */
+  const schnittRef = useRef(schnitt);
+  useEffect(() => {
+    schnittRef.current = schnitt;
+  }, [schnitt]);
+  const markenRef = useRef(marken);
+  useEffect(() => {
+    markenRef.current = marken;
+  }, [marken]);
+
+  const standJetzt = useCallback((): Stand => ({ schnitt: schnittRef.current, marken: markenRef.current }), []);
+  const merken = useCallback(
+    (stand: Stand) => {
+      setZurueckStapel((z) => [...z.slice(-29), stand]);
+      setVorStapel([]);
+    },
+    [],
+  );
+
   /* Hier wird bewusst NICHT aufgeraeumt: aufraeumen zieht beruehrende Abschnitte zusammen, und
    * genau die entstehen beim Teilen. Die einzelnen Schritte raeumen selbst auf, soweit noetig.
    * Beim Bauen werden durchgehende Abschnitte wieder zusammengefasst (render_plan), damit an
    * einer Naht ohne entfernten Teil keine Tonblende hoerbar wird. */
   const schnittSetzen = useCallback(
     (neu: Schnitt) => {
-      if (!neu.length || schnittGleich(neu, schnitt)) return;
-      setZurueckStapel((z) => [...z.slice(-29), schnitt]);
-      setVorStapel([]);
+      if (!neu.length || schnittGleich(neu, schnittRef.current)) return;
+      merken(standJetzt());
+      schnittRef.current = neu;
       setSchnitt(neu);
     },
-    [schnitt],
+    [merken, standJetzt],
   );
 
+  /* Ziehen an einer Kante: waehrend des Zugs nur anzeigen. Sonst stuende nach einem einzigen
+   * Zug fuer jede Mausbewegung eine Fassung im Verlauf, und „Rueckgaengig" ginge einen
+   * Bildpunkt zurueck statt einen Schritt. */
+  const zugStart = useRef<Stand | null>(null);
+  const schnittZiehen = useCallback(
+    (neu: Schnitt) => {
+      if (!neu.length) return;
+      if (!zugStart.current) zugStart.current = standJetzt();
+      schnittRef.current = neu;
+      setSchnitt(neu);
+    },
+    [standJetzt],
+  );
+  const schnittLoslassen = useCallback(() => {
+    const start = zugStart.current;
+    zugStart.current = null;
+    if (!start || schnittGleich(start.schnitt, schnittRef.current)) return;
+    merken(start);
+  }, [merken]);
+
+  /* Marken speichern, ohne den Verlauf anzufassen. Gerechnet wird immer vom neuesten Stand aus:
+   * ohne das rechnet ein zweiter Klick, der vor der Antwort des ersten kommt, mit einer alten
+   * Liste weiter, und aus einer verschobenen Marke werden zwei. */
+  const markenSpeichern = useCallback(
+    async (naechste: Zeitmarke[]) => {
+      const vorher = markenRef.current;
+      markenRef.current = naechste;
+      setMarken(naechste);
+      try {
+        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/zeitmarken`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ zeitmarken: naechste }),
+        });
+        const data = (await res.json()) as { error?: string; zeitmarken?: Zeitmarke[]; needs_render?: boolean };
+        if (!res.ok) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
+        if (data.zeitmarken) {
+          markenRef.current = data.zeitmarken;
+          setMarken(data.zeitmarken);
+        }
+        setMessage({
+          tone: "ok",
+          text: data.needs_render ? "Gespeichert. Wirkt, sobald der Clip neu gebaut wird." : "Gespeichert.",
+        });
+      } catch (err) {
+        markenRef.current = vorher;
+        setMarken(vorher);
+        setMessage({ tone: "error", text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt" });
+      }
+    },
+    [sourceId, clipId],
+  );
+
+  /* Eine Fassung wiederherstellen. Der Schnitt liegt nur hier, die Marken liegen auch auf dem
+   * Server: weichen sie ab, werden sie mitgespeichert, sonst zeigte die Seite nach dem Neuladen
+   * wieder den alten Stand. */
+  const standSetzen = useCallback(
+    (stand: Stand) => {
+      schnittRef.current = stand.schnitt;
+      setSchnitt(stand.schnitt);
+      if (!markenGleich(stand.marken, markenRef.current)) void markenSpeichern(stand.marken);
+    },
+    [markenSpeichern],
+  );
+
+  /* Bewusst ausserhalb der Aktualisierungsfunktionen gerechnet: setState darf nur den neuen
+   * Wert liefern. Ein Speichern von dort aus liefe im Entwicklungsmodus zweimal. */
   const zurueck = useCallback(() => {
-    setZurueckStapel((z) => {
-      if (!z.length) return z;
-      const letzte = z[z.length - 1];
-      setVorStapel((v) => [...v, schnitt]);
-      setSchnitt(letzte);
-      return z.slice(0, -1);
-    });
-  }, [schnitt]);
+    const letzte = zurueckStapel[zurueckStapel.length - 1];
+    if (!letzte) return;
+    const jetzt = standJetzt();
+    setZurueckStapel((z) => z.slice(0, -1));
+    setVorStapel((v) => [...v, jetzt]);
+    standSetzen(letzte);
+  }, [zurueckStapel, standJetzt, standSetzen]);
 
   const vor = useCallback(() => {
-    setVorStapel((v) => {
-      if (!v.length) return v;
-      const naechste = v[v.length - 1];
-      setZurueckStapel((z) => [...z, schnitt]);
-      setSchnitt(naechste);
-      return v.slice(0, -1);
-    });
-  }, [schnitt]);
+    const naechste = vorStapel[vorStapel.length - 1];
+    if (!naechste) return;
+    const jetzt = standJetzt();
+    setVorStapel((v) => v.slice(0, -1));
+    setZurueckStapel((z) => [...z, jetzt]);
+    standSetzen(naechste);
+  }, [vorStapel, standJetzt, standSetzen]);
 
   const schnittGeaendert = !schnittGleich(schnitt, gesichert);
+  /* Verglichen wird in der Form, die auch im Plan steht: der Renderer zieht durchgehende
+   * Abschnitte zusammen. Ohne das gaelte ein geteilter, frisch gebauter Clip fuer immer als
+   * veraltet. */
   const schnittVeraltet =
-    Boolean(clipSrc) && gerenderteSegmente != null && !schnittGleich(gesichert, gerenderteSegmente);
+    Boolean(clipSrc) &&
+    gerenderteSegmente != null &&
+    !schnittGleich(zusammenziehen(gesichert), zusammenziehen(gerenderteSegmente));
   const neueDauer = schnittDauer(schnitt);
 
   /* Der Zeitraum, den die Timeline zeigt: der geladene Schnitt plus zehn Sekunden Luft auf beiden
@@ -351,43 +457,15 @@ export function ClipDetail({
     }
   };
 
-  /* Die Marken auch in einer Ref, damit ein Schreibvorgang immer vom neuesten Stand ausgeht.
-   * Ohne das rechnet ein zweiter Klick, der vor der Antwort des ersten kommt, mit einer alten
-   * Liste weiter: einmal beobachtet, dass dabei aus einer verschobenen Marke zwei wurden. */
-  const markenRef = useRef(marken);
-  useEffect(() => {
-    markenRef.current = marken;
-  }, [marken]);
-
-  const markenSichern = useCallback(
-    async (rechnen: (vorher: Zeitmarke[]) => Zeitmarke[]) => {
-      const vorher = markenRef.current;
-      const naechste = rechnen(vorher);
-      markenRef.current = naechste;
-      setMarken(naechste);
-      try {
-        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/zeitmarken`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ zeitmarken: naechste }),
-        });
-        const data = (await res.json()) as { error?: string; zeitmarken?: Zeitmarke[]; needs_render?: boolean };
-        if (!res.ok) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
-        if (data.zeitmarken) {
-          markenRef.current = data.zeitmarken;
-          setMarken(data.zeitmarken);
-        }
-        setMessage({
-          tone: "ok",
-          text: data.needs_render ? "Gespeichert. Wirkt, sobald der Clip neu gebaut wird." : "Gespeichert.",
-        });
-      } catch (err) {
-        markenRef.current = vorher;
-        setMarken(vorher);
-        setMessage({ tone: "error", text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt" });
-      }
+  /* Eine Marke aendern: erst die bisherige Fassung in den Verlauf, dann speichern. */
+  const markenAendern = useCallback(
+    (rechnen: (vorher: Zeitmarke[]) => Zeitmarke[]) => {
+      const naechste = rechnen(markenRef.current);
+      if (markenGleich(naechste, markenRef.current)) return;
+      merken(standJetzt());
+      void markenSpeichern(naechste);
     },
-    [sourceId, clipId],
+    [merken, standJetzt, markenSpeichern],
   );
 
   const schnittSichern = async () => {
@@ -523,25 +601,18 @@ export function ClipDetail({
           )}
 
           <div className="mt-4">
-            <Zeitleiste
-              filmstripSrc={null}
-              filmstripMeta={null}
-              videoSrc={null}
-              clipStart={vorschauStart}
-              dauerS={neueDauer}
+            <Bildausschnitt
               zeit={currentTime}
-              onSeek={seek}
               shots={shots}
               zeitmarken={marken}
               onMarke={(m) =>
-                void markenSichern((vorher) =>
+                markenAendern((vorher) =>
                   [...vorher.filter((x) => Math.abs(x.ab_s - m.ab_s) > 0.35), m].sort((a, b) => a.ab_s - b.ab_s),
                 )
               }
-              onMarkeWeg={(abS) => void markenSichern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
+              onMarkeWeg={(abS) => markenAendern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
               quelleBreite={quelleBreite}
               canEdit={canEdit}
-              nurEinstellungen
             />
           </div>
         </div>
@@ -612,6 +683,8 @@ export function ClipDetail({
           bereichBisS={bereichBis}
           schnitt={schnitt}
           onSchnitt={(neu) => schnittSetzen(neu)}
+          onZiehen={schnittZiehen}
+          onZiehenFertig={schnittLoslassen}
           quelleDauerS={quelleDauerS}
           zeit={currentTime}
           onSeek={seek}
@@ -619,12 +692,11 @@ export function ClipDetail({
           onPlayPause={() => setSpielen((n) => n + 1)}
           wellenform={wellenform}
           filmstreifen={streifenBilder}
-          filmstripSrc={zeigeGebautes ? filmstripSrc : null}
           shots={shots}
           zeitmarken={marken}
-          onMarkeWeg={(abS) => void markenSichern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
+          onMarkeWeg={(abS) => markenAendern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
           onMarkeVerschieben={(vonS, nachS) =>
-            void markenSichern((vorher) =>
+            markenAendern((vorher) =>
               vorher
                 .map((x) => (Math.abs(x.ab_s - vonS) < 1e-6 ? { ...x, ab_s: Math.round(nachS * 100) / 100 } : x))
                 .sort((a, b) => a.ab_s - b.ab_s),

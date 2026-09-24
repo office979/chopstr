@@ -26,6 +26,10 @@ interface Props {
   bereichBisS: number;
   schnitt: Schnitt;
   onSchnitt: (neu: Schnitt, was: string) => void;
+  /* Waehrend an einer Kante gezogen wird. Getrennt von onSchnitt, weil ein Zug Dutzende
+   * Ereignisse liefert und der Verlauf davon nur EINEN Schritt sehen soll. */
+  onZiehen: (neu: Schnitt) => void;
+  onZiehenFertig: () => void;
   quelleDauerS: number;
   /* Wo der Player steht, in Quellzeit. */
   zeit: number;
@@ -34,7 +38,6 @@ interface Props {
   onPlayPause: () => void;
   wellenform: WellenformDaten | null;
   filmstreifen: string[];
-  filmstripSrc: string | null;
   shots: RenderShot[];
   zeitmarken: Zeitmarke[];
   onMarkeWeg: (abS: number) => void;
@@ -60,6 +63,8 @@ export function Timeline({
   bereichBisS,
   schnitt,
   onSchnitt,
+  onZiehen,
+  onZiehenFertig,
   quelleDauerS,
   zeit,
   onSeek,
@@ -67,7 +72,6 @@ export function Timeline({
   onPlayPause,
   wellenform,
   filmstreifen,
-  filmstripSrc,
   shots,
   zeitmarken,
   onMarkeWeg,
@@ -143,8 +147,9 @@ export function Timeline({
     [ausX],
   );
 
-  /* Einen Marker verschieben. Gespeichert ist er in Clipzeit, gezogen wird in Quellzeit - deshalb
-   * wird beim Loslassen umgerechnet und nicht bei jeder Mausbewegung neu gespeichert. */
+  /* Einen Marker verschieben. Marker liegen in QUELLZEIT, genau wie alles andere in der Leiste:
+   * ein Marker zeigt auf eine Stelle im Video und soll dort bleiben, auch wenn davor etwas
+   * weggeschnitten wird. Gespeichert wird erst beim Loslassen, nicht bei jeder Mausbewegung. */
   const markeZiehen = useCallback(
     (marke: Zeitmarke) => (e: React.PointerEvent) => {
       e.preventDefault();
@@ -152,17 +157,7 @@ export function Timeline({
       let letzte = marke.ab_s;
       const los = (ev: PointerEvent) => {
         const t = ausX(ev.clientX);
-        if (t == null) return;
-        let vorher = 0;
-        for (const a of schnitt) {
-          if (t < a.start) break;
-          if (t <= a.end) {
-            vorher += t - a.start;
-            break;
-          }
-          vorher += a.end - a.start;
-        }
-        letzte = Math.max(0, vorher);
+        if (t != null) letzte = Math.max(0, t);
       };
       const ende = () => {
         window.removeEventListener("pointermove", los);
@@ -172,7 +167,7 @@ export function Timeline({
       window.addEventListener("pointermove", los);
       window.addEventListener("pointerup", ende);
     },
-    [ausX, schnitt, onMarkeVerschieben],
+    [ausX, onMarkeVerschieben],
   );
 
   const imClip = useMemo(() => {
@@ -305,10 +300,10 @@ export function Timeline({
         >
           {/* Bild */}
           <div className="relative h-[64px] w-full overflow-hidden rounded-[6px] bg-black/50" style={{ height: SPUR_HOEHE }}>
-            {filmstripSrc ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={filmstripSrc} alt="" draggable={false} className="pointer-events-none h-full w-full object-fill" />
-            ) : filmstreifen.length > 0 ? (
+            {/* Immer aus der Quelle gezeichnet und nie der gebaute Streifen: der zeigt den
+              * FERTIGEN Clip, also die Abschnitte aneinandergehaengt. Ueber die Zeitskala hier
+              * gelegt saessen seine Bilder an den falschen Stellen. */}
+            {filmstreifen.length > 0 ? (
               <div className="pointer-events-none flex h-full w-full">
                 {filmstreifen.map((b, i) => (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -367,8 +362,14 @@ export function Timeline({
                 </button>
                 {canEdit && (
                   <>
-                    <Griff seite="links" onPointer={ziehen((t) => onSchnitt(randSetzen(schnitt, i, 0, t, quelleDauerS), "Anfang verschoben"))} />
-                    <Griff seite="rechts" onPointer={ziehen((t) => onSchnitt(randSetzen(schnitt, i, 1, t, quelleDauerS), "Ende verschoben"))} />
+                    <Griff
+                      seite="links"
+                      onPointer={ziehen((t) => onZiehen(randSetzen(schnitt, i, 0, t, quelleDauerS)), onZiehenFertig)}
+                    />
+                    <Griff
+                      seite="rechts"
+                      onPointer={ziehen((t) => onZiehen(randSetzen(schnitt, i, 1, t, quelleDauerS)), onZiehenFertig)}
+                    />
                   </>
                 )}
               </div>
@@ -403,6 +404,8 @@ export function Timeline({
                         const ziel = m.marke!.ab_s + (e.key === "ArrowLeft" ? -schritt : e.key === "ArrowRight" ? schritt : 0);
                         if (ziel === m.marke!.ab_s) return;
                         e.preventDefault();
+                        /* Sonst wanderte mit derselben Taste auch der Abspielkopf. */
+                        e.stopPropagation();
                         onMarkeVerschieben(m.marke!.ab_s, Math.max(0, Math.round(ziel * 100) / 100));
                       }}
                       aria-label={`Marker bei ${timecode(m.vonQuelle)} verschieben, mit Pfeiltasten oder Ziehen`}
@@ -493,39 +496,36 @@ export function luecken(schnitt: Schnitt, vonS: number, bisS: number): { von: nu
   return aus.filter((l) => l.bis > l.von);
 }
 
-/* Die Marker als Abschnitte in QUELLZEIT, damit sie sich mit dem Rest der Leiste decken.
- * Gespeichert sind sie in Clipzeit („ab Sekunde x des fertigen Clips"). */
+/* Die Marker als Abschnitte in Quellzeit: ab welcher Stelle gilt welche Entscheidung.
+ *
+ * Marker liegen in QUELLZEIT, so wie der Renderer sie liest (tracking.zeitmarken_anwenden). Eine
+ * Marke heisst „ab dieser Stelle im Video", nicht „ab dieser Sekunde des fertigen Clips": sonst
+ * verschoebe ein Kuerzen am Anfang alle Bildausschnitte, obwohl am Bild nichts geaendert wurde.
+ *
+ * Ein Marker vor dem Clipanfang gilt trotzdem, denn er ist die zuletzt getroffene Entscheidung;
+ * angezeigt wird er ab dem Anfang des Clips. */
 export function marken_abschnitte(marken: Zeitmarke[], schnitt: Schnitt): {
   vonQuelle: number;
   bisQuelle: number;
   marke: Zeitmarke | null;
 }[] {
-  const gesamt = schnittDauer(schnitt);
-  const sortiert = [...marken].filter((m) => m.ab_s < gesamt).sort((a, b) => a.ab_s - b.ab_s);
-  const grenzen: { ab: number; marke: Zeitmarke | null }[] = [{ ab: 0, marke: null }];
+  const anfang = schnitt[0]?.start ?? 0;
+  const ende = schnitt[schnitt.length - 1]?.end ?? 0;
+  const sortiert = [...marken].filter((m) => m.ab_s < ende).sort((a, b) => a.ab_s - b.ab_s);
+  const grenzen: { ab: number; marke: Zeitmarke | null }[] = [{ ab: anfang, marke: null }];
   for (const m of sortiert) {
-    if (m.ab_s <= 1e-6) grenzen[0].marke = m;
+    if (m.ab_s <= anfang + 1e-6) grenzen[0].marke = m;
     else grenzen.push({ ab: m.ab_s, marke: m });
   }
   const aus: { vonQuelle: number; bisQuelle: number; marke: Zeitmarke | null }[] = [];
   for (let i = 0; i < grenzen.length; i += 1) {
-    const von = grenzen[i].ab;
-    const bis = i + 1 < grenzen.length ? grenzen[i + 1].ab : gesamt;
-    /* Ein Abschnitt in Clipzeit kann in der Quelle ueber eine Luecke gehen. Fuer die Anzeige
-     * reicht Anfang und Ende; die Luecke ist in der Bildspur ohnehin abgedunkelt. */
-    aus.push({ vonQuelle: quelle(schnitt, von), bisQuelle: quelle(schnitt, bis), marke: grenzen[i].marke });
+    aus.push({
+      vonQuelle: grenzen[i].ab,
+      bisQuelle: i + 1 < grenzen.length ? grenzen[i + 1].ab : ende,
+      marke: grenzen[i].marke,
+    });
   }
   return aus.filter((a) => a.bisQuelle > a.vonQuelle);
-}
-
-function quelle(schnitt: Schnitt, clipzeit: number): number {
-  let rest = Math.max(0, clipzeit);
-  for (const a of schnitt) {
-    const laenge = a.end - a.start;
-    if (rest <= laenge) return a.start + rest;
-    rest -= laenge;
-  }
-  return schnitt[schnitt.length - 1]?.end ?? 0;
 }
 
 /* Ein Name links neben einer Spur. Die Hoehe wird durchgereicht, damit Name und Spur auf einer

@@ -18,6 +18,7 @@ import {
   MIN_ABSCHNITT_S,
   randSetzen,
   teilen,
+  zusammenziehen,
   type Schnitt,
 } from "@/lib/clips/schnitt";
 
@@ -169,5 +170,21 @@ describe("gleich", () => {
     expect(gleich(EINER, [A(10, 40)])).toBe(true);
     expect(gleich(EINER, [A(10, 41)])).toBe(false);
     expect(gleich(EINER, ZWEI)).toBe(false);
+  });
+});
+
+describe("zusammenziehen", () => {
+  it("macht aus einem Teilen ohne Entfernen wieder einen Abschnitt", () => {
+    /* Genau so sieht der Renderplan aus, und genau dagegen wird verglichen. */
+    expect(zusammenziehen(teilen(EINER, 25))).toEqual(EINER);
+  });
+
+  it("lässt eine echte Lücke stehen", () => {
+    expect(zusammenziehen(ZWEI)).toEqual(ZWEI);
+  });
+
+  it("zieht einen Teaser nicht in den Körper", () => {
+    const mit: Schnitt = [{ start: 10, end: 20, role: "teaser" }, A(20, 30)];
+    expect(zusammenziehen(mit)).toEqual(mit);
   });
 });

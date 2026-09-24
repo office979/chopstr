@@ -27,9 +27,17 @@ from dataclasses import asdict, dataclass, field
 from . import tracking
 
 SAMPLE_FPS = 5
+# Vor der Erkennung wird auf diese Breite verkleinert. Bei 4K sind das rund ein Sechzehntel der
+# Bildpunkte, und YuNet findet Gesichter darauf genauso zuverlaessig: ein Kopf misst dort immer noch
+# ueber hundert Bildpunkte. Gemessen an BP CW (3840 Bildpunkte breit) war das Abtasten ohne diese
+# Verkleinerung langsamer als das Video selbst laeuft.
+ANALYSE_BREITE = 960
+# Zwei Ausschnitte, die sich um weniger als das unterscheiden, gelten als derselbe. Bei rund 1200
+# Bildpunkten Ausschnittbreite ist das unter einem Prozent und im fertigen Bild nicht zu sehen.
+GLEICHER_AUSSCHNITT_PX = 8
 MIN_SHOT_S = 1.2  # kürzer wirkt hektisch
 EYE_LINE = 0.37  # Gesichtsmitte bei 37 % der Ausgabehöhe (Augen im oberen Drittel)
-REFRAME_VERSION = "reframe_v1"
+REFRAME_VERSION = "reframe_v2"
 
 STRATEGIES = ("talking_head", "two_speakers", "neutral", "slide_pip")
 DEFAULT_YUNET_MODEL = "models/face_detection_yunet_2023mar.onnx"
@@ -177,10 +185,22 @@ def crop_geometry(src_w: int, src_h: int, out_w: int, out_h: int) -> tuple[int, 
     return max(2, min(crop_w, _even(src_w))), max(2, min(crop_h, _even(src_h)))
 
 
-def crop_origin(src_w: int, src_h: int, crop_w: int, crop_h: int, face_cx: float | None, face_cy: float | None) -> tuple[int, int]:
-    """Linke obere Ecke des Ausschnitts: horizontal auf das Gesicht zentriert, vertikal so, dass die
-    Gesichtsmitte bei ``EYE_LINE`` der Ausgabehöhe liegt. Ohne Gesicht: mittig, bei Vollhöhe oben (crop_y 0)."""
-    x = (src_w - crop_w) / 2 if face_cx is None else face_cx - crop_w / 2
+def crop_origin(
+    src_w: int,
+    src_h: int,
+    crop_w: int,
+    crop_h: int,
+    face_cx: float | None,
+    face_cy: float | None,
+    anker: float = 0.5,
+) -> tuple[int, int]:
+    """Linke obere Ecke des Ausschnitts.
+
+    Waagerecht sitzt die Gesichtsmitte bei ``anker`` der Ausschnittbreite: 0,5 zentriert wie bisher,
+    ein Drittel laesst Blickraum nach rechts, zwei Drittel nach links (siehe ``tracking.blickraum_anker``).
+    Senkrecht liegt die Gesichtsmitte bei ``EYE_LINE`` der Ausgabehöhe. Ohne Gesicht: mittig, bei
+    Vollhöhe oben (crop_y 0)."""
+    x = (src_w - crop_w) / 2 if face_cx is None else face_cx - anker * crop_w
     if face_cy is None:
         y = 0.0 if crop_h >= src_h else (src_h - crop_h) / 2
     else:
@@ -190,38 +210,13 @@ def crop_origin(src_w: int, src_h: int, crop_w: int, crop_h: int, face_cx: float
     return x, y
 
 
-def detect_faces(video_path: str, t0: float, t1: float) -> list[tuple[float, list[tuple[int, int, int, int]]]]:
-    """Gesichtsboxen (x, y, w, h) pro Abtastzeitpunkt. Benötigt opencv-python-headless und das YuNet-Modell."""
-    import cv2
-
-    model = yunet_model_path()
-    if not os.path.isfile(model):
-        raise FileNotFoundError(f"YuNet-Modell fehlt: {model}")
-    cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    det = cv2.FaceDetectorYN.create(model, "", (w, h), 0.7)
-    out, t = [], t0
-    while t < t1:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(t * fps))
-        ok, frame = cap.read()
-        if not ok:
-            break
-        _, faces = det.detect(frame)
-        boxes = [tuple(map(int, f[:4])) for f in (faces if faces is not None else [])]
-        out.append((t, boxes))
-        t += 1 / SAMPLE_FPS
-    cap.release()
-    return out
-
-
 def abtasten(video_path: str, t0: float, t1: float) -> list[tracking.Abtastung]:
     """Ein Durchlauf über den Abschnitt: Gesichter, Bildwechsel und Mundbewegung zugleich.
 
-    Drei Messungen in einem Durchgang, weil jedes Aufsetzen der Leseposition teuer ist:
+    Drei Messungen in einem Durchgang, weil jedes Aufsetzen der Leseposition teuer ist.
 
-    GESICHTER wie bisher über YuNet.
+    GESICHTER über YuNet, auf ``ANALYSE_BREITE`` verkleinert. Die Boxen werden auf die Quellgröße
+    zurückgerechnet, nach aussen ist davon nichts zu sehen.
 
     BILDWECHSEL als Abstand der Farbverteilung zum vorigen Abtastpunkt. Ein Kameraschnitt ändert
     das Histogramm sprunghaft, eine Bewegung im Bild nicht. Das ist das Signal, an dem Einstellungen
@@ -230,6 +225,11 @@ def abtasten(video_path: str, t0: float, t1: float) -> list[tracking.Abtastung]:
     MUNDBEWEGUNG als Änderung im unteren Teil jeder Gesichtsbox. Wer spricht, bewegt dort etwas.
     Verglichen wird mit demselben Bildbereich des vorigen Abtastpunkts, deshalb ist der Wert
     unmittelbar nach einem Schnitt bedeutungslos und wird verworfen.
+
+    Gelesen wird der Reihe nach und nicht durch Springen. Ein Sprung zwingt den Decoder, ab dem
+    letzten Schlüsselbild neu aufzubauen; bei fünf Abtastungen je Sekunde kostet das mehr, als
+    einfach alle Bilder zu holen und die überzähligen zu verwerfen. Gemessen an BP CW: das Abtasten
+    von 60 Sekunden 4K dauerte so 114 Sekunden, also länger als das Video selbst.
     """
     import cv2
     import numpy as np
@@ -241,30 +241,57 @@ def abtasten(video_path: str, t0: float, t1: float) -> list[tracking.Abtastung]:
     fps = cap.get(cv2.CAP_PROP_FPS) or 25
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    det = cv2.FaceDetectorYN.create(model, "", (w, h), 0.7)
+    skala = max(1.0, w / float(ANALYSE_BREITE))
+    aw, ah = max(1, int(round(w / skala))), max(1, int(round(h / skala)))
+    det = cv2.FaceDetectorYN.create(model, "", (aw, ah), 0.7)
+
+    n0 = int(t0 * fps)
+    n1 = int(t1 * fps)
+    schritt = max(1, int(round(fps / SAMPLE_FPS)))
+    if n0 > 0:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, n0)
 
     out: list[tracking.Abtastung] = []
     vor_hist = None
     vor_grau = None
     vor_boxen: list[tuple[int, int, int, int]] = []
-    t = t0
-    while t < t1:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(t * fps))
+    n = n0
+    while n < n1:
+        if (n - n0) % schritt:
+            if not cap.grab():  # überzähliges Bild, nur weiterschieben
+                break
+            n += 1
+            continue
         ok, frame = cap.read()
         if not ok:
             break
-        _, faces = det.detect(frame)
-        boxen = [tuple(map(int, f[:4])) for f in (faces if faces is not None else [])]
+        t = n / fps
+        n += 1
 
-        klein = cv2.resize(frame, (160, 90))
-        hist = cv2.calcHist([klein], [0, 1, 2], None, [8, 8, 8], [0, 256] * 3)
-        cv2.normalize(hist, hist)
-        wechsel = None if vor_hist is None else float(1.0 - cv2.compareHist(vor_hist, hist, cv2.HISTCMP_CORREL))
+        klein = frame if skala == 1.0 else cv2.resize(frame, (aw, ah))
+        _, faces = det.detect(klein)
+        boxen_klein = [tuple(map(int, f[:4])) for f in (faces if faces is not None else [])]
 
-        grau = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # Farbverteilung des ganzen Bildes, auf Summe 1 gebracht, verglichen ueber Bhattacharyya.
+        # Der naheliegende Weg ueber die Korrelation ist hier unbrauchbar: in einem Studio teilen
+        # zwei Kameras Licht, Wand und Farben, die Korrelation liegt deshalb auch ueber einen
+        # harten Schnitt hinweg bei 0,999. An BP CW gemessen lagen die Schnitte bei 0,008 und die
+        # ruhigen Stellen bei 0,0001 - das Signal war da, aber nicht in einer Groesse, an der sich
+        # eine Schwelle festmachen laesst. Bhattacharyya trennt dieselben Stellen mit 0,24 bis 0,32
+        # gegen 0,04.
+        mini = cv2.resize(klein, (160, 90))
+        hist = cv2.calcHist([mini], [0, 1, 2], None, [8, 8, 8], [0, 256] * 3)
+        hist = hist / max(1e-9, float(hist.sum()))
+        wechsel = None if vor_hist is None else float(cv2.compareHist(vor_hist, hist, cv2.HISTCMP_BHATTACHARYYA))
+
+        grau = cv2.cvtColor(klein, cv2.COLOR_BGR2GRAY)
         munde: list[float] = []
+        # Nach einem Schnitt ist die Mundbewegung bedeutungslos, weil ein anderer Bildinhalt
+        # verglichen wuerde. Hier zaehlt die Untergrenze, nicht die kalibrierte Schwelle: die
+        # ergibt sich erst aus der ganzen Aufnahme, und im Zweifel ist eine verworfene Messung
+        # besser als eine falsche.
         if vor_grau is not None and (wechsel is None or wechsel < tracking.SCHNITT_SCHWELLE):
-            for x, y, bw, bh in boxen:
+            for x, y, bw, bh in boxen_klein:
                 # Nur messen, wenn dieselbe Box im vorigen Bild an fast derselben Stelle stand.
                 # Eine springende Erkennung vergleicht sonst zwei verschiedene Bildausschnitte und
                 # liefert eine riesige Differenz, die wie heftiges Sprechen aussieht. An BP CW
@@ -278,7 +305,7 @@ def abtasten(video_path: str, t0: float, t1: float) -> list[tracking.Abtastung]:
                 if not passend:
                     munde.append(tracking.NICHT_MESSBAR)
                     continue
-                # Unteres Drittel der Box, waagerecht auf die Mitte beschränkt: dort liegt der Mund.
+                # Unterer Teil der Box, waagerecht auf die Mitte beschränkt: dort liegt der Mund.
                 mx0 = max(0, x + int(bw * 0.2))
                 mx1 = min(grau.shape[1], x + int(bw * 0.8))
                 my0 = max(0, y + int(bh * 0.55))
@@ -290,44 +317,13 @@ def abtasten(video_path: str, t0: float, t1: float) -> list[tracking.Abtastung]:
                 b = vor_grau[my0:my1, mx0:mx1].astype("float32")
                 munde.append(float(np.abs(a - b).mean()))
         else:
-            munde = [tracking.NICHT_MESSBAR] * len(boxen)
+            munde = [tracking.NICHT_MESSBAR] * len(boxen_klein)
 
+        boxen = [(int(bx * skala), int(by * skala), int(bw * skala), int(bh * skala)) for bx, by, bw, bh in boxen_klein]
         out.append(tracking.Abtastung(t=t, boxen=boxen, bildwechsel=wechsel, mundbewegung=munde))
-        vor_hist, vor_grau, vor_boxen = hist, grau, boxen
-        t += 1 / SAMPLE_FPS
+        vor_hist, vor_grau, vor_boxen = hist, grau, boxen_klein
     cap.release()
     return out
-
-
-def cluster_positions(samples, n_max: int = 3) -> list[float]:
-    """Stabile Sitzpositionen (x-Zentren) über den Clip, ohne Identität. 1-D-k-Means in numpy."""
-    return [x for x, _y in face_centers(samples, n_max)]
-
-
-def face_centers(samples, n_max: int = 3) -> list[tuple[float, float]]:
-    """Sitzpositionen als (x, y)-Zentren, nach x sortiert. k-Means über x, y als Mittel des Clusters."""
-    import numpy as np
-
-    pts = np.array([(x + bw / 2, y + bh / 2) for _, boxes in samples for (x, y, bw, bh) in boxes], dtype=np.float32)
-    if len(pts) == 0:
-        return []
-    xs = pts[:, 0]
-    k = int(min(n_max, len(np.unique(xs.round(-1)))))
-    centers = np.linspace(xs.min(), xs.max(), k) if k > 1 else np.array([xs.mean()])
-    labels = np.zeros(len(xs), dtype=int)
-    for _ in range(25):
-        labels = np.argmin(np.abs(xs[:, None] - centers[None, :]), axis=1)
-        new = np.array([xs[labels == j].mean() if np.any(labels == j) else centers[j] for j in range(k)])
-        if np.allclose(new, centers):
-            break
-        centers = new
-    out = []
-    for j in range(k):
-        sel = labels == j
-        if not np.any(sel):
-            continue
-        out.append((float(pts[sel, 0].mean()), float(pts[sel, 1].mean())))
-    return sorted(out)
 
 
 def propose_speaker_positions(words: list[dict], n_positions: int) -> dict[str, int]:
@@ -641,6 +637,83 @@ def plan_shots_for_positions(
     return shots
 
 
+def plan_shots_aus_zielen(
+    segments: list[dict],
+    ziele_je_segment: list[list[tracking.Ziel]],
+    src_w: int,
+    src_h: int,
+    out_w: int,
+    out_h: int,
+) -> list[Shot]:
+    """Shots aus gemessenen Zielen, lückenlos je Segment.
+
+    Gegenstück zu ``plan_shots_for_positions``: dort kommt die Wahl aus der Sprechertrennung im Ton
+    und einer festen Sitzordnung, hier aus dem Bild selbst. Deshalb hält dieser Weg auch bei einem
+    Kameraschnitt, wo die Sitzordnung des vorigen Bildes nichts mehr bedeutet.
+
+    Die Grenzen der Ziele werden auf das Segment geschoben und bleiben aufsteigend, damit weder eine
+    Lücke noch eine Überlappung entsteht: der Render braucht eine durchgehende Zeitachse."""
+    crop_w, crop_h = crop_geometry(src_w, src_h, out_w, out_h)
+    shots: list[Shot] = []
+    for seg, zl in zip(segments, ziele_je_segment):
+        s0, s1 = float(seg["start"]), float(seg["end"])
+        if s1 <= s0:
+            continue
+        if not zl:
+            x, y = crop_origin(src_w, src_h, crop_w, crop_h, None, None)
+            shots.append(Shot(s0, s1, x, y, crop_w, crop_h))
+            continue
+        grenzen = [s0]
+        for z in zl[1:]:
+            grenzen.append(min(s1, max(grenzen[-1], z.start_s)))
+        grenzen.append(s1)
+        for z, a, b in zip(zl, grenzen, grenzen[1:]):
+            if b <= a:
+                continue
+            x, y = crop_origin(src_w, src_h, crop_w, crop_h, z.cx, z.cy, z.anker)
+            # Ein Kameraschnitt zwischen zwei gleich gerahmten Naheinstellungen ergibt denselben
+            # Ausschnitt. Ihn zweimal zu planen legt eine Schnittmarke, hinter der sich nichts
+            # aendert. An BP CW kam das zweimal in 48 Sekunden vor.
+            vor = shots[-1] if shots else None
+            if vor is not None and vor.end == a and abs(vor.crop_x - x) <= GLEICHER_AUSSCHNITT_PX and abs(vor.crop_y - y) <= GLEICHER_AUSSCHNITT_PX:
+                vor.end = b
+                continue
+            shots.append(Shot(a, b, x, y, crop_w, crop_h))
+    return shots
+
+
+def verfolgen(
+    video_path: str,
+    segments: list[dict],
+    src_w: int,
+    folgen: bool = True,
+) -> tuple[list[list[tracking.Ziel]], list[tuple[float, float]], int, int]:
+    """Das Video abtasten und daraus ableiten, wer wann im Ausschnitt steht.
+
+    Je Segment getrennt gemessen, denn zwischen zwei Segmenten liegt eine herausgeschnittene Stelle.
+    Über die Lücke hinweg zu vergleichen erfände einen Kameraschnitt, wo keiner ist, oder überginge
+    einen, der dort liegt.
+
+    Zurück kommen die Ziele je Segment, die Sitzpositionen der längsten Einstellung (das ist die
+    Bildaufteilung, die den Clip prägt, und was die Oberfläche anzeigt), die Zahl der Einstellungen
+    und die höchste Personenzahl, die in einer davon gleichzeitig zu sehen war."""
+    ziele_je_segment: list[list[tracking.Ziel]] = []
+    laengste: tuple[float, list[tuple[float, float]]] | None = None
+    einstellungen = 0
+    max_personen = 0
+    for seg in segments:
+        abt = abtasten(video_path, float(seg["start"]), float(seg["end"]))
+        einst = tracking.in_einstellungen_teilen(abt)
+        einstellungen += len(einst)
+        for e in einst:
+            p = tracking.positionen(e)
+            max_personen = max(max_personen, len(p))
+            if p and (laengste is None or e.dauer_s > laengste[0]):
+                laengste = (e.dauer_s, p)
+        ziele_je_segment.append(tracking.ziele(einst, float(src_w), folgen=folgen))
+    return ziele_je_segment, (laengste[1] if laengste else []), einstellungen, max_personen
+
+
 def strategy_for(positions: list[float]) -> str:
     if not positions:
         return "neutral"
@@ -685,21 +758,34 @@ def plan_reframe(
     detector = "none"
     positions: list[float] = []
     face_y: list[float] = []
+    ziele_je_segment: list[list[tracking.Ziel]] | None = None
+    max_personen = 0
     available, reason = detector_available()
     if available and video_path:
         try:
-            samples: list = []
-            for seg in segments:
-                samples.extend(detect_faces(video_path, float(seg["start"]), float(seg["end"])))
-            centers = face_centers(samples)
+            # Bei Override talking_head soll der Ausschnitt innerhalb einer Einstellung stehen
+            # bleiben; Kameraschnitte werden trotzdem beachtet.
+            ziele_je_segment, centers, einstellungen, max_personen = verfolgen(
+                video_path, segments, src_w, folgen=(reframe_override != "talking_head")
+            )
             detector = "yunet"
             positions = [c[0] for c in centers]
             face_y = [c[1] for c in centers]
             if not positions:
                 notes.append("Keine Gesichter erkannt, Reframe läuft neutral")
+                ziele_je_segment = None
+            elif einstellungen > 1:
+                notes.append(f"{einstellungen} Einstellungen erkannt, Ausschnitt folgt jedem Kamerawechsel")
+            if max_personen > 1:
+                gefolgt = sum(1 for zl in ziele_je_segment or [] for z in zl if z.grund == "sprecher")
+                offen = sum(1 for zl in ziele_je_segment or [] for z in zl if z.grund == "gruppe_unentschieden")
+                if gefolgt:
+                    notes.append(f"Bis zu {max_personen} Personen im Bild, Sprecher über die Mundbewegung bestimmt")
+                if offen:
+                    notes.append(f"{offen} Abschnitte ohne eindeutigen Sprecher, dort bleibt die Gruppenmitte im Bild")
         except Exception as exc:  # Detektor darf den Render nie stoppen
             notes.append(f"Gesichtsdetektion fehlgeschlagen ({exc.__class__.__name__}), Reframe läuft neutral")
-            detector, positions, face_y = "none", [], []
+            detector, positions, face_y, ziele_je_segment = "none", [], [], None
     else:
         notes.append(reason or "Kein Detektor, Reframe läuft neutral")
 
@@ -714,7 +800,12 @@ def plan_reframe(
         elif reframe_override == "slide_pip":
             notes.append(slide_reason)
 
-    auto = strategy_for(positions)
+    # Gemessen zählt, wie viele Personen in EINER Einstellung gleichzeitig zu sehen waren. Die
+    # Positionen der längsten Einstellung allein würden eine Totale übersehen, die nur kurz kommt,
+    # in der der Ausschnitt aber sehr wohl dem Sprecher folgen muss.
+    auto = strategy_for(positions) if ziele_je_segment is None else (
+        "neutral" if not positions else ("two_speakers" if max_personen > 1 else "talking_head")
+    )
     slide_usable = slide is not None and slide.confidence >= SLIDE_MIN_CONFIDENCE
     if reframe_override == "slide_pip":
         strategy = "slide_pip"
@@ -746,6 +837,10 @@ def plan_reframe(
         layout = plan_slide_layout(src_w, src_h, out_w, out_h, slide, positions, face_y)
         pip = layout["pip"]
         shots = plan_slide_shots(segments, layout)
+    elif ziele_je_segment is not None and strategy != "neutral" and not spk_pos:
+        # Der gemessene Weg: die Wahl kommt aus dem Bild. Eine von Hand gesetzte Sitzordnung
+        # (``spk_pos``) geht vor, denn sie ist eine ausdrückliche Ansage des Nutzers.
+        shots = plan_shots_aus_zielen(segments, ziele_je_segment, src_w, src_h, out_w, out_h)
     else:
         if strategy == "two_speakers" and not spk_pos:
             spk_pos = propose_speaker_positions(words, len(positions))
@@ -786,6 +881,7 @@ def plan_shots(
 
 
 __all__ = [
+    "abtasten",
     "ASPECTS",
     "DEFAULT_YUNET_MODEL",
     "EYE_LINE",
@@ -801,17 +897,14 @@ __all__ = [
     "Shot",
     "SlideRegion",
     "aspect_ratio",
-    "cluster_positions",
     "crop_geometry",
     "crop_origin",
-    "abtasten",
-    "detect_faces",
     "detect_slide_region",
     "detector_available",
     "effective_strategy",
-    "face_centers",
     "plan_reframe",
     "plan_shots",
+    "plan_shots_aus_zielen",
     "plan_shots_for_positions",
     "plan_slide_layout",
     "plan_slide_shots",
@@ -819,5 +912,6 @@ __all__ = [
     "slide_detector_available",
     "slide_region_from_grid",
     "strategy_for",
+    "verfolgen",
     "yunet_model_path",
 ]

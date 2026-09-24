@@ -149,7 +149,7 @@ export function buildDemoRenderPlan(
       hook_version: hook?.version ?? 0,
       candidate_id: candidate.id,
     },
-    versions: { captions_de: "captions_v1", render: "render_v1", reframe: "reframe_v1" },
+    versions: { captions_de: "captions_v1", render: "render_v1", reframe: "reframe_v2" },
   };
 }
 

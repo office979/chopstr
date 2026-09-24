@@ -47,7 +47,7 @@ def test_plan_has_all_contract_keys_and_is_json():
     assert plan["hook_overlay"] is None  # LinkedIn: Default aus
     assert plan["audio"] == {"preset": "master", "lufs": -16.0, "true_peak": -1.5, "micro_fade_ms": 20}
     assert plan["sources"] == SOURCES
-    assert plan["versions"] == {"captions_de": "captions_v1", "render": "render_v1", "reframe": "reframe_v1"}
+    assert plan["versions"] == {"captions_de": "captions_v1", "render": "render_v1", "reframe": "reframe_v2"}
     json.dumps(plan)
     assert render_plan.plan_duration(plan) == pytest.approx(38.7)
 

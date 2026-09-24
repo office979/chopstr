@@ -246,3 +246,112 @@ def test_runde_mit_sieben_personen_wird_nicht_auf_drei_gekuerzt():
     p = tr.positionen(tr.in_einstellungen_teilen(a)[0])
     assert len(p) == 7
     assert [round(x) for x, _y in p] == xs
+
+# -- Was wann im Bild steht ------------------------------------------------------------------------
+def _einstellungen(abtastungen):
+    return tr.in_einstellungen_teilen(abtastungen)
+
+
+def test_eine_person_ergibt_ein_ziel_ueber_die_ganze_einstellung():
+    a = [abt(i * 0.2, [box(500)], 0.02) for i in range(20)]
+    a[0].bildwechsel = None
+    z = tr.ziele(_einstellungen(a), 1920)
+    assert len(z) == 1
+    assert z[0].grund == "einzige_person"
+    assert z[0].cx == pytest.approx(500, abs=20)
+    # Links der Mitte: Blickraum nach rechts, also sitzt das Gesicht auf dem linken Drittel.
+    assert z[0].anker == pytest.approx(1 / 3)
+
+
+def test_kamerawechsel_ergibt_zwei_ziele():
+    """Der Kern der Sache: ueber den Schnitt hinweg bedeutet dieselbe Bildstelle einen anderen Menschen."""
+    a = [abt(i * 0.2, [box(300)], 0.02) for i in range(10)]
+    a[0].bildwechsel = None
+    b = [abt(2.0 + i * 0.2, [box(1500)], 0.02) for i in range(10)]
+    b[0].bildwechsel = 0.9
+    z = tr.ziele(_einstellungen([*a, *b]), 1920)
+    assert len(z) == 2
+    assert z[0].cx == pytest.approx(300, abs=20) and z[1].cx == pytest.approx(1500, abs=20)
+    assert z[0].ende_s <= z[1].start_s
+    # Und die Drittelregel dreht mit: links sitzend nach rechts, rechts sitzend nach links.
+    assert z[0].anker == pytest.approx(1 / 3) and z[1].anker == pytest.approx(2 / 3)
+
+
+def test_sprecherwechsel_innerhalb_einer_einstellung():
+    a = []
+    for i in range(20):
+        mund = [0.9, 0.05] if i < 10 else [0.05, 0.9]
+        a.append(abt(i * 0.2, [box(400), box(1400)], 0.02, mund=mund))
+    a[0].bildwechsel = None
+    z = tr.ziele(_einstellungen(a), 1920)
+    assert len(z) == 2, [(x.start_s, x.ende_s, x.cx) for x in z]
+    assert z[0].cx == pytest.approx(400, abs=20)
+    assert z[1].cx == pytest.approx(1400, abs=20)
+    assert all(x.grund == "sprecher" for x in z)
+
+
+def test_kurzer_wechsel_laesst_das_bild_stehen():
+    """Ein Ausschnitt, der eine halbe Sekunde steht, wirkt wie ein Fehler, auch wenn die Erkennung recht hat."""
+    a = []
+    for i in range(20):
+        mund = [0.05, 0.9] if i in (8, 9) else [0.9, 0.05]  # 0,4 s Zwischenruf
+        a.append(abt(i * 0.2, [box(400), box(1400)], 0.02, mund=mund))
+    a[0].bildwechsel = None
+    z = tr.ziele(_einstellungen(a), 1920, fenster_s=0.4)
+    assert len(z) == 1
+    assert z[0].cx == pytest.approx(400, abs=20)
+    assert all(x.dauer_s >= tr.MIN_ZIEL_S for x in z)
+
+
+def test_kurze_pause_ist_kein_sprecherwechsel():
+    """Wer kurz Luft holt, darf nicht aus dem Bild fallen."""
+    a = []
+    for i in range(20):
+        mund = [0.0, 0.0] if 8 <= i < 12 else [0.9, 0.05]
+        a.append(abt(i * 0.2, [box(400), box(1400)], 0.02, mund=mund))
+    a[0].bildwechsel = None
+    z = tr.ziele(_einstellungen(a), 1920)
+    assert len(z) == 1 and z[0].cx == pytest.approx(400, abs=20)
+
+
+def test_ohne_erkennbaren_sprecher_bleibt_die_gruppe_im_bild():
+    """Geraten waere schlimmer: dann stuende jemand gross im Bild, der gerade schweigt."""
+    a = [abt(i * 0.2, [box(400), box(1400)], 0.02, mund=[0.5, 0.48]) for i in range(20)]
+    a[0].bildwechsel = None
+    z = tr.ziele(_einstellungen(a), 1920)
+    assert len(z) == 1
+    assert z[0].grund == "gruppe_unentschieden"
+    assert z[0].cx == pytest.approx(900, abs=30)  # die Mitte zwischen beiden
+    assert z[0].anker == 0.5
+
+
+def test_ohne_folgen_bleibt_die_haeufigste_person_im_bild():
+    """Strategie talking_head: Kameraschnitte zaehlen weiter, aber innerhalb einer Einstellung steht das Bild."""
+    a = []
+    for i in range(20):
+        boxen = [box(400), box(1400)] if i % 2 else [box(400)]
+        mund = [0.05, 0.9] if i % 2 else [0.05]
+        a.append(abt(i * 0.2, boxen, 0.02, mund=mund))
+    a[0].bildwechsel = None
+    z = tr.ziele(_einstellungen(a), 1920, folgen=False)
+    assert len(z) == 1
+    assert z[0].grund == "haeufigste_person"
+    assert z[0].cx == pytest.approx(400, abs=20)
+
+
+def test_ohne_gesicht_bleibt_es_mittig():
+    a = [abt(i * 0.2, [], 0.02) for i in range(10)]
+    a[0].bildwechsel = None
+    z = tr.ziele(_einstellungen(a), 1920)
+    assert len(z) == 1 and z[0].cx is None and z[0].grund == "kein_gesicht" and z[0].anker == 0.5
+
+
+def test_ziele_haben_keine_luecken_und_keine_ueberlappung():
+    a = []
+    for i in range(30):
+        mund = [0.9, 0.05] if i < 15 else [0.05, 0.9]
+        a.append(abt(i * 0.2, [box(400), box(1400)], 0.02, mund=mund))
+    a[0].bildwechsel = None
+    z = tr.ziele(_einstellungen(a), 1920)
+    for vor, nach in zip(z, z[1:]):
+        assert vor.ende_s == pytest.approx(nach.start_s)

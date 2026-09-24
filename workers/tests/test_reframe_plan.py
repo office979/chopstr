@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from chopstr_worker.pipeline import reframe
+from chopstr_worker.pipeline import reframe, tracking
 
 SRC_W, SRC_H = 1920, 1080
 SEGS = [{"start": 10.0, "end": 20.0, "role": "body"}, {"start": 30.0, "end": 36.0, "role": "body"}]
@@ -138,3 +138,66 @@ def test_detector_reports_missing_opencv_when_model_exists(monkeypatch, tmp_path
     monkeypatch.setattr(builtins, "__import__", fake_import)
     ok, reason = reframe.detector_available()
     assert ok is False and "OpenCV" in reason
+
+
+# -- Shots aus gemessenen Zielen -------------------------------------------------------------------
+
+def _ziel(a, b, cx, anker=0.5, cy=300.0):
+    return tracking.Ziel(start_s=a, ende_s=b, cx=cx, cy=cy, anker=anker, grund="sprecher")
+
+
+def test_shots_aus_zielen_decken_das_segment_lueckenlos_ab():
+    zl = [[_ziel(10.0, 14.0, 500.0), _ziel(14.0, 20.0, 1400.0)], [_ziel(30.0, 36.0, 500.0)]]
+    shots = reframe.plan_shots_aus_zielen(SEGS, zl, SRC_W, SRC_H, 1080, 1920)
+    assert [(s.start, s.end) for s in shots] == [(10.0, 14.0), (14.0, 20.0), (30.0, 36.0)]
+    for seg in SEGS:
+        teil = [s for s in shots if s.start >= seg["start"] - 1e-9 and s.end <= seg["end"] + 1e-9]
+        assert teil[0].start == pytest.approx(seg["start"]) and teil[-1].end == pytest.approx(seg["end"])
+        for vor, nach in zip(teil, teil[1:]):
+            assert vor.end == pytest.approx(nach.start)
+
+
+def test_ziele_ausserhalb_des_segments_werden_zurechtgeschoben():
+    """Gemessen wird an Abtastpunkten, die selten genau auf der Segmentgrenze liegen."""
+    zl = [[_ziel(9.5, 13.0, 500.0), _ziel(13.0, 25.0, 1400.0)], [_ziel(30.0, 36.0, 500.0)]]
+    shots = reframe.plan_shots_aus_zielen(SEGS, zl, SRC_W, SRC_H, 1080, 1920)
+    erste = [s for s in shots if s.start < 25]
+    assert erste[0].start == pytest.approx(10.0)
+    assert erste[-1].end == pytest.approx(20.0)
+
+
+def test_drittelregel_setzt_das_gesicht_aus_der_mitte():
+    """Wer links sitzt, gehoert auf das linke Drittel, damit rechts Blickraum bleibt."""
+    mitte = reframe.plan_shots_aus_zielen(SEGS[:1], [[_ziel(10.0, 20.0, 960.0, anker=0.5)]], SRC_W, SRC_H, 1080, 1920)[0]
+    links = reframe.plan_shots_aus_zielen(SEGS[:1], [[_ziel(10.0, 20.0, 700.0, anker=1 / 3)]], SRC_W, SRC_H, 1080, 1920)[0]
+    rechts = reframe.plan_shots_aus_zielen(SEGS[:1], [[_ziel(10.0, 20.0, 1300.0, anker=2 / 3)]], SRC_W, SRC_H, 1080, 1920)[0]
+    assert (960 - mitte.crop_x) / mitte.crop_w == pytest.approx(0.5, abs=0.01)
+    assert (700 - links.crop_x) / links.crop_w == pytest.approx(1 / 3, abs=0.01)
+    assert (1300 - rechts.crop_x) / rechts.crop_w == pytest.approx(2 / 3, abs=0.01)
+
+
+def test_ohne_ziel_bleibt_der_ausschnitt_mittig():
+    shots = reframe.plan_shots_aus_zielen(SEGS[:1], [[]], SRC_W, SRC_H, 1080, 1920)
+    assert len(shots) == 1
+    assert shots[0].crop_x == (SRC_W - shots[0].crop_w) // 2
+
+
+def test_ausschnitt_bleibt_immer_im_quellbild():
+    """Am Bildrand darf der Anker den Ausschnitt nicht herausschieben."""
+    for cx, anker in ((60.0, 2 / 3), (1880.0, 1 / 3), (30.0, 1 / 3), (1900.0, 2 / 3)):
+        s = reframe.plan_shots_aus_zielen(SEGS[:1], [[_ziel(10.0, 20.0, cx, anker=anker)]], SRC_W, SRC_H, 1080, 1920)[0]
+        assert s.crop_x >= 0 and s.crop_x + s.crop_w <= SRC_W
+        assert s.crop_y >= 0 and s.crop_y + s.crop_h <= SRC_H
+
+
+def test_gleicher_ausschnitt_wird_nicht_zweimal_geplant():
+    """Ein Schnitt zwischen zwei gleich gerahmten Naheinstellungen ergibt denselben Ausschnitt."""
+    zl = [[_ziel(10.0, 14.0, 500.0), _ziel(14.0, 17.0, 503.0), _ziel(17.0, 20.0, 1400.0)]]
+    shots = reframe.plan_shots_aus_zielen(SEGS[:1], zl, SRC_W, SRC_H, 1080, 1920)
+    assert [(s.start, s.end) for s in shots] == [(10.0, 17.0), (17.0, 20.0)]
+
+
+def test_gleicher_ausschnitt_wird_nicht_ueber_segmentgrenzen_zusammengezogen():
+    zl = [[_ziel(10.0, 20.0, 500.0)], [_ziel(30.0, 36.0, 500.0)]]
+    shots = reframe.plan_shots_aus_zielen(SEGS, zl, SRC_W, SRC_H, 1080, 1920)
+    assert [(s.start, s.end) for s in shots] == [(10.0, 20.0), (30.0, 36.0)]

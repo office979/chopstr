@@ -5,8 +5,8 @@ Frames bleibt in ``reframe.py``; hierher kommen nur Zahlen.
 
 Drei Aufgaben:
 
-1. KAMERAWECHSEL. Bisher hat ``face_centers`` alle Gesichter eines Clips in eine Punktwolke geworfen
-   und die Zeit verworfen. Das setzt eine feste Kamera voraus. Schneidet die Quelle zwischen Totale
+1. KAMERAWECHSEL. Bis hierher wurden alle Gesichter eines Clips in eine Punktwolke geworfen und die
+   Zeit verworfen. Das setzt eine feste Kamera voraus. Schneidet die Quelle zwischen Totale
    und Naheinstellung, landen Gesichter aus unvereinbaren Bildern im selben Cluster, und der
    Ausschnitt zeigt anschliessend irgendetwas zwischen beiden. Deshalb wird zuerst in Einstellungen
    zerlegt und erst darin geclustert.
@@ -24,10 +24,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# Ein Bildwechsel gilt als Schnitt, wenn sich die Farbverteilung stärker ändert als das. Der Wert
-# ist bewusst hoch: ein übersehener Schnitt kostet einen unruhigen Ausschnitt, ein erfundener
-# Schnitt zerlegt eine ruhige Einstellung in Stücke und macht alles schlimmer.
-SCHNITT_SCHWELLE = 0.45
+# Ab wann ein Bildwechsel als Kameraschnitt gilt. ``bildwechsel`` ist der Bhattacharyya-Abstand der
+# Farbverteilung zum vorigen Abtastpunkt, 0 bis 1.
+#
+# An BP CW gemessen, 60 Sekunden mit sechs Schnitten: ruhige Stellen liegen bei 0,04 (95. Perzentil
+# 0,05), die Schnitte bei 0,24 bis 0,32. Die Untergrenze liegt dazwischen.
+#
+# Ein fester Wert allein trägt nicht: eine dunkle Handkamera rauscht deutlich stärker als ein
+# ausgeleuchtetes Studio. Deshalb zusätzlich ein Vielfaches des Medians der Aufnahme selbst. Der
+# Median ist unempfindlich dagegen, dass ein paar Abtastpunkte Schnitte sind, denn Schnitte sind
+# immer die Minderheit.
+SCHNITT_SCHWELLE = 0.15
+SCHNITT_FAKTOR = 3.0
 
 # Kürzere Einstellungen werden mit der vorigen verschmolzen. Unter dieser Dauer ist keine
 # verlässliche Sitzposition zu gewinnen, und der Ausschnitt würde springen.
@@ -55,6 +63,13 @@ DRITTEL = 1.0 / 3.0
 
 # Eine Haeufung mit weniger Rueckhalt als das gilt als Fehlerkennung, nicht als Person.
 MINDEST_ANTEIL = 0.12
+
+# Wie fein innerhalb EINER Einstellung nach dem Sprecher gesucht wird. Feiner reagiert schneller auf
+# einen Sprecherwechsel, kostet aber Ruhe im Bild; die Mindestdauer darunter faengt das wieder ab.
+FENSTER_S = 1.2
+
+# Kuerzer darf kein Ausschnitt stehen. Ein Bild, das haeufiger springt, ist nicht mehr zu lesen.
+MIN_ZIEL_S = 1.2
 
 # Mundbewegung, die nicht verglichen werden konnte (erstes Bild, direkt nach einem Schnitt, oder die
 # Box ist gesprungen). Ausdruecklich keine Aussage, nicht etwa „keine Bewegung".
@@ -86,15 +101,54 @@ class Einstellung:
         return self.ende_s - self.start_s
 
 
+@dataclass
+class Ziel:
+    """Was in einem Zeitabschnitt im Ausschnitt stehen soll.
+
+    ``cx``/``cy`` ist die Bildstelle, auf die der Ausschnitt gelegt wird; ``None`` heisst, dass kein
+    Gesicht messbar war und mittig geschnitten wird. ``anker`` sagt, WO im Ausschnitt diese Stelle
+    sitzt (Drittelregel). ``grund`` haelt fest, warum es dieses Ziel wurde, damit im Nachhinein
+    nachvollziehbar bleibt, ob die Wahl gemessen oder geraten war.
+    """
+
+    start_s: float
+    ende_s: float
+    cx: float | None = None
+    cy: float | None = None
+    anker: float = 0.5
+    grund: str = "kein_gesicht"
+
+    @property
+    def dauer_s(self) -> float:
+        return self.ende_s - self.start_s
+
+
 # -- Kamerawechsel ---------------------------------------------------------------------------------
-def schnitte_finden(abtastungen: list[Abtastung], schwelle: float = SCHNITT_SCHWELLE) -> list[int]:
+def schnitt_schwelle(abtastungen: list[Abtastung], untergrenze: float = SCHNITT_SCHWELLE, faktor: float = SCHNITT_FAKTOR) -> float:
+    """Ab welchem Bildwechsel in DIESER Aufnahme ein Schnitt angenommen wird.
+
+    Die Untergrenze verhindert, dass in einer sehr ruhigen Aufnahme jedes Flackern zum Schnitt wird;
+    das Vielfache des Medians verhindert, dass in einer unruhigen Aufnahme jede zweite Bewegung als
+    Schnitt zählt.
+    """
+    werte = sorted(a.bildwechsel for a in abtastungen if a.bildwechsel is not None)
+    if not werte:
+        return untergrenze
+    n = len(werte)
+    median = werte[n // 2] if n % 2 else (werte[n // 2 - 1] + werte[n // 2]) / 2.0
+    return max(untergrenze, median * faktor)
+
+
+def schnitte_finden(abtastungen: list[Abtastung], schwelle: float | None = None) -> list[int]:
     """Indizes der Abtastpunkte, an denen eine neue Einstellung beginnt (ohne den ersten)."""
+    if schwelle is None:
+        schwelle = schnitt_schwelle(abtastungen)
     return [i for i, a in enumerate(abtastungen) if i > 0 and a.bildwechsel is not None and a.bildwechsel >= schwelle]
 
 
 def in_einstellungen_teilen(
     abtastungen: list[Abtastung],
-    schwelle: float = SCHNITT_SCHWELLE,
+    schwelle: float | None = None,
     min_dauer_s: float = MIN_EINSTELLUNG_S,
 ) -> list[Einstellung]:
     """Abtastpunkte in Einstellungen zerlegen und zu kurze mit der vorigen verschmelzen.
@@ -257,8 +311,148 @@ def blickraum_anker(gesicht_cx: float, quelle_breite: float, ab: float = BLICKRA
     return 0.5
 
 
+
+# -- Was wann im Bild stehen soll ------------------------------------------------------------------
+def _haeufigste_position(einstellung: Einstellung, positionen_xy: list[tuple[float, float]]) -> int:
+    """Index der Position, die in dieser Einstellung am oeftesten erkannt wurde."""
+    zaehler = [0] * len(positionen_xy)
+    for a in einstellung.abtastungen:
+        for x, _y, bw, _bh in a.boxen:
+            cx = x + bw / 2.0
+            zaehler[min(range(len(positionen_xy)), key=lambda i: abs(positionen_xy[i][0] - cx))] += 1
+    return max(range(len(zaehler)), key=lambda i: zaehler[i])
+
+
+def _fenster(einstellung: Einstellung, positionen_xy: list[tuple[float, float]], fenster_s: float) -> list[list]:
+    """Die Einstellung in gleich lange Fenster zerlegen und je Fenster fragen, wer spricht.
+
+    Ergebnis je Fenster: ``[start_s, ende_s, index_oder_None]``.
+    """
+    aus: list[list] = []
+    t = einstellung.start_s
+    while t < einstellung.ende_s:
+        t1 = min(t + fenster_s, einstellung.ende_s)
+        im_fenster = [a for a in einstellung.abtastungen if t <= a.t < t1]
+        aus.append([t, t1, sprecher_position(im_fenster, positionen_xy) if im_fenster else None])
+        t = t1
+    if not aus:
+        aus.append([einstellung.start_s, einstellung.ende_s, sprecher_position(einstellung.abtastungen, positionen_xy)])
+    # Ein angeschnittenes letztes Fenster hat zu wenig Messungen fuer eine eigene Entscheidung.
+    if len(aus) > 1 and (aus[-1][1] - aus[-1][0]) < fenster_s * 0.5:
+        aus[-2][1] = aus[-1][1]
+        aus.pop()
+    return aus
+
+
+def _luecken_fuellen(fenster: list[list]) -> bool:
+    """Fenster ohne Entscheidung uebernehmen die Entscheidung davor, sonst die danach.
+
+    Gibt zurueck, ob ueberhaupt eine Entscheidung vorlag. Wer schweigt, verschwindet sonst aus dem
+    Bild, obwohl er gleich weiterspricht: eine kurze Pause ist kein Sprecherwechsel.
+    """
+    letzte = None
+    for f in fenster:
+        if f[2] is None:
+            f[2] = letzte
+        else:
+            letzte = f[2]
+    naechste = None
+    for f in reversed(fenster):
+        if f[2] is None:
+            f[2] = naechste
+        else:
+            naechste = f[2]
+    return any(f[2] is not None for f in fenster)
+
+
+def _gleiche_nachbarn(laeufe: list[list]) -> list[list]:
+    """Aufeinanderfolgende Abschnitte mit derselben Person zu einem zusammenziehen."""
+    aus: list[list] = []
+    for start, ende, idx in laeufe:
+        if aus and aus[-1][2] == idx:
+            aus[-1][1] = ende
+        else:
+            aus.append([start, ende, idx])
+    return aus
+
+
+def _zu_laeufen(fenster: list[list], min_ziel_s: float) -> list[list]:
+    """Gleiche Nachbarn zusammenfassen und zu kurze Laeufe aufloesen.
+
+    Nach jedem Aufloesen wird erneut zusammengefasst. Ohne das bleiben zwei benachbarte Abschnitte
+    mit derselben Person stehen, nur weil zwischen ihnen einmal ein kurzer Zwischenruf lag: derselbe
+    Ausschnitt, zweimal geplant, und im Render eine Schnittmarke, hinter der sich nichts aendert.
+    """
+    laeufe = _gleiche_nachbarn(fenster)
+    geaendert = True
+    while geaendert and len(laeufe) > 1:
+        geaendert = False
+        for i, lauf in enumerate(laeufe):
+            if lauf[1] - lauf[0] >= min_ziel_s:
+                continue
+            # Zu kurz: die Zeit faellt an den Nachbarn davor, am Anfang an den danach.
+            if i > 0:
+                laeufe[i - 1][1] = lauf[1]
+            else:
+                laeufe[i + 1][0] = lauf[0]
+            laeufe.pop(i)
+            laeufe = _gleiche_nachbarn(laeufe)
+            geaendert = True
+            break
+    return laeufe
+
+
+def ziele(
+    einstellungen: list[Einstellung],
+    quelle_breite: float,
+    folgen: bool = True,
+    fenster_s: float = FENSTER_S,
+    min_ziel_s: float = MIN_ZIEL_S,
+) -> list[Ziel]:
+    """Aus den gemessenen Einstellungen wird, wer wann im Hochformat zu sehen ist.
+
+    Je Einstellung getrennt, denn ueber einen Kameraschnitt hinweg bedeutet dieselbe Bildstelle
+    einen anderen Menschen. Innerhalb einer Einstellung mit mehreren Personen wird fensterweise
+    gefragt, wessen Mund sich bewegt, und das Ergebnis auf ruhige Laeufe geglaettet.
+
+    ``folgen=False`` bleibt je Einstellung bei der am oeftesten erkannten Person. Das ist die
+    Strategie ``talking_head``: Kameraschnitte werden weiterhin beachtet, aber innerhalb einer
+    Einstellung springt der Ausschnitt nicht.
+
+    Laesst sich in einer Totale niemand als Sprecher bestimmen, wird die Mitte der Gruppe gezeigt
+    statt auf gut Glueck eine Person. Ein geratener Sprecher ist der schlechtere Fehler: dann steht
+    jemand gross im Bild, der gerade schweigt.
+    """
+    aus: list[Ziel] = []
+    for e in einstellungen:
+        pos = positionen(e)
+        if not pos:
+            aus.append(Ziel(e.start_s, e.ende_s, None, None, 0.5, "kein_gesicht"))
+            continue
+        if len(pos) == 1 or not folgen:
+            i = 0 if len(pos) == 1 else _haeufigste_position(e, pos)
+            cx, cy = pos[i]
+            grund = "einzige_person" if len(pos) == 1 else "haeufigste_person"
+            aus.append(Ziel(e.start_s, e.ende_s, cx, cy, blickraum_anker(cx, quelle_breite), grund))
+            continue
+
+        fenster = _fenster(e, pos, fenster_s)
+        if not _luecken_fuellen(fenster):
+            cx = sum(p[0] for p in pos) / len(pos)
+            cy = sum(p[1] for p in pos) / len(pos)
+            aus.append(Ziel(e.start_s, e.ende_s, cx, cy, 0.5, "gruppe_unentschieden"))
+            continue
+        for start, ende, idx in _zu_laeufen(fenster, min_ziel_s):
+            cx, cy = pos[idx]
+            aus.append(Ziel(start, ende, cx, cy, blickraum_anker(cx, quelle_breite), "sprecher"))
+    return aus
+
+
 __all__ = [
     "Abtastung",
+    "FENSTER_S",
+    "MIN_ZIEL_S",
+    "Ziel",
     "BLICKRAUM_AB",
     "Einstellung",
     "MINDEST_ANTEIL",
@@ -266,11 +460,14 @@ __all__ = [
     "MINDEST_PRAESENZ",
     "NICHT_MESSBAR",
     "MIN_EINSTELLUNG_S",
+    "SCHNITT_FAKTOR",
     "SCHNITT_SCHWELLE",
     "SPRECHER_VORSPRUNG",
     "blickraum_anker",
     "in_einstellungen_teilen",
     "positionen",
+    "schnitt_schwelle",
     "schnitte_finden",
     "sprecher_position",
+    "ziele",
 ]

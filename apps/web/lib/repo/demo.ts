@@ -707,6 +707,7 @@ export const demoRepo: Repo = {
         ai_features: [],
         guest_approval_required: false,
         status: "draft",
+        review: "offen",
         file_key: null,
         srt_key: null,
         vtt_key: null,

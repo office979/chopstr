@@ -5,18 +5,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { StatusCheck, type StatusCheckState } from "@/components/ui/StatusCheck";
 import { cn } from "@/components/ui/cn";
 import { SilentPreview, type PreviewFont } from "@/components/clips/SilentPreview";
 import { Modal } from "@/components/ui/Modal";
 import { ClipApproval } from "./ClipApproval";
 import type { Aspect, Candidate, CaptionVersion, Clip, GuestApproval, HookVersion, PipelineEvent } from "@/lib/repo/types";
 import { EXPORT_BLOCKED_MESSAGE, exportBlocked, latestByClip } from "@/lib/guest/approval";
-import { standSatz, vorschauStand, wasAbweicht } from "@/lib/clips/vorschau-stand";
+import { vorschauStand } from "@/lib/clips/vorschau-stand";
 import { stilAusPlan, stilPruefen } from "@/lib/clips/caption-style";
-import { structureLabel } from "@/lib/candidates/labels";
+import { RUBRIC_LABELS, RUBRIC_ORDER, structureLabel } from "@/lib/candidates/labels";
+import { clipZustand, korrekturGrund, ZUSTAND_LABEL, ZUSTAND_RANG, ZUSTAND_SATZ, type ClipZustand } from "@/lib/clips/clip-zustand";
+import { fortsetzung, thema } from "@/lib/clips/karten-text";
 import {
-  CLIP_STATUS_LABELS,
   ASPECT_LABELS,
   PLATFORM_LABELS,
   formatClipDuration,
@@ -84,13 +84,6 @@ const ASPECT_RATIO_CSS: Record<Aspect, string> = {
   "16:9": "16 / 9",
 };
 
-function checkState(c: Clip): StatusCheckState {
-  if (c.status === "failed") return "error";
-  if (c.status === "rendering") return "active";
-  if (isDone(c)) return "done";
-  return "idle";
-}
-
 /* Letztes Render-Ereignis je Clip (payload.clip_id) */
 function latestEventByClip(events: PipelineEvent[]): Map<string, PipelineEvent> {
   const out = new Map<string, PipelineEvent>();
@@ -109,11 +102,6 @@ function doneByCandidate(clips: Clip[]): Map<string, boolean> {
     out.set(key, (out.get(key) ?? true) && isDone(c));
   }
   return out;
-}
-
-function snippet(text: string, max = 120): string {
-  const plain = text.replace(/^SPEAKER_\d+:\s*/gm, "").replace(/\s+/g, " ").trim();
-  return plain.length > max ? `${plain.slice(0, max).replace(/\s+\S*$/, "")} …` : plain;
 }
 
 /* Clip-Übersicht: Pakete je Kandidat, Karten je Clip, Fortschritt live über SSE (step = 'render').
@@ -149,19 +137,87 @@ export function ClipBoard({
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [details, setDetails] = useState<Record<string, ClipDetail>>({});
   const clipsRef = useRef<Clip[]>(initialClips);
+  /* Ausgewählte Clips für Sammelaktionen. Bleibt beim Zurückkommen aus dem Editor erhalten: wer
+   * zehn Clips ausgewählt hat, einen bearbeitet und zurückkommt, will nicht von vorn anfangen. */
+  const [auswahl, setAuswahl] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<ClipZustand | "alle">("alle");
+  const [sammelLaeuft, setSammelLaeuft] = useState(false);
+  /* Was zuletzt verworfen wurde, zum Zurückholen. Eine Entscheidung ohne Weg zurück lädt nicht
+   * zum Aufräumen ein. */
+  const [zuletztVerworfen, setZuletztVerworfen] = useState<string[]>([]);
 
-  const groups = useMemo(() => {
-    const byCandidate = new Map<string, Clip[]>();
-    for (const c of clips) {
-      const key = c.candidate_id ?? "ohne";
-      byCandidate.set(key, [...(byCandidate.get(key) ?? []), c]);
+  const merkschluessel = `chopstr.clips.${sourceId}`;
+  /* Auswahl, Filter und Scrollstand über einen Ausflug in den Editor retten.
+   *
+   * Die Reihenfolge ist der Punkt. Ein erster Versuch schrieb den Stand in der Aufräumfunktion
+   * des Speicher-Effekts. Beim Zurückkommen lief dann: wiederherstellen, dadurch ändern sich die
+   * Abhängigkeiten, Aufräumen speichert den Stand von VOR dem Wiederherstellen - also leer. Der
+   * gemerkte Stand löschte sich selbst.
+   *
+   * Jetzt wird bei jeder Änderung geschrieben und genau einmal gelesen. */
+  const standRef = useRef<{ auswahl: string[]; filter: ClipZustand | "alle" }>({ auswahl: [], filter: "alle" });
+  const gelesen = useRef(false);
+
+  const merken = useCallback(() => {
+    /* Vor dem ersten Lesen nichts schreiben, sonst überschreibt der leere Anfangszustand das
+     * Gemerkte, bevor es jemand geholt hat. */
+    if (!gelesen.current) return;
+    try {
+      sessionStorage.setItem(
+        merkschluessel,
+        JSON.stringify({ ...standRef.current, scrollY: Math.round(window.scrollY) }),
+      );
+    } catch {
+      /* Kein Speicher, kein Problem: dann fängt die Auswahl eben neu an. */
     }
-    return [...byCandidate.entries()].map(([candidateId, list]) => ({
-      candidateId,
-      candidate: candidates.find((k) => k.id === candidateId) ?? null,
-      clips: list,
-    }));
-  }, [clips, candidates]);
+  }, [merkschluessel]);
+
+  useEffect(() => {
+    standRef.current = { auswahl: [...auswahl], filter };
+    merken();
+  }, [auswahl, filter, merken]);
+
+  useEffect(() => {
+    const holen = () => {
+      try {
+        const roh = sessionStorage.getItem(merkschluessel);
+        if (roh) {
+          const d = JSON.parse(roh) as { auswahl?: string[]; filter?: string; scrollY?: number };
+          if (Array.isArray(d.auswahl) && d.auswahl.length) setAuswahl(new Set(d.auswahl));
+          if (typeof d.filter === "string") setFilter(d.filter as ClipZustand | "alle");
+          if (typeof d.scrollY === "number" && d.scrollY > 0) window.scrollTo({ top: d.scrollY });
+        }
+      } catch {
+        /* Ein unlesbarer Eintrag ist kein Grund, die Seite zu stören. */
+      }
+      gelesen.current = true;
+    };
+    /* Ein Tick später, damit das Lesen nicht mitten in den ersten Aufbau fällt. */
+    const t = window.setTimeout(holen, 0);
+    window.addEventListener("pagehide", merken);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener("pagehide", merken);
+      merken();
+    };
+  }, [merkschluessel, merken]);
+
+  useEffect(() => {
+    let angefordert = 0;
+    const beiScroll = () => {
+      if (angefordert) return;
+      angefordert = window.requestAnimationFrame(() => {
+        angefordert = 0;
+        merken();
+      });
+    };
+    window.addEventListener("scroll", beiScroll, { passive: true });
+    return () => {
+      if (angefordert) window.cancelAnimationFrame(angefordert);
+      window.removeEventListener("scroll", beiScroll);
+    };
+  }, [merken]);
+
 
   /* Übergang „alle gerendert“ je Paket erkennen: Vergleich alter und neuer Clip-Stand aus dem Stream,
    * nicht beim Laden der Seite. Der Glitch dauert 900 ms (globals.css). */
@@ -208,6 +264,91 @@ export function ClipBoard({
     /* events bewusst nicht als Abhängigkeit: der Stream läuft weiter, bis alle Clips abgeschlossen sind */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceId, applyClips, clips.every(isSettled)]);
+
+  /* Der Zustand je Clip, einmal gerechnet. Karte, Filter und Zähler lesen dasselbe Ergebnis;
+   * drei Stellen mit je eigener Rechnung waren der Grund dafür, dass an einem Clip „Fertig" stand
+   * und daneben eine Warnung. */
+  const zustaende = useMemo(() => {
+    const aus = new Map<string, { zustand: ClipZustand; veraltet: boolean }>();
+    for (const clip of clips) {
+      const gespeicherterStil = stilPruefen(extras[clip.id]?.caption_style);
+      const stand = {
+        status: clip.status,
+        hatDatei: Boolean(clip.file_key),
+        plan: clip.render_plan,
+        renderFehler: clip.render_error,
+        transkriptVersion,
+        stil: Object.keys(gespeicherterStil).length
+          ? gespeicherterStil
+          : stilAusPlan((clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null, clip.render_plan?.output.height),
+        schnitt: clip.composition,
+        zeitmarken: clip.zeitmarken,
+      };
+      aus.set(clip.id, {
+        zustand: clipZustand({ clip, freigabe: approvals.get(clip.id) ?? null, stand }),
+        veraltet: vorschauStand(stand) === "veraltet",
+      });
+    }
+    return aus;
+  }, [clips, extras, approvals, transkriptVersion]);
+
+  const zaehler = useMemo(() => {
+    const aus = new Map<ClipZustand, number>();
+    for (const z of zustaende.values()) aus.set(z.zustand, (aus.get(z.zustand) ?? 0) + 1);
+    return aus;
+  }, [zustaende]);
+
+  /* Die sichtbaren Clips: gefiltert und so sortiert, dass oben steht, was Arbeit braucht.
+   * Verworfene sind nur unter ihrem eigenen Filter zu sehen - sonst wäre Verwerfen folgenlos. */
+  const sichtbar = useMemo(() => {
+    const liste = clips.filter((c) => {
+      const z = zustaende.get(c.id)?.zustand;
+      if (filter === "alle") return z !== "verworfen";
+      return z === filter;
+    });
+    return [...liste].sort((a, b) => {
+      const ra = ZUSTAND_RANG[zustaende.get(a.id)?.zustand ?? "pruefen"];
+      const rb = ZUSTAND_RANG[zustaende.get(b.id)?.zustand ?? "pruefen"];
+      if (ra !== rb) return ra - rb;
+      return (a.composition[0]?.start ?? 0) - (b.composition[0]?.start ?? 0);
+    });
+  }, [clips, zustaende, filter]);
+
+  /* Den Prüfstand setzen, einzeln oder für die ganze Auswahl. */
+  const reviewSetzen = useCallback(
+    async (ids: string[], review: Clip["review"]) => {
+      if (ids.length === 0) return;
+      setSammelLaeuft(true);
+      setMessage(null);
+      try {
+        const res = await fetch(`/api/projects/${sourceId}/clips/review`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clip_ids: ids, review }),
+        });
+        const data = (await res.json()) as ApiError & { clips?: Clip[] };
+        if (!res.ok) throw new Error(data.error ?? "Das hat nicht geklappt");
+        const neu = new Map((data.clips ?? []).map((c) => [c.id, c]));
+        applyClips(clipsRef.current.map((c) => neu.get(c.id) ?? c));
+        setZuletztVerworfen(review === "verworfen" ? ids : []);
+        const wieViele = ids.length === 1 ? "Ein Clip" : `${ids.length} Clips`;
+        setMessage({
+          tone: "ok",
+          text:
+            review === "verworfen"
+              ? `${wieViele} verworfen.`
+              : review === "bereit"
+                ? `${wieViele} als bereit markiert.`
+                : `${wieViele} zurückgeholt.`,
+        });
+      } catch (err) {
+        setMessage({ tone: "error", text: err instanceof Error ? err.message : "Das hat nicht geklappt" });
+      } finally {
+        setSammelLaeuft(false);
+      }
+    },
+    [sourceId, applyClips],
+  );
 
   const latest = useMemo(() => latestEventByClip(events), [events]);
   const allSettled = clips.every(isSettled);
@@ -338,7 +479,9 @@ export function ClipBoard({
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-text-2">
-          {groups.length} {groups.length === 1 ? "Clip" : "Clips"}, {clips.filter(isDone).length} von {clips.length} Clips fertig.
+          {clips.length} {clips.length === 1 ? "Clip" : "Clips"}
+          {zaehler.get("korrektur") ? `, ${zaehler.get("korrektur")} brauchen eine Korrektur` : ""}
+          {zaehler.get("pruefen") ? `, ${zaehler.get("pruefen")} warten auf dich` : ""}.
         </p>
         <div className="flex items-center gap-2 text-xs">
           {live && (
@@ -362,125 +505,223 @@ export function ClipBoard({
         </p>
       )}
 
-      {groups.map((g, gi) => (
-        <GlassCard key={g.candidateId} padding="lg" className={cn("flex flex-col gap-5", glitchGroups.has(g.candidateId) && "spectrum-glitch")}>
-          <div className="min-w-0">
-            <p className="text-xs uppercase tracking-wide text-text-2">Clip {gi + 1}</p>
-            <h2 className="mt-1 text-lg font-medium">{g.candidate ? structureLabel(g.candidate.structure) : "Clip gelöscht"}</h2>
-            {g.candidate && <p className="mt-1 line-clamp-2 text-sm text-text-2">{snippet(g.candidate.rubric.text)}</p>}
+      {/* Filter nach Zustand. Bei dreißig Clips ist „alle zeigen" keine Übersicht mehr, und die
+          Frage lautet ohnehin fast immer „was muss ich noch ansehen". */}
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Clips filtern">
+        {([["alle", `Alle (${clips.length - (zaehler.get("verworfen") ?? 0)})`]] as [ClipZustand | "alle", string][])
+          .concat(
+            (["korrektur", "pruefen", "bereit", "freigegeben", "wird_erstellt", "fehler", "verworfen"] as ClipZustand[])
+              .filter((z) => (zaehler.get(z) ?? 0) > 0)
+              .map((z) => [z, `${ZUSTAND_LABEL[z]} (${zaehler.get(z)})`] as [ClipZustand | "alle", string]),
+          )
+          .map(([wert, label]) => (
+            <button
+              key={wert}
+              type="button"
+              onClick={() => setFilter(wert)}
+              aria-pressed={filter === wert}
+              className={cn(
+                "transition-soft rounded-pill border px-3.5 py-1.5 text-sm",
+                filter === wert ? "border-white/60 bg-white/10 text-text" : "border-line text-text-2 hover:border-line-strong",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+      </div>
+
+      {/* Sammelaktionen. Erscheinen erst mit einer Auswahl: eine Leiste, die immer dasteht und
+          meistens nichts tun kann, nimmt nur Platz weg. */}
+      {auswahl.size > 0 && (
+        <GlassCard padding="md" selected>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-text">
+              {auswahl.size === 1 ? "Ein Clip ausgewählt" : `${auswahl.size} Clips ausgewählt`}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="ghost" disabled={sammelLaeuft} onClick={() => void reviewSetzen([...auswahl], "bereit")}>
+                Als bereit markieren
+              </Button>
+              <Button size="sm" variant="ghost" disabled={sammelLaeuft} onClick={() => void reviewSetzen([...auswahl], "verworfen")}>
+                Verwerfen
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setAuswahl(new Set())}>
+                Auswahl aufheben
+              </Button>
+            </div>
           </div>
+        </GlassCard>
+      )}
 
-          {/* Eine Reihe je Clip statt vier Spalten: die Karten sind nicht mehr aneinander
-              hochgezogen (Grid-Zeilen gleicher Höhe), und der vorhandene Platz nach rechts wird
-              genutzt, statt alles vertikal zu stapeln. */}
-          <ul className="flex flex-col gap-4" aria-label={`Clips zu Vorschlag ${gi + 1}`}>
-            {g.clips.map((clip) => {
-              const ev = latest.get(clip.id);
-              const state = checkState(clip);
-              const progress = clip.status === "rendering" ? (ev?.progress ?? 0) : isDone(clip) ? 1 : 0;
-              const approval = approvals.get(clip.id);
-              const blocked = exportBlocked(clip, approval);
-              /* Zeigt die gebaute Datei noch, was eingestellt ist? Wenn nicht, darf sie weder
-                 heruntergeladen noch jemandem zur Freigabe geschickt werden: der Gast sähe ein
-                 Video, das es so nicht mehr gibt, und gäbe etwas frei, das niemand mehr will. */
-              const gespeicherterStil = stilPruefen(extras[clip.id]?.caption_style);
-              const standEingabe = {
-                status: clip.status,
-                hatDatei: Boolean(clip.file_key),
-                plan: clip.render_plan,
-                renderFehler: clip.render_error,
-                transkriptVersion,
-                stil: Object.keys(gespeicherterStil).length
-                  ? gespeicherterStil
-                  : stilAusPlan((clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null, clip.render_plan?.output.height),
-                schnitt: clip.composition,
-                zeitmarken: clip.zeitmarken,
-              };
-              const veraltet = vorschauStand(standEingabe) === "veraltet";
-              const mp4 = clip.file_key && mediaBase ? `/api/projects/${sourceId}/clips/${clip.id}/download?kind=mp4` : null;
-              /* Warum ein Download gerade nicht geht. Gleiche Reihenfolge wie bisher: fehlende
-                 Gastfreigabe zuerst, dann Testmodus, dann die Datei selbst. */
-              const lockedTitle = blocked
-                ? EXPORT_BLOCKED_MESSAGE
-                : veraltet
-                  ? "Die Datei zeigt nicht mehr, was eingestellt ist. Bitte neu erstellen."
-                  : demo
-                  ? "Im Testmodus gibt es keine Dateien"
-                  : isDone(clip)
-                    ? "Datei noch nicht verfügbar"
-                    : "Erst wenn der Clip fertig ist";
-              const poster = mediaUrl(mediaBase, clip.poster_key);
-              /* Gerendertes MP4 direkt aus der Medien-URL (lokal /api/media, sonst CDN oder MinIO) */
-              const video = isDone(clip) ? mediaUrl(mediaBase, clip.file_key) : null;
-              const duration = clip.duration_s ?? compositionDuration(clip);
-              const clipExtras = extras[clip.id] ?? { id: clip.id, experiment_id: null, variant: null, series_id: null, series_index: null, reframe_override: null };
-              return (
-                <li key={clip.id} className="flex min-w-0 flex-col gap-4 rounded-inner border border-line p-4 sm:flex-row sm:items-stretch">
-                  {/* Vorschau links, klein und mit fester Breite. Die Höhe folgt dem Seitenverhältnis.
-                      Ein Klick öffnet die große Vorschau; als Knopf ist sie mit Tab erreichbar und
-                      reagiert auf Enter und Leertaste. */}
-                  <button
-                    type="button"
-                    onClick={() => void openZoom(clip)}
-                    title="Groß ansehen"
-                    aria-label={`${PLATFORM_LABELS[clip.platform]} groß ansehen`}
-                    className="transition-soft group relative w-[132px] shrink-0 self-start overflow-hidden rounded-[12px] border border-line bg-black hover:border-white/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
-                    style={{ aspectRatio: ASPECT_RATIO_CSS[clip.aspect] }}
-                  >
-                    {video ? (
-                      <video src={video} poster={poster ?? undefined} muted playsInline preload="metadata" className="pointer-events-none h-full w-full object-cover" />
-                    ) : poster ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={poster} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <div
-                        aria-hidden="true"
-                        className="flex h-full w-full items-end justify-between p-3"
-                        style={{
-                          background: "radial-gradient(ellipse at 50% 30%, rgba(91,140,255,0.22) 0%, rgba(27,26,98,0.3) 40%, rgba(0,0,0,0) 75%), #0a0a13",
-                        }}
-                      />
-                    )}
-                    <span aria-hidden="true" className="transition-soft absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/35">
-                      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-text text-black">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                          <path d="M4.5 2.8v10.4c0 .8.9 1.3 1.6.9l8-5.2c.6-.4.6-1.4 0-1.8l-8-5.2c-.7-.4-1.6.1-1.6.9z" />
-                        </svg>
-                      </span>
+      {/* Zurückholen nach einem Verwerfen. Solange der Hinweis steht, ist die Entscheidung
+          umkehrbar, ohne dass man den Filter kennen muss. */}
+      {zuletztVerworfen.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-inner border border-line px-4 py-3">
+          <p className="text-sm text-text-2">
+            {zuletztVerworfen.length === 1 ? "Ein Clip wurde verworfen." : `${zuletztVerworfen.length} Clips wurden verworfen.`}{" "}
+            Gelöscht ist nichts.
+          </p>
+          <Button size="sm" variant="ghost" disabled={sammelLaeuft} onClick={() => void reviewSetzen(zuletztVerworfen, "offen")}>
+            Zurückholen
+          </Button>
+        </div>
+      )}
+
+      {sichtbar.length === 0 && (
+        <GlassCard padding="lg" className="text-center">
+          <p className="text-text-2">
+            {filter === "alle" ? "Hier ist nichts." : `Kein Clip im Zustand „${ZUSTAND_LABEL[filter as ClipZustand]}".`}
+          </p>
+          {filter !== "alle" && (
+            <div className="mt-4 flex justify-center">
+              <Button variant="ghost" onClick={() => setFilter("alle")}>
+                Alle zeigen
+              </Button>
+            </div>
+          )}
+        </GlassCard>
+      )}
+
+      <ul className="flex flex-col gap-3" aria-label="Clips">
+        {sichtbar.map((clip) => {
+          const ev = latest.get(clip.id);
+          const z = zustaende.get(clip.id) ?? { zustand: "pruefen" as ClipZustand, veraltet: false };
+          const kandidat = candidates.find((k) => k.id === clip.candidate_id) ?? null;
+          const progress = clip.status === "rendering" ? (ev?.progress ?? 0) : isDone(clip) ? 1 : 0;
+          const approval = approvals.get(clip.id);
+          const blocked = exportBlocked(clip, approval);
+          const mp4 = clip.file_key && mediaBase ? `/api/projects/${sourceId}/clips/${clip.id}/download?kind=mp4` : null;
+          const lockedTitle = blocked
+            ? EXPORT_BLOCKED_MESSAGE
+            : z.veraltet
+              ? "Die Datei zeigt nicht mehr, was eingestellt ist. Bitte neu erstellen."
+              : demo
+                ? "Im Testmodus gibt es keine Dateien"
+                : isDone(clip)
+                  ? "Datei noch nicht verfügbar"
+                  : "Erst wenn der Clip fertig ist";
+          const poster = mediaUrl(mediaBase, clip.poster_key);
+          const video = isDone(clip) ? mediaUrl(mediaBase, clip.file_key) : null;
+          const duration = clip.duration_s ?? compositionDuration(clip);
+          const clipExtras = extras[clip.id] ?? {
+            id: clip.id,
+            experiment_id: null,
+            variant: null,
+            series_id: null,
+            series_index: null,
+            reframe_override: null,
+          };
+          const gewaehlt = auswahl.has(clip.id);
+          const ueberschrift = thema(kandidat?.rubric.text ?? "");
+
+          return (
+            <li key={clip.id}>
+              <GlassCard
+                padding="md"
+                selected={gewaehlt}
+                className={cn("flex min-w-0 gap-4", glitchGroups.has(clip.candidate_id ?? "ohne") && "spectrum-glitch")}
+              >
+                {/* Auswahlkästchen ganz links: Sammelaktionen brauchen einen Griff, der nicht mit
+                    „ansehen" verwechselt wird. */}
+                <label className="flex shrink-0 cursor-pointer items-start pt-1">
+                  <input
+                    type="checkbox"
+                    checked={gewaehlt}
+                    onChange={(e) =>
+                      setAuswahl((prev) => {
+                        const kopie = new Set(prev);
+                        if (e.target.checked) kopie.add(clip.id);
+                        else kopie.delete(clip.id);
+                        return kopie;
+                      })
+                    }
+                    aria-label={`${ueberschrift} auswählen`}
+                    /* Sichtbar auf dunklem Grund: ein Kästchen in Systemfarben verschwindet hier
+                     * fast. Rand und Hintergrund sind gesetzt, das Häkchen kommt von accent. */
+                    className="h-5 w-5 cursor-pointer rounded border border-line-strong bg-black/40 accent-white"
+                  />
+                </label>
+
+                {/* Vorschau: ein Klick spielt sie groß ab. */}
+                <button
+                  type="button"
+                  onClick={() => void openZoom(clip)}
+                  title="Ansehen"
+                  aria-label={`${ueberschrift} ansehen`}
+                  className="transition-soft group relative w-[92px] shrink-0 self-start overflow-hidden rounded-[10px] border border-line bg-black hover:border-white/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+                  style={{ aspectRatio: ASPECT_RATIO_CSS[clip.aspect] }}
+                >
+                  {video ? (
+                    <video src={video} poster={poster ?? undefined} muted playsInline preload="metadata" className="pointer-events-none h-full w-full object-cover" />
+                  ) : poster ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={poster} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div
+                      aria-hidden="true"
+                      className="h-full w-full"
+                      style={{ background: "radial-gradient(ellipse at 50% 30%, rgba(91,140,255,0.22) 0%, rgba(27,26,98,0.3) 40%, rgba(0,0,0,0) 75%), #0a0a13" }}
+                    />
+                  )}
+                  <span aria-hidden="true" className="transition-soft absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/35">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-text text-black">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M4.5 2.8v10.4c0 .8.9 1.3 1.6.9l8-5.2c.6-.4.6-1.4 0-1.8l-8-5.2c-.7-.4-1.6.1-1.6.9z" />
+                      </svg>
                     </span>
-                  </button>
+                  </span>
+                </button>
 
-                  {/* Mitte: Zustand, kurze Zeichen, Handlungen. */}
-                  <div className="flex min-w-0 flex-1 flex-col gap-3">
-                  <div className="flex items-start gap-3">
-                    <StatusCheck state={state} size={28} label={`${CLIP_STATUS_LABELS[clip.status]}`} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                        <p className={cn("text-sm font-medium", state === "error" ? "text-attention" : "text-text")}>{CLIP_STATUS_LABELS[clip.status]}</p>
-                        <Badge tone="ok" className="h-6 px-2.5 text-[11px]">{PLATFORM_LABELS[clip.platform]}</Badge>
-                        <span className="font-mono text-xs tabular-nums text-text-2">{formatClipDuration(duration)}</span>
-                      </div>
-                      {clip.status === "rendering" && (
-                        <>
-                          <p className="mt-0.5 text-sm text-text-2">{ev?.message ?? RENDER_STEP.description}</p>
-                          <div
-                            className="mt-2 h-1 w-full overflow-hidden rounded-pill bg-white/10"
-                            role="progressbar"
-                            aria-label={`Render ${PLATFORM_LABELS[clip.platform]}`}
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={Math.round(progress * 100)}
-                          >
-                            <div className="transition-soft h-full rounded-pill bg-ai-soft" style={{ width: `${Math.max(4, Math.round(progress * 100))}%` }} />
-                          </div>
-                        </>
-                      )}
-                      {clip.status === "failed" && <p className="mt-0.5 text-sm text-attention">{clip.render_error ?? "Das Erstellen hat nicht geklappt. Bitte nochmal versuchen."}</p>}
-                      {clip.status === "draft" && <p className="mt-0.5 text-sm text-text-2">Wird gleich erstellt.</p>}
-                    </div>
+                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                  {/* Worum es geht. Vorher stand hier die Form des Clips („Pointe am Anfang"), und
+                      die sagt nichts darüber, ob man diesen Clip veröffentlichen will. */}
+                  <div className="min-w-0">
+                    <p className="text-[15px] font-medium leading-snug text-text">{ueberschrift}</p>
+                    {kandidat && fortsetzung(kandidat.rubric.text) && (
+                      <p className="mt-0.5 line-clamp-2 text-sm text-text-2">{fortsetzung(kandidat.rubric.text)}</p>
+                    )}
                   </div>
 
-                  {/* Sichtbar bleibt nur, was rechtlich am Clip hängt. */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <ZustandPille zustand={z.zustand} />
+                    {/* Die Plattform als Plakette: bei mehreren Formaten desselben Ausschnitts ist
+                        sie der Unterschied, und der muss ins Auge fallen. */}
+                    <Badge className="h-6 px-2.5 text-[11px]">{PLATFORM_LABELS[clip.platform]}</Badge>
+                    <span className="font-mono text-xs tabular-nums text-text-2">{formatClipDuration(duration)}</span>
+                    <span className="text-xs text-text-3">{ASPECT_LABELS[clip.aspect]}</span>
+                    {kandidat && <span className="text-xs text-text-3">{structureLabel(kandidat.structure)}</span>}
+                  </div>
+
+                  {clip.status === "rendering" && (
+                    <div
+                      className="h-1 w-full max-w-[280px] overflow-hidden rounded-pill bg-white/10"
+                      role="progressbar"
+                      aria-label="Fortschritt"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.round(progress * 100)}
+                    >
+                      <div className="transition-soft h-full rounded-pill bg-ai-soft" style={{ width: `${Math.max(4, Math.round(progress * 100))}%` }} />
+                    </div>
+                  )}
+
+                  {/* Eine Warnung führt zur Korrektur und nicht in die Leere. */}
+                  {z.zustand === "korrektur" && (
+                    <Link
+                      href={`/projekte/${sourceId}/clips/${clip.id}`}
+                      className="transition-soft flex items-start gap-1.5 self-start rounded-[10px] border border-attention/50 bg-attention/10 px-3 py-2 text-xs text-text hover:border-attention"
+                    >
+                      <IconWarn className="mt-0.5 shrink-0 text-attention" />
+                      <span>
+                        {korrekturGrund(clip, z.veraltet)} <span className="underline underline-offset-4">Beheben</span>
+                      </span>
+                    </Link>
+                  )}
+                  {clip.status === "failed" && (
+                    <p className="text-sm text-attention">{clip.render_error ?? "Das Erstellen hat nicht geklappt."}</p>
+                  )}
+
+                  {/* Was rechtlich am Clip hängt, bleibt sichtbar. */}
                   {isDone(clip) && (clip.ad_label || clip.provenance.source_credit) && (
                     <div className="flex flex-wrap gap-1.5">
                       {clip.ad_label && <Badge>Werbelabel: {clip.ad_label}</Badge>}
@@ -488,43 +729,37 @@ export function ClipBoard({
                     </div>
                   )}
 
-                  {/* Kurzes Zeichen statt Erklärsatz, aber mit einem Weg dorthin: im Clip stehen
-                      die Stellen einzeln, anklickbar und mit dem, was dagegen hilft. Eine Warnung
-                      ohne Ausgang ist nur ein schlechtes Gefühl. */}
-                  {clip.cps_warnings.length > 0 && (
+                  {/* Handlungen: alle sichtbar und benannt, keine hinter einem Zeichen versteckt. */}
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => void openZoom(clip)}>
+                      Ansehen
+                    </Button>
                     <Link
                       href={`/projekte/${sourceId}/clips/${clip.id}`}
-                      title={clip.cps_warnings.join("\n")}
-                      className="transition-soft flex items-center gap-1.5 text-xs text-text-2 underline-offset-4 hover:text-text hover:underline"
+                      className="transition-soft inline-flex h-9 items-center rounded-pill border border-line px-3.5 text-sm text-text-2 hover:border-line-strong hover:text-text"
                     >
-                      <IconWarn />
-                      {clip.cps_warnings.length === 1
-                        ? "Eine Stelle läuft schnell durch"
-                        : `${clip.cps_warnings.length} Stellen laufen schnell durch`}
+                      Bearbeiten
                     </Link>
-                  )}
-
-                  {blocked && (
-                    <p className="flex items-center gap-1.5 rounded-[12px] border border-attention/50 bg-attention/10 px-3 py-2 text-xs text-text">
-                      <IconWarn className="text-attention" />
-                      {EXPORT_BLOCKED_MESSAGE}
-                    </p>
-                  )}
-
-                  {veraltet && (
-                    <p className="flex items-start gap-1.5 rounded-[12px] border border-attention/50 bg-attention/10 px-3 py-2 text-xs text-text">
-                      <IconWarn className="mt-0.5 shrink-0 text-attention" />
-                      <span>
-                        {standSatz("veraltet", wasAbweicht(standEingabe))} Erst neu erstellen, dann herunterladen
-                        oder freigeben lassen.
-                      </span>
-                    </p>
-                  )}
-
-                  {/* Drei Handlungen je Clip: Herunterladen bleibt hervorgehoben, Bearbeiten und
-                      Löschen sind reine Zeichen mit Titel und Beschriftung für Screenreader. */}
-                  <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-                    {mp4 && !blocked && !veraltet ? (
+                    {clip.review === "verworfen" ? (
+                      <Button size="sm" variant="ghost" disabled={sammelLaeuft} onClick={() => void reviewSetzen([clip.id], "offen")}>
+                        Zurückholen
+                      </Button>
+                    ) : (
+                      <>
+                        <Button
+                          size="sm"
+                          variant={z.zustand === "pruefen" ? "primary" : "ghost"}
+                          disabled={sammelLaeuft || clip.review === "bereit" || !isDone(clip)}
+                          onClick={() => void reviewSetzen([clip.id], "bereit")}
+                        >
+                          {clip.review === "bereit" ? "Ist bereit" : "Freigeben"}
+                        </Button>
+                        <Button size="sm" variant="ghost" disabled={sammelLaeuft} onClick={() => void reviewSetzen([clip.id], "verworfen")}>
+                          Verwerfen
+                        </Button>
+                      </>
+                    )}
+                    {mp4 && !blocked && !z.veraltet ? (
                       <a
                         href={mp4}
                         download
@@ -539,47 +774,70 @@ export function ClipBoard({
                         title={lockedTitle}
                         className={cn(
                           "inline-flex h-9 cursor-not-allowed items-center gap-2 rounded-pill border px-4 text-sm font-medium",
-                          blocked || veraltet ? "border-attention/40 text-attention/70" : "border-line text-text-3",
+                          blocked || z.veraltet ? "border-attention/40 text-attention/70" : "border-line text-text-3",
                         )}
                       >
                         <IconDownload />
                         Herunterladen
                       </span>
                     )}
-                    <IconLink href={`/projekte/${sourceId}/clips/${clip.id}`} label="Bearbeiten">
-                      <IconPencil />
-                    </IconLink>
                     {canDelete && (
-                      <IconButton label="Löschen" tone="danger" onClick={() => setDeleteTarget(clip)} disabled={clip.status === "rendering"}>
+                      <IconButton label="Endgültig löschen" tone="danger" onClick={() => setDeleteTarget(clip)} disabled={clip.status === "rendering"}>
                         <IconTrash />
                       </IconButton>
                     )}
                   </div>
-                  </div>
 
-                  {/* Rechte Spalte: oben die Freigabe (hat mit dem Rest nichts zu tun),
-                      unten die Serie. Dazwischen Luft, damit beides an seinem Platz bleibt. */}
-                  <div className="flex w-full shrink-0 flex-col justify-between gap-4 border-t border-line pt-3 sm:w-[300px] sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
-                    <div className="flex flex-col gap-1">
-                      <ClipApproval
-                        sourceId={sourceId}
-                        clipId={clip.id}
-                        clipLabel={`${PLATFORM_LABELS[clip.platform]} ${ASPECT_LABELS[clip.aspect]}`}
-                        guestApprovalRequired={clip.guest_approval_required}
-                        current={approval ?? null}
-                        canRequest={canRequestGuest && !veraltet}
-                        planAllows={planAllowsGuest}
-                        planName={planName}
-                        onRequested={onRequested}
-                      />
-                      {clip.guest_approval_required && !approval?.decision && (
-                        <button type="button" onClick={() => refreshApproval(clip)} className="self-start text-xs text-text-2 underline-offset-4 hover:text-text hover:underline">
-                          Status aktualisieren
-                        </button>
-                      )}
-                    </div>
+                  {/* Warum dieser Clip vorgeschlagen wurde, aus der Analyse und nicht erfunden.
+                      Zugeklappt, weil es beim Suchen nicht stört und beim Zweifeln hilft. */}
+                  {kandidat?.rubric.proposal_why && (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-sm text-text-2 underline-offset-4 hover:text-text hover:underline">
+                        Warum vorgeschlagen?
+                      </summary>
+                      <div className="mt-2 flex flex-col gap-2 rounded-inner border border-line p-3">
+                        <p className="text-sm text-text">{kandidat.rubric.proposal_why}</p>
+                        <ul className="flex flex-wrap gap-x-4 gap-y-1">
+                          {RUBRIC_ORDER.filter((k) => kandidat.rubric.scores[k]).map((k) => (
+                            <li key={k} className="text-xs text-text-2">
+                              {RUBRIC_LABELS[k]}{" "}
+                              <span className="tabular-nums text-text">{kandidat.rubric.scores[k].value.toFixed(0)}</span>
+                              <span className="text-text-3"> von 10</span>
+                            </li>
+                          ))}
+                        </ul>
+                        {kandidat.rubric.scores_stale && (
+                          <p className="text-xs text-text-3">
+                            Die Bewertung stammt vom ursprünglichen Ausschnitt, der Clip wurde seitdem geändert.
+                          </p>
+                        )}
+                      </div>
+                    </details>
+                  )}
 
-                    {publishing?.canSeries && (
+                  {/* Gastfreigabe und Serie stehen unter dem Clip und nicht in einer eigenen
+                      Spalte: als Spalte waren sie genauso hoch wie die Karte und machten aus
+                      jedem Eintrag einen Block. */}
+                  <div className="mt-1 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-line pt-3">
+                    <ClipApproval
+                      sourceId={sourceId}
+                      clipId={clip.id}
+                      clipLabel={`${PLATFORM_LABELS[clip.platform]} ${ASPECT_LABELS[clip.aspect]}`}
+                      guestApprovalRequired={clip.guest_approval_required}
+                      current={approval ?? null}
+                      canRequest={canRequestGuest && !z.veraltet}
+                      planAllows={planAllowsGuest}
+                      planName={planName}
+                      onRequested={onRequested}
+                    />
+                    {clip.guest_approval_required && !approval?.decision && (
+                      <button type="button" onClick={() => refreshApproval(clip)} className="text-xs text-text-2 underline-offset-4 hover:text-text hover:underline">
+                        Status aktualisieren
+                      </button>
+                    )}
+                    {/* Nur wenn es Serien gibt. Ein leeres „Serie zuordnen" auf jeder Karte war
+                        dreißigmal derselbe Hinweis auf etwas, das es nicht gibt. */}
+                    {publishing?.canSeries && publishing.series.length > 0 && (
                       <ClipSeries
                         clipId={clip.id}
                         extras={clipExtras}
@@ -588,12 +846,12 @@ export function ClipBoard({
                       />
                     )}
                   </div>
-                </li>
-              );
-            })}
-          </ul>
-        </GlassCard>
-      ))}
+                </div>
+              </GlassCard>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
@@ -623,12 +881,6 @@ const IconDownload = () => (
     <path d="M12 3v12" />
     <path d="m7 11 5 5 5-5" />
     <path d="M4 20h16" />
-  </Svg>
-);
-const IconPencil = () => (
-  <Svg size={18}>
-    <path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z" />
-    <path d="m14 6 4 4" />
   </Svg>
 );
 const IconTrash = () => (
@@ -679,11 +931,22 @@ function IconButton({
   );
 }
 
-/* Reines Zeichen als Verweis, sonst gleich wie IconButton. */
-function IconLink({ href, label, children }: { href: string; label: string; children: ReactNode }) {
+/* Der Zustand als Pille. Farbe nur da, wo sie etwas bedeutet: Korrektur ist dringend, bereit und
+ * freigegeben sind erledigt, der Rest bleibt neutral. Eine Oberfläche, in der alles bunt ist,
+ * sagt nichts mehr. */
+function ZustandPille({ zustand }: { zustand: ClipZustand }) {
   return (
-    <Link href={href} title={label} aria-label={label} className={ICON_ACTION}>
-      {children}
-    </Link>
+    <span
+      title={ZUSTAND_SATZ[zustand]}
+      className={cn(
+        "inline-flex h-6 items-center rounded-pill border px-2.5 text-[12px] font-medium",
+        zustand === "korrektur" && "border-attention/60 bg-attention/15 text-text",
+        zustand === "fehler" && "border-danger/60 bg-danger/15 text-text",
+        (zustand === "bereit" || zustand === "freigegeben") && "border-brand/60 bg-brand/15 text-text",
+        (zustand === "pruefen" || zustand === "wird_erstellt" || zustand === "verworfen") && "border-line text-text-2",
+      )}
+    >
+      {ZUSTAND_LABEL[zustand]}
+    </span>
   );
 }

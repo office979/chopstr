@@ -218,6 +218,7 @@ export function toClipWithExtras(r: Row): ClipWithExtras {
     platform: r.platform as Clip["platform"],
     destination: (r.destination as Clip["destination"]) ?? null,
     aspect: r.aspect as Clip["aspect"],
+    review: ((r.review as string | null) ?? "offen") as Clip["review"],
     composition: json<Clip["composition"]>(r.composition, []),
     kept_ranges: json<unknown>(r.kept_ranges, null),
     fidelity_warnings: json<unknown[]>(r.fidelity_warnings, []),

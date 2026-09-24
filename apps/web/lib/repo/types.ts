@@ -378,6 +378,7 @@ export interface CandidateCount {
 
 /* Clips, Hook-Versionen, Caption-Versionen (Phase 3): Spiegel von packages/schema/CLIPS.md, Vertrag clips_v1 / render_plan_v1 */
 export type ClipStatus = "draft" | "approved" | "rendering" | "rendered" | "exported" | "failed" | "deleted";
+export type ClipReview = "offen" | "bereit" | "verworfen";
 export type Aspect = "9:16" | "4:5" | "1:1" | "16:9";
 export type HookPattern = "identity_call" | "contrarian" | "open_loop" | "results_first" | "mistake_warning";
 export type ReframeStrategy = "talking_head" | "two_speakers" | "neutral";
@@ -471,6 +472,10 @@ export interface Clip {
   ai_features: string[];
   guest_approval_required: boolean;
   status: ClipStatus;
+  /* Der Prüfstand: hat ein Mensch entschieden? Getrennt vom technischen Zustand, weil „die Datei
+   * ist da" und „ich will diesen Clip" zwei verschiedene Aussagen sind. „verworfen" ist umkehrbar,
+   * das Löschen bleibt endgültig. */
+  review: ClipReview;
   file_key: string | null;
   srt_key: string | null;
   vtt_key: string | null;

@@ -193,6 +193,7 @@ function toClip(r: Row): Clip {
     platform: r.platform as Clip["platform"],
     destination: (r.destination as Clip["destination"]) ?? null,
     aspect: r.aspect as Clip["aspect"],
+    review: ((r.review as string | null) ?? "offen") as Clip["review"],
     composition: jsonValue<Clip["composition"]>(r.composition, []),
     kept_ranges: jsonValue<unknown>(r.kept_ranges, null),
     fidelity_warnings: jsonValue<unknown[]>(r.fidelity_warnings, []),
@@ -893,7 +894,7 @@ export const postgresRepo: Repo = {
 
   async updateClip(id, patch) {
     return withContext(await currentSession(), async (tx) => {
-      const scalar: (keyof Clip)[] = ["status", "title_card", "ad_label", "render_error", "destination"];
+      const scalar: (keyof Clip)[] = ["status", "review", "title_card", "ad_label", "render_error", "destination"];
       const json: (keyof Clip)[] = ["speaker_positions", "composition"];
       const data: Record<string, unknown> = {};
       for (const key of scalar) {

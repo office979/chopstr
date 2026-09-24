@@ -77,6 +77,8 @@ SQL_CAPTION_MAX = "select coalesce(max(version), 0) from caption_versions where 
 SQL_REFRAME_OVERRIDE = "select reframe_override from clips where id = %s"
 NOTE_OVERRIDE_UNREADABLE = "Reframe-Override konnte nicht gelesen werden (Migration 0005 eingespielt?), Automatik verwendet"
 SQL_CAPTION_STYLE = "select caption_style from clips where id = %s"
+SQL_ZEITMARKEN = "select zeitmarken from clips where id = %s"
+NOTE_MARKEN_UNREADABLE = "Zeitmarken konnten nicht gelesen werden (Migration 0009 eingespielt?), Automatik verwendet"
 NOTE_STYLE_UNREADABLE = "Untertitel-Stil des Clips konnte nicht gelesen werden (Migration 0008 eingespielt?), Markenprofil verwendet"
 
 
@@ -312,6 +314,20 @@ def caption_basis_preset(destination: str, extra: dict, aspect: str | None, styl
     if gewaehlt in captions_de.PRESETS:
         return gewaehlt
     return caption_preset_for(destination, extra, aspect)
+
+
+def _load_zeitmarken(ctx: common.Context, clip_id: str) -> tuple[list[dict], str | None]:
+    """``clips.zeitmarken`` lesen: die Entscheidungen von Hand aus der Zeitleiste.
+
+    Ohne Spalte oder bei einem Lesefehler laeuft die Automatik weiter. Eine fehlende Marke kostet
+    Genauigkeit, ein abgebrochener Render kostet den ganzen Clip."""
+    try:
+        row = db.fetch_one(ctx.conn, SQL_ZEITMARKEN, (clip_id,))
+    except Exception as exc:
+        log.warning("zeitmarken not readable clip=%s error=%s", clip_id, exc.__class__.__name__)
+        return [], NOTE_MARKEN_UNREADABLE
+    wert = _json(row[0], []) if row else []
+    return [m for m in (wert or []) if isinstance(m, dict)], None
 
 
 def caption_schrift(style: dict | None, marken_font: str | None) -> tuple[str | None, str | None]:
@@ -560,12 +576,16 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         )
     src = {**src, "width": src_probe.width, "height": src_probe.height, "fps": src_probe.fps or src.get("fps")}
     override, override_note = _load_reframe_override(ctx, clip_id)
+    zeitmarken, marken_note = _load_zeitmarken(ctx, clip_id)
     rf = reframe.plan_reframe(
         str(local_src), segments, words, clip.get("speaker_positions"), aspect,
         src_w=src_probe.width, src_h=src_probe.height, out_size=(out_w, out_h), reframe_override=override,
+        zeitmarken=zeitmarken,
     )  # fmt: skip
     if override_note:
         rf.notes.append(override_note)
+    if marken_note:
+        rf.notes.append(marken_note)
     speaker_positions = clip.get("speaker_positions") or (rf.speaker_positions or None)
 
     # 3) Captions auf der Ausgabe-Timeline
@@ -628,6 +648,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         log.warning("decision log reframe failed clip=%s error=%s", clip_id, exc.__class__.__name__)
     h = render_plan.plan_hash(plan, hook["version"], tv_version)
     keys = {ext: f"{RENDER_PREFIX}/{clip_id}/{h}.{ext}" for ext in ("mp4", "srt", "vtt", "jpg", "ass")}
+    keys["streifen"] = f"{RENDER_PREFIX}/{clip_id}/{h}.streifen.jpg"
     duration = render_plan.plan_duration(plan)
 
     if clip.get("file_key") == keys["mp4"] and ctx.store.exists("derived", keys["mp4"]):
@@ -657,6 +678,12 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     notes.extend(f"Regressionstest: {c}" for c in checks)
     poster = work / f"{h}.jpg"
     render.make_poster(mp4, poster, 1.0)
+    # Einzelbilder fuer die Zeitleiste. Faellt das aus, fehlt nur der Filmstreifen; der Clip ist
+    # fertig, und ihn deswegen scheitern zu lassen waere falsch herum.
+    streifen = work / f"{h}.streifen.jpg"
+    streifen_meta = render.make_filmstreifen(mp4, streifen)
+    if streifen_meta is None:
+        notes.append("Filmstreifen konnte nicht erzeugt werden, die Zeitleiste zeigt keine Einzelbilder")
 
     probe = ingest.probe(mp4)
 
@@ -669,6 +696,8 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     ctx.store.put_file("derived", keys["srt"], paths["srt"], CONTENT_TYPES["srt"])
     ctx.store.put_file("derived", keys["vtt"], paths["vtt"], CONTENT_TYPES["vtt"])
     ctx.store.put_file("derived", keys["jpg"], poster, CONTENT_TYPES["jpg"])
+    if streifen_meta is not None:
+        ctx.store.put_file("derived", keys["streifen"], streifen, CONTENT_TYPES["jpg"])
     ctx.store.put_file("derived", keys["ass"], paths["ass"], CONTENT_TYPES["ass"])
 
     db.update(
@@ -679,6 +708,8 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         srt_key=keys["srt"],
         vtt_key=keys["vtt"],
         poster_key=keys["jpg"],
+        filmstrip_key=keys["streifen"] if streifen_meta is not None else None,
+        filmstrip_meta=db.jsonb(streifen_meta) if streifen_meta is not None else None,
         duration_s=probe.duration_s,
         width=probe.width,
         height=probe.height,

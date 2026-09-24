@@ -107,6 +107,22 @@ export interface BrandCI {
   hook_overlay?: Partial<Record<Platform, boolean>>;
 }
 
+export interface FilmstripMeta {
+  bilder: number;
+  breite: number;
+  hoehe: number;
+  dauer_s: number;
+}
+
+/* Eine Entscheidung aus der Zeitleiste: ab ``ab_s`` (Sekunden im Clip) die Person an der
+ * Bildstelle ``x`` (Bildpunkte in der Quelle) zeigen, bis zur naechsten Marke. Ueber die
+ * Bildstelle und nicht ueber einen Index, weil ein Index sich verschiebt, sobald die Erkennung
+ * eine Person mehr oder weniger findet. */
+export interface Zeitmarke {
+  ab_s: number;
+  x: number;
+}
+
 export interface CaptionStyle {
   highlight_color?: string;
   hook_overlay?: Partial<Record<Platform, boolean>>;
@@ -383,6 +399,11 @@ export interface RenderShot {
   crop_w: number;
   crop_h: number;
   layout: "single" | "split";
+  /* Auf welche Bildstelle der Quelle dieser Ausschnitt zielt und welche Personen zu dieser Zeit
+   * zur Wahl standen. Nur zur Anzeige: die Zeitleiste baut daraus „wer soll im Bild sein". */
+  quelle_x?: number | null;
+  auswahl?: number[];
+  grund?: string;
 }
 
 export interface RenderPlan {
@@ -439,6 +460,12 @@ export interface Clip {
   srt_key: string | null;
   vtt_key: string | null;
   poster_key: string | null;
+  /* Zeitleiste (Migration 0009): ein JPG mit vielen Einzelbildern nebeneinander, plus die Masse,
+   * die die Oberflaeche zum Rechnen braucht. Fehlt beides, zeigt die Zeitleiste keine Bilder. */
+  filmstrip_key: string | null;
+  filmstrip_meta: FilmstripMeta | null;
+  /* Entscheidungen von Hand: ab dieser Sekunde die Person an der Bildstelle x zeigen. */
+  zeitmarken: Zeitmarke[];
   cps_warnings: string[];
   duration_s: number | null;
   width: number | null;

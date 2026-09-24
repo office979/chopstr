@@ -244,6 +244,8 @@ export interface ClipExtras {
   /* Untertitel-Stil dieses Clips (Migration 0008). Leeres Objekt heisst: nichts eingestellt, es
    * gilt das Markenprofil und was das Format vorgibt. Form siehe lib/clips/caption-style.ts. */
   caption_style: Record<string, unknown>;
+  /* Entscheidungen aus der Zeitleiste (Migration 0009). */
+  zeitmarken: { ab_s: number; x: number }[];
 }
 
 /* Gespeicherte Untertitel-Vorlage. Gehoert dem Workspace, nicht der Person: in einer Agentur stellt

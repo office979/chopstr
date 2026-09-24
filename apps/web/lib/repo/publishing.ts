@@ -193,6 +193,7 @@ function toExtras(r: Row): ClipExtras {
     series_index: num(r.series_index),
     reframe_override: (r.reframe_override as ClipExtras["reframe_override"]) ?? null,
     caption_style: (r.caption_style as Record<string, unknown> | null) ?? {},
+    zeitmarken: (r.zeitmarken as ClipExtras["zeitmarken"] | null) ?? [],
   };
 }
 
@@ -231,6 +232,9 @@ export function toClipWithExtras(r: Row): ClipWithExtras {
     srt_key: (r.srt_key as string | null) ?? null,
     vtt_key: (r.vtt_key as string | null) ?? null,
     poster_key: (r.poster_key as string | null) ?? null,
+    filmstrip_key: (r.filmstrip_key as string | null) ?? null,
+    filmstrip_meta: json<Clip["filmstrip_meta"]>(r.filmstrip_meta, null),
+    zeitmarken: json<Clip["zeitmarken"]>(r.zeitmarken, []),
     cps_warnings: json<string[]>(r.cps_warnings, []),
     duration_s: num(r.duration_s),
     width: num(r.width),
@@ -428,7 +432,7 @@ const postgresPublishingRepo: PublishingRepo = {
     const session = await currentSession();
     return withContext(session, async (tx) => {
       const rows = await tx`
-        select c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override, c.caption_style
+        select c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override, c.caption_style, c.zeitmarken
         from clips c join sources s on s.id = c.source_id where c.id in ${tx(clipIds)} and s.workspace_id = ${session.workspaceId}`;
       return rows.map((r) => toExtras(r as Row));
     });
@@ -444,10 +448,11 @@ const postgresPublishingRepo: PublishingRepo = {
       /* jsonb braucht die ausdrueckliche Umwandlung, und null ist hier das leere Objekt: die Spalte
        * ist not null, und „nichts eingestellt" heisst {}, nicht fehlend. */
       if ("caption_style" in patch) data.caption_style = tx.json((patch.caption_style ?? {}) as never);
+      if ("zeitmarken" in patch) data.zeitmarken = tx.json((patch.zeitmarken ?? []) as never);
       if (Object.keys(data).length === 0) return (await this.getClipExtras([clipId]))[0] ?? null;
       const rows = await tx`
         update clips c set ${tx(data)} from sources s where c.id = ${clipId} and s.id = c.source_id and s.workspace_id = ${session.workspaceId}
-        returning c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override, c.caption_style`;
+        returning c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override, c.caption_style, c.zeitmarken`;
       return rows.length ? toExtras(rows[0] as Row) : null;
     });
   },

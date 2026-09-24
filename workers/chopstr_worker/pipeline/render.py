@@ -489,8 +489,14 @@ def make_poster(video_path: str | os.PathLike, jpg_path: str | os.PathLike, at_s
 # Filmstreifen fuer die Zeitleiste: ein einziges Bild mit vielen kleinen Einzelbildern nebeneinander.
 # Bewusst eine Datei und nicht hundert: ein Streifen ist ein Bildabruf, hundert Einzelbilder waeren
 # hundert, und die Zeitleiste soll sofort dastehen und nicht nachladen, waehrend man schiebt.
-STREIFEN_BILDER = 40  # so viele Einzelbilder ueber den ganzen Clip
-STREIFEN_HOEHE = 96  # Hoehe je Einzelbild in Bildpunkten; die Breite ergibt sich aus dem Format
+# Zahl und Hoehe sind an der fertigen Oberflaeche abgelesen, nicht geraten: die Zeitleiste steht in
+# der linken Spalte und ist dort rund 400 Bildpunkte breit. Mit 40 Einzelbildern blieben davon 10
+# Punkte je Bild uebrig, und der Streifen wurde zu einem grauen Band, auf dem nichts mehr zu
+# erkennen war. Mit 20 sind es 20 Punkte je Bild bei 72 Punkten Hoehe - schmal, aber man sieht, wer
+# im Bild ist und wo ein Kameraschnitt liegt. Genau dafuer ist der Streifen da; das Bild selbst
+# zeigt die Vorschau darueber.
+STREIFEN_BILDER = 20  # so viele Einzelbilder ueber den ganzen Clip
+STREIFEN_HOEHE = 108  # Hoehe je Einzelbild in Bildpunkten; die Breite ergibt sich aus dem Format
 
 
 def make_filmstreifen(

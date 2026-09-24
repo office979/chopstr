@@ -90,8 +90,12 @@ export function formatClipDuration(s: number | null | undefined): string {
 
 /* Medien-URL aus NEXT_PUBLIC_MEDIA_BASE_URL + Key; ohne Basis oder Key (Demo) null */
 export function mediaUrl(base: string | null | undefined, key: string | null | undefined): string | null {
-  if (!base || !key) return null;
-  return `${base.replace(/\/$/, "")}/${key.replace(/^\//, "")}`;
+  if (!key) return null;
+  /* Ein Schluessel, der schon eine vollstaendige Adresse ist, wird durchgereicht. Das braucht der
+   * Demo-Modus, wo Dateien aus public/ kommen und es gar keinen Speicher gibt. */
+  if (/^(https?:)?\/\//.test(key) || key.startsWith("/")) return key;
+  if (!base) return null;
+  return `${base.replace(/\/$/, "")}/${key}`;
 }
 
 /* Medien-URL für die Gast-Freigabe: im lokalen Modus (MEDIA_MODE=local) prüft /api/media das Token ?t=,

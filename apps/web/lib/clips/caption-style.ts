@@ -10,6 +10,7 @@
  * um; die Oberflaeche zeigt immer hochkant. */
 
 import fontsJson from "../../../../packages/design/caption_fonts.json";
+import { zahlImRahmen } from "@/lib/zahl";
 
 /* Bewusst ein Typ-Alias und keine Schnittstelle: nur ein Alias laesst sich an ein
  * ``Record<string, unknown>`` uebergeben, und genau das ist die Form, in der der Stil als jsonb in
@@ -66,6 +67,66 @@ export const BASIS_PRESETS = [
   { id: "linkedin_static", name: "Sachlich mit Kasten", hinweis: "Ohne Hervorhebung" },
 ] as const;
 
+/* Vier Looks statt einer Liste von Schriften, Staerken und Konturen.
+ *
+ * „Welche Schrift, wie fett, wie dick die Kontur" sind drei Fragen, die niemand beantworten will,
+ * der einen Clip fertig machen moechte. „Wie soll es aussehen" ist eine. Jeder Look ist ein Buendel
+ * von Einstellungen; wer danach etwas Einzelnes aendern will, findet alles unter „Mehr einstellen".
+ *
+ * Die Looks sind an dem abgelesen, was in Kurzformaten tatsaechlich vorkommt: die neutrale
+ * Grotesk, die schwere Versalien-Schrift, der ruhige Kasten und der laute Karaoke-Stil. */
+export interface Look {
+  id: string;
+  name: string;
+  hinweis: string;
+  stil: CaptionStyle;
+}
+
+export const LOOKS: Look[] = [
+  {
+    id: "klar",
+    name: "Klar",
+    hinweis: "Neutral, gut lesbar",
+    stil: { preset: "tiktok_words", font: "Inter", bold: true, all_caps: false, outline_px: 5, box: false, base_color: "#ffffff", highlight_color: "#ffd700" },
+  },
+  {
+    id: "laut",
+    name: "Laut",
+    hinweis: "Schwer, Großbuchstaben",
+    stil: { preset: "tiktok_words", font: "Anton", bold: true, all_caps: true, outline_px: 9, box: false, base_color: "#ffffff", highlight_color: "#00e5a0" },
+  },
+  {
+    id: "ruhig",
+    name: "Ruhig",
+    hinweis: "Mit Kasten, ohne Blinken",
+    stil: { preset: "linkedin_static", font: "Inter", bold: false, all_caps: false, outline_px: 0, box: true, highlight_words: false, base_color: "#ffffff", words_per_card: 4, max_lines: 2 },
+  },
+  {
+    id: "signal",
+    name: "Signal",
+    hinweis: "Kräftig, farbige Hervorhebung",
+    stil: { preset: "tiktok_words", font: "Archivo Black", bold: true, all_caps: true, outline_px: 7, box: false, base_color: "#ffffff", highlight_color: "#ff3b6b" },
+  },
+];
+
+/* Fuenf Farben fuer die Hervorhebung. Eine Reihe Punkte statt eines Farbwaehlers: die Wahl ist in
+ * einer Sekunde getroffen, und es kommt nichts heraus, was auf dunklem Bild untergeht. Der freie
+ * Waehler bleibt unter „Mehr einstellen". */
+export const HIGHLIGHT_FARBEN = ["#ffd700", "#00e5a0", "#ff3b6b", "#5b8cff", "#ffffff"] as const;
+
+/* Welcher Look sitzt gerade? Verglichen wird ueber die Felder, die den Look ausmachen; alles
+ * andere (Groesse, Wortzahl, Hoehe) darf abweichen, ohne dass die Auswahl verspringt. */
+const LOOK_FELDER = ["font", "all_caps", "box", "outline_px"] as const;
+
+export function aktiverLook(stil: CaptionStyle): string | null {
+  const s = mitVorgabe(stil);
+  const treffer = LOOKS.find((l) => {
+    const v = mitVorgabe(l.stil);
+    return LOOK_FELDER.every((f) => v[f] === s[f]);
+  });
+  return treffer?.id ?? null;
+}
+
 /* Mittlere Zeichenbreite in em, gemessen an Inter Bold. Spiegel von captions_de.AVG_CHAR_EM. */
 export const AVG_CHAR_EM = 0.56;
 export const SAFE_BREITE_STANDARD = 1080 - 180;
@@ -76,15 +137,7 @@ export function maxZeichen(fontPx: number, safeBreite = SAFE_BREITE_STANDARD): n
 }
 
 function inGrenzen(wert: unknown, [unten, oben]: readonly [number, number]): number | null {
-  /* Nur echte Zahlen und Zahlen als Text. Die naheliegende Abkuerzung ueber Number() ist hier
-   * falsch: Number(null) und Number([]) sind 0, und aus einem fehlenden Wert wuerde damit
-   * stillschweigend die kleinste erlaubte Schrift. Python wirft an derselben Stelle, und beide
-   * Seiten muessen gleich entscheiden - der Spiegeltest in caption-style.test.ts haelt das fest.
-   * NaN und Infinity fallen ebenfalls durch: Math.min(180, NaN) ist NaN, jeder Vergleich damit
-   * ist falsch, und der Wert kaeme ungeprueft durch. */
-  const z = typeof wert === "number" ? wert : typeof wert === "string" && wert.trim() !== "" ? Number(wert) : NaN;
-  if (!Number.isFinite(z)) return null;
-  return Math.round(Math.max(unten, Math.min(oben, z)));
+  return zahlImRahmen(wert, unten, oben);
 }
 
 const HEX = /^#[0-9a-fA-F]{6}$/;

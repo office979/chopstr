@@ -78,6 +78,11 @@ export default async function ClipPage({ params }: Props) {
          * die es nicht mehr gibt, und die sollen nicht in die Oberfläche durchschlagen. */
         captionStyle={stilPruefen(extras[0]?.caption_style)}
         captionPresets={captionPresets.map((p) => ({ id: p.id, name: p.name, style: p.style }))}
+        filmstripSrc={mediaUrl(mediaBase, clip.filmstrip_key)}
+        filmstripMeta={clip.filmstrip_meta}
+        zeitmarken={clip.zeitmarken}
+        shots={clip.render_plan?.shots ?? []}
+        quelleBreite={source.width ?? null}
       />
     </PageShell>
   );

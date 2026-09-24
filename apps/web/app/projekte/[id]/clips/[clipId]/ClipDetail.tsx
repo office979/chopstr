@@ -8,7 +8,8 @@ import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/components/ui/cn";
 import { reclassify } from "@/lib/transcript/fillers";
 import { ASPECT_LABELS, formatClipDuration } from "@/lib/clips/labels";
-import type { Aspect, TranscriptVersion, TranscriptWord } from "@/lib/repo/types";
+import type { Aspect, FilmstripMeta, RenderShot, TranscriptVersion, TranscriptWord, Zeitmarke } from "@/lib/repo/types";
+import { Zeitleiste } from "./Zeitleiste";
 import { ClipPreview } from "./ClipPreview";
 import { ClipTextEditor } from "./ClipTextEditor";
 import { CaptionStudio, CaptionVorschau, type GespeicherteVorlage } from "./CaptionStudio";
@@ -38,6 +39,11 @@ interface Props {
   captionStyle: CaptionStyle;
   captionPresets: GespeicherteVorlage[];
   clipId: string;
+  filmstripSrc: string | null;
+  filmstripMeta: FilmstripMeta | null;
+  zeitmarken: Zeitmarke[];
+  shots: RenderShot[];
+  quelleBreite: number | null;
 }
 
 /* Ein Clip: oben Vorschau, daneben sein Text. Gespeichert wird mit einem Klick, ohne Rückfrage.
@@ -60,6 +66,11 @@ export function ClipDetail({
   captionStyle,
   captionPresets,
   clipId,
+  filmstripSrc,
+  filmstripMeta,
+  zeitmarken: markenAnfang,
+  shots,
+  quelleBreite,
 }: Props) {
   const router = useRouter();
   const backHref = `/projekte/${sourceId}/clips`;
@@ -79,6 +90,11 @@ export function ClipDetail({
   const [stilGespeichert, setStilGespeichert] = useState<CaptionStyle>(captionStyle);
   const [stilSaving, setStilSaving] = useState(false);
   const [vorlagen, setVorlagen] = useState<GespeicherteVorlage[]>(captionPresets);
+
+  /* Zeitleiste: die Marken liegen hier, weil die Vorschau oben und die Leiste unten dieselben
+   * brauchen. Gespeichert wird sofort beim Setzen, nicht ueber einen zweiten Knopf: eine Marke ist
+   * eine einzelne kleine Entscheidung, und wer sie trifft, will nicht danach noch speichern. */
+  const [marken, setMarken] = useState<Zeitmarke[]>(markenAnfang);
 
   const hasText = wordFrom != null && wordTo != null && wordTo >= wordFrom;
 
@@ -210,6 +226,30 @@ export function ClipDetail({
     }
   };
 
+  const markenSichern = useCallback(
+    async (naechste: Zeitmarke[]) => {
+      setMarken(naechste);
+      try {
+        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/zeitmarken`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ zeitmarken: naechste }),
+        });
+        const data = (await res.json()) as { error?: string; zeitmarken?: Zeitmarke[]; needs_render?: boolean };
+        if (!res.ok) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
+        if (data.zeitmarken) setMarken(data.zeitmarken);
+        setMessage({
+          tone: "ok",
+          text: data.needs_render ? "Gespeichert. Wirkt, sobald der Clip neu gebaut wird." : "Gespeichert.",
+        });
+      } catch (err) {
+        setMarken(marken);
+        setMessage({ tone: "error", text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt" });
+      }
+    },
+    [sourceId, clipId, marken],
+  );
+
   const goBack = () => {
     if (dirty || stilGeaendert) setLeaveOpen(true);
     else router.push(backHref);
@@ -256,6 +296,23 @@ export function ClipDetail({
             seekTo={seekTo}
             overlay={clipWords.length ? <CaptionVorschau stil={stil} woerter={clipWords} zeit={currentTime} /> : null}
           />
+
+          <div className="mt-4">
+            <Zeitleiste
+              filmstripSrc={filmstripSrc}
+              filmstripMeta={filmstripMeta}
+              clipStart={clipStart}
+              dauerS={durationS ?? (clipEnd != null ? clipEnd - clipStart : 0)}
+              zeit={currentTime}
+              onSeek={seek}
+              shots={shots}
+              zeitmarken={marken}
+              onMarke={(m) => void markenSichern([...marken.filter((x) => Math.abs(x.ab_s - m.ab_s) > 0.35), m].sort((a, b) => a.ab_s - b.ab_s))}
+              onMarkeWeg={(abS) => void markenSichern(marken.filter((x) => x.ab_s !== abS))}
+              quelleBreite={quelleBreite}
+              canEdit={canEdit}
+            />
+          </div>
         </div>
 
         <div className="flex flex-col gap-5">

@@ -105,9 +105,9 @@ export function buildDemoRenderPlan(
   const layout = layoutFor(preset, clip.aspect);
   const srcW = source.width ?? 1920;
   const srcH = source.height ?? 1080;
-  /* neutraler Crop: mittig, volle Höhe der Quelle */
+  /* Ausschnitt in voller Höhe der Quelle; wo er waagerecht sitzt, entscheidet unten die
+   * erfundene Sitzposition je Abschnitt. */
   const cropW = Math.round((srcH * size.width) / size.height);
-  const cropX = Math.round((srcW - cropW) / 2);
   return {
     contract: "render_plan_v1",
     platform: clip.platform,
@@ -116,15 +116,30 @@ export function buildDemoRenderPlan(
     segments: clip.composition,
     filler_cuts: false,
     reframe: { strategy: "neutral", detector: "none", faces_detected: false, positions: [], min_shot_s: 1.2 },
-    shots: clip.composition.map((s) => ({
-      start: s.start,
-      end: s.end,
-      crop_x: Math.max(0, cropX),
-      crop_y: 0,
-      crop_w: Math.min(srcW, cropW),
-      crop_h: srcH,
-      layout: "single" as const,
-    })),
+    /* Im Demo-Modus laeuft kein Worker, es gibt also keine Gesichtserkennung. Damit die Zeitleiste
+     * trotzdem zeigt, was sie im Betrieb zeigt, wird jedes Segment in Abschnitte von rund acht
+     * Sekunden geteilt und mit zwei Sitzpositionen versehen. Das ist erfunden und heisst hier auch
+     * so; ohne das saehe der Demo-Modus aus, als koennte das Werkzeug keine Kameraschnitte. */
+    shots: clip.composition.flatMap((s) => {
+      const positionen = [Math.round(srcW * 0.3), Math.round(srcW * 0.68)];
+      const n = Math.max(1, Math.round((s.end - s.start) / 8));
+      const schritt = (s.end - s.start) / n;
+      return Array.from({ length: n }, (_, i) => {
+        const quelle = positionen[i % positionen.length];
+        return {
+          start: Math.round((s.start + i * schritt) * 1000) / 1000,
+          end: Math.round((s.start + (i + 1) * schritt) * 1000) / 1000,
+          crop_x: Math.max(0, Math.min(srcW - Math.min(srcW, cropW), Math.round(quelle - cropW / 2))),
+          crop_y: 0,
+          crop_w: Math.min(srcW, cropW),
+          crop_h: srcH,
+          layout: "single" as const,
+          quelle_x: quelle,
+          auswahl: positionen,
+          grund: "sprecher",
+        };
+      });
+    }),
     captions: {
       preset: captions.preset,
       font: preset.font,
@@ -183,6 +198,10 @@ export function buildDemoRenderPatch(clip: Clip, source: Source, brand: BrandPro
     srt_key: null,
     vtt_key: null,
     poster_key: null,
+    /* Ein echter Filmstreifen aus einem gerenderten Clip, damit die Zeitleiste im Demo-Modus
+     * Einzelbilder zeigt statt eines leeren Kastens. */
+    filmstrip_key: "/demo/streifen.jpg",
+    filmstrip_meta: { bilder: 20, breite: 60, hoehe: 108, dauer_s: 33.28 },
   };
 }
 

@@ -7,10 +7,13 @@ import { Toggle } from "@/components/ui/Toggle";
 import { cn } from "@/components/ui/cn";
 import type { TranscriptWord } from "@/lib/repo/types";
 import {
-  BASIS_PRESETS,
+  aktiverLook,
   FONTS,
   GRENZEN,
+  HIGHLIGHT_FARBEN,
+  LOOKS,
   type CaptionStyle,
+  type Look,
   maxZeichen,
   mitVorgabe,
 } from "@/lib/clips/caption-style";
@@ -152,11 +155,12 @@ interface StudioProps {
   saving: boolean;
 }
 
-const WORTZAHLEN = [1, 2, 3, 4, 5, 6] as const;
-
-/* Untertitel einstellen. Die Reihenfolge folgt der Reihenfolge, in der jemand entscheidet:
- * erst der Look, dann wie viele Wörter, dann Schrift und Größe, dann Farbe. Alles Weitere liegt
- * hinter „Mehr einstellen", damit die Karte nicht erschlägt. */
+/* Untertitel einstellen, auf das Nötige gebracht.
+ *
+ * Sichtbar sind vier Looks, zwei Schieber und eine Reihe Farbpunkte. Das ist die ganze Bedienung.
+ * „Welche Schrift, wie fett, wie dick die Kontur" sind drei Fragen, die niemand beantworten will,
+ * der einen Clip fertig machen möchte; „wie soll es aussehen" ist eine. Wer doch an einer einzelnen
+ * Schraube drehen will, findet alles unter „Mehr einstellen" — aber niemand muss dort hinein. */
 export function CaptionStudio({
   stil,
   onChange,
@@ -174,9 +178,9 @@ export function CaptionStudio({
   const [vorlageName, setVorlageName] = useState("");
   const [vorlageMeldung, setVorlageMeldung] = useState<string | null>(null);
   const [fehlendeSchrift, setFehlendeSchrift] = useState(false);
-  const idFont = useId();
+  const idWoerter = useId();
   const idGroesse = useId();
-  const idHoehe = useId();
+  const look = aktiverLook(stil);
 
   const setzen = useCallback(
     (teil: Partial<CaptionStyle>) => {
@@ -194,11 +198,10 @@ export function CaptionStudio({
    *
    * Der naheliegende Weg über document.fonts.check() taugt dafür nicht: der gibt auch für eine
    * Schrift true zurück, die es gar nicht gibt, weil der Browser den Text ja mit der Ersatzschrift
-   * darstellen kann. Am echten Fall geprüft: für „Anton" kam true, obwohl keine Datei vorlag.
+   * darstellen kann. An „Anton" geprüft: kam true, obwohl keine Datei vorlag.
    *
    * Deshalb gemessen: derselbe Text einmal mit der gesuchten Schrift vor einer Ersatzschrift und
-   * einmal nur mit der Ersatzschrift. Sind beide Breiten gleich, wurde die gesuchte Schrift nicht
-   * verwendet. Zwei verschiedene Ersatzschriften, weil eine davon zufällig gleich breit sein kann. */
+   * einmal nur mit der Ersatzschrift. Sind beide Breiten gleich, wurde sie nicht verwendet. */
   useEffect(() => {
     let abgebrochen = false;
     const pruefen = async () => {
@@ -226,7 +229,12 @@ export function CaptionStudio({
   }, [s.font]);
 
   const zeichenGrenze = maxZeichen(s.font_px);
-  const zuLang = laengstesWort.length > zeichenGrenze;
+  /* Gewarnt wird erst, wenn auch die Silbentrennung nicht mehr hilft. Der Renderer trennt lange
+   * Komposita an der Morphemgrenze (captions_de.hyphenate); ein Wort, das knapp ueber die Zeile
+   * geht, wird also sauber umbrochen. Beim ersten Versuch stand die Warnung schon im
+   * Ausgangszustand da, also bevor jemand etwas eingestellt hatte, und das Werkzeug beschwerte
+   * sich ueber sich selbst. */
+  const zuLang = laengstesWort.length > zeichenGrenze * 1.6;
 
   const vorlageSpeichern = async () => {
     const name = vorlageName.trim();
@@ -268,108 +276,58 @@ export function CaptionStudio({
       </div>
 
       <div className="mt-5 flex flex-col gap-6">
-        {/* 1. Vorlage */}
-        <section className="flex flex-col gap-2">
-          <p className="text-sm font-medium text-text">Vorlage</p>
-          <div className="flex flex-wrap gap-2">
-            {BASIS_PRESETS.map((p) => (
-              <button
-                key={p.id || "auto"}
-                type="button"
-                disabled={!canEdit}
-                onClick={() => setzen({ preset: p.id || undefined })}
-                title={p.hinweis}
-                className={cn(
-                  "transition-soft rounded-pill border px-3 py-1.5 text-sm disabled:opacity-60",
-                  (stil.preset ?? "") === p.id ? "border-white/60 bg-white/10 text-text" : "border-line text-text-2 hover:border-line-strong",
-                )}
-              >
-                {p.name}
-              </button>
-            ))}
-          </div>
-          {vorlagen.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-2">
-              {vorlagen.map((v) => (
-                <span key={v.id} className="inline-flex items-center gap-1 rounded-pill border border-line pl-3 pr-1 text-sm text-text-2">
-                  <button type="button" disabled={!canEdit} onClick={() => onChange(v.style as CaptionStyle)} className="py-1.5 hover:text-text disabled:opacity-60">
-                    {v.name}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!canEdit}
-                    onClick={() => void vorlageLoeschen(v)}
-                    aria-label={`Vorlage ${v.name} entfernen`}
-                    className="transition-soft inline-flex h-6 w-6 items-center justify-center rounded-full text-text-3 hover:bg-white/10 hover:text-text disabled:opacity-60"
-                  >
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-                      <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                    </svg>
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
+        {/* 1. Wie soll es aussehen? Vier Karten, eine Berührung. */}
+        <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {LOOKS.map((l) => (
+            <button
+              key={l.id}
+              type="button"
+              disabled={!canEdit}
+              onClick={() => setzen(l.stil)}
+              aria-pressed={look === l.id}
+              className={cn(
+                "transition-soft flex flex-col items-center gap-2 rounded-inner border p-3 disabled:opacity-60",
+                look === l.id ? "border-white/60 bg-white/10" : "border-line hover:border-line-strong",
+              )}
+            >
+              <LookProbe look={l} />
+              <span className={cn("text-sm font-medium", look === l.id ? "text-text" : "text-text-2")}>{l.name}</span>
+              <span className="text-center text-xs text-text-3">{l.hinweis}</span>
+            </button>
+          ))}
         </section>
 
-        {/* 2. Wörter je Einblendung: die Einstellung, um die es beim Kurzformat geht */}
+        {/* 2. Wie viele Wörter auf einmal */}
         <section className="flex flex-col gap-2">
-          <p className="text-sm font-medium text-text">Wörter je Einblendung</p>
-          <div className="flex flex-wrap gap-2">
-            {WORTZAHLEN.map((n) => (
-              <button
-                key={n}
-                type="button"
-                disabled={!canEdit}
-                onClick={() => setzen({ words_per_card: n })}
-                aria-pressed={s.words_per_card === n}
-                className={cn(
-                  "transition-soft h-10 w-10 rounded-inner border text-sm disabled:opacity-60",
-                  s.words_per_card === n ? "border-white/60 bg-white/10 text-text" : "border-line text-text-2 hover:border-line-strong",
-                )}
-              >
-                {n}
-              </button>
-            ))}
+          <div className="flex items-baseline justify-between gap-2">
+            <label htmlFor={idWoerter} className="text-sm font-medium text-text">
+              Wörter auf einmal
+            </label>
+            <span className="text-sm tabular-nums text-text-2">{s.words_per_card}</span>
           </div>
+          <input
+            id={idWoerter}
+            type="range"
+            min={GRENZEN.words_per_card[0]}
+            max={GRENZEN.words_per_card[1]}
+            step={1}
+            value={s.words_per_card}
+            disabled={!canEdit}
+            onChange={(e) => setzen({ words_per_card: Number(e.target.value) })}
+            className="w-full accent-white disabled:opacity-60"
+          />
           <p className="text-sm text-text-2">
-            {s.words_per_card === 1 ? "Ein Wort nach dem anderen, groß gesetzt." : `Je ${s.words_per_card} Wörter auf einmal.`}
+            {s.words_per_card === 1 ? "Ein Wort nach dem anderen." : `Je ${s.words_per_card} Wörter zusammen.`}
           </p>
         </section>
 
-        {/* 3. Schrift */}
-        <section className="flex flex-col gap-2">
-          <label htmlFor={idFont} className="text-sm font-medium text-text">
-            Schrift
-          </label>
-          <select
-            id={idFont}
-            value={s.font}
-            disabled={!canEdit}
-            onChange={(e) => setzen({ font: e.target.value })}
-            className="transition-soft w-full rounded-inner border border-line bg-black/40 px-4 py-3 text-[15px] text-text hover:border-line-strong focus:border-white/50 focus:outline-none disabled:opacity-60"
-          >
-            {FONTS.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.id} — {f.beschreibung}
-              </option>
-            ))}
-          </select>
-          {fehlendeSchrift && (
-            <p className="text-sm text-attention">
-              Diese Schrift liegt in deinem Browser nicht vor, die Vorschau zeigt Inter. Im fertigen Clip wird sie
-              verwendet, sobald die Datei im Schriftordner des Workers liegt.
-            </p>
-          )}
-        </section>
-
-        {/* 4. Größe */}
+        {/* 3. Wie groß */}
         <section className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between gap-2">
             <label htmlFor={idGroesse} className="text-sm font-medium text-text">
               Größe
             </label>
-            <span className="text-sm text-text-2">{s.font_px} px</span>
+            <span className="text-sm tabular-nums text-text-2">{s.font_px} px</span>
           </div>
           <input
             id={idGroesse}
@@ -382,49 +340,92 @@ export function CaptionStudio({
             onChange={(e) => setzen({ font_px: Number(e.target.value) })}
             className="w-full accent-white disabled:opacity-60"
           />
-          <p className={cn("text-sm", zuLang ? "text-attention" : "text-text-2")}>
-            {zuLang
-              ? `„${laengstesWort}" ist länger als eine Zeile (${zeichenGrenze} Zeichen). Es wird getrennt oder umgebrochen.`
-              : `Etwa ${zeichenGrenze} Zeichen passen in eine Zeile.`}
+          {zuLang && (
+            <p className="text-sm text-attention">
+              „{laengstesWort}&ldquo; passt so nicht in eine Zeile. Kleiner stellen oder mehr Zeilen erlauben.
+            </p>
+          )}
+        </section>
+
+        {/* 4. Farbe der Hervorhebung */}
+        {s.highlight_words && (
+          <section className="flex flex-col gap-2">
+            <p className="text-sm font-medium text-text">Farbe des gesprochenen Worts</p>
+            <div className="flex flex-wrap gap-2">
+              {HIGHLIGHT_FARBEN.map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  disabled={!canEdit}
+                  onClick={() => setzen({ highlight_color: f })}
+                  aria-label={`Farbe ${f}`}
+                  aria-pressed={s.highlight_color.toLowerCase() === f}
+                  className={cn(
+                    "transition-soft h-9 w-9 rounded-full border-2 disabled:opacity-60",
+                    s.highlight_color.toLowerCase() === f ? "border-white" : "border-white/20 hover:border-white/50",
+                  )}
+                  style={{ background: f }}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {fehlendeSchrift && (
+          <p className="text-sm text-attention">
+            Die Schrift dieses Looks liegt in deinem Browser nicht vor, die Vorschau zeigt Inter. Im fertigen Clip wird
+            sie verwendet, sobald die Datei im Schriftordner des Workers liegt.
           </p>
-        </section>
+        )}
 
-        {/* 5. Farben */}
-        <section className="grid gap-4 sm:grid-cols-2">
-          <Farbwahl
-            label="Textfarbe"
-            wert={s.base_color}
-            disabled={!canEdit}
-            onChange={(v) => setzen({ base_color: v })}
-          />
-          <Farbwahl
-            label="Hervorhebung"
-            wert={s.highlight_color}
-            disabled={!canEdit || !s.highlight_words}
-            onChange={(v) => setzen({ highlight_color: v })}
-          />
-        </section>
-
-        {/* 6. Höhe im Bild */}
-        <section className="flex flex-col gap-2">
-          <div className="flex items-baseline justify-between gap-2">
-            <label htmlFor={idHoehe} className="text-sm font-medium text-text">
-              Höhe im Bild
-            </label>
-            <span className="text-sm text-text-2">{s.bottom_margin_px} px über der Kante</span>
-          </div>
-          <input
-            id={idHoehe}
-            type="range"
-            min={GRENZEN.bottom_margin_px[0]}
-            max={GRENZEN.bottom_margin_px[1]}
-            step={10}
-            value={s.bottom_margin_px}
-            disabled={!canEdit}
-            onChange={(e) => setzen({ bottom_margin_px: Number(e.target.value) })}
-            className="w-full accent-white disabled:opacity-60"
-          />
-        </section>
+        {/* 5. Vorlagen */}
+        {(vorlagen.length > 0 || canEdit) && (
+          <section className="flex flex-col gap-2 border-t border-line pt-5">
+            <p className="text-sm font-medium text-text">Vorlagen</p>
+            {vorlagen.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {vorlagen.map((v) => (
+                  <span key={v.id} className="inline-flex items-center gap-1 rounded-pill border border-line pl-3 pr-1 text-sm text-text-2">
+                    <button type="button" disabled={!canEdit} onClick={() => onChange(v.style as CaptionStyle)} className="py-1.5 hover:text-text disabled:opacity-60">
+                      {v.name}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canEdit}
+                      onClick={() => void vorlageLoeschen(v)}
+                      aria-label={`Vorlage ${v.name} entfernen`}
+                      className="transition-soft inline-flex h-6 w-6 items-center justify-center rounded-full text-text-3 hover:bg-white/10 hover:text-text disabled:opacity-60"
+                    >
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                        <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {canEdit && (
+              <div className="flex flex-wrap gap-2">
+                <input
+                  value={vorlageName}
+                  onChange={(e) => setVorlageName(e.target.value)}
+                  maxLength={60}
+                  placeholder="Name, zum Beispiel Podcast fett"
+                  aria-label="Name der Vorlage"
+                  className="transition-soft min-w-[180px] flex-1 rounded-inner border border-line bg-black/40 px-4 py-3 text-[15px] text-text placeholder:text-text-3 hover:border-line-strong focus:border-white/50 focus:outline-none"
+                />
+                <Button variant="ghost" disabled={!vorlageName.trim()} onClick={() => void vorlageSpeichern()}>
+                  Merken
+                </Button>
+              </div>
+            )}
+            {vorlageMeldung && (
+              <p role="status" aria-live="polite" className="text-sm text-text-2">
+                {vorlageMeldung}
+              </p>
+            )}
+          </section>
+        )}
 
         <button
           type="button"
@@ -436,92 +437,45 @@ export function CaptionStudio({
 
         {mehr && (
           <section className="flex flex-col gap-4 border-t border-line pt-5">
+            <Schriftwahl wert={s.font} disabled={!canEdit} onChange={(v) => setzen({ font: v })} />
+            <Farbwahl label="Textfarbe" wert={s.base_color} disabled={!canEdit} onChange={(v) => setzen({ base_color: v })} />
             <Toggle checked={s.bold} disabled={!canEdit} onChange={(v) => setzen({ bold: v })} label="Fett" />
-            <Toggle
-              checked={s.all_caps}
-              disabled={!canEdit}
-              onChange={(v) => setzen({ all_caps: v })}
-              label="Großbuchstaben"
-              description="Passt zu schmalen Schriften wie Anton oder Bebas Neue"
-            />
+            <Toggle checked={s.all_caps} disabled={!canEdit} onChange={(v) => setzen({ all_caps: v })} label="Großbuchstaben" />
             <Toggle
               checked={s.highlight_words}
               disabled={!canEdit}
               onChange={(v) => setzen({ highlight_words: v })}
               label="Gesprochenes Wort hervorheben"
             />
-            <Toggle
-              checked={s.box}
+            <Toggle checked={s.box} disabled={!canEdit} onChange={(v) => setzen({ box: v })} label="Kasten hinter dem Text" />
+            <Regler
+              label="Kontur"
+              einheit="px"
+              wert={s.outline_px}
+              min={GRENZEN.outline_px[0]}
+              max={GRENZEN.outline_px[1]}
               disabled={!canEdit}
-              onChange={(v) => setzen({ box: v })}
-              label="Kasten hinter dem Text"
-              description="Ruhiger, gut auf unruhigem Bild"
+              onChange={(v) => setzen({ outline_px: v })}
             />
-            <div className="flex flex-col gap-2">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-sm font-medium text-text">Kontur</span>
-                <span className="text-sm text-text-2">{s.outline_px} px</span>
-              </div>
-              <input
-                type="range"
-                min={GRENZEN.outline_px[0]}
-                max={GRENZEN.outline_px[1]}
-                value={s.outline_px}
-                disabled={!canEdit}
-                onChange={(e) => setzen({ outline_px: Number(e.target.value) })}
-                aria-label="Kontur"
-                className="w-full accent-white disabled:opacity-60"
-              />
-            </div>
+            <Regler
+              label="Höhe im Bild"
+              einheit="px über der Kante"
+              wert={s.bottom_margin_px}
+              min={GRENZEN.bottom_margin_px[0]}
+              max={GRENZEN.bottom_margin_px[1]}
+              schritt={10}
+              disabled={!canEdit}
+              onChange={(v) => setzen({ bottom_margin_px: v })}
+            />
             {s.words_per_card > 1 && (
-              <div className="flex flex-col gap-2">
-                <span className="text-sm font-medium text-text">Zeilen</span>
-                <div className="flex gap-2">
-                  {[1, 2, 3, 4].map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      disabled={!canEdit}
-                      onClick={() => setzen({ max_lines: n })}
-                      aria-pressed={s.max_lines === n}
-                      className={cn(
-                        "transition-soft h-10 w-10 rounded-inner border text-sm disabled:opacity-60",
-                        s.max_lines === n ? "border-white/60 bg-white/10 text-text" : "border-line text-text-2 hover:border-line-strong",
-                      )}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* Als Vorlage merken */}
-        {canEdit && (
-          <section className="flex flex-col gap-2 border-t border-line pt-5">
-            <p className="text-sm font-medium text-text">Als Vorlage merken</p>
-            <div className="flex flex-wrap gap-2">
-              <input
-                value={vorlageName}
-                onChange={(e) => setVorlageName(e.target.value)}
-                maxLength={60}
-                placeholder="Name, zum Beispiel Podcast fett"
-                aria-label="Name der Vorlage"
-                className="transition-soft min-w-[200px] flex-1 rounded-inner border border-line bg-black/40 px-4 py-3 text-[15px] text-text placeholder:text-text-3 hover:border-line-strong focus:border-white/50 focus:outline-none"
+              <Regler
+                label="Zeilen"
+                wert={s.max_lines}
+                min={GRENZEN.max_lines[0]}
+                max={GRENZEN.max_lines[1]}
+                disabled={!canEdit}
+                onChange={(v) => setzen({ max_lines: v })}
               />
-              <Button variant="ghost" disabled={!vorlageName.trim()} onClick={() => void vorlageSpeichern()}>
-                Merken
-              </Button>
-            </div>
-            <p className="text-sm text-text-2">
-              Vorlagen gelten für alle im Arbeitsbereich. Gleicher Name heißt überschreiben.
-            </p>
-            {vorlageMeldung && (
-              <p role="status" aria-live="polite" className="text-sm text-text-2">
-                {vorlageMeldung}
-              </p>
             )}
           </section>
         )}
@@ -533,7 +487,7 @@ export function CaptionStudio({
               onClick={zuruecksetzen}
               className="transition-soft text-sm text-text-2 underline underline-offset-4 hover:text-text"
             >
-              Auf die Vorgabe zurücksetzen
+              Zurücksetzen
             </button>
             <Button variant={gespeichert ? "ghost" : "primary"} disabled={gespeichert || saving} onClick={speichern}>
               {saving ? "Wird gespeichert" : gespeichert ? "Gespeichert" : "Untertitel speichern"}
@@ -542,6 +496,107 @@ export function CaptionStudio({
         )}
       </div>
     </GlassCard>
+  );
+}
+
+/* Eine kleine Probe des Looks: das Wort „Aa" so gesetzt, wie die Untertitel aussehen werden.
+ * Ein Bild sagt hier mehr als der Name der Schrift. */
+function LookProbe({ look }: { look: Look }) {
+  const v = mitVorgabe(look.stil);
+  return (
+    <span
+      aria-hidden="true"
+      className="flex h-10 w-full items-center justify-center overflow-hidden rounded-[6px] bg-black/60"
+      style={{
+        fontFamily: `"${v.font}", "Inter", system-ui, sans-serif`,
+        fontWeight: v.bold ? 800 : 500,
+        color: v.base_color,
+        textTransform: v.all_caps ? "uppercase" : "none",
+        fontSize: 17,
+        letterSpacing: v.all_caps ? "0.02em" : undefined,
+      }}
+    >
+      <span
+        style={{
+          background: v.box ? "rgba(0,0,0,0.6)" : "transparent",
+          padding: v.box ? "2px 6px" : 0,
+          borderRadius: v.box ? 3 : 0,
+          textShadow: v.outline_px ? `0 0 ${Math.max(1, v.outline_px / 3)}px #000, 0 1px 2px #000` : "none",
+        }}
+      >
+        Wort <span style={{ color: v.highlight_words ? v.highlight_color : v.base_color }}>Wort</span>
+      </span>
+    </span>
+  );
+}
+
+function Schriftwahl({ wert, onChange, disabled }: { wert: string; onChange: (v: string) => void; disabled?: boolean }) {
+  const id = useId();
+  return (
+    <div className="flex flex-col gap-2">
+      <label htmlFor={id} className="text-sm font-medium text-text">
+        Schrift
+      </label>
+      <select
+        id={id}
+        value={wert}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="transition-soft w-full rounded-inner border border-line bg-black/40 px-4 py-3 text-[15px] text-text hover:border-line-strong focus:border-white/50 focus:outline-none disabled:opacity-60"
+      >
+        {FONTS.map((f) => (
+          <option key={f.id} value={f.id}>
+            {f.id} — {f.beschreibung}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function Regler({
+  label,
+  wert,
+  min,
+  max,
+  schritt = 1,
+  einheit,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  wert: number;
+  min: number;
+  max: number;
+  schritt?: number;
+  einheit?: string;
+  onChange: (v: number) => void;
+  disabled?: boolean;
+}) {
+  const id = useId();
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <label htmlFor={id} className="text-sm font-medium text-text">
+          {label}
+        </label>
+        <span className="text-sm tabular-nums text-text-2">
+          {wert}
+          {einheit ? ` ${einheit}` : ""}
+        </span>
+      </div>
+      <input
+        id={id}
+        type="range"
+        min={min}
+        max={max}
+        step={schritt}
+        value={wert}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-white disabled:opacity-60"
+      />
+    </div>
   );
 }
 

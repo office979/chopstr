@@ -34,6 +34,36 @@ def read_wav_mono(wav_path: str) -> tuple[int, np.ndarray]:
     return sr, raw
 
 
+# Auflösung der Wellenform für die Zeitleiste. 25 Werte je Sekunde: fein genug, um eine Sprechpause
+# von einer Zehntelsekunde zu sehen, und grob genug, dass ein zehnminütiges Video unter hundert
+# Kilobyte bleibt. Feiner bringt nichts, weil die Anzeige ohnehin nur ein paar hundert Bildpunkte
+# breit ist.
+WELLENFORM_BIN_S = 0.04
+
+
+def wellenform(wav_path: str, bin_s: float = WELLENFORM_BIN_S) -> dict:
+    """Spitzenwerte der Lautstärke über die Zeit, für die Darstellung in der Zeitleiste.
+
+    Gemessen wird der Höchstwert je Abschnitt, nicht der Durchschnitt: ein kurzer lauter Einsatz
+    soll sichtbar sein, und genau an seinem Rand will jemand schneiden. Der Durchschnitt würde ihn
+    verschleifen.
+
+    Die Werte sind 0 bis 255, damit die Datei klein bleibt; für eine Darstellung von ein paar
+    hundert Bildpunkten Höhe ist das mehr als genug.
+    """
+    sr, x = read_wav_mono(wav_path)
+    hop = max(1, int(sr * bin_s))
+    n = len(x) // hop
+    if n == 0:
+        return {"bin_s": bin_s, "dauer_s": 0.0, "werte": []}
+    frames = np.abs(x[: n * hop].reshape(n, hop)).max(axis=1)
+    # Auf den lautesten Abschnitt beziehen: eine leise Aufnahme soll nicht als flache Linie
+    # erscheinen, nur weil niemand ins Mikrofon geschrien hat.
+    spitze = float(frames.max()) or 1.0
+    werte = np.clip(frames / spitze * 255.0, 0, 255).astype(np.uint8)
+    return {"bin_s": bin_s, "dauer_s": round(len(x) / sr, 3), "werte": [int(v) for v in werte]}
+
+
 def audio_heatmap(wav_path: str, bin_s: float = 1.0) -> np.ndarray:
     sr, x = read_wav_mono(wav_path)
     hop = max(1, int(sr * bin_s))

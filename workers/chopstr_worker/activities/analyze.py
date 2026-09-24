@@ -67,6 +67,12 @@ SQL_DROP_AUTO_CANDIDATES = (
 SQL_SURVIVING_CANDIDATES = "select start_s, end_s from candidates where source_id = %s"
 
 
+def wellenform_key_for(audio_key: str) -> str:
+    """Key der Wellenform. Haengt nur an der Audiospur, nicht an Transkript oder Prompts: die
+    Lautstaerke aendert sich nicht, wenn ein Modell wechselt."""
+    return storage.derived_key(audio_key, {"bin_s": signals.WELLENFORM_BIN_S}, SIGNALS_VERSION, "json", prefix="wellenform")
+
+
 def heatmap_key_for(audio_key: str, with_text: bool) -> str:
     return storage.derived_key(audio_key, {"text": with_text}, SIGNALS_VERSION, "json", prefix="heatmap")
 
@@ -84,10 +90,24 @@ def run_heatmap(ctx: common.Context, source_id: str) -> str:
             if ctx.store.exists("derived", akey):
                 words = ctx.store.get_json("derived", akey).get("words", [])
         key = heatmap_key_for(audio_key, bool(words))
-        if ctx.store.exists("derived", key):
+        wkey = wellenform_key_for(audio_key)
+        # Die Wellenform gehoert zur Zeitleiste und nicht zur Bewertung, haengt aber an derselben
+        # Audiodatei. Sie hier mitzunehmen spart einen zweiten Download; fehlt sie, wird sie auch
+        # dann erzeugt, wenn die Heatmap schon vorliegt.
+        if ctx.store.exists("derived", key) and ctx.store.exists("derived", wkey):
+            _merke_wellenform(ctx, source_id, wkey)
             st.finish("Heatmap bereits vorhanden, Schritt übersprungen", skipped=True, key=key)
             return key
         local = common.ensure_local_audio(ctx, source_id, audio_key)
+        if not ctx.store.exists("derived", wkey):
+            try:
+                ctx.store.put_json("derived", wkey, signals.wellenform(str(local)))
+            except Exception as exc:  # eine fehlende Wellenform kostet Bedienkomfort, keinen Clip
+                log.warning("wellenform failed source=%s error=%s", source_id, exc.__class__.__name__)
+        _merke_wellenform(ctx, source_id, wkey)
+        if ctx.store.exists("derived", key):
+            st.finish("Heatmap bereits vorhanden, Schritt übersprungen", skipped=True, key=key)
+            return key
         audio = signals.audio_heatmap(str(local))
         heat = signals.combined(str(local), words, audio=audio)
         payload = signals.to_payload(heat, audio=audio)
@@ -144,6 +164,16 @@ def candidates_key_for(tv_id: str, tv_version: int, brief: dict, prompt_versions
         "policy": policy,
     }
     return storage.derived_key(f"transcript/{tv_id}", params, story_engine.CONTRACT, "json", prefix="candidates")
+
+
+def _merke_wellenform(ctx: common.Context, source_id: str, key: str) -> None:
+    """Den Key an der Quelle vermerken, damit die Oberflaeche ihn ohne Umweg findet."""
+    if not ctx.store.exists("derived", key):
+        return
+    try:
+        db.update(ctx.conn, "sources", {"id": source_id}, waveform_key=key)
+    except Exception as exc:  # ohne die Spalte (Migration 0010) laeuft alles andere weiter
+        log.warning("waveform_key not writable source=%s error=%s", source_id, exc.__class__.__name__)
 
 
 def _drop_stale_auto_rows(ctx: common.Context, source_id: str) -> None:

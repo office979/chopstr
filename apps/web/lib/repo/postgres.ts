@@ -66,6 +66,7 @@ function toSource(r: Row): Source {
     sha256: (r.sha256 as string | null) ?? null,
     storage_key: r.storage_key as string,
     proxy_key: (r.proxy_key as string | null) ?? null,
+    waveform_key: (r.waveform_key as string | null) ?? null,
     duration_s: num(r.duration_s),
     width: num(r.width),
     height: num(r.height),

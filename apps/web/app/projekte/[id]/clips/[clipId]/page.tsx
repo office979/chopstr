@@ -19,8 +19,7 @@ export async function generateMetadata({ params }: Props) {
   return { title: source ? `Clip · ${source.title}` : "Clip" };
 }
 
-/* Ein einzelner Clip: Vorschau und Text. Der Schnitt (verlängern, kürzen, Grenzen verschieben)
- * steht hier bewusst nicht, er ist zurückgestellt. */
+/* Ein einzelner Clip: Vorschau, Text und die Timeline mit dem Schnitt. */
 export default async function ClipPage({ params }: Props) {
   const { id, clipId } = await params;
   const session = await requireSession();
@@ -79,10 +78,18 @@ export default async function ClipPage({ params }: Props) {
         captionStyle={stilPruefen(extras[0]?.caption_style)}
         captionPresets={captionPresets.map((p) => ({ id: p.id, name: p.name, style: p.style }))}
         filmstripSrc={mediaUrl(mediaBase, clip.filmstrip_key)}
-        filmstripMeta={clip.filmstrip_meta}
-        zeitmarken={clip.zeitmarken}
+        /* Aus den Extras und nicht aus der Clip-Zeile: geschrieben wird ueber updateClipExtras,
+         * und gelesen werden muss dieselbe Stelle. Im Testmodus sind das zwei getrennte Ablagen,
+         * dort waren gesetzte Marken nach dem Neuladen sonst weg. */
+        zeitmarken={extras[0]?.zeitmarken ?? clip.zeitmarken}
         shots={clip.render_plan?.shots ?? []}
         quelleBreite={source.width ?? null}
+        komposition={clip.composition}
+        /* Der Schnitt aus dem letzten Bauen. Daran haengt der Hinweis „das Video zeigt noch den
+         * alten Schnitt"; ohne Plan gibt es nichts zu vergleichen. */
+        gerenderteSegmente={clip.render_plan?.segments ?? null}
+        quelleDauerS={source.duration_s ?? 0}
+        wellenformSrc={mediaUrl(mediaBase, source.waveform_key)}
         gerenderteCaptions={(clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null}
         /* Die Vorschau rechnet den Ausschnitt selbst aus, dafuer braucht sie beide Groessen. Die
          * Ausgabegroesse steht im Plan; ohne Plan gilt 1080x1920, das Format aller neuen Clips. */

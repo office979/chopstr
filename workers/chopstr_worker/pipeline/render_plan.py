@@ -144,12 +144,20 @@ def audio_block(preset: str = "master") -> dict[str, Any]:
 
 
 def normalize_segments(segments: list[dict]) -> list[dict]:
-    out = []
+    out: list[dict] = []
     for s in segments:
         start, end = float(s["start"]), float(s["end"])
         if end <= start:
             raise ValueError(f"Segment mit Länge 0 oder negativ ({start:.2f} bis {end:.2f})")
-        out.append({"start": round(start, 3), "end": round(end, 3), "role": str(s.get("role") or "body")})
+        stueck = {"start": round(start, 3), "end": round(end, 3), "role": str(s.get("role") or "body")}
+        vor = out[-1] if out else None
+        # Zwei Abschnitte, die in der Quelle aneinander liegen, werden zu einem. Im Editor kann
+        # jemand geteilt und dann nichts entfernt haben; die Naht waere im Ergebnis trotzdem zu
+        # hoeren, weil jeder Abschnitt eine Tonblende von 20 ms bekommt (siehe render._audio).
+        if vor is not None and vor["role"] == stueck["role"] and abs(stueck["start"] - vor["end"]) < 1e-3:
+            vor["end"] = stueck["end"]
+            continue
+        out.append(stueck)
     if not out:
         raise ValueError("Komposition ohne Segmente")
     return out

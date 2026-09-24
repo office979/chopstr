@@ -157,6 +157,9 @@ export interface Source {
   sha256: string | null;
   storage_key: string;
   proxy_key: string | null;
+  /* Die Lautstärke über die Zeit, als JSON neben dem Ton. Die Timeline zeichnet daraus die
+   * Wellenform; ohne sie gäbe es dort nur einen dekorativen Strich. */
+  waveform_key: string | null;
   duration_s: number | null;
   width: number | null;
   height: number | null;

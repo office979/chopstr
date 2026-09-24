@@ -26,9 +26,16 @@ interface Props {
   outH: number;
   clipStart: number;
   clipEnd: number | null;
+  /* Was aus dem Clip entfernt ist, in Quellzeit. Beim Abspielen springt die Vorschau darueber
+   * hinweg, damit sie denselben Ablauf zeigt wie der spaetere Clip. */
+  luecken?: { von: number; bis: number }[];
   zeit: number;
   onTime: (quellzeit: number) => void;
   seekTo: { at: number; nonce: number } | null;
+  /* Zaehler von aussen: jede Erhoehung startet oder stoppt das Video. So bedient der Knopf in der
+   * Timeline denselben Player wie der Knopf im Bild. */
+  spielen?: number;
+  onLaeuft?: (laeuft: boolean) => void;
   shots: RenderShot[];
   zeitmarken: Zeitmarke[];
   stil: CaptionStyle;
@@ -54,9 +61,12 @@ export function LiveVorschau({
   outH,
   clipStart,
   clipEnd,
+  luecken = [],
   zeit,
   onTime,
   seekTo,
+  spielen = 0,
+  onLaeuft,
   shots,
   zeitmarken,
   stil,
@@ -81,6 +91,20 @@ export function LiveVorschau({
     if (!video || !seekTo) return;
     video.currentTime = Math.max(0, seekTo.at);
   }, [seekTo]);
+
+  /* Der erste Lauf ist kein Klick: ohne diese Sperre startete das Video beim Laden von selbst. */
+  const ersterZaehler = useRef(spielen);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || spielen === ersterZaehler.current) return;
+    if (video.paused) void video.play();
+    else video.pause();
+  }, [spielen]);
+
+  const melden = (l: boolean) => {
+    setLaeuft(l);
+    onLaeuft?.(l);
+  };
 
   /* Was gilt an dieser Stelle? Eine Marke von Hand schlaegt den Plan; ohne Marke gilt, was die
    * Automatik beim letzten Lauf entschieden hat. */
@@ -143,13 +167,20 @@ export function LiveVorschau({
           playsInline
           preload="metadata"
           style={lage}
-          onPlay={() => setLaeuft(true)}
-          onPause={() => setLaeuft(false)}
+          onPlay={() => melden(true)}
+          onPause={() => melden(false)}
           onTimeUpdate={(e) => {
             const v = e.currentTarget;
             if (clipEnd != null && v.currentTime > clipEnd) {
               v.pause();
               v.currentTime = clipEnd;
+            }
+            /* Ueber eine entfernte Stelle hinwegspringen. Nur beim Abspielen: wer von Hand in eine
+             * Luecke zieht, soll dort stehen bleiben und sehen, was er weggeschnitten hat. */
+            const luecke = v.paused ? null : luecken.find((l) => v.currentTime > l.von + 0.02 && v.currentTime < l.bis);
+            if (luecke) {
+              v.currentTime = luecke.bis;
+              return;
             }
             onTime(v.currentTime);
           }}

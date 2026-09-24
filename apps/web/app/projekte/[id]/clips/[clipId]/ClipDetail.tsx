@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button, ButtonLink } from "@/components/ui/Button";
@@ -8,8 +8,12 @@ import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/components/ui/cn";
 import { reclassify } from "@/lib/transcript/fillers";
 import { ASPECT_LABELS, formatClipDuration } from "@/lib/clips/labels";
-import type { Aspect, FilmstripMeta, RenderShot, TranscriptVersion, TranscriptWord, Zeitmarke } from "@/lib/repo/types";
-import { Zeitleiste } from "./Zeitleiste";
+import type { Aspect, RenderShot, TranscriptVersion, TranscriptWord, Zeitmarke } from "@/lib/repo/types";
+import { Zeitleiste, beschreibung as markeBeschreibung } from "./Zeitleiste";
+import { Timeline, luecken } from "./timeline/Timeline";
+import { useFilmstreifen } from "./useFilmstreifen";
+import type { WellenformDaten } from "./timeline/Wellenform";
+import { dauer as schnittDauer, gleich as schnittGleich, type Schnitt } from "@/lib/clips/schnitt";
 import { ClipPreview } from "./ClipPreview";
 import { LiveVorschau } from "./LiveVorschau";
 import { ClipTextEditor } from "./ClipTextEditor";
@@ -47,10 +51,16 @@ interface Props {
   outW: number;
   outH: number;
   filmstripSrc: string | null;
-  filmstripMeta: FilmstripMeta | null;
   zeitmarken: Zeitmarke[];
   shots: RenderShot[];
   quelleBreite: number | null;
+  /* Der gespeicherte Schnitt: welche Abschnitte der Quelle dieser Clip zeigt. */
+  komposition: Schnitt;
+  /* Der Schnitt, der im gebauten Video steckt. Weicht er vom gespeicherten ab, zeigt das Video
+   * ein altes Ergebnis, und das muss dastehen. */
+  gerenderteSegmente: Schnitt | null;
+  quelleDauerS: number;
+  wellenformSrc: string | null;
 }
 
 /* Ein Clip: oben Vorschau, daneben sein Text. Gespeichert wird mit einem Klick, ohne Rückfrage.
@@ -79,10 +89,13 @@ export function ClipDetail({
   outW,
   outH,
   filmstripSrc,
-  filmstripMeta,
   zeitmarken: markenAnfang,
   shots,
   quelleBreite,
+  komposition,
+  gerenderteSegmente,
+  quelleDauerS,
+  wellenformSrc,
 }: Props) {
   const router = useRouter();
   const backHref = `/projekte/${sourceId}/clips`;
@@ -110,6 +123,96 @@ export function ClipDetail({
   /* Vorschau aus der Quelle (zeigt jede Aenderung sofort) oder das gebaute Video (zeigt das
    * Ergebnis des letzten Laufs). Voreingestellt ist die Vorschau: wer hier ist, stellt etwas ein. */
   const [zeigeGebautes, setZeigeGebautes] = useState(false);
+
+  /* Der Schnitt mit Verlauf. Rueckgaengig und Wiederherstellen brauchen nur zwei Listen alter
+   * Fassungen; ein Diff waere hier Aufwand ohne Nutzen, die Listen sind winzig. */
+  const [schnitt, setSchnitt] = useState<Schnitt>(komposition);
+  const [gesichert, setGesichert] = useState<Schnitt>(komposition);
+  const [zurueckStapel, setZurueckStapel] = useState<Schnitt[]>([]);
+  const [vorStapel, setVorStapel] = useState<Schnitt[]>([]);
+  const [schnittSaving, setSchnittSaving] = useState(false);
+  const [wellenform, setWellenform] = useState<WellenformDaten | null>(null);
+  const [laeuft, setLaeuft] = useState(false);
+  const [spielen, setSpielen] = useState(0);
+
+  useEffect(() => {
+    if (!wellenformSrc) return undefined;
+    let weg = false;
+    fetch(wellenformSrc)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!weg && d && Array.isArray(d.werte)) setWellenform(d as WellenformDaten);
+      })
+      .catch(() => undefined);
+    return () => {
+      weg = true;
+    };
+  }, [wellenformSrc]);
+
+  /* Hier wird bewusst NICHT aufgeraeumt: aufraeumen zieht beruehrende Abschnitte zusammen, und
+   * genau die entstehen beim Teilen. Die einzelnen Schritte raeumen selbst auf, soweit noetig.
+   * Beim Bauen werden durchgehende Abschnitte wieder zusammengefasst (render_plan), damit an
+   * einer Naht ohne entfernten Teil keine Tonblende hoerbar wird. */
+  const schnittSetzen = useCallback(
+    (neu: Schnitt) => {
+      if (!neu.length || schnittGleich(neu, schnitt)) return;
+      setZurueckStapel((z) => [...z.slice(-29), schnitt]);
+      setVorStapel([]);
+      setSchnitt(neu);
+    },
+    [schnitt],
+  );
+
+  const zurueck = useCallback(() => {
+    setZurueckStapel((z) => {
+      if (!z.length) return z;
+      const letzte = z[z.length - 1];
+      setVorStapel((v) => [...v, schnitt]);
+      setSchnitt(letzte);
+      return z.slice(0, -1);
+    });
+  }, [schnitt]);
+
+  const vor = useCallback(() => {
+    setVorStapel((v) => {
+      if (!v.length) return v;
+      const naechste = v[v.length - 1];
+      setZurueckStapel((z) => [...z, schnitt]);
+      setSchnitt(naechste);
+      return v.slice(0, -1);
+    });
+  }, [schnitt]);
+
+  const schnittGeaendert = !schnittGleich(schnitt, gesichert);
+  const schnittVeraltet =
+    Boolean(clipSrc) && gerenderteSegmente != null && !schnittGleich(gesichert, gerenderteSegmente);
+  const neueDauer = schnittDauer(schnitt);
+
+  /* Der Zeitraum, den die Timeline zeigt: der geladene Schnitt plus zehn Sekunden Luft auf beiden
+   * Seiten, damit sich der Anfang auch wieder verlaengern laesst. Bewusst fest ab dem Laden und
+   * NICHT dem laufenden Schnitt folgend: sonst verschoebe sich die Zeitskala unter der Hand,
+   * waehrend jemand an einer Kante zieht. */
+  const bereichVon = useMemo(() => Math.max(0, (komposition[0]?.start ?? 0) - 10), [komposition]);
+  const bereichBis = useMemo(
+    () => Math.min(quelleDauerS || Infinity, (komposition[komposition.length - 1]?.end ?? 0) + 10),
+    [komposition, quelleDauerS],
+  );
+  /* Die Einzelbilder fuer die Bildspur. Sie haengen am festen Bereich, nicht am Schnitt: sonst
+   * wuerde der Streifen bei jeder Kante neu gezeichnet. */
+  const streifenBilder = useFilmstreifen(sourceSrc, bereichVon, bereichBis);
+
+  /* Anfang und Ende des Clips nach dem aktuellen Schnitt. Daran haengt die Vorschau: sie soll das
+   * zeigen, was gerade eingestellt ist, nicht den Stand vom Laden. */
+  const vorschauStart = schnitt[0]?.start ?? clipStart;
+  const vorschauEnde = schnitt[schnitt.length - 1]?.end ?? clipEnd;
+  /* Die entfernten Teile. Beim Abspielen springt die Vorschau darueber hinweg, damit sie denselben
+   * Ablauf zeigt wie der spaetere Clip. */
+  const vorschauLuecken = useMemo(() => luecken(schnitt, vorschauStart, vorschauEnde ?? vorschauStart), [schnitt, vorschauStart, vorschauEnde]);
+
+  const auswahlAusShots = useMemo(
+    () => [...new Set(shots.flatMap((sh) => sh.auswahl ?? []))].sort((a, b) => a - b),
+    [shots],
+  );
 
   const hasText = wordFrom != null && wordTo != null && wordTo >= wordFrom;
 
@@ -248,8 +351,19 @@ export function ClipDetail({
     }
   };
 
+  /* Die Marken auch in einer Ref, damit ein Schreibvorgang immer vom neuesten Stand ausgeht.
+   * Ohne das rechnet ein zweiter Klick, der vor der Antwort des ersten kommt, mit einer alten
+   * Liste weiter: einmal beobachtet, dass dabei aus einer verschobenen Marke zwei wurden. */
+  const markenRef = useRef(marken);
+  useEffect(() => {
+    markenRef.current = marken;
+  }, [marken]);
+
   const markenSichern = useCallback(
-    async (naechste: Zeitmarke[]) => {
+    async (rechnen: (vorher: Zeitmarke[]) => Zeitmarke[]) => {
+      const vorher = markenRef.current;
+      const naechste = rechnen(vorher);
+      markenRef.current = naechste;
       setMarken(naechste);
       try {
         const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/zeitmarken`, {
@@ -259,21 +373,49 @@ export function ClipDetail({
         });
         const data = (await res.json()) as { error?: string; zeitmarken?: Zeitmarke[]; needs_render?: boolean };
         if (!res.ok) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
-        if (data.zeitmarken) setMarken(data.zeitmarken);
+        if (data.zeitmarken) {
+          markenRef.current = data.zeitmarken;
+          setMarken(data.zeitmarken);
+        }
         setMessage({
           tone: "ok",
           text: data.needs_render ? "Gespeichert. Wirkt, sobald der Clip neu gebaut wird." : "Gespeichert.",
         });
       } catch (err) {
-        setMarken(marken);
+        markenRef.current = vorher;
+        setMarken(vorher);
         setMessage({ tone: "error", text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt" });
       }
     },
-    [sourceId, clipId, marken],
+    [sourceId, clipId],
   );
 
+  const schnittSichern = async () => {
+    setSchnittSaving(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/schnitt`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ composition: schnitt }),
+      });
+      const data = (await res.json()) as { error?: string; composition?: Schnitt; needs_render?: boolean };
+      if (!res.ok || !data.composition) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
+      setSchnitt(data.composition);
+      setGesichert(data.composition);
+      setMessage({
+        tone: "ok",
+        text: data.needs_render ? "Schnitt gespeichert. Der Clip muss neu gebaut werden." : "Schnitt gespeichert.",
+      });
+    } catch (err) {
+      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt" });
+    } finally {
+      setSchnittSaving(false);
+    }
+  };
+
   const goBack = () => {
-    if (dirty || stilGeaendert) setLeaveOpen(true);
+    if (dirty || stilGeaendert || schnittGeaendert) setLeaveOpen(true);
     else router.push(backHref);
   };
 
@@ -295,8 +437,10 @@ export function ClipDetail({
           <div>
             <p className="text-sm text-text-2">{sourceTitle}</p>
             <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Clip</h1>
+            {/* Die Laenge kommt aus dem aktuellen Schnitt und nicht aus dem gebauten Video: nach
+              * einer Kuerzung stuende hier sonst weiter die alte Dauer. */}
             <p className="mt-1 text-sm text-text-2">
-              {ASPECT_LABELS[aspect]}, {formatClipDuration(durationS)}
+              {ASPECT_LABELS[aspect]}, {formatClipDuration(neueDauer || durationS)}
             </p>
           </div>
         </div>
@@ -340,6 +484,8 @@ export function ClipDetail({
             trim={trim}
             onTime={setCurrentTime}
             seekTo={seekTo}
+            spielen={spielen}
+            onLaeuft={setLaeuft}
             /* Die Vorschau der Untertitel NUR, solange das Quellvideo laeuft. Im fertigen Clip sind
              * sie eingebrannt; beides zugleich ergibt zwei Texte uebereinander. */
             overlay={null}
@@ -353,11 +499,14 @@ export function ClipDetail({
               srcH={srcH}
               outW={outW}
               outH={outH}
-              clipStart={clipStart}
-              clipEnd={clipEnd}
+              clipStart={vorschauStart}
+              clipEnd={vorschauEnde}
+              luecken={vorschauLuecken}
               zeit={currentTime}
               onTime={setCurrentTime}
               seekTo={seekTo}
+              spielen={spielen}
+              onLaeuft={setLaeuft}
               shots={shots}
               zeitmarken={marken}
               stil={stil}
@@ -375,19 +524,24 @@ export function ClipDetail({
 
           <div className="mt-4">
             <Zeitleiste
-              filmstripSrc={filmstripSrc}
-              filmstripMeta={filmstripMeta}
-              videoSrc={sourceSrc}
-              clipStart={clipStart}
-              dauerS={durationS ?? (clipEnd != null ? clipEnd - clipStart : 0)}
+              filmstripSrc={null}
+              filmstripMeta={null}
+              videoSrc={null}
+              clipStart={vorschauStart}
+              dauerS={neueDauer}
               zeit={currentTime}
               onSeek={seek}
               shots={shots}
               zeitmarken={marken}
-              onMarke={(m) => void markenSichern([...marken.filter((x) => Math.abs(x.ab_s - m.ab_s) > 0.35), m].sort((a, b) => a.ab_s - b.ab_s))}
-              onMarkeWeg={(abS) => void markenSichern(marken.filter((x) => x.ab_s !== abS))}
+              onMarke={(m) =>
+                void markenSichern((vorher) =>
+                  [...vorher.filter((x) => Math.abs(x.ab_s - m.ab_s) > 0.35), m].sort((a, b) => a.ab_s - b.ab_s),
+                )
+              }
+              onMarkeWeg={(abS) => void markenSichern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
               quelleBreite={quelleBreite}
               canEdit={canEdit}
+              nurEinstellungen
             />
           </div>
         </div>
@@ -448,6 +602,67 @@ export function ClipDetail({
             </GlassCard>
           )}
         </div>
+      </div>
+
+      {/* Die Timeline bekommt die volle Breite unter Vorschau und Einstellungen. In der schmalen
+        * Spalte waren Marker und Zeiten abgeschnitten, und Schneiden braucht Platz. */}
+      <div className="mt-5">
+        <Timeline
+          bereichVonS={bereichVon}
+          bereichBisS={bereichBis}
+          schnitt={schnitt}
+          onSchnitt={(neu) => schnittSetzen(neu)}
+          quelleDauerS={quelleDauerS}
+          zeit={currentTime}
+          onSeek={seek}
+          laeuft={laeuft}
+          onPlayPause={() => setSpielen((n) => n + 1)}
+          wellenform={wellenform}
+          filmstreifen={streifenBilder}
+          filmstripSrc={zeigeGebautes ? filmstripSrc : null}
+          shots={shots}
+          zeitmarken={marken}
+          onMarkeWeg={(abS) => void markenSichern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
+          onMarkeVerschieben={(vonS, nachS) =>
+            void markenSichern((vorher) =>
+              vorher
+                .map((x) => (Math.abs(x.ab_s - vonS) < 1e-6 ? { ...x, ab_s: Math.round(nachS * 100) / 100 } : x))
+                .sort((a, b) => a.ab_s - b.ab_s),
+            )
+          }
+          markeBeschriftung={(m) => markeBeschreibung(m, auswahlAusShots)}
+          canEdit={canEdit}
+          kannZurueck={zurueckStapel.length > 0}
+          kannVor={vorStapel.length > 0}
+          onZurueck={zurueck}
+          onVor={vor}
+        />
+
+        {canEdit && (
+          <GlassCard padding="md" className="mt-3" selected={schnittGeaendert}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-col gap-1">
+                <p className="text-sm text-text">
+                  {schnittGeaendert
+                    ? `Schnitt geändert, noch nicht gespeichert. Neue Länge ${neueDauer.toFixed(1).replace(".", ",")} s.`
+                    : schnittVeraltet
+                      ? "Gespeichert. Das gebaute Video zeigt noch den alten Schnitt."
+                      : `Gespeichert. Länge ${neueDauer.toFixed(1).replace(".", ",")} s.`}
+                </p>
+                {(schnittGeaendert || schnittVeraltet) && (
+                  <p className="text-sm text-text-2">Die Vorschau links zeigt bereits den neuen Schnitt.</p>
+                )}
+              </div>
+              <Button
+                variant={schnittGeaendert ? "primary" : "ghost"}
+                disabled={!schnittGeaendert || schnittSaving}
+                onClick={() => void schnittSichern()}
+              >
+                {schnittSaving ? "Wird gespeichert" : "Schnitt speichern"}
+              </Button>
+            </div>
+          </GlassCard>
+        )}
       </div>
 
       <Modal

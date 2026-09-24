@@ -549,6 +549,7 @@ export const demoRepo: Repo = {
       sha256: input.sha256 ?? null,
       storage_key: input.storage_key,
       proxy_key: null,
+      waveform_key: null,
       duration_s: null,
       width: null,
       height: null,

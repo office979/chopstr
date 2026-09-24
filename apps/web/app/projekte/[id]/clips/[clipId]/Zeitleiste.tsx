@@ -21,6 +21,9 @@ interface Props {
   onMarkeWeg: (abS: number) => void;
   quelleBreite: number | null;
   canEdit: boolean;
+  /* Nur der Einstellteil, ohne eigene Spur. Die Zeitspur steht jetzt in der Timeline unter der
+   * Seite; zwei Leisten mit denselben Bildern nebeneinander waren eine Leiste zu viel. */
+  nurEinstellungen?: boolean;
 }
 
 const HOEHE = 76;
@@ -96,6 +99,7 @@ export function Zeitleiste({
   onMarkeWeg,
   quelleBreite,
   canEdit,
+  nurEinstellungen = false,
 }: Props) {
   const spurRef = useRef<HTMLDivElement | null>(null);
   const imClip = Math.max(0, Math.min(dauerS, zeit - clipStart));
@@ -103,7 +107,11 @@ export function Zeitleiste({
 
   /* Gibt es schon einen gerenderten Streifen, wird der genommen. Sonst zeichnet der Browser die
    * Bilder aus dem Quellvideo - gebraucht werden sie VOR dem Render, nicht danach. */
-  const selbstGezeichnet = useFilmstreifen(filmstripSrc ? null : videoSrc, clipStart, clipStart + dauerS);
+  const selbstGezeichnet = useFilmstreifen(
+    nurEinstellungen || filmstripSrc ? null : videoSrc,
+    clipStart,
+    clipStart + dauerS,
+  );
 
   const ausSpur = useCallback(
     (clientX: number) => {
@@ -178,9 +186,10 @@ export function Zeitleiste({
       {/* Eine Ueberschrift, die sagt wofuer die Leiste da ist. Ohne sie steht hier ein Streifen
         * Bilder und darunter Knoepfe, und niemand weiss, was zusammengehoert. */}
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-lg font-semibold">Zeitleiste</h2>
-        <p className="text-sm text-text-2">Was wann zu sehen ist</p>
+        <h2 className="text-lg font-semibold">Bildausschnitt</h2>
+        <p className="text-sm text-text-2">Wer wie nah im Bild ist</p>
       </div>
+      {!nurEinstellungen && (
       <div
         ref={spurRef}
         onPointerDown={greifen}
@@ -255,15 +264,19 @@ export function Zeitleiste({
           <div className="absolute -left-[7px] -top-1 h-4 w-4 rounded-full border-2 border-black/60 bg-white" />
         </div>
       </div>
+      )}
 
-      <div className="flex items-center justify-between text-sm text-text-2">
-        <span className="tabular-nums">{sekunden(imClip)}</span>
-        <span className="tabular-nums">{sekunden(dauerS)}</span>
-      </div>
+      {!nurEinstellungen && (
+        <div className="flex items-center justify-between text-sm text-text-2">
+          <span className="tabular-nums">{sekunden(imClip)}</span>
+          <span className="tabular-nums">{sekunden(dauerS)}</span>
+        </div>
+      )}
 
       {/* Die Abschnitte: was gilt wo. Ein duenner Strich auf dem Streifen sagt niemandem, dass er
         * dort etwas gesetzt hat; eine beschriftete Flaeche schon. Breite nach Dauer, damit sich die
         * Leiste mit dem Streifen darueber deckt. */}
+      {!nurEinstellungen && (
       <div className="flex w-full gap-[2px]" aria-label="Abschnitte">
         {stuecke.map((a) => {
           const hier = imClip >= a.vonS && imClip < a.bisS;
@@ -288,6 +301,7 @@ export function Zeitleiste({
           );
         })}
       </div>
+      )}
 
       {/* Was an dieser Stelle gilt, und was man daran aendern kann. Alles in einem Kasten, damit der
         * Zusammenhang zur Zeitleiste sichtbar bleibt: hier steht der Schieber, hier wird es gesetzt. */}
@@ -295,7 +309,9 @@ export function Zeitleiste({
         <div className="flex flex-col gap-4 rounded-inner border border-line bg-black/20 p-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <p className="text-sm font-medium text-text">Ab {sekunden(imClip)} gilt</p>
-            <p className="text-sm text-text-3">Schieb oben an eine Stelle</p>
+            <p className="text-sm text-text-3">
+              {nurEinstellungen ? "Stelle in der Timeline wählen" : "Schieb oben an eine Stelle"}
+            </p>
           </div>
 
           {auswahl.length > 1 && (

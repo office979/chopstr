@@ -105,6 +105,10 @@ const baseSource = {
    * Einzelbilder zeichnen. Die Datei liegt in public/ und ist ein synthetisches Testbild aus
    * ffmpeg, kein echtes Material. */
   proxy_key: "/demo/video.mp4" as string | null,
+  /* Dazu die echte Wellenform dieser Datei, erzeugt mit derselben Funktion wie im Worker
+   * (signals.wellenform). Eine ausgedachte Kurve wuerde im Demo-Modus Pausen zeigen, die es
+   * im Ton nicht gibt. */
+  waveform_key: "/demo/wellenform.json" as string | null,
 };
 
 export const seedSources: Source[] = [

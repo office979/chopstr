@@ -141,3 +141,26 @@ def test_motion_zoom_only_when_reframing():
         sources=SOURCES, caption_preset="tiktok_words", src_fps=25.0,
     )  # fmt: skip
     assert plan["motion"]["zoom_to"] == 1.0
+
+
+def test_normalize_segments_zieht_durchgehende_abschnitte_zusammen():
+    """Teilen ohne Entfernen darf im Ergebnis nicht hoerbar sein.
+
+    Im Editor kann jemand an einer Stelle teilen und dann nichts wegnehmen. Die Komposition hat
+    danach zwei Abschnitte, die in der Quelle aneinander liegen. Jeder Abschnitt bekommt beim
+    Rendern eine Tonblende von 20 ms (render._audio); zwei Abschnitte ergaeben also ein hoerbares
+    Loch an einer Stelle, an der der Nutzer nichts geschnitten hat.
+    """
+    aus = render_plan.normalize_segments([{"start": 10, "end": 20}, {"start": 20, "end": 30}])
+    assert aus == [{"start": 10.0, "end": 30.0, "role": "body"}]
+
+
+def test_normalize_segments_behaelt_eine_echte_luecke():
+    aus = render_plan.normalize_segments([{"start": 10, "end": 20}, {"start": 25, "end": 30}])
+    assert [(s["start"], s["end"]) for s in aus] == [(10.0, 20.0), (25.0, 30.0)]
+
+
+def test_normalize_segments_trennt_rollen():
+    """Ein Teaser bleibt ein eigener Abschnitt, auch wenn er direkt an den Koerper anschliesst."""
+    aus = render_plan.normalize_segments([{"start": 10, "end": 20, "role": "teaser"}, {"start": 20, "end": 30}])
+    assert [s["role"] for s in aus] == ["teaser", "body"]

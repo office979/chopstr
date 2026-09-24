@@ -29,11 +29,26 @@ interface Props {
   /* Über das Bild gelegt, zum Beispiel die Untertitel-Vorschau. Nimmt keine Klicks an, damit die
    * Steuerung des Browsers erreichbar bleibt. */
   overlay?: ReactNode;
+  /* Zaehler von aussen: jede Erhoehung startet oder stoppt das Video, damit der Knopf in der
+   * Timeline denselben Player bedient. */
+  spielen?: number;
+  onLaeuft?: (laeuft: boolean) => void;
 }
 
 /* Vorschau des Clips. Die Steuerung ist die des Browsers: abspielen, anhalten, schieben.
  * Mehr steht hier nicht, der Schnitt kommt später. */
-export function ClipPreview({ src, posterSrc, aspect, timeOffset, trim, onTime, seekTo, overlay }: Props) {
+export function ClipPreview({
+  src,
+  posterSrc,
+  aspect,
+  timeOffset,
+  trim,
+  onTime,
+  seekTo,
+  overlay,
+  spielen = 0,
+  onLaeuft,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   /* Läuft das ganze Video, soll es dort beginnen, wo der Clip beginnt. */
@@ -53,6 +68,15 @@ export function ClipPreview({ src, posterSrc, aspect, timeOffset, trim, onTime, 
     if (!video || !seekTo) return;
     video.currentTime = Math.max(0, seekTo.at - timeOffset);
   }, [seekTo, timeOffset]);
+
+  /* Der erste Lauf ist kein Klick: ohne diese Sperre startete das Video beim Laden von selbst. */
+  const ersterZaehler = useRef(spielen);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || spielen === ersterZaehler.current) return;
+    if (video.paused) void video.play();
+    else video.pause();
+  }, [spielen]);
 
   if (!src) {
     return (
@@ -87,6 +111,8 @@ export function ClipPreview({ src, posterSrc, aspect, timeOffset, trim, onTime, 
           playsInline
           preload="metadata"
           aria-label="Clip abspielen"
+          onPlay={() => onLaeuft?.(true)}
+          onPause={() => onLaeuft?.(false)}
           className="block max-h-[62dvh] w-auto bg-black"
           style={{ aspectRatio: trim ? undefined : ASPECT_RATIO_CSS[aspect] }}
           onTimeUpdate={(e) => {

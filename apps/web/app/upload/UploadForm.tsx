@@ -28,7 +28,18 @@ class DirectUploadError extends Error {}
 
 const RIGHTS_TEXT = "Ich darf dieses Video bearbeiten und veröffentlichen.";
 
-const ACCEPT = "video/mp4,video/quicktime,video/x-matroska,video/webm,audio/mpeg,audio/wav,audio/x-m4a,.mp4,.mov,.mkv,.webm,.mp3,.wav,.m4a";
+/* Was der Worker wirklich verarbeiten kann. Die Liste steht hier und in
+ * app/api/uploads/direct/route.ts (EXT_BY_MIME); mehr anzubieten hiesse, einen Upload anzunehmen,
+ * der beim Verarbeiten scheitert. */
+const ENDUNGEN = [".mp4", ".mov", ".mkv", ".webm", ".mp3", ".wav", ".m4a"] as const;
+const ACCEPT = `video/mp4,video/quicktime,video/x-matroska,video/webm,audio/mpeg,audio/wav,audio/x-m4a,${ENDUNGEN.join(",")}`;
+
+/* Passt die Datei? Geprüft wird die Endung und nicht der gemeldete Typ: Browser melden für
+ * dieselbe Datei verschiedene Typen, und manche gar keinen. */
+function endungPasst(name: string): boolean {
+  const punkt = name.lastIndexOf(".");
+  return punkt > 0 && (ENDUNGEN as readonly string[]).includes(name.slice(punkt).toLowerCase());
+}
 
 /* Eine Box, vier Dinge: Name, Stil, Video, Haken. Alles andere (wem das Video gehört, Quellenangabe)
  * liegt hinter „Mehr anzeigen“ — es betrifft wenige und darf den Weg nicht verlängern.
@@ -48,14 +59,37 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [phase, setPhase] = useState<Phase>("form");
   const [progress, setProgress] = useState(0);
+  /* Übertragene und gesamte Bytes. „47 %" allein sagt bei einer Datei von zwei Gigabyte nichts
+   * darüber, ob noch etwas passiert; die Zahl der Bytes schon. */
+  const [uebertragen, setUebertragen] = useState<{ gesendet: number; gesamt: number } | null>(null);
+  /* Ein angefangener Upload, den tus fortsetzen kann. */
+  const [fortsetzbar, setFortsetzbar] = useState<{ file: string; gesendet: number; gesamt: number } | null>(null);
   const [note, setNote] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<{ abort: () => void } | null>(null);
+  /* Sperre gegen den zweiten Klick. Der Knopf ist zwar ``disabled``, sobald der Upload läuft,
+   * aber das greift erst nach dem nächsten Aufbau: zwei Klicks im selben Moment kämen daran
+   * vorbei und erzeugten zwei Aufträge. Eine Ref wirkt sofort.
+   *
+   * Auf dem Server sichert der Verweis des Clients dasselbe ab (lib/uploads/finalize.ts); hier
+   * geht es darum, dass gar nicht erst zwei Uploads laufen. */
+  const laeuftRef = useRef(false);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const chooseFile = (f: File | null) => {
     if (!f) return;
+    /* Ein falsches Format fällt jetzt hier auf und nicht erst beim Verarbeiten. Beim Ziehen in
+     * die Fläche greift das accept-Attribut nicht; vorher wurde eine .txt angenommen, hochgeladen
+     * und erst vom Worker abgelehnt. */
+    if (!endungPasst(f.name)) {
+      setErrors((e) => ({
+        ...e,
+        file: `Dieses Format geht nicht. Möglich sind ${ENDUNGEN.join(", ")}.`,
+      }));
+      setFile(null);
+      return;
+    }
     if (f.size > maxBytes) {
       setErrors((e) => ({ ...e, file: `Datei zu groß (${formatBytes(f.size)}). Maximal ${formatBytes(maxBytes)}.` }));
       setFile(null);
@@ -67,6 +101,8 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
       return rest;
     });
     setFile(f);
+    setFortsetzbar(null);
+    void nachRestPruefen(f);
   };
 
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -139,7 +175,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
     return json.upload_token;
   };
 
-  const realUpload = async (data: ReturnType<typeof collect>, clientRef: string) => {
+  const realUpload = async (data: ReturnType<typeof collect>, clientRef: string, fortsetzen = false) => {
     if (!file) return;
     const uploadToken = await fetchUploadToken(data.brand_profile_id);
     const { Upload } = await import("tus-js-client");
@@ -168,12 +204,50 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
         retryDelays: [0, 1000, 3000, 5000],
         metadata,
         onError: (err) => reject(err),
-        onProgress: (sent, total) => setProgress(Math.round((sent / total) * 100)),
-        onSuccess: () => resolve(),
+        onProgress: (sent, total) => {
+          setProgress(Math.round((sent / total) * 100));
+          setUebertragen({ gesendet: sent, gesamt: total });
+        },
+        onSuccess: () => {
+          setFortsetzbar(null);
+          resolve();
+        },
       });
-      abortRef.current = { abort: () => void upload.abort() };
-      upload.start();
+      /* Abbrechen räumt auf: ``abort(true)`` sagt dem Server, dass der angefangene Upload weg
+       * kann. Ohne das bliebe die halbe Datei dort liegen, bis irgendwann jemand aufräumt. */
+      abortRef.current = {
+        abort: () => {
+          void upload.abort(true);
+          setFortsetzbar(null);
+        },
+      };
+
+      const starten = async () => {
+        if (fortsetzen) {
+          /* Ein angefangener Upload derselben Datei wird fortgesetzt statt neu begonnen. tus
+           * merkt sich dafür einen Fingerabdruck im Browser. */
+          const frueher = await upload.findPreviousUploads();
+          if (frueher.length > 0) upload.resumeFromPreviousUpload(frueher[frueher.length - 1]);
+        }
+        upload.start();
+      };
+      void starten();
     });
+  };
+
+  /* Gibt es zu dieser Datei einen angefangenen Upload? Wird beim Auswählen geprüft, damit der
+   * Hinweis dasteht, bevor jemand von vorn anfängt. */
+  const nachRestPruefen = async (f: File) => {
+    if (demoUpload || uploadMode !== "tus") return;
+    try {
+      const { Upload } = await import("tus-js-client");
+      const probe = new Upload(f, { endpoint: tusEndpoint, metadata: {} });
+      const frueher = await probe.findPreviousUploads();
+      const letzte = frueher[frueher.length - 1];
+      if (letzte) setFortsetzbar({ file: f.name, gesendet: 0, gesamt: f.size });
+    } catch {
+      /* Keine Auskunft ist kein Fehler: dann fängt der Upload eben von vorn an. */
+    }
   };
 
   /* Lokaler Testmodus: multipart per XMLHttpRequest (Fortschritt über upload.onprogress), Datei als letztes Feld */
@@ -197,7 +271,9 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
       xhr.open("POST", "/api/uploads/direct");
       xhr.responseType = "json";
       xhr.upload.onprogress = (ev) => {
-        if (ev.lengthComputable) setProgress(Math.min(100, Math.round((ev.loaded / ev.total) * 100)));
+        if (!ev.lengthComputable) return;
+        setProgress(Math.min(100, Math.round((ev.loaded / ev.total) * 100)));
+        setUebertragen({ gesendet: ev.loaded, gesamt: ev.total });
       };
       xhr.upload.onload = () => {
         setProgress(100);
@@ -217,6 +293,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (laeuftRef.current) return;
     const fd = new FormData(e.currentTarget);
     const errs = validate(fd);
     setErrors(errs);
@@ -226,12 +303,14 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
     if (Object.keys(errs).length > 0 || !file) return;
 
     const data = collect(fd);
+    laeuftRef.current = true;
     setPhase("uploading");
     setProgress(0);
     setNote("");
 
     if (demoUpload) {
       await simulateUpload(data);
+      laeuftRef.current = false;
       return;
     }
 
@@ -244,6 +323,8 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
       } catch (err) {
         setPhase("error");
         setNote(err instanceof Error ? err.message : String(err));
+      } finally {
+        laeuftRef.current = false;
       }
       return;
     }
@@ -253,16 +334,20 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
       setPhase("done");
       router.push(`/projekte/${clientRef}`);
     } catch (err) {
-      /* Endpoint nicht erreichbar: auf Simulation ausweichen, damit die App bedienbar bleibt.
-       * Token-Fehler (403 Rolle, 402 Kontingent) werden angezeigt, nicht simuliert. */
+      /* Kein Ausweichen auf eine Simulation mehr.
+       *
+       * Vorher wurde bei einem nicht erreichbaren Endpunkt ein Upload VORGETÄUSCHT: ein laufender
+       * Balken, danach ein Demo-Projekt, und der Nutzer glaubte, seine Datei liege auf dem Server.
+       * Sie lag nirgends. Ein Fehler, den man sieht, ist besser als ein Erfolg, den es nicht gibt. */
       const message = err instanceof Error ? err.message : String(err);
-      const unreachable = !(err instanceof UploadTokenError) && /failed to fetch|network|ECONNREFUSED|Load failed|tus: failed to create upload/i.test(message);
-      if (unreachable) {
-        await simulateUpload(data);
-      } else {
-        setPhase("error");
-        setNote(message);
-      }
+      setPhase("error");
+      setNote(
+        /failed to fetch|network|ECONNREFUSED|Load failed|tus: failed to create upload/i.test(message)
+          ? "Der Upload-Dienst ist gerade nicht erreichbar. Deine Datei wurde nicht übertragen."
+          : message,
+      );
+    } finally {
+      laeuftRef.current = false;
     }
   };
 
@@ -275,7 +360,9 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
           <Field label="Name" htmlFor="title" required error={errors.title}>
             <Input id="title" name="title" placeholder="z. B. Podcast Folge 13" required disabled={busy} />
           </Field>
-          <Field label="Stil" htmlFor="brand_profile_id">
+          {/* Die Marke bestimmt Anrede, Farben, Schrift und Untertitel. Wer für mehrere Kunden
+            * arbeitet, wählt hier den Kunden, bevor es losgeht. */}
+          <Field label="Marke" htmlFor="brand_profile_id" hint="Bestimmt Anrede, Aussehen und Schreibweisen.">
             <Select id="brand_profile_id" name="brand_profile_id" defaultValue={profiles[0]?.id ?? ""} disabled={busy}>
               {profiles.length === 0 && <option value="">Noch keiner angelegt</option>}
               {profiles.map((p) => (
@@ -287,7 +374,13 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
           </Field>
         </div>
 
-        <Field label="Video" htmlFor="file" required error={errors.file} hint={`Video oder Audio, maximal ${formatBytes(maxBytes)}.`}>
+        <Field
+          label="Video"
+          htmlFor="file"
+          required
+          error={errors.file}
+          hint={`${ENDUNGEN.join(", ")}, bis ${formatBytes(maxBytes)}. Audio ohne Bild geht auch.`}
+        >
           <div
             onDragOver={(e) => {
               e.preventDefault();
@@ -325,6 +418,14 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
           </div>
         </Field>
 
+        {/* Ein angefangener Upload derselben Datei. Ohne diesen Hinweis fängt nach einem
+          * Verbindungsabbruch jeder von vorn an, obwohl schon Stunden übertragen sein können. */}
+        {fortsetzbar && phase === "form" && (
+          <p className="text-sm text-text-2">
+            {'Von dieser Datei liegt schon ein angefangener Upload. Mit „Clips erstellen“ wird er fortgesetzt statt neu begonnen.'}
+          </p>
+        )}
+
         <div className="flex flex-col gap-1">
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
             <label className="flex cursor-pointer items-start gap-3">
@@ -344,7 +445,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
               disabled={busy}
               className="transition-soft text-sm text-text-2 underline-offset-4 hover:text-text hover:underline disabled:opacity-60"
             >
-              Mehr anzeigen
+              Fein einstellen
             </button>
           </div>
           {errors.rights_confirmed && (
@@ -358,11 +459,18 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
          * wäre es eine Liste mit Dingen, die noch gar nicht laufen. */}
         {phase !== "form" && (
           <div aria-live="polite" className="flex flex-col gap-2 border-t border-line pt-4">
-            <div className="flex justify-between text-sm">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-sm">
               <span className="font-medium text-text">
                 {phase === "finishing" || phase === "done" ? "Fast fertig" : phase === "error" ? "Es hat nicht geklappt" : "Wird hochgeladen"}
               </span>
-              <span className="font-mono text-text-2">{progress} %</span>
+              {/* Übertragene Bytes neben dem Prozentwert: bei einer großen Datei ist „47 %" eine
+                * Zahl, die sich minutenlang nicht bewegt, und dann weiß niemand, ob noch etwas
+                * passiert. */}
+              <span className="font-mono text-text-2">
+                {uebertragen
+                  ? `${formatBytes(uebertragen.gesendet)} von ${formatBytes(uebertragen.gesamt)} · ${progress} %`
+                  : `${progress} %`}
+              </span>
             </div>
             <div
               className="h-1 w-full overflow-hidden rounded-pill bg-white/10"
@@ -375,6 +483,24 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
               <div className="transition-soft h-full rounded-pill bg-text" style={{ width: `${progress}%` }} />
             </div>
             {note && <p className={cn("text-sm", phase === "error" ? "text-attention" : "text-text-2")}>{note}</p>}
+            {phase === "error" && (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  type="submit"
+                  size="sm"
+                  variant="primary"
+                  onClick={() => {
+                    setPhase("form");
+                    setNote("");
+                  }}
+                >
+                  Nochmal versuchen
+                </Button>
+                <span className="text-sm text-text-2">
+                  {fortsetzbar ? "Es wird dort weitergemacht, wo es abgebrochen ist." : "Der Upload beginnt von vorn."}
+                </span>
+              </div>
+            )}
           </div>
         )}
       </GlassCard>
@@ -390,15 +516,18 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
               variant="danger"
               onClick={() => {
                 abortRef.current?.abort();
+                laeuftRef.current = false;
                 setPhase("form");
                 setProgress(0);
+                setUebertragen(null);
+                setNote("Abgebrochen. Die halb übertragene Datei wurde auf dem Server verworfen.");
               }}
             >
               Abbrechen
             </Button>
           )}
           <Button type="submit" disabled={busy || !confirmed}>
-            {phase === "uploading" ? "Wird hochgeladen" : phase === "finishing" ? "Fast fertig" : "Los geht's"}
+            {phase === "uploading" ? "Wird hochgeladen" : phase === "finishing" ? "Fast fertig" : "Clips erstellen"}
           </Button>
         </div>
       </div>

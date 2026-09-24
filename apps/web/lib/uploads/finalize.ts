@@ -74,6 +74,15 @@ export async function finalizeUpload(input: FinalizeUploadInput): Promise<Finali
 
     /* Phase 5a: POST /api/v1/sources mit upload = tus hat die Quelle schon als `uploading` angelegt (client_ref = source.id) */
     const pending = clientRef ? await repo.getSource(clientRef) : null;
+
+    /* Derselbe Auftrag zweimal: ein zweiter Klick, ein Wiederholungsversuch des Clients, ein
+     * doppelt gefeuerter tus-Hook. Der Verweis des Clients ist die Kennung der Quelle, also gibt
+     * es sie schon - und dann kommt sie zurück, statt ein zweites Projekt anzulegen oder am
+     * doppelten Schlüssel zu scheitern. */
+    if (pending && pending.status !== "uploading") {
+      return { source_id: pending.id, workflow_id: pending.temporal_workflow_id ?? null };
+    }
+
     if (pending && pending.status === "uploading") {
       const completed = await getApiRepo().completeUploadingSource(pending.id, {
         storage_key: storageKey,

@@ -13,7 +13,7 @@ interface PageShellProps {
   /* Veraltet: das Hintergrundwort ist mit der Seitenleiste entfallen, der Prop bleibt für bestehende Aufrufe */
   backgroundWord?: string;
   lightTone?: "brand" | "ai";
-  width?: "narrow" | "default" | "wide";
+  width?: "narrow" | "default" | "wide" | "arbeit";
   className?: string;
   /* Seite ist auch ohne aktiven Workspace erreichbar (/workspaces) */
   allowWithoutWorkspace?: boolean;
@@ -23,6 +23,11 @@ const widths = {
   narrow: "max-w-[760px]",
   default: "max-w-[1120px]",
   wide: "max-w-[1440px]",
+  /* Arbeitsseiten, die nebeneinander arbeiten: die Clip-Ansicht hat links ein festes Video und
+   * rechts eine Arbeitsfläche. Bei 1440 Pixeln Deckel blieb auf einem breiten Bildschirm rechts
+   * eine leere Hälfte, während die Timeline sich quetschte. Hier wächst die Arbeitsfläche mit,
+   * bis 1920 - darüber werden Zeilen zu lang zum Lesen. */
+  arbeit: "max-w-[1920px]",
 };
 
 /* Seitenrahmen: blaue Blasen → Seitenleiste links → Inhalt. Liest die Sitzung für die Navigation. */

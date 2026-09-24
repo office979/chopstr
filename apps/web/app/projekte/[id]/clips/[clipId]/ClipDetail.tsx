@@ -22,6 +22,7 @@ import {
   type Schnitt,
 } from "@/lib/clips/schnitt";
 import { pruefen } from "@/lib/clips/untertitel-pruefung";
+import { vorschauStand } from "@/lib/clips/vorschau-stand";
 import { ClipPreview } from "./ClipPreview";
 import { LiveVorschau } from "./LiveVorschau";
 import { ClipTextEditor } from "./ClipTextEditor";
@@ -96,6 +97,20 @@ interface Props {
 
 /* Ein Clip: oben Vorschau, daneben sein Text. Gespeichert wird mit einem Klick, ohne Rückfrage.
  * Die Rückfrage kommt nur beim Zurückgehen mit offenen Änderungen. */
+/* Die vier Arbeitsbereiche eines Clips.
+ *
+ * Vier und nicht acht: mehr Reiter beantworten die Frage „wo mache ich das?" nicht besser,
+ * sondern verlagern sie nur. Die Reihenfolge ist die des Arbeitens - erst der Schnitt, dann der
+ * Text, dann das Aussehen, zuletzt das Fertigmachen. */
+export type Bereich = "schnitt" | "text" | "untertitel" | "fertig";
+
+const BEREICHE: { id: Bereich; name: string; satz: string }[] = [
+  { id: "schnitt", name: "Schnitt", satz: "Timeline und Bildausschnitt" },
+  { id: "text", name: "Text", satz: "Gesprochene Wörter prüfen" },
+  { id: "untertitel", name: "Untertitel", satz: "Aussehen, Position, Lesbarkeit" },
+  { id: "fertig", name: "Fertigstellen", satz: "Offenes prüfen, bauen, herunterladen" },
+];
+
 export function ClipDetail({
   sourceId,
   sourceTitle,
@@ -162,6 +177,17 @@ export function ClipDetail({
   /* Vorschau aus der Quelle (zeigt jede Aenderung sofort) oder das gebaute Video (zeigt das
    * Ergebnis des letzten Laufs). Voreingestellt ist die Vorschau: wer hier ist, stellt etwas ein. */
   const [zeigeGebautes, setZeigeGebautes] = useState(false);
+  /* Welcher Arbeitsbereich offen ist.
+   *
+   * Vorher lag alles untereinander auf einer Seite: Vorschau und Timeline oben, darunter Text,
+   * Untertitel und Bildausschnitt. Wer einen Regler weiter unten anfasste, sah die Wirkung nicht,
+   * weil das Video zwei Bildschirme weiter oben stand. Jetzt bleibt das Video stehen und nur der
+   * rechte Teil wechselt.
+   *
+   * Alle vier Bereiche bleiben im Baum und werden nur ausgeblendet. Das ist der Grund, warum ein
+   * Wechsel nichts zurücksetzt: nicht gespeicherte Eingaben, die gewählte Stelle und die
+   * Abspielposition überleben, weil nichts neu aufgebaut wird. */
+  const [bereich, setBereich] = useState<Bereich>("schnitt");
 
   /* Der Verlauf fuer Rueckgaengig und Wiederherstellen. Eine Fassung ist Schnitt UND Marken
    * zusammen: wer einen Marker verschiebt und dann „Rueckgaengig" drueckt, meint den Marker.
@@ -344,6 +370,22 @@ export function ClipDetail({
     !schnittGleich(zusammenziehen(gesichert), zusammenziehen(gerenderteSegmente));
   const neueDauer = schnittDauer(schnitt);
 
+  /* Zeigt das gebaute Video noch, was eingestellt ist? Dieselbe Rechnung wie im Renderstand, hier
+   * gebraucht, um es direkt am Umschalter zu sagen: wer auf „Zuletzt gebaut" klickt, soll dort
+   * erfahren, dass er eine alte Fassung sieht, und nicht erst weiter unten. */
+  const gebautesVeraltet =
+    Boolean(clipSrc) &&
+    vorschauStand({
+      status: clipStatus,
+      hatDatei: Boolean(clipSrc),
+      plan: renderPlan,
+      renderFehler,
+      transkriptVersion,
+      stil: stilGespeichert,
+      schnitt: gesichert,
+      zeitmarken: marken,
+    }) === "veraltet";
+
   /* Der Zeitraum, den die Timeline zeigt: der geladene Schnitt plus zehn Sekunden Luft auf beiden
    * Seiten, damit sich der Anfang auch wieder verlaengern laesst. Bewusst fest ab dem Laden und
    * NICHT dem laufenden Schnitt folgend: sonst verschoebe sich die Zeitskala unter der Hand,
@@ -410,6 +452,10 @@ export function ClipDetail({
     }
     return false;
   }, [hasText, wordFrom, wordTo, words, original]);
+
+  /* Ein Wort für die ganze Seite: gibt es irgendwo etwas Ungespeichertes? Steht in der Kopfzeile
+   * und entscheidet, ob das Bauen gesperrt ist. */
+  const offeneAenderungen = dirty || stilGeaendert || schnittGeaendert;
 
   const editWord = useCallback(
     (index: number, raw: string, merken = false) => {
@@ -603,8 +649,18 @@ export function ClipDetail({
             <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Clip</h1>
             {/* Die Laenge kommt aus dem aktuellen Schnitt und nicht aus dem gebauten Video: nach
               * einer Kuerzung stuende hier sonst weiter die alte Dauer. */}
-            <p className="mt-1 text-sm text-text-2">
-              {ASPECT_LABELS[aspect]}, {formatClipDuration(neueDauer || durationS)}
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-2">
+              <span>
+                {ASPECT_LABELS[aspect]}, {formatClipDuration(neueDauer || durationS)}
+              </span>
+              {/* Der Speicherstand gehört in die Kopfzeile: er gilt für die ganze Seite, und
+                  unten am Ende eines Bereichs sieht man ihn nur, wenn man dort gerade ist. */}
+              <span aria-hidden="true" className="text-text-3">
+                ·
+              </span>
+              <span className={offeneAenderungen ? "text-attention" : "text-text-3"} role="status" aria-live="polite">
+                {offeneAenderungen ? "Nicht gespeichert" : "Gespeichert"}
+              </span>
             </p>
           </div>
         </div>
@@ -646,26 +702,41 @@ export function ClipDetail({
         </div>
       </div>
 
-      {/* Arbeitsbereich: Vorschau und Timeline nebeneinander. Vorher lag die Timeline unter
-        * allen Einstellungen, also einen Bildschirm weiter unten - beim Schneiden sah man
-        * entweder das Bild oder die Spur, nie beides. Alles, was man nicht beim Schneiden
-        * braucht, steht darunter. */}
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)] lg:items-start">
-        <div className="lg:sticky lg:top-8">
+      {/* Der Arbeitsplatz: links das Video, rechts die Aufgabe.
+        *
+        * Die Vorschau bekommt eine eigene Spalte und bleibt beim Scrollen stehen. Sie schwebt
+        * nicht über den Bedienelementen, sondern hat Platz, der ihr gehört - deshalb verdeckt sie
+        * nichts. Vorher lag alles untereinander: beim Scrollen zu den Untertiteln war das Video
+        * weg, und rechts blieb eine große leere Fläche.
+        *
+        * Die Breite: 380 Pixel für das Video, der Rest für die Arbeit. Auf einem breiten
+        * Bildschirm wird damit die Arbeitsfläche breiter und nicht das Video größer - ein
+        * Hochformat-Video, das die halbe Seite einnimmt, hilft niemandem. */}
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)] lg:items-start">
+        {/* Auf schmalen Bildschirmen gibt es keine zweite Spalte. Dann wird aus der Vorschau
+            eine schmale Leiste, die oben kleben bleibt: kleiner, aber sichtbar. Sie steht im
+            Fluss und verdeckt nichts - unter ihr geht die Seite weiter. */}
+        <div className="sticky top-0 z-20 -mx-4 border-b border-line bg-[#0a0a13]/95 px-4 py-2 backdrop-blur max-lg:flex max-lg:flex-wrap max-lg:items-start max-lg:gap-3 lg:top-4 lg:mx-0 lg:self-start lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:backdrop-blur-none">
+          {/* Welche der beiden Fassungen läuft gerade? Am veralteten gebauten Video steht es
+              direkt am Umschalter: dort stellt sich die Frage, ob das noch stimmt. */}
           {clipSrc && (
-            <div className="mb-3 flex gap-1 rounded-pill border border-line p-1">
+            <div className="mb-3 flex gap-1 rounded-pill border border-line p-1 max-lg:order-2 max-lg:mb-0 max-lg:min-w-[200px] max-lg:flex-1">
               {[
-                { an: false, name: "Vorschau", titel: "Zeigt, was jetzt eingestellt ist" },
-                { an: true, name: "Gebautes Video", titel: "Das Ergebnis des letzten Bauens" },
+                { an: false, name: "Mit deinen Änderungen", titel: "Zeigt, was jetzt eingestellt ist" },
+                {
+                  an: true,
+                  name: gebautesVeraltet ? "Zuletzt gebaut · alt" : "Zuletzt gebaut",
+                  titel: "Das Ergebnis des letzten Bauens",
+                },
               ].map((w) => (
                 <button
-                  key={w.name}
+                  key={String(w.an)}
                   type="button"
                   title={w.titel}
                   onClick={() => setZeigeGebautes(w.an)}
                   aria-pressed={zeigeGebautes === w.an}
                   className={cn(
-                    "transition-soft flex-1 rounded-pill px-3 py-1.5 text-sm",
+                    "transition-soft flex-1 rounded-pill px-3 py-1.5 text-xs",
                     zeigeGebautes === w.an ? "bg-white/10 text-text" : "text-text-2 hover:text-text",
                   )}
                 >
@@ -675,6 +746,7 @@ export function ClipDetail({
             </div>
           )}
 
+          <div className="max-lg:order-1 max-lg:w-[120px] max-lg:shrink-0">
           {clipSrc && zeigeGebautes ? (
             <ClipPreview
             src={clipSrc ?? sourceSrc}
@@ -715,15 +787,21 @@ export function ClipDetail({
               onCaptionHoehe={canEdit ? (px) => setStil((v) => ({ ...v, bottom_margin_px: px })) : undefined}
             />
           )}
+          </div>
 
-          {/* Was das gebaute Video gerade zeigt, und der Weg zu einem aktuellen. Steht direkt
-            * unter der Vorschau, weil genau dort die Frage aufkommt: sehe ich das Ergebnis? */}
-          <div className="mt-3">
+          {/* Der Stand des gebauten Videos, kurz. Die lange Fassung mit allen Sätzen steht unter
+            * „Fertigstellen"; hier unter dem Video nahm sie ein Drittel der Höhe ein, die dem
+            * Video gehört. */}
+          {/* Unter „Fertigstellen" steht die ausführliche Fassung derselben Karte. Beide zugleich
+              wäre dieselbe Aussage zweimal auf einem Bildschirm. */}
+          <div hidden={bereich === "fertig"} className="mt-3 max-lg:order-3 max-lg:mt-0 max-lg:w-full">
             <VorschauStatus
+              kompakt
+              onMehr={() => setBereich("fertig")}
               sourceId={sourceId}
               clipId={clipId}
               canEdit={canEdit}
-              offeneAenderungen={dirty || stilGeaendert || schnittGeaendert}
+              offeneAenderungen={offeneAenderungen}
               offeneUntertitel={offeneUntertitel}
               onNeuGebaut={() => router.refresh()}
               status={clipStatus}
@@ -739,7 +817,33 @@ export function ClipDetail({
 
         </div>
 
-        <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-8">
+        <div className="flex min-w-0 flex-col gap-4">
+          {/* Die vier Bereiche. Alle bleiben im Baum und werden nur ausgeblendet: ein Wechsel
+              setzt deshalb nichts zurück, weder die Abspielposition noch eine begonnene
+              Texteingabe noch den gewählten Abschnitt in der Timeline. */}
+          <div role="tablist" aria-label="Arbeitsbereich" className="flex flex-wrap gap-1 rounded-inner border border-line p-1">
+            {BEREICHE.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                role="tab"
+                aria-selected={bereich === b.id}
+                title={b.satz}
+                onClick={() => setBereich(b.id)}
+                className={cn(
+                  "transition-soft flex-1 rounded-[10px] px-3 py-2 text-sm",
+                  bereich === b.id ? "bg-white/10 font-medium text-text" : "text-text-2 hover:text-text",
+                )}
+              >
+                {b.name}
+                {b.id === "fertig" && offeneUntertitel > 0 && (
+                  <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-attention align-middle" aria-hidden="true" />
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div hidden={bereich !== "schnitt"} className="flex min-w-0 flex-col gap-4">
           <Timeline
             bereichVonS={bereichVon}
             bereichBisS={bereichBis}
@@ -774,7 +878,7 @@ export function ClipDetail({
           />
 
           {canEdit && (
-            <GlassCard padding="md" className="mt-3" selected={schnittGeaendert}>
+            <GlassCard padding="md" selected={schnittGeaendert}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-col gap-1">
                   <p className="text-sm text-text">
@@ -798,95 +902,141 @@ export function ClipDetail({
               </div>
             </GlassCard>
           )}
-        </div>
-      </div>
 
-      {/* Darunter die Feinarbeit: Text, Untertitel, Bildausschnitt. */}
-      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)] lg:items-start">
-        <div className="flex min-w-0 flex-col gap-5">
-          {hasText ? (
-            <ClipTextEditor
-              words={words}
-              original={original}
-              wordFrom={wordFrom}
-              wordTo={wordTo}
-              speakers={speakers}
-              speakerNames={speakerNames}
-              currentTime={currentTime}
-              canEdit={canEdit}
-              onEditWord={editWord}
-              onChangeSpeaker={changeSpeaker}
-              onSeek={seek}
-              markeVorhanden={markeVorhanden}
-            />
-          ) : (
-            <GlassCard padding="md">
-              <p className="text-sm text-text-2">Zu diesem Clip steht kein Text bereit.</p>
-            </GlassCard>
-          )}
-
-          <CaptionStudio
-            stil={stil}
-            onChange={setStil}
-            vorlagen={vorlagen}
-            onVorlagenChange={setVorlagen}
+          {/* Der Bildausschnitt gehört zum Schneiden: beides hängt an der Stelle, an der der
+              Abspielkopf steht. Vorher lag er in einer eigenen Spalte weit unten, und man musste
+              zwischen Timeline und Ausschnitt hin und her scrollen. */}
+          <Bildausschnitt
+            zeit={currentTime}
+            shots={shots}
+            zeitmarken={marken}
+            onMarke={(m) =>
+              markenAendern((vorher) =>
+                [...vorher.filter((x) => Math.abs(x.ab_s - m.ab_s) > 0.35), m].sort((a, b) => a.ab_s - b.ab_s),
+              )
+            }
+            onMarkeWeg={(abS) => markenAendern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
+            quelleBreite={quelleBreite}
             canEdit={canEdit}
-            gespeichert={!stilGeaendert}
-            speichern={() => void stilSpeichern()}
-            zuruecksetzen={() => setStil({})}
-            saving={stilSaving}
-            schriftenVorhanden={schriftenVorhanden}
-            woerter={clipWords}
-            onSeek={seek}
           />
+          </div>
 
-          {canEdit && hasText && (
-            <GlassCard padding="md" selected={dirty}>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-text-2">
-                  {dirty ? "Du hast etwas geändert." : "Nichts geändert."}
-                </p>
-                <Button variant={dirty ? "primary" : "ghost"} disabled={!dirty || saving} onClick={save}>
-                  {saving ? "Wird gespeichert" : "Speichern"}
-                </Button>
-              </div>
-              {message && (
-                <div role="status" aria-live="polite" className="mt-3 flex flex-wrap items-center gap-3">
-                  <p className={cn("text-sm", message.tone === "ok" ? "text-text" : "text-attention")}>{message.text}</p>
-                  {message.nochmal && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        const wieder = message.nochmal;
-                        setMessage(null);
-                        wieder?.();
-                      }}
-                    >
-                      Nochmal versuchen
-                    </Button>
-                  )}
-                </div>
-              )}
-            </GlassCard>
-          )}
-        </div>
-        <div className="flex min-w-0 flex-col gap-5">
-            <div className="mt-4">
-              <Bildausschnitt
-                zeit={currentTime}
-                shots={shots}
-                zeitmarken={marken}
-                onMarke={(m) =>
-                  markenAendern((vorher) =>
-                    [...vorher.filter((x) => Math.abs(x.ab_s - m.ab_s) > 0.35), m].sort((a, b) => a.ab_s - b.ab_s),
-                  )
-                }
-                onMarkeWeg={(abS) => markenAendern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
-                quelleBreite={quelleBreite}
+          <div hidden={bereich !== "text"} className="flex min-w-0 flex-col gap-4">
+            {hasText ? (
+              <ClipTextEditor
+                words={words}
+                original={original}
+                wordFrom={wordFrom}
+                wordTo={wordTo}
+                speakers={speakers}
+                speakerNames={speakerNames}
+                currentTime={currentTime}
                 canEdit={canEdit}
+                onEditWord={editWord}
+                onChangeSpeaker={changeSpeaker}
+                onSeek={seek}
+                markeVorhanden={markeVorhanden}
               />
-            </div>
+            ) : (
+              <GlassCard padding="md">
+                <p className="text-sm text-text-2">Zu diesem Clip steht kein Text bereit.</p>
+              </GlassCard>
+            )}
+
+            {canEdit && hasText && (
+              <GlassCard padding="md" selected={dirty}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm text-text-2">{dirty ? "Du hast etwas geändert." : "Nichts geändert."}</p>
+                  <Button variant={dirty ? "primary" : "ghost"} disabled={!dirty || saving} onClick={save}>
+                    {saving ? "Wird gespeichert" : "Text speichern"}
+                  </Button>
+                </div>
+                {message && (
+                  <div role="status" aria-live="polite" className="mt-3 flex flex-wrap items-center gap-3">
+                    <p className={cn("text-sm", message.tone === "ok" ? "text-text" : "text-attention")}>{message.text}</p>
+                    {message.nochmal && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          const wieder = message.nochmal;
+                          setMessage(null);
+                          wieder?.();
+                        }}
+                      >
+                        Nochmal versuchen
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </GlassCard>
+            )}
+          </div>
+
+          <div hidden={bereich !== "untertitel"} className="flex min-w-0 flex-col gap-4">
+            <CaptionStudio
+              stil={stil}
+              onChange={setStil}
+              vorlagen={vorlagen}
+              onVorlagenChange={setVorlagen}
+              canEdit={canEdit}
+              gespeichert={!stilGeaendert}
+              speichern={() => void stilSpeichern()}
+              zuruecksetzen={() => setStil({})}
+              saving={stilSaving}
+              schriftenVorhanden={schriftenVorhanden}
+              woerter={clipWords}
+              onSeek={seek}
+            />
+          </div>
+
+          {/* Fertigstellen: was noch offen ist, das Bauen und der Download. Alles, was man ganz
+              zum Schluss braucht, an einer Stelle statt über die Seite verteilt. */}
+          <div hidden={bereich !== "fertig"} className="flex min-w-0 flex-col gap-4">
+            <VorschauStatus
+              sourceId={sourceId}
+              clipId={clipId}
+              canEdit={canEdit}
+              offeneAenderungen={offeneAenderungen}
+              offeneUntertitel={offeneUntertitel}
+              onNeuGebaut={() => router.refresh()}
+              status={clipStatus}
+              hatDatei={Boolean(clipSrc)}
+              plan={renderPlan}
+              renderFehler={renderFehler}
+              transkriptVersion={transkriptVersion}
+              stil={stilGespeichert}
+              schnitt={gesichert}
+              zeitmarken={marken}
+            />
+
+            <GlassCard padding="md" className="flex flex-col gap-3">
+              <p className="text-sm font-medium text-text">Was noch offen ist</p>
+              {offeneAenderungen ? (
+                <p className="text-sm text-attention">
+                  {"Es gibt ungespeicherte Änderungen. Gebaut wird der gespeicherte Stand."}
+                </p>
+              ) : null}
+              {offeneUntertitel > 0 ? (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm text-text-2">
+                    {offeneUntertitel === 1
+                      ? "Ein Untertitel ragt über den sicheren Bereich hinaus."
+                      : `${offeneUntertitel} Untertitel ragen über den sicheren Bereich hinaus.`}
+                  </p>
+                  <Button size="sm" variant="ghost" onClick={() => setBereich("untertitel")}>
+                    Zu den Untertiteln
+                  </Button>
+                </div>
+              ) : null}
+              {!offeneAenderungen && offeneUntertitel === 0 && (
+                <p className="text-sm text-text-2">Nichts. Alles gespeichert, keine offenen Untertitel.</p>
+              )}
+              <ButtonLink href={`/projekte/${sourceId}/clips`} variant="ghost" size="sm" className="self-start">
+                Zur Clip-Übersicht mit dem Download
+              </ButtonLink>
+            </GlassCard>
+          </div>
         </div>
       </div>
 

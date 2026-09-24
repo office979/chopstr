@@ -71,7 +71,7 @@ export default async function ClipPage({ params }: Props) {
   const wordTo = inClip[inClip.length - 1]?.word_range[1] ?? null;
 
   return (
-    <PageShell width="default">
+    <PageShell width="arbeit">
       <ClipDetail
         sourceId={source.id}
         sourceTitle={source.title}

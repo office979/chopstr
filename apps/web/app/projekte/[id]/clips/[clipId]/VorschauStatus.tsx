@@ -19,6 +19,12 @@ interface Props extends StandEingabe {
   offeneUntertitel: number;
   /* Wird nach einem angestoßenen Lauf gerufen, damit die Seite den neuen Stand holt. */
   onNeuGebaut: () => void;
+  /* Kurzform für direkt unter der Vorschau: eine Zeile und ein Knopf. Die ausführliche Fassung
+   * mit allen Sätzen steht im Bereich „Fertigstellen". Zwei Fassungen derselben Karte, weil die
+   * lange Fassung unter dem Video ein Drittel des Platzes einnahm, der dem Video gehört. */
+  kompakt?: boolean;
+  /* Führt in den Bereich, in dem die ausführliche Fassung steht. Nur in der Kurzform. */
+  onMehr?: () => void;
 }
 
 /* Was das gebaute Video gerade zeigt, und der Weg zu einem aktuellen.
@@ -34,6 +40,8 @@ export function VorschauStatus({
   offeneAenderungen,
   offeneUntertitel,
   onNeuGebaut,
+  kompakt = false,
+  onMehr,
   ...stand
 }: Props) {
   const [laeuft, setLaeuft] = useState(false);
@@ -84,6 +92,39 @@ export function VorschauStatus({
   const satz = fehler ?? standSatz(zustand, ab);
   const tonFarbe =
     zustand === "aktuell" ? "text-text" : zustand === "fehler" || fehler ? "text-attention" : "text-text-2";
+
+  /* Die Kurzform: Punkt, ein Satz, ein Knopf. Mehr passt unter ein Video nicht, ohne dass das
+   * Video kleiner wird. */
+  if (kompakt) {
+    return (
+      <div
+        className={cn(
+          "flex flex-wrap items-center justify-between gap-2 rounded-inner border px-3 py-2",
+          zustand === "veraltet" || zustand === "fehler" || fehler ? "border-attention/50 bg-attention/10" : "border-line",
+        )}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <Punkt zustand={fehler ? "fehler" : zustand} />
+          <span className="truncate text-sm text-text">{ÜBERSCHRIFT[fehler ? "fehler" : zustand]}</span>
+        </span>
+        {canEdit && zustand !== "aktuell" && zustand !== "laeuft" && (
+          <Button
+            size="sm"
+            variant={zustand === "veraltet" || zustand === "fehler" ? "primary" : "ghost"}
+            onClick={() => (onMehr ? onMehr() : void neuBauen())}
+            disabled={offeneAenderungen}
+          >
+            {zustand === "keine" ? "Video bauen" : "Neu bauen"}
+          </Button>
+        )}
+        {zustand === "laeuft" && (
+          <span className="text-sm tabular-nums text-text-2">
+            {fortschritt != null ? `${Math.round(fortschritt * 100)} Prozent` : "läuft"}
+          </span>
+        )}
+      </div>
+    );
+  }
 
   return (
     <GlassCard padding="md" selected={zustand === "veraltet"}>

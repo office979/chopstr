@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { sprecherName } from "@/lib/transcript/sprechername";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Select } from "@/components/ui/Field";
 import { Timecode } from "@/components/ui/Timecode";
@@ -151,7 +152,7 @@ export function ClipTextEditor({
         )}
       >
         {blocks.map((b, bi) => {
-          const label = speakerNames[b.speaker] ?? b.speaker;
+          const label = sprecherName(b.speaker, speakerNames);
           return (
             <section key={`${b.speaker}-${bi}`} aria-label={`${label} ab ${Math.floor(b.start)} Sekunden`}>
               <div className="mb-1.5 flex flex-wrap items-center gap-2">
@@ -162,9 +163,11 @@ export function ClipTextEditor({
                     disabled={!canEdit}
                     onChange={(e) => onChangeSpeaker(b.indices, e.target.value)}
                   >
+                    {/* „SPEAKER_00" ist eine Kennung aus der Spracherkennung, kein Name. Wer
+                        hier entscheidet, wem ein Satz gehört, kann damit nichts anfangen. */}
                     {speakers.map((s) => (
                       <option key={s} value={s}>
-                        {speakerNames[s] ?? s}
+                        {sprecherName(s, speakerNames)}
                       </option>
                     ))}
                   </Select>

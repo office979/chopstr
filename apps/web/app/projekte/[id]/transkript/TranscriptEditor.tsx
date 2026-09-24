@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { sprecherName } from "@/lib/transcript/sprechername";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/Button";
 import { Toggle } from "@/components/ui/Toggle";
@@ -97,7 +98,7 @@ export function TranscriptEditor({ sourceId, title, durationS, videoSrc, transcr
 
   const paragraphs = useMemo(() => buildParagraphs(words), [words]);
   const activeIndex = useMemo(() => findActiveIndex(words, player.currentTime), [words, player.currentTime]);
-  const activeSpeaker = activeIndex >= 0 ? (speakerNames[words[activeIndex].speaker] ?? words[activeIndex].speaker) : null;
+  const activeSpeaker = activeIndex >= 0 ? sprecherName(words[activeIndex].speaker, speakerNames) : null;
   const fillers = useMemo(() => countFillers(words), [words]);
   const lowCount = useMemo(() => words.filter((w) => w.prob < LOW_CONFIDENCE).length, [words]);
   const dirty = corrections.size > 0 || JSON.stringify(speakerNames) !== JSON.stringify(transcript.stats.speaker_names ?? {});
@@ -320,7 +321,7 @@ export function TranscriptEditor({ sourceId, title, durationS, videoSrc, transcr
 
           <div className="flex flex-col gap-6">
             {paragraphs.map((p, pi) => {
-              const label = speakerNames[p.speaker] ?? p.speaker;
+              const label = sprecherName(p.speaker, speakerNames);
               const isEditingSpeaker = editingSpeaker === pi;
               return (
                 <section key={`${p.speaker}-${pi}`} aria-label={`${label} ab ${Math.floor(p.start)} Sekunden`}>

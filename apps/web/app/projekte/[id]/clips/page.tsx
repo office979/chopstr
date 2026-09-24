@@ -114,6 +114,7 @@ export default async function ClipsPage({ params }: Props) {
         planAllowsGuest={Boolean(quota.plan?.features?.guest_approval)}
         planName={quota.plan?.name ?? "Starter"}
         canDelete={can(session.role, "source.delete")}
+        canPublish={canExt(session.role, "publishing.publish")}
         previewFont={previewFont}
         publishing={{
           series: seriesList.filter((s) => s.active),

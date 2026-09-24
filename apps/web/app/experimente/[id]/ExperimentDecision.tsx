@@ -46,31 +46,51 @@ export function ExperimentDecision({ experimentId, status, winner, decidedAt, co
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
+        {/* „Konfidenz als Posterior P(A > B) über Beta-Verteilungen (2.000 Ziehungen, fester
+            Seed)" beschreibt die Rechnung genau - und richtet sich an niemanden, der hier
+            entscheidet. Gerechnet wird weiter dasselbe; es steht nur anders da.
+
+            Ohne genug Zahlen steht ausdrücklich, dass es keine Aussage gibt. Eine Prozentzahl an
+            zwei Clips mit je vierzig Aufrufen wäre eine Behauptung, die die Daten nicht tragen. */}
         <div>
           <h2 className="text-lg font-medium">Entscheidung</h2>
-          <p className="mt-1 text-sm text-text-2">Konfidenz als Posterior P(A &gt; B) über Beta-Verteilungen der {metricLabel} (2.000 Ziehungen, fester Seed).</p>
+          <p className="mt-1 text-sm text-text-2">
+            {pct == null
+              ? "Sobald beide Fassungen gepostet sind und genug Zahlen vorliegen, steht hier, welche besser ankommt."
+              : `Gerechnet aus ${metricLabel.toLowerCase()} beider Fassungen. Je näher an 100 Prozent, desto sicherer ist der Vorsprung.`}
+          </p>
         </div>
-        <p className="font-mono text-2xl tabular-nums">
-          {pct == null ? <span className="text-text-3">P(A&gt;B) offen</span> : <span>P(A&gt;B) {pct} %</span>}
+        <p className="text-right text-2xl tabular-nums">
+          {pct == null ? (
+            <span className="text-base text-text-3">Noch keine belastbare Aussage</span>
+          ) : (
+            <span>
+              {pct} %{" "}
+              <span className="text-base text-text-2">sicher für Fassung {pct >= 50 ? "A" : "B"}</span>
+            </span>
+          )}
         </p>
       </div>
       {pct != null && (
-        <div className="h-2 w-full overflow-hidden rounded-pill bg-white/10" role="img" aria-label={`Wahrscheinlichkeit A besser als B: ${pct} Prozent`}>
+        <div className="h-2 w-full overflow-hidden rounded-pill bg-white/10" role="img" aria-label={`Sicherheit für Fassung A: ${pct} Prozent`}>
           <div className="h-full rounded-pill bg-text" style={{ width: `${pct}%` }} />
         </div>
       )}
       {status === "decided" ? (
         <p className="text-sm text-text">
-          Entschieden für Variante {winner ?? "?"} am {formatDateTime(decidedAt)}.
+          Entschieden für Fassung {winner ?? "?"} am {formatDateTime(decidedAt)}.
         </p>
       ) : (
         <>
           {!ready && (
-            <ul className="flex flex-col gap-1 rounded-inner border border-attention/40 bg-attention/10 px-4 py-3 text-sm text-text" aria-label="Warum noch keine Entscheidung möglich ist">
-              {reasons.map((r, i) => (
-                <li key={i}>{r}</li>
-              ))}
-            </ul>
+            <div className="rounded-inner border border-attention/40 bg-attention/10 px-4 py-3 text-sm text-text">
+              <p className="font-medium">Noch keine belastbare Aussage</p>
+              <ul className="mt-1.5 flex flex-col gap-1 text-text-2" aria-label="Was noch fehlt">
+                {reasons.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            </div>
           )}
           <div className="flex flex-wrap gap-2">
             {(["A", "B"] as const).map((w) => (
@@ -82,7 +102,7 @@ export function ExperimentDecision({ experimentId, status, winner, decidedAt, co
                 title={ready ? undefined : reasons[0]}
                 className={cn(!ready && "opacity-50")}
               >
-                {busy === w ? "Wird gesetzt" : `Variante ${w} gewinnt`}
+                {busy === w ? "Wird gesetzt" : `Fassung ${w} gewinnt`}
               </Button>
             ))}
           </div>

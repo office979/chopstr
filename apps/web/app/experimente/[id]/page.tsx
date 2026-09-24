@@ -52,14 +52,16 @@ export default async function ExperimentPage({ params }: Props) {
 
   return (
     <PageShell width="default" backgroundWord="A/B">
+      {/* „Mindestexposure … Views je Variante" war Fachsprache. Was hier zählt, ist die
+          Bedingung: wann darf überhaupt entschieden werden. */}
       <PageHeader
-        eyebrow={`Experiment${source ? ` · ${source.title}` : ""}`}
+        eyebrow={`Test${source ? ` · ${source.title}` : ""}`}
         title={experiment.hypothesis ?? "Experiment"}
-        description={`Angelegt ${formatDateTime(experiment.created_at)} · Mindestexposure ${experiment.min_exposure.toLocaleString("de-AT")} Views je Variante`}
+        description={`Angelegt ${formatDateTime(experiment.created_at)} · Entschieden wird frühestens 48 Stunden nach dem Posten und ab ${experiment.min_exposure.toLocaleString("de-AT")} Aufrufen je Fassung`}
         actions={
           <>
             <ButtonLink href="/experimente" variant="ghost">
-              Alle Experimente
+              Alle Tests
             </ButtonLink>
             {source && (
               <ButtonLink href={`/projekte/${source.id}/clips`} variant="ghost">
@@ -83,36 +85,42 @@ export default async function ExperimentPage({ params }: Props) {
           return (
             <GlassCard key={label} padding="lg" selected={Boolean(winner)} className="flex flex-col gap-4">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="text-lg font-medium">Variante {label}</h2>
+                <h2 className="text-lg font-medium">Fassung {label}</h2>
                 <div className="flex gap-1.5">
                   {winner && <Badge tone="ok">Gewinner</Badge>}
                   {clip && <Badge>{PLATFORM_LABELS[clip.platform]}</Badge>}
                 </div>
               </div>
               {!clip ? (
-                <p className="text-sm text-text-2">Kein Clip für diese Variante.</p>
+                <p className="text-sm text-text-2">Für diese Fassung gibt es noch keinen Clip.</p>
               ) : (
                 <>
+                  {/* Was an dieser Fassung anders ist - der einzige Unterschied zwischen A und B.
+                      „Hook" und „On-Screen" sind Fachwörter; gemeint sind der gesprochene Einstieg
+                      und der Text, der dabei im Bild steht. */}
                   <div className="text-sm">
-                    <p className="text-text-2">Hook ({patternLabel(hook?.pattern)})</p>
-                    <p className="mt-1 text-text">{hook?.spoken_hook ?? "Noch keine Hook-Version"}</p>
-                    {hook?.onscreen_hook && <p className="mt-1 text-xs text-text-2">On-Screen: {hook.onscreen_hook}</p>}
+                    <p className="text-text-2">Gesprochener Einstieg ({patternLabel(hook?.pattern)})</p>
+                    <p className="mt-1 text-text">{hook?.spoken_hook ?? "Noch kein Einstieg geschrieben"}</p>
+                    {hook?.onscreen_hook && <p className="mt-1 text-xs text-text-2">Im Bild: {hook.onscreen_hook}</p>}
                   </div>
+                  {/* Die Zahlen mit ihrer Herkunft. Ohne die letzte Zeile weiss niemand, ob hier
+                      Zahlen von gestern oder von vor drei Wochen stehen - und ob sie von Hand
+                      eingetragen oder von der Plattform geholt wurden. */}
                   <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                    <dt className="text-text-2">Clip-Status</dt>
+                    <dt className="text-text-2">Stand des Clips</dt>
                     <dd>{CLIP_STATUS_LABELS[clip.status]}</dd>
-                    <dt className="text-text-2">Veröffentlicht</dt>
+                    <dt className="text-text-2">Gepostet</dt>
                     <dd>{stats?.published_at ? formatDateTime(stats.published_at) : "noch nicht"}</dd>
-                    <dt className="text-text-2">Views</dt>
+                    <dt className="text-text-2">Aufrufe</dt>
                     <dd className="font-mono tabular-nums">{n(stats?.views)}</dd>
-                    <dt className="text-text-2">Folgen</dt>
+                    <dt className="text-text-2">Neue Folgende</dt>
                     <dd className="font-mono tabular-nums">{n(stats?.follows)}</dd>
-                    <dt className="text-text-2">Folgequote / 1.000</dt>
+                    <dt className="text-text-2">Je 1.000 Aufrufe</dt>
                     <dd className="font-mono tabular-nums">{n(stats?.follows_per_1k, 2)}</dd>
-                    <dt className="text-text-2">Saves</dt>
+                    <dt className="text-text-2">Gespeichert</dt>
                     <dd className="font-mono tabular-nums">{n(stats?.saves)}</dd>
-                    <dt className="text-text-2">Fenster</dt>
-                    <dd>{stats?.window ?? "keine Metriken"}</dd>
+                    <dt className="text-text-2">Woher die Zahlen kommen</dt>
+                    <dd>{stats?.window === "manual" ? "Von Hand eingetragen" : (stats?.window ?? "Noch keine Zahlen")}</dd>
                   </dl>
                   {pubs.length > 0 && (
                     <ul className="flex flex-col gap-1 text-xs text-text-2">
@@ -133,10 +141,10 @@ export default async function ExperimentPage({ params }: Props) {
                   )}
                   <div className="mt-auto flex flex-wrap gap-2">
                     <ButtonLink href={`/projekte/${clip.source_id}/clips/${clip.id}/hooks`} size="sm" variant="ghost">
-                      Hook-Studio
+                      Einstieg bearbeiten
                     </ButtonLink>
                     <ButtonLink href={`/projekte/${clip.source_id}/clips`} size="sm" variant="ghost">
-                      Clip-Karte
+                      Zum Clip
                     </ButtonLink>
                   </div>
                 </>

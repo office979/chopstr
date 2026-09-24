@@ -276,6 +276,10 @@ export interface WeeklyReportBody {
   best?: WeeklyReportClipEntry[];
   worst?: WeeklyReportClipEntry[];
   publications?: number;
+  /* Wie viele Clips in diesem Bericht überhaupt verglichen wurden. Ohne diese Zahl heisst
+   * „der beste Clip" bei zweien etwas anderes als bei zwanzig, und der Leser kann das nicht
+   * unterscheiden. Kommt aus reports.build_report. */
+  clips?: number;
   summary?: string | null;
   [key: string]: unknown;
 }

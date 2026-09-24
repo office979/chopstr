@@ -212,12 +212,12 @@ export function HookStudio({
         body: JSON.stringify({ source_id: sourceId, clip_id: clip.id, variant_index: experimentVariant, hypothesis }),
       });
       const data = (await res.json()) as ApiError & { experiment?: { id: string }; href?: string };
-      if (!res.ok || !data.experiment) throw new Error(data.error ?? "Experiment konnte nicht angelegt werden");
+      if (!res.ok || !data.experiment) throw new Error(data.error ?? "Der Test konnte nicht angelegt werden");
       setExperimentId(data.experiment.id);
       setExperimentOpen(false);
-      setMessage({ tone: "ok", text: "Variante B angelegt. Der zweite Clip wartet auf den Render.", href: data.href ?? `/experimente/${data.experiment.id}` });
+      setMessage({ tone: "ok", text: "Zweite Fassung angelegt. Der zweite Clip wird gerade geclippt.", href: data.href ?? `/experimente/${data.experiment.id}` });
     } catch (err) {
-      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Experiment konnte nicht angelegt werden" });
+      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Der Test konnte nicht angelegt werden" });
     } finally {
       setExperimentBusy(false);
     }
@@ -233,16 +233,16 @@ export function HookStudio({
           {/* Varianten */}
           <GlassCard padding="md" className="flex flex-col gap-3">
             <div>
-              <h2 className="text-sm font-medium">Fünf Varianten</h2>
+              <h2 className="text-sm font-medium">Fünf Vorschläge</h2>
               <p className="mt-0.5 text-xs text-text-2">
                 {current?.origin === "llm" ? `${current.model_id ?? "Sprachmodell"}` : "Aus Version 1 (Sprachmodell)"}. Auswahl übernimmt die Texte.
                 {variantOrder.learned ? " Reihenfolge aus der Lernschleife." : " Standardreihenfolge."}
               </p>
             </div>
             {variants.length === 0 ? (
-              <p className="text-sm text-text-2">Noch keine Varianten. Sie entstehen beim ersten Render (Copy zuerst).</p>
+              <p className="text-sm text-text-2">Noch keine Vorschläge. Sie entstehen, sobald der Clip zum ersten Mal geclippt wurde.</p>
             ) : (
-              <ul className="flex flex-col gap-2" aria-label="Hook-Varianten">
+              <ul className="flex flex-col gap-2" aria-label="Vorschläge für den Einstieg">
                 {variants.map((v, i) => {
                   const active = selectedVariant === i;
                   return (
@@ -318,7 +318,7 @@ export function HookStudio({
                     <Input value={hypothesis} onChange={(e) => setHypothesis(e.target.value)} placeholder="Hypothese (optional)" maxLength={500} className="py-2 text-sm" />
                     <div className="flex flex-wrap gap-2">
                       <Button size="sm" type="submit" disabled={experimentBusy || experimentVariant == null}>
-                        {experimentBusy ? "Wird angelegt" : "Variante B anlegen"}
+                        {experimentBusy ? "Wird angelegt" : "Zweite Fassung anlegen"}
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => setExperimentOpen(false)} disabled={experimentBusy}>
                         Abbrechen
@@ -405,7 +405,7 @@ export function HookStudio({
                     <>
                       {" "}
                       <Link href={message.href} className="font-medium underline-offset-4 hover:underline">
-                        {message.href.startsWith("/experimente") ? "Experiment öffnen" : "Clips ansehen"}
+                        {message.href.startsWith("/experimente") ? "Test öffnen" : "Clips ansehen"}
                       </Link>
                     </>
                   )}
@@ -435,7 +435,7 @@ export function HookStudio({
         <GlassCard padding="md">
           <h2 className="mb-3 text-sm font-medium">Versionen</h2>
           {versions.length === 0 ? (
-            <p className="text-sm text-text-2">Noch keine Hook-Version. Version 1 entsteht beim ersten Render.</p>
+            <p className="text-sm text-text-2">Noch kein Einstieg. Er entsteht, sobald der Clip zum ersten Mal geclippt wurde.</p>
           ) : (
             <ol className="flex flex-col gap-2">
               {[...versions].reverse().map((v) => (

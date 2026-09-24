@@ -41,6 +41,7 @@ import { compositionDuration } from "@/lib/clips/render-demo";
 import { PLATFORM_DEFAULT_PRESET } from "@/lib/clips/presets";
 import type { ClipExtras, Series } from "@/lib/repo/types-publishing";
 import { ClipSeries } from "./ClipSeries";
+import { Gepostet } from "./Gepostet";
 
 /* Serien-Zuordnung je Clip. Posten, Bildausschnitt und Experimente stehen nicht mehr auf der Karte. */
 export interface ClipBoardPublishing {
@@ -67,6 +68,8 @@ interface Props {
   planAllowsGuest: boolean;
   planName: string;
   canDelete: boolean;
+  /* Darf dieser Nutzer eintragen, dass ein Clip gepostet wurde, und Kennzahlen nachtragen? */
+  canPublish: boolean;
   previewFont: PreviewFont | null;
   publishing?: ClipBoardPublishing;
   /* Die neueste Transkriptversion des Projekts. Daran hängt, ob eine Textkorrektur schon im
@@ -138,6 +141,7 @@ export function ClipBoard({
   planAllowsGuest,
   planName,
   canDelete,
+  canPublish,
   previewFont,
   publishing,
   transkriptVersion,
@@ -1116,6 +1120,12 @@ export function ClipBoard({
                       planName={planName}
                       onRequested={onRequested}
                     />
+                    {/* Was aus dem Clip geworden ist. Ohne diese Zeile endete die Kette am
+                        fertigen Clip: Posten und Kennzahlen gab es nur als Schnittstelle, und
+                        „Tests" und „Berichte" konnten deshalb nie etwas zeigen. */}
+                    {p.redaktion === "freigegeben" && (
+                      <Gepostet sourceId={sourceId} clipId={clip.id} plattform={clip.platform} canPublish={canPublish} />
+                    )}
                     {clip.guest_approval_required && !approval?.decision && (
                       <button type="button" onClick={() => refreshApproval(clip)} className="text-xs text-text-2 underline-offset-4 hover:text-text hover:underline">
                         Status aktualisieren

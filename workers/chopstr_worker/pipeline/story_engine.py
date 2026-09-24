@@ -36,9 +36,17 @@ CONTRACT = "candidates_v1"
 #     werden; die Laengenbewertung rechnet dann mit der Abspieldauer, nicht der Quellspanne.
 # Der Wert steckt im Idempotenz-Schluessel und erzwingt eine Neuberechnung. Ohne ihn
 # kaeme das alte Ergebnis aus dem Zwischenspeicher und die Aenderung waere unsichtbar.
-ENGINE_VERSION = "story_engine_v3"
+ENGINE_VERSION = "story_engine_v4"
+# Die Laengengrenzen stehen in der Richtlinie (packages/editorial/clip_policy_v1.yaml) und nur
+# dort. Hier standen frueher 12 und 90 Sekunden, waehrend die Richtlinie 18 und 70 als „hart"
+# fuehrte: zwei Wahrheiten, von denen die laxere gewann. So ist an BP CW ein Clip von 78 Sekunden
+# entstanden. Die beiden Namen bleiben als Ruecklauf, falls die Richtlinie fehlt.
 MIN_LEN_S = 12.0
 MAX_LEN_S = 90.0
+
+# Tore, die sich durch Verlaengern nach hinten beheben lassen. Alle drei beschreiben ein kaputtes
+# ENDE; was am Anfang fehlt, holt die Verlaengerung nach hinten nicht zurueck.
+ENDE_TORE = ("fidelity", "sentence_boundaries", "no_open_loop")
 MAX_CANDIDATES = 20
 MAX_PER_CHAPTER = 4
 MAX_REPAIR_ROUNDS = 2
@@ -574,12 +582,102 @@ def _duration(sents: list[Sentence], first: int, last: int) -> float:
     return sents[last].end - sents[first].start
 
 
-def _length_reason(dur: float) -> str | None:
-    if dur < MIN_LEN_S:
+def _length_reason(dur: float, mit_zugabe: bool = False) -> str | None:
+    """Verwerfungsgrund wegen der Laenge, oder None.
+
+    Massgeblich ist die Richtlinie. ``mit_zugabe`` gilt nur fuer einen Clip, der nach hinten
+    verlaengert wurde, um sein Ende zu heilen; ohne diesen Grund endet es bei ``hart_max_s``."""
+    try:
+        pol = editorial.load()
+        unten, oben = pol.hart_min_s, pol.hart_max_s + (pol.kontext_zugabe_s if mit_zugabe else 0.0)
+    except Exception:  # ohne Richtlinie lieber weiter arbeiten als gar nicht
+        unten, oben = MIN_LEN_S, MAX_LEN_S
+    if dur < unten:
         return "too_short"
-    if dur > MAX_LEN_S:
+    if dur > oben:
         return "too_long"
     return None
+
+
+def _vorfilter_grund(sents: list[Sentence], first: int, last: int) -> str | None:
+    """Billiger Vorfilter vor der Bewertung: verwirft nur, was auch die Reparatur nicht rettet.
+
+    Der Vorfilter spart eine Modellanfrage fuer aussichtslose Vorschlaege. Er darf dabei aber nicht
+    die endgueltige Grenze anlegen: ein zu kurzer Vorschlag kann durch die Reparatur (fehlender
+    Kontext nach vorne, fehlende Antwort nach hinten) und die Kontextzugabe noch lang genug werden.
+    Genau daran ist der erste Versuch gescheitert: mit der harten Untergrenze im Vorfilter fiel ein
+    Vorschlag von 17,6 Sekunden heraus, den die Reparatur auf 23,4 gebracht haette.
+
+    Nach oben ist der Vorfilter dagegen exakt: ein Abschnitt waechst nur, er schrumpft nie.
+    """
+    dur = _duration(sents, first, last)
+    if _length_reason(dur, mit_zugabe=True) == "too_long":
+        return "too_long"
+    # Wie lang koennte dieser Abschnitt nach der groesstmoeglichen Reparatur hoechstens werden?
+    vorne = max(0, first - MAX_REPAIR_ROUNDS)
+    hinten = min(len(sents) - 1, last + MAX_REPAIR_ROUNDS)
+    try:
+        zugabe = editorial.load().kontext_zugabe_s
+    except Exception:
+        zugabe = 0.0
+    if _length_reason(_duration(sents, vorne, hinten) + zugabe) == "too_short":
+        return "too_short"
+    return None
+
+
+def kontext_verlaengern(
+    words: list[dict],
+    sents: list[Sentence],
+    first: int,
+    last: int,
+    rubric: dict,
+) -> tuple[int, dict | None]:
+    """Den Abschnitt nach hinten wachsen lassen, bis sein Ende nicht mehr kaputt ist.
+
+    Die Laenge entscheidet, aber nicht gegen den Sinn: ein Clip, der vor dem „aber" endet, das ihn
+    erst erklaert, ist kein kurzer Clip, sondern ein falscher. Deshalb darf er um bis zu
+    ``kontext_zugabe_s`` Sekunden ueber die harte Grenze hinauswachsen.
+
+    Eingesetzt wird die Zugabe nur gegen einen benannten Mangel aus ``ENDE_TORE``, und sie hoert
+    auf, sobald er behoben ist. Ein Clip, den sie nicht heilt, bleibt wie er war und wird von der
+    Auswahl verworfen. Es gibt keine Verlaengerung „einfach so".
+
+    Zurueck kommt der neue letzte Satz und, falls verlaengert wurde, eine Notiz fuer die Rubrik.
+    """
+    gates = deterministic_gates(words, sents, first, last, rubric)
+    kaputt = [k for k in ENDE_TORE if k in gates and not gates[k].get("passed")]
+    if not kaputt:
+        return last, None
+    try:
+        pol = editorial.load()
+        max_saetze, max_s = pol.kontext_zugabe_saetze, pol.kontext_zugabe_s
+    except Exception:
+        return last, None
+    if max_saetze <= 0 or max_s <= 0 or last >= len(sents) - 1:
+        return last, None
+
+    ende0 = sents[last].end
+    for ziel in range(last + 1, min(last + max_saetze, len(sents) - 1) + 1):
+        gewonnen = sents[ziel].end - ende0
+        # BEIDE Grenzen gelten. Die Sekunden sind die Ansage, wie viel laenger ein Clip aus
+        # Kontextgruenden werden darf; die Satzzahl verhindert zusaetzlich, dass viele kurze Saetze
+        # zusammen doch eine halbe Minute ergeben.
+        if gewonnen > max_s:
+            break
+        neu_dauer = sents[ziel].end - sents[first].start
+        # Die Obergrenze gilt auch fuer eine Heilung. Ein Clip, der nur ueber 77 Sekunden hinaus
+        # heilbar waere, wird verworfen und nicht aufgeblasen.
+        if _length_reason(neu_dauer, mit_zugabe=True):
+            break
+        g = deterministic_gates(words, sents, first, ziel, rubric)
+        if all(bool(x.get("passed")) for x in g.values()):
+            return ziel, {
+                "saetze": ziel - last,
+                "sekunden": round(gewonnen, 2),
+                "behoben": kaputt,
+                "grund": "; ".join(str(gates[k].get("detail") or "") for k in kaputt),
+            }
+    return last, None
 
 
 def evaluate_span(
@@ -598,8 +696,12 @@ def evaluate_span(
     heuristic = getattr(llm, "is_heuristic", False)
     r = story_score.score_with_repair(sents, first0, last0, brief, llm, max_rounds=MAX_REPAIR_ROUNDS)
     first, last = int(r["first_sent"]), int(r["last_sent"])
+    # Erst das Ende heilen, dann die Laenge pruefen. Andersherum faellt ein Clip wegen einer Laenge
+    # durch, die er nach der Heilung gar nicht mehr haette, oder er besteht mit einem Ende, das
+    # mitten im Satz abbricht.
+    last, zugabe = kontext_verlaengern(words, sents, first, last, r)
     dur = _duration(sents, first, last)
-    reason = _length_reason(dur)
+    reason = _length_reason(dur, mit_zugabe=zugabe is not None)
     if reason:
         return {
             "reason": reason + ("_after_repair" if (first, last) != (first0, last0) else ""),
@@ -631,6 +733,8 @@ def evaluate_span(
             struktur = "payoff_first"
     scores = {k: int(max(0, min(10, int(r.get(k, 0) or 0)))) for k in SCORE_KEYS}
     gates = deterministic_gates(words, sents, first, last, r)
+    if zugabe is not None:
+        r["kontext_zugabe"] = zugabe
     flags = later_qualifications(sents, first, last, llm)
     expanded_front, expanded_back = first0 - first, last - last0
     rubric = {
@@ -663,6 +767,10 @@ def evaluate_span(
             "expanded_back": expanded_back,
             "failed": bool(r.get("repair_failed")),
         },
+        # Wurde die Kontextzugabe eingesetzt, steht hier warum und wie viel. Ohne diesen Eintrag
+        # waere spaeter nicht mehr zu sehen, ob ein Clip ueber der harten Grenze liegt, weil er
+        # etwas brauchte, oder weil ihn niemand aufgehalten hat.
+        "kontext_zugabe": r.get("kontext_zugabe"),
         "proposal_why": str(proposal.get("why") or ""),
         "parent_id": None,
     }
@@ -781,7 +889,7 @@ def run(
         for m in moments:
             first, last = int(m["first_sent"]), int(m["last_sent"])
             dur = _duration(sents, first, last)
-            reason = _length_reason(dur)
+            reason = _vorfilter_grund(sents, first, last)
             if reason:
                 report.discarded.append({"reason": reason, "first_sent": first, "last_sent": last, "duration_s": round(dur, 2)})
                 continue
@@ -818,6 +926,7 @@ def detect(
 
 __all__ = [
     "CONTRACT",
+    "ENDE_TORE",
     "ENGINE_VERSION",
     "MAX_CANDIDATES",
     "MAX_LEN_S",
@@ -829,6 +938,7 @@ __all__ = [
     "detect",
     "deterministic_gates",
     "evaluate_span",
+    "kontext_verlaengern",
     "later_qualifications",
     "prompt_versions",
     "resolve_weights",

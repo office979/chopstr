@@ -103,6 +103,33 @@ class Policy:
     def hart_max_s(self) -> float:
         return float(self.roh["laenge"]["hart_max_s"])
 
+    @property
+    def kontext_zugabe_s(self) -> float:
+        """Wie viele Sekunden ein Clip ueber die harte Grenze wachsen darf, um sein Ende zu heilen.
+
+        Nur gegen einen benannten Mangel einsetzbar, nicht als allgemeine Verlaengerung. Fehlt der
+        Wert in einer aelteren Richtlinie, gibt es keine Zugabe: lieber streng als stillschweigend
+        grosszuegig."""
+        return float(self.roh["laenge"].get("kontext_zugabe_s") or 0.0)
+
+    @property
+    def kontext_zugabe_saetze(self) -> int:
+        """Wie viele Saetze die Heilung eines kaputten Endes anhaengen darf.
+
+        Getrennt von ``kontext_zugabe_s``, weil es zwei verschiedene Dinge sind: die Sekunden sagen,
+        wie weit ein Clip ueber die harte Grenze darf, die Saetze, wie weit die Heilung reichen
+        darf. An echtem Material sind 27 Prozent der Saetze laenger als sieben Sekunden; mit einer
+        reinen Sekundengrenze bliebe jedes vierte kaputte Ende ungeheilt."""
+        return int(self.roh["laenge"].get("kontext_zugabe_saetze") or 0)
+
+    def laenge_erlaubt(self, sekunden: float, mit_zugabe: bool = False) -> bool:
+        """Darf ein Clip dieser Laenge ueberhaupt angeboten werden?
+
+        ``mit_zugabe`` gilt nur fuer einen Clip, der nach hinten verlaengert wurde, um einen
+        Mangel am Ende zu beheben. Ohne diesen Grund endet es bei ``hart_max_s``."""
+        oben = self.hart_max_s + (self.kontext_zugabe_s if mit_zugabe else 0.0)
+        return self.hart_min_s <= sekunden <= oben
+
     def laenge_ok(self, sekunden: float) -> bool:
         return self.gut_von_s <= sekunden <= self.gut_bis_s
 

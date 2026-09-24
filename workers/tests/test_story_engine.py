@@ -176,18 +176,20 @@ def test_repair_failure_is_kept_with_title_card_hint(brain, llm):
     assert "Einstieg braucht Vorwissen" in c.why
 
 
-def test_deterministic_gates_open_loop_and_fidelity(brain, llm):
-    brain.moments = lambda sents: [{"first_sent": 8, "last_sent": 10, "structure": "decision_story", "why": "x"}]
-    bericht = story_engine.run(demo_words(), BRIEF, {}, None, llm)
-    assert bericht.candidates == []
-    c = bericht.verworfen[0]
-    assert c.gates["no_open_loop"] == {"passed": False, "detail": "endet auf „aber“"}
-    assert c.gates["fidelity"] == {"passed": False, "detail": "endet direkt vor „allerdings“"}
-    assert c.gates["standalone"]["passed"] is True
-    assert c.gate_passed is False
-    assert "endet auf einem offenen Konnektor" in c.why and "endet direkt vor einer Relativierung" in c.why
-    assert c.story_graph_flags == []
-    assert "keine spätere Relativierung gefunden" in c.why
+def test_deterministic_gates_open_loop_and_fidelity():
+    """Die Tore selbst, ohne den ganzen Lauf.
+
+    Frueher ging dieser Test ueber ``run``. Das taugt nicht mehr: ein Abschnitt, der auf „aber"
+    endet, wird jetzt nach hinten verlaengert, bis er das nicht mehr tut - genau darum geht es bei
+    der Kontextzugabe. Geprueft wird hier also die Feststellung des Mangels, nicht was danach
+    damit geschieht.
+    """
+    w = demo_words()
+    sents = segment.sentences_from_words(w)
+    g = story_engine.deterministic_gates(w, sents, 8, 10, {})
+    assert g["no_open_loop"] == {"passed": False, "detail": "endet auf „aber“"}
+    assert g["fidelity"] == {"passed": False, "detail": "endet direkt vor „allerdings“"}
+    assert g["standalone"]["passed"] is True
 
 
 def test_story_graph_without_verdict_stays_unconfirmed(brain, llm):
@@ -217,10 +219,18 @@ def test_length_limits_discard_with_reason(brain, llm):
     assert d["duration_s"] == pytest.approx(4.0, abs=0.05)
     assert not any(t == "score_clip" and i == 0 for i, (t, _) in enumerate(brain.calls))  # kurzer Vorschlag wird nicht bewertet
 
-    # zu lang nach Reparatur: Grenzen wachsen über 90 Sekunden
+    # Schon der Vorschlag ist zu lang: ein Abschnitt waechst nur, er schrumpft nie, also faellt er
+    # ohne Modellanfrage durch.
     words = make_words(long_script(1, sentences_per_chapter=10, sentence_s=12.0))
     brain.moments = lambda sents: [{"first_sent": 1, "last_sent": 7, "structure": "loop", "why": "x"}]
-    brain.rubrics[(1, 7)] = {"needs_earlier_context": True}
+    report = story_engine.run(words, BRIEF, {}, None, llm)
+    assert report.candidates == []
+    assert report.discarded[0]["reason"] == "too_long"
+
+    # Erst die Reparatur macht ihn zu lang: 5 Saetze zu 12 s sind 60 s und damit erlaubt, nach dem
+    # Erweitern um einen Satz nach vorne sind es 72 s und damit ueber der harten Grenze von 70.
+    brain.moments = lambda sents: [{"first_sent": 1, "last_sent": 5, "structure": "loop", "why": "x"}]
+    brain.rubrics[(1, 5)] = {"needs_earlier_context": True}
     report = story_engine.run(words, BRIEF, {}, None, llm)
     assert report.candidates == []
     assert report.discarded[0]["reason"] == "too_long_after_repair"
@@ -391,3 +401,90 @@ def test_satzgrenzen_gate_laesst_einen_sauberen_schnitt_durch():
     ]
     sents = [story_engine.Sentence(idx=0, text="Das stimmt.", start=0.0, end=0.6, word_range=(0, 1), speaker="SPEAKER_00")]
     assert story_engine._satzgrenzen_gate(woerter, sents, 0, 0)["passed"] is True
+
+
+
+# -- Kontextzugabe: lieber sieben Sekunden laenger als sinnlos ------------------------------------
+def test_ein_clip_der_vor_dem_aber_endet_wird_verlaengert_statt_verworfen():
+    """Der Fall aus BP CW: „...finde Broetchen auch deutlich leckerer," und dann Schnitt.
+
+    Die Laenge entscheidet, aber nicht gegen den Sinn. Statt den Clip wegzuwerfen, waechst er nach
+    hinten, bis das „aber" mit drin ist.
+    """
+    w = demo_words()
+    sents = segment.sentences_from_words(w)
+    vorher = story_engine.deterministic_gates(w, sents, 8, 10, {})
+    assert not vorher["no_open_loop"]["passed"], "Satz 10 endet auf „aber“, sonst prueft der Test nichts"
+
+    neu, zugabe = story_engine.kontext_verlaengern(w, sents, 8, 10, {})
+    assert neu > 10, "der Abschnitt haette wachsen muessen"
+    assert zugabe is not None
+    assert zugabe["sekunden"] <= 7.0
+    assert "no_open_loop" in zugabe["behoben"]
+    nachher = story_engine.deterministic_gates(w, sents, 8, neu, {})
+    assert all(g["passed"] for g in nachher.values())
+
+
+def test_ohne_mangel_wird_nicht_verlaengert():
+    """Die Zugabe ist kein Freibrief, den Clip „noch etwas voller" zu machen."""
+    w = demo_words()
+    sents = segment.sentences_from_words(w)
+    assert all(g["passed"] for g in story_engine.deterministic_gates(w, sents, 0, 3, {}).values())
+    neu, zugabe = story_engine.kontext_verlaengern(w, sents, 0, 3, {})
+    assert (neu, zugabe) == (3, None)
+
+
+def test_die_zugabe_hoert_bei_sieben_sekunden_auf():
+    """Ein Mangel, der nur mit mehr als der Zugabe zu heilen waere, bleibt ungeheilt."""
+    w = demo_words()
+    sents = segment.sentences_from_words(w)
+    lang = [s for s in sents]
+    # Kuenstlich: der naechste Satz liegt weiter weg als die Zugabe erlaubt.
+    verschoben = segment.Sentence(
+        idx=lang[11].idx, text=lang[11].text, start=lang[10].end + 20.0, end=lang[10].end + 26.0,
+        speaker=lang[11].speaker, word_range=lang[11].word_range,
+    )  # fmt: skip
+    kuenstlich = [*lang[:11], verschoben, *lang[12:]]
+    neu, zugabe = story_engine.kontext_verlaengern(w, kuenstlich, 8, 10, {})
+    assert (neu, zugabe) == (10, None)
+
+
+def test_die_harte_grenze_gilt_wirklich():
+    """78 Sekunden sind raus, 77 mit Grund sind drin, 71 ohne Grund nicht."""
+    assert story_engine._length_reason(78.0, mit_zugabe=True) == "too_long"
+    assert story_engine._length_reason(77.0, mit_zugabe=True) is None
+    assert story_engine._length_reason(71.0, mit_zugabe=False) == "too_long"
+    assert story_engine._length_reason(70.0, mit_zugabe=False) is None
+    assert story_engine._length_reason(17.9) == "too_short"
+    assert story_engine._length_reason(18.0) is None
+
+
+def test_der_vorfilter_verwirft_nur_das_aussichtslose():
+    """Ein zu kurzer Vorschlag, den die Reparatur retten kann, muss bewertet werden duerfen."""
+    w = demo_words()
+    sents = segment.sentences_from_words(w)
+    # 1..3 sind 17,6 s und damit unter der Grenze, 0..3 waeren 23,4 s.
+    assert story_engine._duration(sents, 1, 3) < 18.0
+    assert story_engine._vorfilter_grund(sents, 1, 3) is None
+
+
+def test_beide_grenzen_der_zugabe_gelten():
+    """Sekunden UND Satzzahl. An BP CW gemessen: der naechste Satz lag 8,9 s entfernt und damit
+    ausserhalb der sieben Sekunden, obwohl es nur ein Satz gewesen waere."""
+    w = demo_words()
+    sents = segment.sentences_from_words(w)
+    from chopstr_worker import editorial
+
+    pol = editorial.load()
+    assert pol.kontext_zugabe_s > 0 and pol.kontext_zugabe_saetze > 0
+
+    # Ein Satz, der innerhalb der Sekundengrenze liegt, heilt.
+    neu, zugabe = story_engine.kontext_verlaengern(w, sents, 8, 10, {})
+    assert zugabe is not None and zugabe["sekunden"] <= pol.kontext_zugabe_s
+
+    # Derselbe Fall, aber der naechste Satz liegt weiter weg als die Sekundengrenze erlaubt.
+    weit = segment.Sentence(
+        idx=sents[11].idx, text=sents[11].text, start=sents[10].end + pol.kontext_zugabe_s + 1.0,
+        end=sents[10].end + pol.kontext_zugabe_s + 5.0, speaker=sents[11].speaker, word_range=sents[11].word_range,
+    )  # fmt: skip
+    assert story_engine.kontext_verlaengern(w, [*sents[:11], weit, *sents[12:]], 8, 10, {}) == (10, None)

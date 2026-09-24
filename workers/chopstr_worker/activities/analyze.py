@@ -22,7 +22,7 @@ from typing import Any
 
 from temporalio import activity
 
-from .. import costlog, db, decision_log, events, outbox, storage, usage
+from .. import costlog, db, decision_log, editorial, events, outbox, storage, usage
 from ..pipeline import copy_engine, signals, story_engine
 from ..providers_llm import LLM
 from ..residency import Tenant
@@ -123,7 +123,16 @@ def _load_heat(ctx: common.Context, src: dict) -> dict | None:
 
 
 def candidates_key_for(tv_id: str, tv_version: int, brief: dict, prompt_versions: list[str], provider: str, model: str, weights: dict) -> str:
-    """Idempotenz-Key: Transkriptversion + Briefing + Prompt-Versionen + Provider/Modell + Gewichte."""
+    """Idempotenz-Key: Transkriptversion, Briefing, Prompt-Versionen, Provider/Modell, Gewichte,
+    Engine UND redaktionelle Grundlage.
+
+    Die Grundlage gehoert dazu, weil sie das Ergebnis bestimmt: Laengengrenzen, Kontextzugabe,
+    Gewichte der Rubrik. Ohne sie bliebe nach einer Aenderung an der Richtlinie das alte Ergebnis
+    aus dem Zwischenspeicher stehen, und die Aenderung sieht aus, als haette sie nicht gewirkt."""
+    try:
+        policy = editorial.policy_version()
+    except Exception:  # ohne Richtlinie lieber weiterarbeiten als gar nicht
+        policy = "unbekannt"
     params = {
         "transcript_version": tv_version,
         "brief": brief,
@@ -132,6 +141,7 @@ def candidates_key_for(tv_id: str, tv_version: int, brief: dict, prompt_versions
         "model": model,
         "weights": weights,
         "engine": story_engine.ENGINE_VERSION,
+        "policy": policy,
     }
     return storage.derived_key(f"transcript/{tv_id}", params, story_engine.CONTRACT, "json", prefix="candidates")
 

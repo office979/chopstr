@@ -34,17 +34,43 @@ laenge:
   ziel_s: 41
   gut_von_s: 30
   gut_bis_s: 55
-  # Ausserhalb dieser Grenzen ist ein Moment als Clip unbrauchbar, egal wie gut sein Inhalt ist.
-  # Kein Verwerfen (siehe bewertung.modus), sondern starker Abzug.
-  #
-  # OFFEN, und hier ausdruecklich festgehalten, damit es nicht in Vergessenheit geraet: „hart"
-  # verspricht eine Grenze, die es nicht gibt. An BP CW ist ein Clip von 78 Sekunden entstanden,
-  # also acht ueber dem harten Maximum, mit dem hoechstmoeglichen Laengenabzug von 1,0 und trotzdem
-  # ausgeliefert. Entweder wird die Grenze wirklich hart (ein Moment ausserhalb wird nicht mehr
-  # angeboten, im Zweifel gibt es dann weniger Clips), oder sie heisst nicht mehr „hart".
-  # Das ist eine Produktentscheidung und keine Programmieraufgabe.
+  # Ausserhalb dieser Grenzen wird ein Moment nicht mehr angeboten. Das war lange anders: die
+  # Grenzen hiessen „hart", wirkten aber nur als Abzug, und im Code standen mit 12 und 90 Sekunden
+  # ganz andere Zahlen. An BP CW ist so ein Clip von 78 Sekunden entstanden, mit dem hoechsten
+  # Laengenabzug von 1,0 und trotzdem ausgeliefert. Jetzt gilt eine Zahl, und sie gilt wirklich.
   hart_min_s: 18
   hart_max_s: 70
+
+  # KONTEXTZUGABE. Die Laenge entscheidet, aber nicht gegen den Sinn. Endet ein Clip vor dem „aber",
+  # das ihn erst erklaert, mitten im Satz oder auf einem offenen Konnektor, darf er so weit nach
+  # hinten wachsen, bis dieser Mangel weg ist.
+  #
+  # Die Zugabe ist keine allgemeine Verlaengerung. Sie wird nur gegen einen benannten Mangel
+  # eingesetzt (siehe ``ausstieg``), sie hoert auf, sobald er behoben ist, und sie steht nicht zur
+  # Verfuegung, um einen Clip „noch etwas voller" zu machen. Ein Clip, den sie nicht heilt, wird
+  # verworfen statt verlaengert.
+  #
+  # Es sind zwei verschiedene Groessen, und sie duerfen nicht verwechselt werden:
+  #
+  #   kontext_zugabe_s     wie weit ein Clip UEBER hart_max_s hinausgehen darf
+  #   kontext_zugabe_saetze wie viele Saetze die Heilung anhaengen darf
+  #
+  # BEIDE Grenzen muessen gelten. Die Sekunden sind die Ansage. Die Satzzahl kommt dazu, damit
+  # nicht viele kurze Saetze zusammen doch eine halbe Minute ergeben.
+  #
+  # GEMESSENE FOLGE, bitte vor dem Verschieben lesen: an BP CW sind die Saetze im Median 4,1 s
+  # lang, aber 27 Prozent sind laenger als 7 s (90. Perzentil 15,1 s). Ein kaputtes Ende laesst
+  # sich nur heilen, indem der naechste Satz dazukommt - passt der nicht in die sieben Sekunden,
+  # bleibt der Mangel, und der Clip wird verworfen.
+  #
+  # Konkret an BP CW: zwei Clips enden kaputt („endet direkt vor aber", „endet mitten im Satz auf
+  # …"). Der naechste Satz liegt 8,9 beziehungsweise 19,2 Sekunden entfernt. Mit sieben Sekunden
+  # werden beide verworfen; aus sechs Vorschlaegen werden drei Clips. Wuerde die Zugabe auf 20 s
+  # stehen, waeren es fuenf, alle mit heilem Ende und alle im guten Laengenfenster (33,9 und
+  # 49,2 s). Das ist eine Abwaegung zwischen weniger Clips und laengeren Clips, keine technische
+  # Frage - deshalb steht sie hier und nicht im Code.
+  kontext_zugabe_s: 7
+  kontext_zugabe_saetze: 2
 
 # ------------------------------------------------------------------------------------------------
 # Rubrik

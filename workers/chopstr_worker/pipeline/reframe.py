@@ -246,6 +246,7 @@ def abtasten(video_path: str, t0: float, t1: float) -> list[tracking.Abtastung]:
     out: list[tracking.Abtastung] = []
     vor_hist = None
     vor_grau = None
+    vor_boxen: list[tuple[int, int, int, int]] = []
     t = t0
     while t < t1:
         cap.set(cv2.CAP_PROP_POS_FRAMES, int(t * fps))
@@ -264,6 +265,19 @@ def abtasten(video_path: str, t0: float, t1: float) -> list[tracking.Abtastung]:
         munde: list[float] = []
         if vor_grau is not None and (wechsel is None or wechsel < tracking.SCHNITT_SCHWELLE):
             for x, y, bw, bh in boxen:
+                # Nur messen, wenn dieselbe Box im vorigen Bild an fast derselben Stelle stand.
+                # Eine springende Erkennung vergleicht sonst zwei verschiedene Bildausschnitte und
+                # liefert eine riesige Differenz, die wie heftiges Sprechen aussieht. An BP CW
+                # gemessen: eine wacklige Fehlerkennung schlug mit Median 22,5 den echten Sprecher
+                # mit 17,8. tracking.NICHT_MESSBAR heisst „keine Aussage", nicht „keine Bewegung".
+                cx, cy = x + bw / 2.0, y + bh / 2.0
+                passend = any(
+                    abs((px + pw / 2.0) - cx) < pw * 0.3 and abs((py + ph / 2.0) - cy) < ph * 0.3
+                    for px, py, pw, ph in vor_boxen
+                )
+                if not passend:
+                    munde.append(tracking.NICHT_MESSBAR)
+                    continue
                 # Unteres Drittel der Box, waagerecht auf die Mitte beschränkt: dort liegt der Mund.
                 mx0 = max(0, x + int(bw * 0.2))
                 mx1 = min(grau.shape[1], x + int(bw * 0.8))
@@ -276,10 +290,10 @@ def abtasten(video_path: str, t0: float, t1: float) -> list[tracking.Abtastung]:
                 b = vor_grau[my0:my1, mx0:mx1].astype("float32")
                 munde.append(float(np.abs(a - b).mean()))
         else:
-            munde = [0.0] * len(boxen)
+            munde = [tracking.NICHT_MESSBAR] * len(boxen)
 
         out.append(tracking.Abtastung(t=t, boxen=boxen, bildwechsel=wechsel, mundbewegung=munde))
-        vor_hist, vor_grau = hist, grau
+        vor_hist, vor_grau, vor_boxen = hist, grau, boxen
         t += 1 / SAMPLE_FPS
     cap.release()
     return out

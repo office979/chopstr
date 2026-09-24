@@ -68,9 +68,13 @@ def test_positionen_werden_nicht_ueber_den_schnitt_vermischt():
     p1 = tr.positionen(einst[1])
     assert p0[0][0] == pytest.approx(300, abs=5)
     assert p1[0][0] == pytest.approx(1500, abs=5)
-    # Ohne Trennung waere genau das herausgekommen:
-    alle = tr.Einstellung(0.0, 4.0, [*a, *b])
-    assert tr.positionen(alle, n_max=1)[0][0] == pytest.approx(900, abs=50)
+    # Zwei Schutzschichten greifen hier. Die Trennung an Kameraschnitten haelt die Einstellungen
+    # auseinander, und selbst wenn man sie zusammenwirft, trennt die Lueckenclusterung noch immer
+    # sauber in zwei Positionen statt eine erfundene Mitte zu bilden. Frueher kam an dieser Stelle
+    # 900 heraus, also eine Position, an der niemand sitzt.
+    alle = tr.positionen(tr.Einstellung(0.0, 4.0, [*a, *b]))
+    assert len(alle) == 2
+    assert [round(x) for x, _y in alle] == [300, 1500]
 
 
 def test_zwei_personen_in_einer_einstellung_bleiben_zwei():
@@ -86,38 +90,77 @@ def test_zwei_personen_in_einer_einstellung_bleiben_zwei():
 
 
 # -- Wer spricht -----------------------------------------------------------------------------------
+POS2 = [(400.0, 400.0), (1400.0, 400.0)]
+
+
 def test_bewegter_mund_gewinnt():
     """Zwei Personen im Bild, nur eine bewegt den Mund."""
     a = [abt(i * 0.2, [box(400), box(1400)], 0.02, mund=[0.9, 0.05]) for i in range(10)]
-    assert tr.sprecher_box(a) == 0
+    assert tr.sprecher_position(a, POS2) == 0
 
 
 def test_die_andere_person_gewinnt_wenn_sie_spricht():
     a = [abt(i * 0.2, [box(400), box(1400)], 0.02, mund=[0.04, 0.8]) for i in range(10)]
-    assert tr.sprecher_box(a) == 1
+    assert tr.sprecher_position(a, POS2) == 1
+
+
+def test_wechselnde_reihenfolge_der_erkennung_stoert_nicht():
+    """Der Detektor liefert die Gesichter je Bild in wechselnder Reihenfolge.
+
+    An einem echten Video gemessen: t=76.0 x=[1304, 2595], t=76.2 x=[2596, 1305]. Wer ueber den
+    Listenindex summiert, vermischt zwei Menschen und bekommt fuer beide denselben Wert. Die erste
+    Fassung ist genau daran gescheitert, und kein erdachter Test konnte es zeigen, weil dort die
+    Reihenfolge feststeht.
+    """
+    a = []
+    for i in range(10):
+        if i % 2:
+            a.append(abt(i * 0.2, [box(1400), box(400)], 0.02, mund=[0.9, 0.05]))   # gekippt
+        else:
+            a.append(abt(i * 0.2, [box(400), box(1400)], 0.02, mund=[0.05, 0.9]))
+    # In beiden Faellen spricht die Person bei x=1400.
+    assert tr.sprecher_position(a, POS2) == 1
 
 
 def test_ohne_deutlichen_unterschied_keine_entscheidung():
     """Geratener Sprecher ist schlimmer als keiner: der Ausschnitt spraenge auf jemanden, der schweigt."""
     a = [abt(i * 0.2, [box(400), box(1400)], 0.02, mund=[0.50, 0.48]) for i in range(10)]
-    assert tr.sprecher_box(a) is None
+    assert tr.sprecher_position(a, POS2) is None
 
 
 def test_eine_person_braucht_keinen_vergleich():
     a = [abt(i * 0.2, [box(900)], 0.02, mund=[0.3]) for i in range(10)]
-    assert tr.sprecher_box(a) == 0
+    assert tr.sprecher_position(a, [(900.0, 400.0)]) == 0
 
 
 def test_ohne_bewegung_keine_entscheidung():
     a = [abt(i * 0.2, [box(400), box(1400)], 0.02, mund=[0.0, 0.0]) for i in range(10)]
-    assert tr.sprecher_box(a) is None
+    assert tr.sprecher_position(a, POS2) is None
 
 
 def test_kurzes_zucken_schlaegt_dauerhaftes_sprechen_nicht():
-    """Gemittelt wird, nicht summiert: ein einzelner Ausschlag darf nicht gewinnen."""
+    """Median statt Mittelwert: ein einzelner Ausschlag darf nicht gewinnen."""
     a = [abt(i * 0.2, [box(400), box(1400)], 0.02, mund=[0.6, 0.02]) for i in range(10)]
     a.append(abt(2.2, [box(400), box(1400)], 0.02, mund=[0.0, 5.0]))
-    assert tr.sprecher_box(a) == 0
+    assert tr.sprecher_position(a, POS2) == 0
+
+
+def test_echte_werte_aus_dem_testvideo():
+    """Gemessen an BP CW zwischen 76 und 79 Sekunden, drei Personen im Bild.
+
+    Die Person bei x rund 2580 hatte 13 bis 33, die bei 1305 nur 1,8 bis 2,2.
+    """
+    pos = [(1305.0, 700.0), (2580.0, 700.0), (2980.0, 700.0)]
+    roh = [
+        ([1305, 2593], [1.91, 21.34]),
+        ([1305, 2583], [2.23, 33.67]),
+        ([1307, 2586], [1.92, 28.72]),
+        ([2591, 1306, 2981], [19.21, 1.8, 3.72]),   # Reihenfolge gekippt, wie im Original
+        ([1306, 2577, 2984], [2.21, 21.82, 3.48]),
+        ([1305, 2571], [2.17, 13.46]),
+    ]
+    a = [abt(76.0 + i * 0.2, [box(x) for x in xs], 0.02, mund=m) for i, (xs, m) in enumerate(roh)]
+    assert tr.sprecher_position(a, pos) == 1
 
 
 # -- Drittelregel ----------------------------------------------------------------------------------
@@ -140,3 +183,66 @@ def test_knapp_neben_der_mitte_bleibt_mittig():
 
 def test_ohne_breite_keine_entscheidung():
     assert tr.blickraum_anker(400, 0) == 0.5
+
+
+def test_eine_person_wird_nicht_in_drei_positionen_zersaegt():
+    """Gemessen an BP CW: eine Person ergab frueher die Positionen 1126, 2147 und 3234.
+
+    Ursache war eine erzwungene Clusterzahl. Bei stetigen x-Werten war sie praktisch immer das
+    Hoechstmass, und k-Means zerlegte eine einzelne Haeufung in drei Teile.
+    """
+    a = []
+    for i in range(60):
+        wackel = (i % 7) - 3  # leichte Kopfbewegung, wie im echten Video
+        a.append(abt(i * 0.2, [box(1900 + wackel * 12)], 0.02))
+    a[0].bildwechsel = None
+    p = tr.positionen(tr.in_einstellungen_teilen(a)[0])
+    assert len(p) == 1, f"Eine Person, aber {len(p)} Positionen: {[round(x) for x, _ in p]}"
+    assert p[0][0] == pytest.approx(1900, abs=60)
+
+
+def test_vereinzelte_fehlerkennung_wird_verworfen():
+    """Ein Poster oder eine Spiegelung darf keine Sitzposition werden."""
+    a = [abt(i * 0.2, [box(1900)], 0.02) for i in range(60)]
+    a[0].bildwechsel = None
+    a[10].boxen.append(box(200))  # zwei Ausreisser
+    a[30].boxen.append(box(200))
+    p = tr.positionen(tr.in_einstellungen_teilen(a)[0])
+    assert len(p) == 1
+    assert p[0][0] == pytest.approx(1900, abs=60)
+
+
+def test_kaum_sichtbare_erkennung_gewinnt_nicht():
+    """An BP CW gemessen: eine Erkennung mit 5 Messungen schlug den echten Sprecher mit 32,
+    allein weil ihr Median hoeher lag. Ueber jemanden, der kaum sichtbar ist, laesst sich nicht
+    urteilen."""
+    pos = [(1306.0, 700.0), (1953.0, 700.0), (2576.0, 700.0)]
+    a = []
+    for i in range(40):
+        boxen = [box(1306), box(2576)]
+        mund = [2.0, 18.9]
+        if i % 8 == 0:           # nur in jedem achten Bild sichtbar
+            boxen.append(box(1953))
+            mund.append(21.2)    # hoeherer Median, aber kaum Rueckhalt
+        a.append(abt(i * 0.2, boxen, 0.02, mund=mund))
+    assert tr.sprecher_position(a, pos) == 2
+
+
+def test_nicht_messbare_werte_zaehlen_nicht_als_ruhe():
+    """NICHT_MESSBAR heisst keine Aussage. Als 0 gewertet wuerde es einen Sprecher verwaessern."""
+    a = [abt(i * 0.2, [box(400), box(1400)], 0.02, mund=[tr.NICHT_MESSBAR, 0.9]) for i in range(10)]
+    assert tr.sprecher_position(a, POS2) == 1
+
+
+def test_runde_mit_sieben_personen_wird_nicht_auf_drei_gekuerzt():
+    """An BP CW gemessen: sieben Personen an einem Tisch, alle sicher erkannt.
+
+    Mit der alten Grenze von drei Positionen fielen vier davon weg, und der Sprecher war
+    womoeglich gar nicht unter den dreien.
+    """
+    xs = [713, 1103, 1396, 2056, 2425, 3038, 3484]
+    a = [abt(i * 0.2, [box(x) for x in xs], 0.02, mund=[1.0] * len(xs)) for i in range(40)]
+    a[0].bildwechsel = None
+    p = tr.positionen(tr.in_einstellungen_teilen(a)[0])
+    assert len(p) == 7
+    assert [round(x) for x, _y in p] == xs

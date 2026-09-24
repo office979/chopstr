@@ -37,10 +37,28 @@ MIN_EINSTELLUNG_S = 0.8
 # Sprecher. Liegen alle dicht beieinander, ist keine Entscheidung möglich und es bleibt bei None.
 SPRECHER_VORSPRUNG = 1.6
 
+# Wie oft muss eine Position ueberhaupt messbar sein, damit sie als Sprecher in Frage kommt, im
+# Verhaeltnis zur bestbelegten Position. Wer nur in jedem siebten Bild auftaucht, ist keine
+# verlaessliche Grundlage: An BP CW gewann sonst eine Erkennung mit 5 Messungen gegen den echten
+# Sprecher mit 32, allein weil ihr Median hoeher lag.
+MINDEST_PRAESENZ = 0.4
+
+# Wie viele Sitzpositionen hoechstens. Die alte Grenze von drei stammt aus der Welt mit nur
+# „talking_head" und „two_speakers". An BP CW sitzen sieben Personen an einem Tisch; mit drei
+# Positionen fielen vier davon unter den Tisch und der Sprecher war womoeglich nicht dabei.
+MAX_POSITIONEN = 8
+
 # Waagerechte Drittelregel: Wie weit muss jemand aus der Bildmitte sitzen, damit ein Blickraum
 # angelegt wird. In Anteilen der Quellbreite.
 BLICKRAUM_AB = 0.08
 DRITTEL = 1.0 / 3.0
+
+# Eine Haeufung mit weniger Rueckhalt als das gilt als Fehlerkennung, nicht als Person.
+MINDEST_ANTEIL = 0.12
+
+# Mundbewegung, die nicht verglichen werden konnte (erstes Bild, direkt nach einem Schnitt, oder die
+# Box ist gesprungen). Ausdruecklich keine Aussage, nicht etwa „keine Bewegung".
+NICHT_MESSBAR = -1.0
 
 
 @dataclass
@@ -113,54 +131,87 @@ def in_einstellungen_teilen(
 
 
 # -- Sitzpositionen je Einstellung -----------------------------------------------------------------
-def positionen(einstellung: Einstellung, n_max: int = 3) -> list[tuple[float, float]]:
+def positionen(einstellung: Einstellung, n_max: int = MAX_POSITIONEN, mindest_anteil: float = MINDEST_ANTEIL) -> list[tuple[float, float]]:
     """Sitzpositionen (x, y) innerhalb EINER Einstellung, nach x sortiert.
 
-    Gleiches Verfahren wie bisher, aber auf einen Abschnitt beschränkt, in dem die Kamera steht.
+    Getrennt wird an echten Lücken, nicht mit einer vorgegebenen Clusterzahl. Der bisherige Weg
+    setzte k auf die Zahl unterschiedlicher gerundeter x-Werte, was bei stetigen Werten fast immer
+    das Höchstmass ergab; k-Means zersägte dann EINE Häufung in drei Teile und lieferte Positionen,
+    an denen niemand sitzt. Gemessen an einem echten Video: eine Person ergab die Positionen 1126,
+    2147 und 3234.
+
+    Der Mindestabstand kalibriert sich selbst an der Gesichtsbreite: Zwei Erkennungen, die näher
+    beieinander liegen als ein halbes Gesicht, sind dieselbe Person. Häufungen mit zu wenig
+    Rückhalt fliegen raus, das sind in aller Regel Fehlerkennungen (Poster, Spiegelungen).
     """
     punkte = [
-        (x + bw / 2.0, y + bh / 2.0)
+        (x + bw / 2.0, y + bh / 2.0, bw)
         for a in einstellung.abtastungen
         for (x, y, bw, bh) in a.boxen
     ]
     if not punkte:
         return []
-    xs = sorted(p[0] for p in punkte)
-    k = min(n_max, len(set(round(x, -1) for x in xs)))
-    if k <= 1:
-        return [(sum(p[0] for p in punkte) / len(punkte), sum(p[1] for p in punkte) / len(punkte))]
 
-    mitten = [xs[0] + (xs[-1] - xs[0]) * i / (k - 1) for i in range(k)]
-    for _ in range(25):
-        gruppen: list[list[tuple[float, float]]] = [[] for _ in range(k)]
-        for p in punkte:
-            j = min(range(k), key=lambda i: abs(p[0] - mitten[i]))
-            gruppen[j].append(p)
-        neu = [sum(g[i][0] for i in range(len(g))) / len(g) if g else mitten[j] for j, g in enumerate(gruppen)]
-        if all(abs(a - b) < 0.5 for a, b in zip(neu, mitten)):
-            mitten = neu
-            break
-        mitten = neu
-    out = []
-    for g in gruppen:
-        if g:
-            out.append((sum(p[0] for p in g) / len(g), sum(p[1] for p in g) / len(g)))
+    breiten = sorted(p[2] for p in punkte)
+    mittlere_breite = breiten[len(breiten) // 2]
+    mindest_abstand = max(1.0, mittlere_breite * 0.5)
+
+    punkte.sort(key=lambda p: p[0])
+    gruppen: list[list[tuple[float, float, float]]] = [[punkte[0]]]
+    for p in punkte[1:]:
+        if p[0] - gruppen[-1][-1][0] > mindest_abstand:
+            gruppen.append([p])
+        else:
+            gruppen[-1].append(p)
+
+    schwelle = max(1, int(len(punkte) * mindest_anteil))
+    stark = [g for g in gruppen if len(g) >= schwelle]
+    if not stark:
+        stark = [max(gruppen, key=len)]
+    stark.sort(key=len, reverse=True)
+    stark = stark[:n_max]
+
+    out = [(sum(q[0] for q in g) / len(g), sum(q[1] for q in g) / len(g)) for g in stark]
     return sorted(out)
 
 
 # -- Wer spricht -----------------------------------------------------------------------------------
-def sprecher_box(abtastungen: list[Abtastung], vorsprung: float = SPRECHER_VORSPRUNG) -> int | None:
-    """Index der Box, deren Mund sich am deutlichsten bewegt, oder None.
+def sprecher_position(
+    abtastungen: list[Abtastung],
+    positionen_xy: list[tuple[float, float]],
+    vorsprung: float = SPRECHER_VORSPRUNG,
+) -> int | None:
+    """Index der Sitzposition, an der gesprochen wird, oder None.
 
-    None bedeutet ausdrücklich „nicht entscheidbar", nicht „die erste". Ein geratener Sprecher ist
-    schlimmer als gar keiner: Der Ausschnitt springt dann auf eine Person, die schweigt.
+    Zugeordnet wird ueber die Lage im Bild, NICHT ueber den Listenindex der Erkennung. Der Detektor
+    liefert die Gesichter je Bild in wechselnder Reihenfolge; an einem echten Video gemessen:
+
+        t=76.0  x=[1304, 2595]
+        t=76.2  x=[2596, 1305]   <- gekippt
+        t=76.4  x=[1305, 2593]
+
+    Wer ueber den Index summiert, vermischt die Mundbewegung zweier Menschen und bekommt fuer beide
+    denselben Mittelwert. Genau daran ist die erste Fassung gescheitert, ohne dass ein Test es
+    zeigen konnte: in erdachten Daten steht die Reihenfolge fest.
+
+    None heisst ausdruecklich „nicht entscheidbar", nicht „die erste". Ein geratener Sprecher ist
+    schlimmer als gar keiner, weil der Ausschnitt dann auf jemanden springt, der schweigt.
     """
+    if not positionen_xy:
+        return None
+    if len(positionen_xy) == 1:
+        return 0
+
     werte: dict[int, list[float]] = {}
     for a in abtastungen:
-        for i, wert in enumerate(a.mundbewegung):
-            werte.setdefault(i, []).append(float(wert))
+        for (x, _y, bw, _bh), bewegung in zip(a.boxen, a.mundbewegung):
+            if float(bewegung) < 0.0:
+                continue  # nicht vergleichbar, siehe NICHT_MESSBAR
+            cx = x + bw / 2.0
+            j = min(range(len(positionen_xy)), key=lambda i: abs(positionen_xy[i][0] - cx))
+            werte.setdefault(j, []).append(float(bewegung))
     if len(werte) < 2:
-        return 0 if werte else None
+        return next(iter(werte), None)
 
     # Median, nicht Mittelwert: Ein einzelner Ausschlag (Niesen, Lachen, ein Ruckler im Bild) zieht
     # den Mittelwert so weit hoch, dass eine schweigende Person gewinnen kann. Beim Median hat ein
@@ -170,7 +221,12 @@ def sprecher_box(abtastungen: list[Abtastung], vorsprung: float = SPRECHER_VORSP
         n = len(g)
         return g[n // 2] if n % 2 else (g[n // 2 - 1] + g[n // 2]) / 2.0
 
-    mittel = {i: median(v) for i, v in werte.items()}
+    hoechste_belegung = max(len(v) for v in werte.values())
+    brauchbar = {i: v for i, v in werte.items() if len(v) >= hoechste_belegung * MINDEST_PRAESENZ}
+    if len(brauchbar) < 2:
+        return next(iter(brauchbar), None)
+
+    mittel = {i: median(v) for i, v in brauchbar.items()}
     sortiert = sorted(mittel.items(), key=lambda kv: kv[1], reverse=True)
     (bester, hoch), (_, zweit) = sortiert[0], sortiert[1]
     if hoch <= 0.0:
@@ -205,6 +261,10 @@ __all__ = [
     "Abtastung",
     "BLICKRAUM_AB",
     "Einstellung",
+    "MINDEST_ANTEIL",
+    "MAX_POSITIONEN",
+    "MINDEST_PRAESENZ",
+    "NICHT_MESSBAR",
     "MIN_EINSTELLUNG_S",
     "SCHNITT_SCHWELLE",
     "SPRECHER_VORSPRUNG",
@@ -212,5 +272,5 @@ __all__ = [
     "in_einstellungen_teilen",
     "positionen",
     "schnitte_finden",
-    "sprecher_box",
+    "sprecher_position",
 ]

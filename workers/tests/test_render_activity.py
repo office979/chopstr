@@ -14,6 +14,12 @@ from tests.transcript_fixtures import make_words
 # Mit OpenCV (Extra vision) erkennt der Folien-Crop (Phase 5c) das statische testsrc-Muster als Folie: slide_pip.
 HAVE_CV2 = reframe.slide_detector_available()[0]
 AUTO_STRATEGY = "slide_pip" if HAVE_CV2 else "neutral"
+# Die Gesichtserkennung braucht OpenCV UND das YuNet-Modell. Fehlt eines, laeuft der Zuschnitt
+# neutral und der Detektor heisst "none". Frueher stand hier fest "none": der Test schrieb damit
+# den kaputten Zustand als Sollzustand fest und waere gruen geblieben, egal wie lange die
+# Erkennung ausfaellt.
+
+AUTO_DETECTOR = "yunet" if reframe.detector_available()[0] else "none"
 
 SCRIPT = [
     ("SPEAKER_00", "Ehrlich gesagt war das der teuerste Fehler meiner Karriere.", 3.0),
@@ -64,7 +70,7 @@ def test_render_pack_writes_clip_hook_captions_events_and_costs(fake_db, fake_co
         "source_credit": "Quelle: Podcast XY, „Folge 3“", "ad_label": "Anzeige",
     }  # fmt: skip
     plan = clip["render_plan"]
-    assert plan["contract"] == "render_plan_v1" and plan["reframe"]["strategy"] == AUTO_STRATEGY and plan["reframe"]["detector"] == "none"
+    assert plan["contract"] == "render_plan_v1" and plan["reframe"]["strategy"] == AUTO_STRATEGY and plan["reframe"]["detector"] == AUTO_DETECTOR
     assert plan["captions"]["preset"] == "tiktok_words" and plan["hook_overlay"]["seconds"] == 3.0
     assert plan["sources"] == {"storage_key": "uploads/in.mp4", "transcript_version": 1, "hook_version": 1, "candidate_id": project["cid"]}
     assert plan["title_card"] == {"text": "Preise im Handwerk", "seconds": 2.5}

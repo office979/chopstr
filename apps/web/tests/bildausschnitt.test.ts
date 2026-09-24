@@ -5,7 +5,15 @@
 
 import { describe, expect, it } from "vitest";
 import { markenPruefen } from "@/app/api/projects/[id]/clips/[clipId]/zeitmarken/route";
-import { beschreibung, NAEHE, personName } from "@/app/projekte/[id]/clips/[clipId]/Bildausschnitt";
+import {
+  beschreibung,
+  NAEHE_MAX,
+  NAEHE_MIN,
+  NAEHE_SCHRITT,
+  naeheKurz,
+  naeheName,
+  personName,
+} from "@/app/projekte/[id]/clips/[clipId]/Bildausschnitt";
 import { aktiverLook, LOOKS, mitVorgabe } from "@/lib/clips/caption-style";
 
 describe("markenPruefen", () => {
@@ -140,20 +148,35 @@ describe("Marken mit Zoom und geteiltem Bild", () => {
   });
 });
 
-describe("Nähe-Stufen", () => {
-  it("fängt bei Normal an und bleibt im erlaubten Bereich", () => {
-    expect(NAEHE[0].id).toBe(1.0);
-    for (const n of NAEHE) {
-      expect(n.id).toBeGreaterThanOrEqual(1.0);
-      expect(n.id).toBeLessThanOrEqual(1.8);
-    }
+describe("Nähe", () => {
+  it("bleibt im Bereich, den Worker und Schnittstelle annehmen", () => {
+    /* Spiegel von tracking.ZOOM_MIN / ZOOM_MAX. Laufen die auseinander, schneidet der Regler
+     * Werte ein, die beim Speichern still zurechtgestutzt werden - und der Nutzer sieht danach
+     * etwas anderes als eingestellt. */
+    expect(NAEHE_MIN).toBe(1.0);
+    expect(NAEHE_MAX).toBe(1.8);
   });
 
-  it("die Stufen sind deutlich genug auseinander, um sie zu sehen", () => {
-    /* Ein Regler von 1,0 bis 1,8 lädt dazu ein, 1,07 einzustellen, und das sieht niemand. */
-    for (let i = 1; i < NAEHE.length; i += 1) {
-      expect(NAEHE[i].id - NAEHE[i - 1].id).toBeGreaterThanOrEqual(0.25);
-    }
+  it("hat eine Schrittweite, die sich noch bedienen lässt", () => {
+    const stufen = Math.round((NAEHE_MAX - NAEHE_MIN) / NAEHE_SCHRITT);
+    expect(stufen).toBeGreaterThanOrEqual(8);
+    expect(stufen).toBeLessThanOrEqual(40);
+  });
+});
+
+describe("naeheName", () => {
+  it("nennt den Ausgangszustand beim Namen und nicht mit einer Zahl", () => {
+    expect(naeheName(1)).toBe("Normal");
+  });
+
+  it("sagt Prozent statt Faktor", () => {
+    /* „1,35×" ist Kamerasprache. Wer den Ausschnitt setzt, denkt in „wie viel näher". */
+    expect(naeheName(1.35)).toBe("35 Prozent näher");
+    expect(naeheName(1.8)).toBe("80 Prozent näher");
+  });
+
+  it("rundet auf ganze Prozent", () => {
+    expect(naeheName(1.05)).toBe("5 Prozent näher");
   });
 });
 
@@ -163,7 +186,7 @@ describe("beschreibung", () => {
   });
 
   it("nennt Person und Nähe in einem Satz", () => {
-    expect(beschreibung({ ab_s: 1, x: 1400, zoom: 1.3 }, [400, 1400])).toBe("rechts, näher");
+    expect(beschreibung({ ab_s: 1, x: 1400, zoom: 1.3 }, [400, 1400])).toBe("rechts, 30 % näher");
   });
 
   it("nennt beim geteilten Bild beide statt einer Person", () => {
@@ -171,10 +194,19 @@ describe("beschreibung", () => {
   });
 
   it("lässt die Person weg, wenn es gar keine Wahl gab", () => {
-    expect(beschreibung({ ab_s: 1, x: 400, zoom: 1.6 }, [400])).toBe("ganz nah");
+    expect(beschreibung({ ab_s: 1, x: 400, zoom: 1.6 }, [400])).toBe("60 % näher");
   });
 
   it("sagt wenigstens, dass von Hand gesetzt wurde", () => {
     expect(beschreibung({ ab_s: 1, zoom: 1 }, [])).toBe("Von Hand");
+  });
+});
+
+describe("naeheKurz", () => {
+  it("passt in eine Abschnittsbeschriftung", () => {
+    /* In der Timeline ist Platz für ein paar Zeichen, nicht für einen Satz. */
+    expect(naeheKurz(1.3)).toBe("30 % näher");
+    expect(naeheKurz(1)).toBe("normal");
+    expect(naeheKurz(1.3).length).toBeLessThan(14);
   });
 });

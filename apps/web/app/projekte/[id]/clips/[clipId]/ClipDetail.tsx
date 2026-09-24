@@ -253,6 +253,16 @@ export function ClipDetail({
     markenRef.current = marken;
   }, [marken]);
 
+  /* Die Marken, solange jemand an einem Regler zieht - und nur dafür.
+   *
+   * Sie liegen bewusst NICHT in ``marken``: ein Effekt spiegelt diesen Zustand nach
+   * ``markenRef``, und ``markenRef`` ist die Grundlage für Speichern und Rückgängig. Ein erster
+   * Versuch führte die Vorschau über ``marken``, und danach hielt das Speichern den gezogenen
+   * Wert für den schon gespeicherten - es passierte nichts, ohne jede Meldung. */
+  const [markenVorschau, setMarkenVorschau] = useState<Zeitmarke[] | null>(null);
+  /* Was die Anzeige zeigt: beim Ziehen die Vorschau, sonst der gespeicherte Stand. */
+  const markenSicht = markenVorschau ?? marken;
+
   const standJetzt = useCallback((): Stand => ({ schnitt: schnittRef.current, marken: markenRef.current }), []);
   const merken = useCallback(
     (stand: Stand) => {
@@ -788,7 +798,7 @@ export function ClipDetail({
               spielen={spielen}
               onLaeuft={setLaeuft}
               shots={shots}
-              zeitmarken={marken}
+              zeitmarken={markenSicht}
               stil={stil}
               woerter={clipWords}
               onCaptionHoehe={canEdit ? (px) => setStil((v) => ({ ...v, bottom_margin_px: px })) : undefined}
@@ -867,7 +877,7 @@ export function ClipDetail({
             wellenformStand={wellenformStand}
             filmstreifen={streifenBilder}
             shots={shots}
-            zeitmarken={marken}
+            zeitmarken={markenSicht}
             onMarkeWeg={(abS) => markenAendern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
             onMarkeVerschieben={(vonS, nachS) =>
               markenAendern((vorher) =>
@@ -916,13 +926,23 @@ export function ClipDetail({
           <Bildausschnitt
             zeit={currentTime}
             shots={shots}
-            zeitmarken={marken}
+            zeitmarken={markenSicht}
             onMarke={(m) =>
               markenAendern((vorher) =>
                 [...vorher.filter((x) => Math.abs(x.ab_s - m.ab_s) > 0.35), m].sort((a, b) => a.ab_s - b.ab_s),
               )
             }
             onMarkeWeg={(abS) => markenAendern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
+            /* Beim Ziehen am Nähe-Regler: nur die Vorschau nachführen. Nicht speichern und keinen
+               Schritt im Verlauf anlegen - sonst stünden nach einer Bewegung von 1,0 nach 1,6 ein
+               Dutzend Speichervorgänge im Netz und ebenso viele Schritte in „Rückgängig". */
+            onVorschau={(m) =>
+              setMarkenVorschau(
+                m == null
+                  ? null
+                  : [...markenRef.current.filter((x) => Math.abs(x.ab_s - m.ab_s) > 0.35), m].sort((a, b) => a.ab_s - b.ab_s),
+              )
+            }
             quelleBreite={quelleBreite}
             canEdit={canEdit}
           />

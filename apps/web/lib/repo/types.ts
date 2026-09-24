@@ -445,6 +445,10 @@ export interface RenderPlan {
   title_card: { text: string; seconds: number } | null;
   hook_overlay: { text: string; seconds: number } | null;
   audio: { preset: "master" | "legacy_social"; lufs: number; true_peak: number; micro_fade_ms: number };
+  /* Die Bildausschnitt-Marken, mit denen gebaut wurde. Sie stecken zwar über die Einstellungen
+   * schon im Plan, aber nicht rückrechenbar; nur hiermit kann die Oberfläche sagen, ob das
+   * gebaute Video noch zu den gesetzten Marken passt. Ältere Pläne haben das Feld nicht. */
+  zeitmarken?: Zeitmarke[];
   sources: { storage_key: string; transcript_version: number; hook_version: number; candidate_id: string };
   versions: { captions_de: string; render: string; reframe: string };
 }

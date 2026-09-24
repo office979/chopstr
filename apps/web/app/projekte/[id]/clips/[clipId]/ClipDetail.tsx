@@ -8,7 +8,8 @@ import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/components/ui/cn";
 import { reclassify } from "@/lib/transcript/fillers";
 import { ASPECT_LABELS, formatClipDuration } from "@/lib/clips/labels";
-import type { Aspect, RenderShot, TranscriptVersion, TranscriptWord, Zeitmarke } from "@/lib/repo/types";
+import type { Aspect, ClipStatus, RenderPlan, RenderShot, TranscriptVersion, TranscriptWord, Zeitmarke } from "@/lib/repo/types";
+import { VorschauStatus } from "./VorschauStatus";
 import { Bildausschnitt, beschreibung as markeBeschreibung } from "./Bildausschnitt";
 import { Timeline, luecken } from "./timeline/Timeline";
 import { useFilmstreifen } from "./useFilmstreifen";
@@ -23,7 +24,7 @@ import { ClipPreview } from "./ClipPreview";
 import { LiveVorschau } from "./LiveVorschau";
 import { ClipTextEditor } from "./ClipTextEditor";
 import { CaptionStudio, type GespeicherteVorlage } from "./CaptionStudio";
-import { passtZumRender, type CaptionStyle } from "@/lib/clips/caption-style";
+import type { CaptionStyle } from "@/lib/clips/caption-style";
 
 /* Eine Fassung im Verlauf: Schnitt und Marken gehoeren zusammen, weil „Rueckgaengig" den
  * letzten Schritt meint und nicht den letzten Schritt einer bestimmten Sorte. */
@@ -61,8 +62,6 @@ interface Props {
   captionStyle: CaptionStyle;
   captionPresets: GespeicherteVorlage[];
   clipId: string;
-  /* Der ``captions``-Block des Renderplans: was im Bild wirklich eingebrannt ist. */
-  gerenderteCaptions: Record<string, unknown> | null;
   srcW: number | null;
   srcH: number | null;
   outW: number;
@@ -77,6 +76,13 @@ interface Props {
   gerenderteSegmente: Schnitt | null;
   quelleDauerS: number;
   wellenformSrc: string | null;
+  /* Der Plan des letzten Laufs: daran hängt, ob das gebaute Video noch aktuell ist. */
+  renderPlan: RenderPlan | null;
+  clipStatus: ClipStatus;
+  renderFehler: string | null;
+  transkriptVersion: number | null;
+  /* Ohne Markenprofil gibt es kein Wörterbuch, in das eine Schreibweise wandern könnte. */
+  markeVorhanden: boolean;
 }
 
 /* Ein Clip: oben Vorschau, daneben sein Text. Gespeichert wird mit einem Klick, ohne Rückfrage.
@@ -99,7 +105,6 @@ export function ClipDetail({
   captionStyle,
   captionPresets,
   clipId,
-  gerenderteCaptions,
   srcW,
   srcH,
   outW,
@@ -111,6 +116,11 @@ export function ClipDetail({
   gerenderteSegmente,
   quelleDauerS,
   wellenformSrc,
+  renderPlan,
+  clipStatus,
+  renderFehler,
+  transkriptVersion,
+  markeVorhanden,
 }: Props) {
   const router = useRouter();
   const backHref = `/projekte/${sourceId}/clips`;
@@ -121,7 +131,9 @@ export function ClipDetail({
   const [currentTime, setCurrentTime] = useState(clipStart);
   const [seekTo, setSeekTo] = useState<{ at: number; nonce: number } | null>(null);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  /* Bei einem Fehler steht in ``nochmal``, was zu wiederholen ist. Eine Meldung ohne Weg zurueck
+   * laesst den Nutzer mit seiner Arbeit im Browser sitzen und sonst nichts. */
+  const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string; nochmal?: () => void } | null>(null);
   const [leaveOpen, setLeaveOpen] = useState(false);
 
   /* Untertitel: eigener Stand, eigener Speicherknopf. Bewusst getrennt vom Text, denn es sind zwei
@@ -222,8 +234,10 @@ export function ClipDetail({
   /* Marken speichern, ohne den Verlauf anzufassen. Gerechnet wird immer vom neuesten Stand aus:
    * ohne das rechnet ein zweiter Klick, der vor der Antwort des ersten kommt, mit einer alten
    * Liste weiter, und aus einer verschobenen Marke werden zwei. */
+  /* Benannter Funktionsausdruck, damit der Wiederholen-Knopf denselben Aufruf noch einmal machen
+   * kann, ohne sich auf eine Variable von aussen zu beziehen. */
   const markenSpeichern = useCallback(
-    async (naechste: Zeitmarke[]) => {
+    async function speichern(naechste: Zeitmarke[]): Promise<void> {
       const vorher = markenRef.current;
       markenRef.current = naechste;
       setMarken(naechste);
@@ -246,7 +260,11 @@ export function ClipDetail({
       } catch (err) {
         markenRef.current = vorher;
         setMarken(vorher);
-        setMessage({ tone: "error", text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt" });
+        setMessage({
+          tone: "error",
+          text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt",
+          nochmal: () => void speichern(naechste),
+        });
       }
     },
     [sourceId, clipId],
@@ -335,13 +353,6 @@ export function ClipDetail({
     () => JSON.stringify(stil) !== JSON.stringify(stilGespeichert),
     [stil, stilGespeichert],
   );
-  /* Zeigt das Video noch die Untertitel, die jetzt eingestellt sind? Verglichen wird gegen den
-   * Renderplan und nicht gegen den gespeicherten Stand: nach dem Speichern ist nichts mehr
-   * „geaendert", im Bild stehen aber weiter die alten. */
-  const captionsVeraltet = useMemo(
-    () => Boolean(clipSrc) && zeigeGebautes && !passtZumRender(stil, gerenderteCaptions),
-    [clipSrc, zeigeGebautes, stil, gerenderteCaptions],
-  );
 
   /* Liegt der fertige Clip vor, läuft er selbst. Sonst läuft das ganze Video und bleibt am Ende
    * der Stelle stehen. Fest im Speicher, sonst hinge der Effekt im Player an jedem Zeitschritt. */
@@ -366,7 +377,7 @@ export function ClipDetail({
   }, [hasText, wordFrom, wordTo, words, original]);
 
   const editWord = useCallback(
-    (index: number, raw: string) => {
+    (index: number, raw: string, merken = false) => {
       const text = raw.trim();
       if (!text) return;
       setWords((prev) => {
@@ -379,7 +390,9 @@ export function ClipDetail({
         const next = new Map(prev);
         const before = original[index];
         if (!before || before.text === text) next.delete(index);
-        else next.set(index, { old_text: before.text, new_text: text, add_to_vocab: false });
+        /* ``add_to_vocab`` traegt die Schreibweise ins Woerterbuch der Marke. Das entscheidet der
+         * Nutzer je Wort: ein Eigenname gehoert dorthin, ein Tippfehler nicht. */
+        else next.set(index, { old_text: before.text, new_text: text, add_to_vocab: merken });
         return next;
       });
     },
@@ -423,7 +436,8 @@ export function ClipDetail({
     } catch (err) {
       setMessage({
         tone: "error",
-        text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt. Versuch es noch einmal.",
+        text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt.",
+        nochmal: () => void save(),
       });
     } finally {
       setSaving(false);
@@ -451,7 +465,11 @@ export function ClipDetail({
           : "Untertitel gespeichert.",
       });
     } catch (err) {
-      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt" });
+      setMessage({
+        tone: "error",
+        text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt",
+        nochmal: () => void stilSpeichern(),
+      });
     } finally {
       setStilSaving(false);
     }
@@ -486,7 +504,11 @@ export function ClipDetail({
         text: data.needs_render ? "Schnitt gespeichert. Der Clip muss neu gebaut werden." : "Schnitt gespeichert.",
       });
     } catch (err) {
-      setMessage({ tone: "error", text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt" });
+      setMessage({
+        tone: "error",
+        text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt",
+        nochmal: () => void schnittSichern(),
+      });
     } finally {
       setSchnittSaving(false);
     }
@@ -592,13 +614,25 @@ export function ClipDetail({
             />
           )}
 
-          {/* Im fertigen Clip sind die Untertitel eingebrannt. Wer den Stil danach aendert, sieht
-            * im Bild weiter die alten - das muss dastehen, sonst wirkt es, als sei nichts passiert. */}
-          {captionsVeraltet && (
-            <p className="mt-3 text-sm text-attention">
-              Im Bild sind noch die alten Untertitel. Neu bauen, um die neuen zu sehen.
-            </p>
-          )}
+          {/* Was das gebaute Video gerade zeigt, und der Weg zu einem aktuellen. Steht direkt
+            * unter der Vorschau, weil genau dort die Frage aufkommt: sehe ich das Ergebnis? */}
+          <div className="mt-3">
+            <VorschauStatus
+              sourceId={sourceId}
+              clipId={clipId}
+              canEdit={canEdit}
+              offeneAenderungen={dirty || stilGeaendert || schnittGeaendert}
+              onNeuGebaut={() => router.refresh()}
+              status={clipStatus}
+              hatDatei={Boolean(clipSrc)}
+              plan={renderPlan}
+              renderFehler={renderFehler}
+              transkriptVersion={transkriptVersion}
+              stil={stilGespeichert}
+              schnitt={gesichert}
+              zeitmarken={marken}
+            />
+          </div>
 
           <div className="mt-4">
             <Bildausschnitt
@@ -631,6 +665,7 @@ export function ClipDetail({
               onEditWord={editWord}
               onChangeSpeaker={changeSpeaker}
               onSeek={seek}
+              markeVorhanden={markeVorhanden}
             />
           ) : (
             <GlassCard padding="md">
@@ -662,13 +697,22 @@ export function ClipDetail({
                 </Button>
               </div>
               {message && (
-                <p
-                  role="status"
-                  aria-live="polite"
-                  className={cn("mt-3 text-sm", message.tone === "ok" ? "text-text" : "text-attention")}
-                >
-                  {message.text}
-                </p>
+                <div role="status" aria-live="polite" className="mt-3 flex flex-wrap items-center gap-3">
+                  <p className={cn("text-sm", message.tone === "ok" ? "text-text" : "text-attention")}>{message.text}</p>
+                  {message.nochmal && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        const wieder = message.nochmal;
+                        setMessage(null);
+                        wieder?.();
+                      }}
+                    >
+                      Nochmal versuchen
+                    </Button>
+                  )}
+                </div>
               )}
             </GlassCard>
           )}

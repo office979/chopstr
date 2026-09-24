@@ -28,13 +28,14 @@ export default async function ClipsPage({ params }: Props) {
   const repo = getRepo();
   const source = await repo.getSource(id);
   if (!source) notFound();
-  const [clips, candidates, events, brand, approvals, quota] = await Promise.all([
+  const [clips, candidates, events, brand, approvals, quota, transcript] = await Promise.all([
     repo.listClips(id),
     repo.listCandidates(id),
     repo.listPipelineEvents(id),
     source.brand_profile_id ? repo.getBrandProfile(source.brand_profile_id) : Promise.resolve(null),
     repo.listGuestApprovals(id),
     getQuota(repo),
+    repo.getCurrentTranscript(id),
   ]);
   const previewFont = await previewFontFor(repo, brand);
   const pub = getPublishingRepo();
@@ -73,6 +74,7 @@ export default async function ClipsPage({ params }: Props) {
       <ClipBoard
         sourceId={source.id}
         initialClips={clips}
+        transkriptVersion={transcript?.version ?? null}
         candidates={candidates.filter((c) => candidateIds.has(c.id))}
         initialEvents={events.filter((e) => e.step === "render")}
         mediaBase={process.env.NEXT_PUBLIC_MEDIA_BASE_URL ?? null}

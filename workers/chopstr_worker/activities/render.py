@@ -637,6 +637,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
             "watermark": brand_assets["watermark"],
         },
         caption_text_field=text_field,
+        zeitmarken=zeitmarken,
     )
     try:
         decision_log.record_reframe_strategy(

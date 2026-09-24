@@ -12,6 +12,8 @@ import { Modal } from "@/components/ui/Modal";
 import { ClipApproval } from "./ClipApproval";
 import type { Aspect, Candidate, CaptionVersion, Clip, GuestApproval, HookVersion, PipelineEvent } from "@/lib/repo/types";
 import { EXPORT_BLOCKED_MESSAGE, exportBlocked, latestByClip } from "@/lib/guest/approval";
+import { standSatz, vorschauStand, wasAbweicht } from "@/lib/clips/vorschau-stand";
+import { stilAusPlan, stilPruefen } from "@/lib/clips/caption-style";
 import { structureLabel } from "@/lib/candidates/labels";
 import {
   CLIP_STATUS_LABELS,
@@ -50,6 +52,9 @@ interface Props {
   canDelete: boolean;
   previewFont: PreviewFont | null;
   publishing?: ClipBoardPublishing;
+  /* Die neueste Transkriptversion des Projekts. Daran hängt, ob eine Textkorrektur schon im
+   * gebauten Video steckt. */
+  transkriptVersion: number | null;
 }
 
 interface ApiError {
@@ -129,6 +134,7 @@ export function ClipBoard({
   canDelete,
   previewFont,
   publishing,
+  transkriptVersion,
 }: Props) {
   const [clips, setClips] = useState<Clip[]>(initialClips);
   const [extras, setExtras] = useState<Record<string, ClipExtras>>(publishing?.extras ?? {});
@@ -374,12 +380,31 @@ export function ClipBoard({
               const progress = clip.status === "rendering" ? (ev?.progress ?? 0) : isDone(clip) ? 1 : 0;
               const approval = approvals.get(clip.id);
               const blocked = exportBlocked(clip, approval);
+              /* Zeigt die gebaute Datei noch, was eingestellt ist? Wenn nicht, darf sie weder
+                 heruntergeladen noch jemandem zur Freigabe geschickt werden: der Gast sähe ein
+                 Video, das es so nicht mehr gibt, und gäbe etwas frei, das niemand mehr will. */
+              const gespeicherterStil = stilPruefen(extras[clip.id]?.caption_style);
+              const standEingabe = {
+                status: clip.status,
+                hatDatei: Boolean(clip.file_key),
+                plan: clip.render_plan,
+                renderFehler: clip.render_error,
+                transkriptVersion,
+                stil: Object.keys(gespeicherterStil).length
+                  ? gespeicherterStil
+                  : stilAusPlan((clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null),
+                schnitt: clip.composition,
+                zeitmarken: clip.zeitmarken,
+              };
+              const veraltet = vorschauStand(standEingabe) === "veraltet";
               const mp4 = clip.file_key && mediaBase ? `/api/projects/${sourceId}/clips/${clip.id}/download?kind=mp4` : null;
               /* Warum ein Download gerade nicht geht. Gleiche Reihenfolge wie bisher: fehlende
                  Gastfreigabe zuerst, dann Testmodus, dann die Datei selbst. */
               const lockedTitle = blocked
                 ? EXPORT_BLOCKED_MESSAGE
-                : demo
+                : veraltet
+                  ? "Die Datei zeigt nicht mehr, was eingestellt ist. Bitte neu erstellen."
+                  : demo
                   ? "Im Testmodus gibt es keine Dateien"
                   : isDone(clip)
                     ? "Datei noch nicht verfügbar"
@@ -479,10 +504,20 @@ export function ClipBoard({
                     </p>
                   )}
 
+                  {veraltet && (
+                    <p className="flex items-start gap-1.5 rounded-[12px] border border-attention/50 bg-attention/10 px-3 py-2 text-xs text-text">
+                      <IconWarn className="mt-0.5 shrink-0 text-attention" />
+                      <span>
+                        {standSatz("veraltet", wasAbweicht(standEingabe))} Erst neu erstellen, dann herunterladen
+                        oder freigeben lassen.
+                      </span>
+                    </p>
+                  )}
+
                   {/* Drei Handlungen je Clip: Herunterladen bleibt hervorgehoben, Bearbeiten und
                       Löschen sind reine Zeichen mit Titel und Beschriftung für Screenreader. */}
                   <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-                    {mp4 && !blocked ? (
+                    {mp4 && !blocked && !veraltet ? (
                       <a
                         href={mp4}
                         download
@@ -497,7 +532,7 @@ export function ClipBoard({
                         title={lockedTitle}
                         className={cn(
                           "inline-flex h-9 cursor-not-allowed items-center gap-2 rounded-pill border px-4 text-sm font-medium",
-                          blocked ? "border-attention/40 text-attention/70" : "border-line text-text-3",
+                          blocked || veraltet ? "border-attention/40 text-attention/70" : "border-line text-text-3",
                         )}
                       >
                         <IconDownload />
@@ -525,7 +560,7 @@ export function ClipBoard({
                         clipLabel={`${PLATFORM_LABELS[clip.platform]} ${ASPECT_LABELS[clip.aspect]}`}
                         guestApprovalRequired={clip.guest_approval_required}
                         current={approval ?? null}
-                        canRequest={canRequestGuest}
+                        canRequest={canRequestGuest && !veraltet}
                         planAllows={planAllowsGuest}
                         planName={planName}
                         onRequested={onRequested}

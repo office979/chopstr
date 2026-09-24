@@ -12,7 +12,7 @@ SEGMENTS = [{"start": 812.4, "end": 830.1, "role": "body"}, {"start": 840.0, "en
 SOURCES = {"storage_key": "uploads/abc", "transcript_version": 3, "hook_version": 1, "candidate_id": "cand-1"}
 CONTRACT_KEYS = {
     "contract", "platform", "aspect", "output", "segments", "filler_cuts", "reframe", "shots", "motion", "captions",
-    "title_card", "hook_overlay", "audio", "brand", "sources", "versions",
+    "title_card", "hook_overlay", "audio", "brand", "sources", "versions", "zeitmarken",
 }  # fmt: skip
 
 
@@ -164,3 +164,23 @@ def test_normalize_segments_trennt_rollen():
     """Ein Teaser bleibt ein eigener Abschnitt, auch wenn er direkt an den Koerper anschliesst."""
     aus = render_plan.normalize_segments([{"start": 10, "end": 20, "role": "teaser"}, {"start": 20, "end": 30}])
     assert [s["role"] for s in aus] == ["teaser", "body"]
+
+
+def test_plan_traegt_die_zeitmarken_unveraendert():
+    """Die Oberflaeche muss sagen koennen, ob das gebaute Video noch zu den gesetzten Marken passt.
+
+    Die Marken stecken zwar ueber die Einstellungen schon im Plan, aber nicht so, dass man sie
+    zurueckrechnen koennte. Ohne das Feld hier bliebe nur raten, und die Anzeige "aktuelle
+    Vorschau bereit" waere eine Behauptung.
+    """
+    marken = [{"ab_s": 12.5, "zoom": 1.3, "layout": "einzel"}]
+    plan = _plan("tiktok", zeitmarken=marken)
+    assert plan["zeitmarken"] == marken
+    assert _plan("tiktok")["zeitmarken"] == []
+
+
+def test_zeitmarken_aendern_den_plan_hash():
+    """Sonst faende die Idempotenz einen alten Lauf und die Marke wirkte nie."""
+    ohne = render_plan.plan_hash(_plan("tiktok"), 1, 1)
+    mit = render_plan.plan_hash(_plan("tiktok", zeitmarken=[{"ab_s": 3.0, "zoom": 1.6}]), 1, 1)
+    assert ohne != mit

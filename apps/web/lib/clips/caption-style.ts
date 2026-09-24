@@ -143,15 +143,57 @@ export function assFarbe(wert: string): string | null {
   return `&H00${w.slice(4, 6)}${w.slice(2, 4)}${w.slice(0, 2)}`.toUpperCase();
 }
 
+/* ``&H00BBGGRR`` zurueck nach ``#rrggbb``. Gegenstueck zu assFarbe. */
+export function hexFarbe(wert: unknown): string | null {
+  const w = String(wert ?? "").trim().toUpperCase();
+  const m = /^&H[0-9A-F]{2}([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})$/.exec(w);
+  if (!m) return null;
+  const [, bb, gg, rr] = m;
+  return `#${rr}${gg}${bb}`.toLowerCase();
+}
+
+/* Der Stil, der im gebauten Video wirklich steckt, aus dem Renderplan zurueckgelesen.
+ *
+ * Gebraucht fuer Clips ohne eigenen Stil. Die zeigten bisher die Vorgaben der Oberflaeche, gebaut
+ * wurde aber mit dem Plattform-Preset - andere Schriftgroesse, andere Konturstaerke. Die Folge:
+ * ein Clip, an dem niemand etwas geaendert hatte, meldete sich als veraltet, und der Regler stand
+ * auf einem Wert, der im Bild nicht vorkam. */
+export function stilAusPlan(geplant: Record<string, unknown> | null | undefined): CaptionStyle {
+  if (!geplant) return {};
+  const aus: CaptionStyle = {};
+  const zahl = (k: string) => (typeof geplant[k] === "number" ? (geplant[k] as number) : null);
+  const bool = (k: string) => (typeof geplant[k] === "boolean" ? (geplant[k] as boolean) : null);
+  if (typeof geplant.font === "string" && geplant.font) aus.font = geplant.font;
+  for (const k of ["font_px", "words_per_card", "max_lines", "outline_px"] as const) {
+    const v = zahl(k);
+    if (v != null) aus[k] = v;
+  }
+  for (const [hier, dort] of [["bold", "bold"], ["all_caps", "all_caps"], ["box", "box"], ["highlight_words", "highlight"]] as const) {
+    const v = bool(dort);
+    if (v != null) aus[hier] = v;
+  }
+  for (const [hier, dort] of [["base_color", "base_color"], ["highlight_color", "highlight_color"], ["outline_color", "outline_color"]] as const) {
+    const v = hexFarbe(geplant[dort]);
+    if (v) aus[hier] = v;
+  }
+  /* Der Abstand nach unten steckt im Plan als Grundlinie: Bildhoehe minus Grundlinie. */
+  const grundlinie = zahl("baseline_y");
+  const safe = (geplant.safe_zone as { bottom?: number } | undefined)?.bottom;
+  if (grundlinie != null && typeof safe === "number") aus.bottom_margin_px = Math.round(1920 - safe - grundlinie);
+  return stilPruefen(aus);
+}
+
 /* Zeigt das gerenderte Video noch dieselben Untertitel, die jetzt eingestellt sind?
  *
  * Im fertigen Clip sind die Untertitel eingebrannt. Wer den Stil danach aendert, sieht im Bild
  * weiter die alten - ohne diesen Vergleich wirkt es, als sei die Aenderung folgenlos geblieben.
  *
  * Verglichen wird gegen den ``captions``-Block des Renderplans, der seit dem Anschluss der
- * Untertitel den ANGEWENDETEN Stil traegt und nicht mehr die Preset-Vorgaben. Was dort fehlt
- * (aelterer Plan), gilt als unbekannt und damit als abweichend: lieber einmal zu viel darauf
- * hinweisen als eine Aenderung stillschweigend verschlucken. */
+ * Untertitel den ANGEWENDETEN Stil traegt und nicht mehr die Preset-Vorgaben.
+ *
+ * Felder, die im Plan gar nicht vorkommen, werden uebersprungen. Ein Plan aus der Zeit vor einer
+ * Einstellung kann ueber sie nichts aussagen, und ein Vergleich gegen "fehlt" haette jeden aelteren
+ * Clip fuer immer als veraltet gemeldet - eine Warnung, die immer dasteht, liest niemand mehr. */
 export function passtZumRender(stil: CaptionStyle, geplant: Record<string, unknown> | null | undefined): boolean {
   if (!geplant) return true; // noch nichts gerendert: es gibt nichts, was veraltet sein koennte
   const s = mitVorgabe(stil);
@@ -162,16 +204,16 @@ export function passtZumRender(stil: CaptionStyle, geplant: Record<string, unkno
     ["outline_px", "outline_px"],
   ];
   for (const [hier, dort] of zahlen) {
-    if (!(dort in geplant)) return false;
+    if (!(dort in geplant)) continue;
     if (Number(geplant[dort] ?? NaN) !== Number(s[hier])) return false;
   }
   for (const [hier, dort] of [["bold", "bold"], ["all_caps", "all_caps"], ["box", "box"], ["highlight_words", "highlight"]] as const) {
-    if (!(dort in geplant)) return false;
+    if (!(dort in geplant)) continue;
     if (Boolean(geplant[dort]) !== Boolean(s[hier])) return false;
   }
-  if (String(geplant.font ?? "") !== s.font) return false;
+  if ("font" in geplant && String(geplant.font ?? "") !== s.font) return false;
   for (const [hier, dort] of [["base_color", "base_color"], ["highlight_color", "highlight_color"], ["outline_color", "outline_color"]] as const) {
-    if (!(dort in geplant)) return false;
+    if (!(dort in geplant)) continue;
     if (String(geplant[dort] ?? "").toUpperCase() !== assFarbe(s[hier])) return false;
   }
   /* Die Hoehe steckt im Plan als Grundlinie, also Safe-Zone-Unterkante minus Abstand. */

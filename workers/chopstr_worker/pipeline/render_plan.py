@@ -186,11 +186,15 @@ def build_plan(
     caption_font: str | None = None,
     brand: dict[str, Any] | None = None,
     caption_text_field: str | None = None,
+    zeitmarken: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Baut den Plan. ``caption_preset`` ist das Basis-Preset (Name oder 1080x1920-Objekt), die Skalierung passiert hier.
     ``sources`` erwartet ``storage_key``, ``transcript_version``, ``hook_version``, ``candidate_id``.
     ``caption_font`` ist der Familienname des Marken-Fonts, ``brand`` die Asset-IDs und das Wasserzeichen.
-    ``caption_text_field`` (``text`` | ``text_norm``) wählt die Wortform der Captions (Schweizerdeutsch-Beta)."""
+    ``caption_text_field`` (``text`` | ``text_norm``) wählt die Wortform der Captions (Schweizerdeutsch-Beta).
+    ``zeitmarken`` sind die Bildausschnitt-Entscheidungen von Hand, in Quellzeit. Sie stecken zwar
+    schon über die Einstellungen im Plan, stehen aber zusätzlich unverändert darin: nur so kann die
+    Oberfläche sagen, ob das gebaute Video noch zu den gesetzten Marken passt."""
     aspect = aspect or aspect_for_platform(platform)
     out_w, out_h = output_size(aspect)
     fps = float(src_fps) if src_fps else DEFAULT_FPS
@@ -219,6 +223,7 @@ def build_plan(
         "title_card": {"text": title, "seconds": TITLE_CARD_S} if title else None,
         "hook_overlay": {"text": hook, "seconds": HOOK_OVERLAY_S} if hook and hook_overlay_enabled(platform, hook_overlay) else None,
         "audio": audio_block(audio_preset),
+        "zeitmarken": [dict(m) for m in (zeitmarken or [])],
         "brand": brand_block(brand),
         "sources": {
             "storage_key": sources.get("storage_key"),

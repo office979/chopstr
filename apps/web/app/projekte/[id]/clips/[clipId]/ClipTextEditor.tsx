@@ -6,6 +6,7 @@ import { Select } from "@/components/ui/Field";
 import { Timecode } from "@/components/ui/Timecode";
 import { cn } from "@/components/ui/cn";
 import type { TranscriptWord } from "@/lib/repo/types";
+import { WortKorrektur } from "./WortKorrektur";
 
 /* Zusammenhängende Wörter desselben Sprechers. Geht aus review/ClipText.tsx hervor, dort waren
  * die Blöcke nur zum Lesen da; hier lässt sich jedes Wort ändern und jeder Block einem anderen
@@ -45,9 +46,13 @@ interface Props {
   /* Stelle im ganzen Video, die gerade läuft */
   currentTime: number;
   canEdit: boolean;
-  onEditWord: (index: number, text: string) => void;
+  /* ``merken`` heisst: die Schreibweise kommt ins Woerterbuch der Marke und gilt fuer die
+   * naechsten Videos. Gedacht fuer Namen, nicht fuer jeden Tippfehler. */
+  onEditWord: (index: number, text: string, merken: boolean) => void;
   onChangeSpeaker: (indices: number[], speaker: string) => void;
   onSeek: (secondsInSource: number) => void;
+  /* Ohne Markenprofil gibt es kein Woerterbuch, in das man etwas merken koennte. */
+  markeVorhanden: boolean;
 }
 
 /* Text des Clips: Wortlaut ändern und zuordnen, wer spricht. */
@@ -63,8 +68,13 @@ export function ClipTextEditor({
   onEditWord,
   onChangeSpeaker,
   onSeek,
+  markeVorhanden,
 }: Props) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  /* Im Korrekturmodus oeffnet ein einfacher Klick die Korrektur statt zu springen. Der
+   * Doppelklick bleibt, aber er ist nicht mehr der einzige Weg: eine Handlung, die man nur
+   * findet, wenn man sie schon kennt, ist keine Handlung. */
+  const [korrigieren, setKorrigieren] = useState(false);
   const [ganz, setGanz] = useState(false);
   const blocks = blocksInRange(words, wordFrom, wordTo);
   const kasten = useRef<HTMLDivElement | null>(null);
@@ -96,18 +106,38 @@ export function ClipTextEditor({
     <GlassCard padding="md">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-lg font-semibold">Text</h2>
-        <button
-          type="button"
-          onClick={() => setGanz((v) => !v)}
-          className="transition-soft text-sm text-text-2 underline underline-offset-4 hover:text-text"
-        >
-          {ganz ? "Nur die Stelle zeigen" : "Ganzen Text zeigen"}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => {
+                setKorrigieren((v) => !v);
+                setEditingIndex(null);
+              }}
+              aria-pressed={korrigieren}
+              className={cn(
+                "transition-soft rounded-pill border px-3 py-1.5 text-sm",
+                korrigieren ? "border-white/60 bg-white/10 text-text" : "border-line text-text-2 hover:border-line-strong",
+              )}
+            >
+              {korrigieren ? "Fertig mit Korrigieren" : "Text korrigieren"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setGanz((v) => !v)}
+            className="transition-soft text-sm text-text-2 underline underline-offset-4 hover:text-text"
+          >
+            {ganz ? "Nur die Stelle zeigen" : "Ganzen Text zeigen"}
+          </button>
+        </div>
       </div>
       <p className="mb-3 text-sm text-text-2">
-        {canEdit
-          ? "Klick ein Wort an, um dorthin zu springen. Doppelklick, wenn du es ändern willst."
-          : "Klick ein Wort an, um dorthin zu springen."}
+        {!canEdit
+          ? "Klick ein Wort an, um dorthin zu springen."
+          : korrigieren
+            ? "Klick das Wort an, dessen Schreibweise du ändern willst. Der Ton bleibt, wie er ist."
+            : "Klick ein Wort an, um dorthin zu springen. Zum Ändern auf „Text korrigieren“."}
       </p>
 
       {/* Zusammengeklappt nur rund drei Zeilen, die mit dem Ton mitlaufen. Der ganze Text stand
@@ -155,38 +185,12 @@ export function ClipTextEditor({
                   const changed = original[i] != null && original[i].text !== w.text;
                   const low = w.prob < LOW_CONFIDENCE;
                   const active = currentTime >= w.start && currentTime < w.end + 0.15;
-                  if (editingIndex === i) {
-                    return (
-                      <input
-                        key={i}
-                        autoFocus
-                        defaultValue={w.text}
-                        aria-label={`Wort ändern: ${w.text}`}
-                        size={Math.max(3, w.text.length + 1)}
-                        onFocus={(e) => e.currentTarget.select()}
-                        className="mx-0.5 inline-block rounded-md border border-white/60 bg-black/70 px-1.5 py-0.5 font-sans text-[17px] text-text focus:outline-none"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            onEditWord(i, e.currentTarget.value);
-                            setEditingIndex(null);
-                          } else if (e.key === "Escape") {
-                            setEditingIndex(null);
-                          }
-                        }}
-                        onBlur={(e) => {
-                          onEditWord(i, e.currentTarget.value);
-                          setEditingIndex(null);
-                        }}
-                      />
-                    );
-                  }
                   return (
                     <button
                       key={i}
                       ref={active ? aktivesWort : undefined}
                       type="button"
-                      onClick={() => onSeek(w.start)}
+                      onClick={() => (korrigieren && canEdit ? setEditingIndex(i) : onSeek(w.start))}
                       onDoubleClick={() => canEdit && setEditingIndex(i)}
                       onKeyDown={(e) => {
                         if (canEdit && e.key === "Enter") {
@@ -194,12 +198,15 @@ export function ClipTextEditor({
                           setEditingIndex(i);
                         }
                       }}
-                      title={changed ? `Vorher: ${original[i].text}` : low ? "Der Computer war sich hier nicht sicher" : undefined}
+                      aria-label={korrigieren && canEdit ? `${w.text} korrigieren` : `Zu ${w.text} springen`}
+                      title={changed ? `Im Video gesprochen: ${original[i].text}` : low ? "Der Computer war sich hier nicht sicher" : undefined}
                       className={cn(
                         "transition-soft mx-px inline rounded-md px-0.5 py-0.5 text-left align-baseline hover:bg-white/10",
                         low && "word-low",
                         changed && "text-ai-soft",
                         active && "word-active",
+                        editingIndex === i && "bg-white/20",
+                        korrigieren && canEdit && "cursor-text underline decoration-dotted decoration-white/30 underline-offset-4",
                       )}
                     >
                       {w.text}
@@ -207,10 +214,30 @@ export function ClipTextEditor({
                   );
                 })}
               </p>
+
             </section>
           );
         })}
       </div>
+
+      {/* Die Korrektur steht UNTER dem Textkasten und nicht darin: der Kasten zeigt
+        * zusammengeklappt nur drei Zeilen, und eine Eingabe mit Knöpfen passt dort nicht hinein.
+        * Im Kasten war das Feld sichtbar und „Übernehmen" abgeschnitten. */}
+      {editingIndex != null && words[editingIndex] && (
+        <WortKorrektur
+          key={editingIndex}
+          wort={words[editingIndex]}
+          /* Das Original aus der Spracherkennung, nicht die letzte Fassung: sonst stünde nach der
+           * zweiten Korrektur die erste Korrektur als „gesprochen" da. */
+          gehoert={original[editingIndex]?.text ?? words[editingIndex].text}
+          markeVorhanden={markeVorhanden}
+          onSpeichern={(text, merken) => {
+            onEditWord(editingIndex, text, merken);
+            setEditingIndex(null);
+          }}
+          onAbbrechen={() => setEditingIndex(null)}
+        />
+      )}
     </GlassCard>
   );
 }

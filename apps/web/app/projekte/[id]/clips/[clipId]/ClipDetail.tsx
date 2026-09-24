@@ -473,6 +473,14 @@ export function ClipDetail({
   /* Ein Wort für die ganze Seite: gibt es irgendwo etwas Ungespeichertes? Steht in der Kopfzeile
    * und entscheidet, ob das Bauen gesperrt ist. */
   const offeneAenderungen = dirty || stilGeaendert || schnittGeaendert;
+  /* Was genau offen ist. „Du hast etwas geändert" lässt den Nutzer raten, was er verliert. */
+  const offeneListe = [
+    schnittGeaendert ? "der Schnitt" : null,
+    dirty ? "der Text" : null,
+    stilGeaendert ? "die Untertitel" : null,
+  ]
+    .filter(Boolean)
+    .join(", ") || "nichts";
 
   const editWord = useCallback(
     (index: number, raw: string, merken = false) => {
@@ -1095,14 +1103,28 @@ export function ClipDetail({
         open={leaveOpen}
         onClose={() => setLeaveOpen(false)}
         title="Willst du die Seite wirklich verlassen?"
-        description="Du hast etwas geändert und noch nicht gespeichert. Wenn du jetzt gehst, ist die Änderung weg."
+        description={`Nicht gespeichert: ${offeneListe}. Wenn du jetzt gehst, ist das weg.`}
       >
+        {/* Drei Wege statt zwei. „Hier bleiben" und „ohne Speichern gehen" liessen den einzigen
+            Ausgang aus, den man eigentlich will: speichern und dann gehen. Wer das nicht
+            angeboten bekommt, bleibt, sucht den Speicherknopf und versucht es noch einmal. */}
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="ghost" onClick={() => setLeaveOpen(false)}>
             Hier bleiben
           </Button>
           <Button variant="danger" onClick={() => router.push(backHref)}>
-            Ohne Speichern verlassen
+            Ohne Speichern gehen
+          </Button>
+          <Button
+            disabled={saving || stilSaving || schnittSaving}
+            onClick={async () => {
+              if (schnittGeaendert) await schnittSichern();
+              if (stilGeaendert) await stilSpeichern();
+              if (dirty) await save();
+              router.push(backHref);
+            }}
+          >
+            Speichern und gehen
           </Button>
         </div>
       </Modal>

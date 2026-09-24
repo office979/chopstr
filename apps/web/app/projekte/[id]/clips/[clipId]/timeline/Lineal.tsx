@@ -4,11 +4,21 @@ import { useMemo } from "react";
 
 export function timecode(t: number, mitZehntel = false): string {
   const s = Math.max(0, t);
-  const m = Math.floor(s / 60);
-  const rest = s - m * 60;
-  const sek = Math.floor(rest);
-  if (!mitZehntel) return `${m}:${String(sek).padStart(2, "0")}`;
-  return `${m}:${String(sek).padStart(2, "0")},${Math.floor((rest - sek) * 10)}`;
+  if (!mitZehntel) {
+    const m = Math.floor(s / 60);
+    return `${m}:${String(Math.floor(s - m * 60)).padStart(2, "0")}`;
+  }
+  /* Gerundet, nicht abgeschnitten.
+   *
+   * Abgeschnitten stand am selben Clip oben „38,8 s" und in der Timeline „0:38,7" - dieselbe
+   * Zahl, zwei Anzeigen, und der Nutzer sucht den Fehler bei sich. formatClipDuration rundet;
+   * hier wurde abgeschnitten.
+   *
+   * Gerundet wird auf Zehntel in EINEM Schritt, bevor Minuten und Sekunden entstehen: sonst
+   * ergäbe 59,96 s die Anzeige „0:60,0" statt „1:00,0". */
+  const zehntel = Math.round(s * 10);
+  const ganzeSekunden = Math.floor(zehntel / 10);
+  return `${Math.floor(ganzeSekunden / 60)}:${String(ganzeSekunden % 60).padStart(2, "0")},${zehntel % 10}`;
 }
 
 /* Welcher Abstand zwischen zwei beschrifteten Strichen? Gesucht ist der kleinste Wert aus einer

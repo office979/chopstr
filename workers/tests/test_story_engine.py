@@ -162,9 +162,12 @@ def test_repair_extends_to_front_when_context_missing(brain, llm):
 
 
 def test_repair_failure_is_kept_with_title_card_hint(brain, llm):
+    """Der Kandidat wird nicht mehr angeboten (gerissenes Tor), aber der Bericht zeigt ihn weiter."""
     brain.moments = lambda sents: [{"first_sent": 0, "last_sent": 3, "structure": "loop", "why": "x"}]
     brain.rubrics[(0, 3)] = {"needs_earlier_context": True, "suggested_title_card": "Nach dem Preisfehler 2019"}
-    c = story_engine.detect(demo_words(), BRIEF, {}, None, llm)[0]
+    bericht = story_engine.run(demo_words(), BRIEF, {}, None, llm)
+    assert bericht.candidates == [], "ein Kandidat mit gerissenem Tor darf nicht angeboten werden"
+    c = bericht.verworfen[0]
     assert c.rubric["repair"]["failed"] is True and c.rubric["repair"]["rounds"] == 0  # Satz 0 hat keinen Vorgänger
     assert c.gates["standalone"] == {"passed": False, "detail": "Einstieg braucht Vorwissen"}
     assert c.gate_passed is False
@@ -175,7 +178,9 @@ def test_repair_failure_is_kept_with_title_card_hint(brain, llm):
 
 def test_deterministic_gates_open_loop_and_fidelity(brain, llm):
     brain.moments = lambda sents: [{"first_sent": 8, "last_sent": 10, "structure": "decision_story", "why": "x"}]
-    c = story_engine.detect(demo_words(), BRIEF, {}, None, llm)[0]
+    bericht = story_engine.run(demo_words(), BRIEF, {}, None, llm)
+    assert bericht.candidates == []
+    c = bericht.verworfen[0]
     assert c.gates["no_open_loop"] == {"passed": False, "detail": "endet auf „aber“"}
     assert c.gates["fidelity"] == {"passed": False, "detail": "endet direkt vor „allerdings“"}
     assert c.gates["standalone"]["passed"] is True
@@ -290,5 +295,99 @@ def test_chapter_order_and_overlap_suppression():
         )  # fmt: skip
 
     kept, dropped = story_engine.select_best([cand(0, 1, 6.0), cand(0, 2, 7.0), cand(3, 4, 9.0, passed=False)], limit=5)
-    assert [(c.first_sent, c.last_sent) for c in kept] == [(0, 2), (3, 4)]
-    assert dropped == [{"reason": "overlap", "first_sent": 0, "last_sent": 1, "total": 6.0}]
+    # (3, 4) reisst ein Tor und wird deshalb gar nicht mehr angeboten, (0, 1) steckt in (0, 2).
+    assert [(c.first_sent, c.last_sent) for c in kept] == [(0, 2)]
+    gruende = {d["reason"] for d in dropped}
+    assert gruende == {"overlap", "gate"}
+
+
+# -- Ueberlappung: Anteil am kuerzeren, nicht IoU --------------------------------------------------
+def _spanne(start, ende, total=8.0):
+    return story_engine.CandidateResult(
+        segments=[], start_s=start, end_s=ende, first_sent=0, last_sent=1,
+        structure="loop", rubric={}, gates={}, story_graph_flags=[], risk_flags=[], total=total,
+        gate_passed=True, why="", model_id="m", prompt_version="score_clip_v2",
+    )  # fmt: skip
+
+
+def test_gemeinsamer_anteil_misst_am_kuerzeren():
+    # Der kurze Abschnitt steckt ganz im langen: 1,0, egal wie lang der lange ist.
+    assert story_engine.gemeinsamer_anteil(10.0, 20.0, 0.0, 100.0) == 1.0
+    assert story_engine.gemeinsamer_anteil(0.0, 10.0, 10.0, 20.0) == 0.0
+    assert story_engine.gemeinsamer_anteil(0.0, 10.0, 5.0, 15.0) == 0.5
+
+
+def test_der_fall_aus_dem_echten_video():
+    """An BP CW gemessen: 0 bis 19,6 s neben 9,9 bis 87,9 s.
+
+    Die Haelfte des kurzen Clips steckt im langen. IoU ist dabei nur 9,7 / 87,9 = 0,11 und blieb
+    weit unter jeder sinnvollen Schwelle, also standen beide Clips nebeneinander in der Liste.
+    """
+    anteil = story_engine.gemeinsamer_anteil(0.0, 19.6, 9.9, 87.9)
+    assert anteil == pytest.approx(0.49, abs=0.01)
+    iou = 9.7 / 87.9
+    assert iou < 0.12, "zum Vergleich: so klein war das alte Mass"
+
+    kept, dropped = story_engine.select_best([_spanne(0.0, 19.6, 6.0), _spanne(9.9, 87.9, 9.0)], limit=5)
+    assert len(kept) == 1, "der halb enthaltene Clip muss weichen"
+    assert kept[0].start_s == 9.9
+    assert dropped and dropped[0]["reason"] == "overlap"
+
+
+def test_ein_ganz_enthaltener_kurzer_clip_weicht_immer():
+    kept, _ = story_engine.select_best([_spanne(30.0, 45.0, 6.0), _spanne(0.0, 70.0, 9.0)], limit=5)
+    assert [c.start_s for c in kept] == [0.0]
+
+
+def test_zwei_clips_die_sich_kaum_beruehren_bleiben_beide():
+    """Ein kurzes Ueberlappen an der Naht ist kein Wiederholen."""
+    kept, _ = story_engine.select_best([_spanne(0.0, 40.0, 9.0), _spanne(38.0, 78.0, 8.0)], limit=5)
+    assert len(kept) == 2
+
+
+def test_benachbarte_clips_ohne_ueberlappung_bleiben_beide():
+    kept, _ = story_engine.select_best([_spanne(0.0, 30.0, 9.0), _spanne(30.0, 60.0, 8.0)], limit=5)
+    assert len(kept) == 2
+
+
+# -- Satzgrenzen: das Tor prueft jetzt wirklich ----------------------------------------------------
+def test_endet_satz_erkennt_abschluss():
+    assert story_engine._endet_satz("Punkt.")
+    assert story_engine._endet_satz("Wirklich?")
+    assert story_engine._endet_satz("Nie!")
+    assert not story_engine._endet_satz("leckerer,")
+    assert not story_engine._endet_satz("Druck")
+
+
+def test_auslassungspunkte_sind_kein_satzende():
+    """An BP CW gemessen: ein Clip endete auf „…", einer 3,3 Sekunden langen Pause im Transkript.
+
+    Die Auslassungspunkte markieren ein Abreissen, keinen abgeschlossenen Gedanken. Wer nur auf das
+    letzte Zeichen schaut, haelt den Punkt darin faelschlich fuer ein Satzende.
+    """
+    assert not story_engine._endet_satz("…")
+    assert not story_engine._endet_satz("dass dieser Druck …")
+    assert not story_engine._endet_satz("Moment...")
+
+
+def test_satzgrenzen_gate_faengt_den_schnitt_vor_aber():
+    """Der echte Fall: „...finde Broetchen auch deutlich leckerer," und dann Schnitt."""
+    woerter = [
+        {"text": "Ich", "start": 0.0, "end": 0.2, "speaker": "SPEAKER_00"},
+        {"text": "finde", "start": 0.2, "end": 0.4, "speaker": "SPEAKER_00"},
+        {"text": "leckerer,", "start": 0.4, "end": 0.8, "speaker": "SPEAKER_00"},
+        {"text": "aber", "start": 2.0, "end": 2.3, "speaker": "SPEAKER_00"},
+    ]
+    sents = [story_engine.Sentence(idx=0, text="Ich finde leckerer,", start=0.0, end=0.8, word_range=(0, 2), speaker="SPEAKER_00")]
+    g = story_engine._satzgrenzen_gate(woerter, sents, 0, 0)
+    assert g["passed"] is False
+    assert "leckerer," in g["detail"]
+
+
+def test_satzgrenzen_gate_laesst_einen_sauberen_schnitt_durch():
+    woerter = [
+        {"text": "Das", "start": 0.0, "end": 0.2, "speaker": "SPEAKER_00"},
+        {"text": "stimmt.", "start": 0.2, "end": 0.6, "speaker": "SPEAKER_00"},
+    ]
+    sents = [story_engine.Sentence(idx=0, text="Das stimmt.", start=0.0, end=0.6, word_range=(0, 1), speaker="SPEAKER_00")]
+    assert story_engine._satzgrenzen_gate(woerter, sents, 0, 0)["passed"] is True

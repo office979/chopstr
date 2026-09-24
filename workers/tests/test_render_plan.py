@@ -41,7 +41,10 @@ def test_plan_has_all_contract_keys_and_is_json():
     assert set(plan["reframe"]) == {"strategy", "detector", "faces_detected", "positions", "min_shot_s"}
     assert plan["reframe"]["min_shot_s"] == 1.2
     assert set(plan["shots"][0]) == {"start", "end", "crop_x", "crop_y", "crop_w", "crop_h", "layout"}
-    assert set(plan["captions"]) == {"preset", "font", "font_px", "max_chars", "baseline_y", "safe_zone", "cards", "highlight"}
+    assert set(plan["captions"]) == {
+        "preset", "font", "font_px", "max_chars", "baseline_y", "safe_zone", "cards", "highlight",
+        "bold", "all_caps", "max_lines", "words_per_card", "outline_px", "box", "base_color", "highlight_color",
+    }
     assert plan["captions"]["cards"] == 14 and plan["captions"]["font"] == "Inter"
     assert plan["title_card"] == {"text": "Preise im Handwerk", "seconds": 2.5}
     assert plan["hook_overlay"] is None  # LinkedIn: Default aus

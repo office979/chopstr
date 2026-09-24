@@ -36,6 +36,13 @@ laenge:
   gut_bis_s: 55
   # Ausserhalb dieser Grenzen ist ein Moment als Clip unbrauchbar, egal wie gut sein Inhalt ist.
   # Kein Verwerfen (siehe bewertung.modus), sondern starker Abzug.
+  #
+  # OFFEN, und hier ausdruecklich festgehalten, damit es nicht in Vergessenheit geraet: „hart"
+  # verspricht eine Grenze, die es nicht gibt. An BP CW ist ein Clip von 78 Sekunden entstanden,
+  # also acht ueber dem harten Maximum, mit dem hoechstmoeglichen Laengenabzug von 1,0 und trotzdem
+  # ausgeliefert. Entweder wird die Grenze wirklich hart (ein Moment ausserhalb wird nicht mehr
+  # angeboten, im Zweifel gibt es dann weniger Clips), oder sie heisst nicht mehr „hart".
+  # Das ist eine Produktentscheidung und keine Programmieraufgabe.
   hart_min_s: 18
   hart_max_s: 70
 

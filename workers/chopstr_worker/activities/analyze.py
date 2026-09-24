@@ -63,6 +63,8 @@ SQL_DROP_AUTO_CANDIDATES = (
     "delete from candidates where source_id = %s and verdict_by is null and verdict_reason = %s "
     "and not exists (select 1 from clips c where c.candidate_id = candidates.id)"
 )
+# Die Kandidaten, die einen Lauf ueberleben, weil jemand sie beurteilt hat.
+SQL_SURVIVING_CANDIDATES = "select start_s, end_s from candidates where source_id = %s"
 
 
 def heatmap_key_for(audio_key: str, with_text: bool) -> str:
@@ -145,11 +147,31 @@ def _drop_stale_auto_rows(ctx: common.Context, source_id: str) -> None:
 
 
 def _write_rows(ctx: common.Context, source_id: str, cands: list[story_engine.CandidateResult]) -> list[str]:
-    """Alte Kandidaten ohne Urteil löschen (Re-Run), neue Zeilen schreiben; Zeilen mit Urteil bleiben."""
+    """Alte Kandidaten ohne Urteil löschen (Re-Run), neue Zeilen schreiben; Zeilen mit Urteil bleiben.
+
+    Ein Kandidat, der eine überlebende Zeile wiederholt, wird nicht geschrieben. Ohne das entstehen
+    bei jedem erneuten Lauf Dubletten: gelöscht wird nur, was noch kein Urteil hat, die beurteilten
+    Zeilen bleiben, und das neue Ergebnis enthält dieselben Stellen noch einmal. An einer echten
+    Quelle gemessen standen danach 17 Kandidaten für 11 Clips, darunter fünf Paare mit exakt
+    derselben Spanne. In der Prüfliste sieht ein Mensch denselben Moment dann zweimal.
+
+    Verglichen wird mit demselben Maß wie in der Auswahl (Anteil am kürzeren Abschnitt), damit nicht
+    zwei verschiedene Begriffe von „dasselbe" nebeneinander stehen."""
     _drop_stale_auto_rows(ctx, source_id)
     ctx.conn.execute("delete from candidates where source_id = %s and human_verdict is null", (source_id,))
+    ueberlebende = [
+        (float(r[0] or 0.0), float(r[1] or 0.0))
+        for r in db.fetch_all(ctx.conn, SQL_SURVIVING_CANDIDATES, (source_id,))
+    ]
     ids = []
     for c in cands:
+        if any(
+            story_engine.gemeinsamer_anteil(c.start_s, c.end_s, a, b) >= story_engine.OVERLAP_SUPPRESS_ANTEIL
+            for a, b in ueberlebende
+        ):
+            log.info("kandidat uebersprungen source=%s span=%.1f-%.1fs grund=deckt_beurteilten_ab", source_id, c.start_s, c.end_s)
+            ids.append("")
+            continue
         row = c.to_row()
         inserted = db.insert(
             ctx.conn,

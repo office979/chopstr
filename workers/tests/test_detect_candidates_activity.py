@@ -82,8 +82,15 @@ def test_rerun_is_cached_and_keeps_rows_with_verdict(fake_db, fake_context, sour
     second = analyze.run_detect_candidates(fake_context, source)
     assert len(second) == len(first)
     assert judged["id"] in [c["id"] for c in fake_db.candidates]
-    assert len(fake_db.candidates) == len(first) + 1
+    # Die beurteilte Zeile bleibt, und der neue Kandidat, der dieselbe Stelle noch einmal vorschlaegt,
+    # wird NICHT geschrieben. Frueher stand hier len(first) + 1: die Dublette landete in der Liste,
+    # und in der Pruefliste sah ein Mensch denselben Moment zweimal. An einer echten Quelle gemessen
+    # standen so 17 Kandidaten fuer 11 Clips, darunter fuenf Paare mit exakt derselben Spanne.
+    assert len(fake_db.candidates) == len(first)
+    spannen = [(round(c["start_s"], 1), round(c["end_s"], 1)) for c in fake_db.candidates]
+    assert len(spannen) == len(set(spannen)), f"doppelte Spannen: {spannen}"
     assert not set(second) & set(first)  # neue Zeilen, alte ohne menschliches Urteil sind weg
+    assert "" in second, "der uebersprungene Kandidat haelt seinen Platz, damit die Clip-Zuordnung stimmt"
     fin = fake_db.events_for("detect_candidates")[-1]["payload"]
     assert fin["cached"] is True and fin["candidates"] == len(first)
     assert fake_db.sources[source]["status"] == "ready"

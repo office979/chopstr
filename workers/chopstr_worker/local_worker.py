@@ -35,7 +35,7 @@ from urllib.parse import urlsplit
 from . import config, db, editorial, events
 from .activities import analyze, common, deletion, ingest, nlp, publish, transcribe, webhooks
 from .activities.render import run_render_pack
-from .pipeline import story_engine
+from .pipeline import captions_de, reframe, story_engine
 
 log = logging.getLogger("chopstr.local_worker")
 
@@ -117,11 +117,13 @@ class LocalWorker:
         # also mit dem Code von damals. Ohne diese Zeile sieht ein Lauf mit veraltetem Code genauso
         # aus wie ein richtiger, und man sucht den Fehler stundenlang in den Daten.
         log.info(
-            "geladener Stand: engine=%s policy=%s prompts=%s signals=%s",
+            "geladener Stand: engine=%s policy=%s prompts=%s signals=%s reframe=%s schriften=%s",
             story_engine.ENGINE_VERSION,
             editorial.policy_version(),
             ",".join(story_engine.prompt_versions()),
             analyze.SIGNALS_VERSION,
+            reframe.REFRAME_VERSION,
+            captions_de.schriften().get("version", "?"),
         )
         while not self.stop_requested:
             try:

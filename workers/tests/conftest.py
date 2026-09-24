@@ -317,6 +317,9 @@ class FakeDB:
                 row.setdefault(key, None)
             self.candidates.append(row)
             return FakeCursor([(row["id"],)])
+        if q.startswith("select start_s, end_s from candidates where source_id = %s"):
+            # Die Zeilen, die einen erneuten Lauf ueberleben; neue Kandidaten duerfen sie nicht wiederholen.
+            return FakeCursor([(c["start_s"], c["end_s"]) for c in self.candidates if c["source_id"] == params[0]])
         if q.startswith("delete from candidates where source_id = %s and human_verdict is null"):
             self.candidates = [c for c in self.candidates if not (c["source_id"] == params[0] and c.get("human_verdict") is None)]
             return FakeCursor([])

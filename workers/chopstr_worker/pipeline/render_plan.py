@@ -67,16 +67,22 @@ def caption_block(
     font: str | None = None,
     min_top: int | None = None,
     text_field: str | None = None,
+    bereits_skaliert: bool = False,
 ) -> dict[str, Any]:
     """Block ``captions``: Basis-Preset (Name oder Objekt für 1080x1920) auf die Ausgabegröße skaliert,
     Safe Zone als Randabstände. Ein bereits skaliertes Preset hier nicht übergeben (doppelte Skalierung).
     ``font`` ist der echte Familienname des Marken-Fonts; ohne ihn gilt der Preset-Font (Inter).
     ``min_top`` schiebt die Oberkante der Safe Zone nach unten (Folie oben bei ``slide_pip``).
     ``text_field = "text_norm"`` wird als Feld eingetragen; ``"text"`` ist der Default und bleibt weg."""
-    p = captions_de.scaled_preset(preset, out_w, out_h)
+    p = preset if bereits_skaliert and isinstance(preset, captions_de.CaptionPreset) else captions_de.scaled_preset(preset, out_w, out_h)
     safe = captions_de.safe_zone_margins(p, out_w, out_h)
     if min_top is not None:
         safe["top"] = max(int(safe["top"]), int(min_top))
+    # Alles, was das Bild verändert, gehört in den Block. Der Plan ist die Beschreibung dessen, was
+    # gerendert wurde, und zugleich der Idempotenz-Schlüssel: was hier fehlt, ändert den Hash nicht,
+    # und eine Änderung daran bliebe folgenlos, weil der Render als „schon vorhanden" übersprungen
+    # würde. Genau das ist passiert, als der Block nur die Preset-Vorgaben trug: eine andere
+    # Textfarbe kam nie im Clip an.
     block = {
         "preset": p.name,
         "font": (font or "").strip() or p.font,
@@ -86,6 +92,14 @@ def caption_block(
         "safe_zone": safe,
         "cards": int(cards),
         "highlight": bool(p.highlight_words),
+        "bold": bool(p.bold),
+        "all_caps": bool(p.all_caps),
+        "max_lines": int(p.max_lines),
+        "words_per_card": p.words_per_card,
+        "outline_px": int(p.outline_px),
+        "box": bool(p.box),
+        "base_color": p.base_color,
+        "highlight_color": p.highlight_color,
     }
     if text_field and text_field != "text":
         block["text_field"] = captions_de.check_text_field(text_field)
@@ -150,6 +164,7 @@ def build_plan(
     reframe_result: reframe.ReframeResult,
     caption_preset: str | captions_de.CaptionPreset,
     caption_cards: int,
+    caption_preset_skaliert: bool = False,
     sources: dict[str, Any],
     aspect: str | None = None,
     src_fps: float | None = None,
@@ -188,7 +203,9 @@ def build_plan(
         "reframe": reframe_result.plan_block(),
         "shots": reframe_result.shots_json(),
         "motion": motion_block(reframe_result, out_w, out_h),
-        "captions": caption_block(caption_preset, out_w, out_h, caption_cards, caption_font, caption_top, caption_text_field),
+        "captions": caption_block(
+            caption_preset, out_w, out_h, caption_cards, caption_font, caption_top, caption_text_field, caption_preset_skaliert
+        ),
         "title_card": {"text": title, "seconds": TITLE_CARD_S} if title else None,
         "hook_overlay": {"text": hook, "seconds": HOOK_OVERLAY_S} if hook and hook_overlay_enabled(platform, hook_overlay) else None,
         "audio": audio_block(audio_preset),

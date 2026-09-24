@@ -43,7 +43,20 @@ MAX_CANDIDATES = 20
 MAX_PER_CHAPTER = 4
 MAX_REPAIR_ROUNDS = 2
 CHAPTER_SECONDS = 240.0
-OVERLAP_SUPPRESS_IOU = 0.6
+# Ab wann zwei Spannen als derselbe Clip gelten, gemessen am KUERZEREN der beiden.
+#
+# Vorher stand hier IoU, also Schnittmenge durch Vereinigung. Das ist das falsche Mass, sobald die
+# Laengen auseinandergehen, und das tun sie: die Richtlinie erlaubt 18 bis 70 Sekunden. An BP CW
+# gemessen lagen ein Clip von 0 bis 19,6 s und einer von 9,9 bis 87,9 s nebeneinander. Die Haelfte
+# des kurzen steckt im langen, aber IoU ist nur 9,7 / 87,9 = 0,11 und damit weit unter jeder
+# sinnvollen Schwelle. Der Zuschauer sieht zwei Clips, von denen einer zur Haelfte den anderen
+# wiederholt.
+#
+# Am Anteil des kuerzeren gemessen sind es 49 Prozent. Ueber alle drei vorhandenen Quellen liegt
+# kein einziges ueberlappendes Paar zwischen 0 und 49 Prozent; der genaue Wert der Schwelle ist
+# deshalb unkritisch, solange er in dieser Luecke liegt. 0,4 ist die Linie, ab der ein Clip nicht
+# mehr fuer sich steht.
+OVERLAP_SUPPRESS_ANTEIL = 0.4
 FIDELITY_TAIL_WORDS = 3
 SCORE_KEYS = ("hook", "payoff", "specificity", "tension", "audience_fit")
 
@@ -90,6 +103,10 @@ class DetectReport:
     """Ergebnis eines Laufs: Kandidaten plus Zähler und Verwerfungsgründe für Event-Payload und Storage."""
 
     candidates: list[CandidateResult] = field(default_factory=list)
+    # Gefunden, aber nicht angeboten: gerissenes Tor, Ueberlappung oder ueber der Obergrenze. Die
+    # Gruende stehen in ``discarded``, die Kandidaten selbst hier. Ohne das waere nach der Auswahl
+    # nicht mehr nachvollziehbar, WAS verworfen wurde, nur noch dass etwas verworfen wurde.
+    verworfen: list[CandidateResult] = field(default_factory=list)
     discarded: list[dict] = field(default_factory=list)
     chapters: int = 0
     chapters_with_seeds: int = 0
@@ -371,6 +388,46 @@ def _open_loop_gate(sents: list[Sentence], last: int) -> dict:
     return {"passed": True, "detail": "endet mit abgeschlossenem Satz"}
 
 
+# Zeichen, die einen Satz wirklich beenden. Die Auslassungspunkte stehen bewusst NICHT dabei: sie
+# markieren im Transkript eine Pause oder ein Abreissen, keinen abgeschlossenen Gedanken.
+SATZENDE_ZEICHEN = ".!?\"'»)"
+SATZENDE_AUSNAHMEN = ("…", "...")
+
+
+def _endet_satz(text: str) -> bool:
+    t = (text or "").strip()
+    if not t or any(t.endswith(a) for a in SATZENDE_AUSNAHMEN):
+        return False
+    return t[-1] in SATZENDE_ZEICHEN
+
+
+def _satzgrenzen_gate(words: list[dict], sents: list[Sentence], first: int, last: int) -> dict:
+    """Faengt der Abschnitt an einem Satzanfang an und hoert er an einem Satzende auf?
+
+    Dieses Tor hat frueher ``passed: True`` mit der Begruendung „Start und Ende an Satzgrenzen"
+    gemeldet, ohne irgendetwas zu pruefen. An BP CW gemessen war das zweimal von sechs falsch: ein
+    Clip endete auf „leckerer," und das naechste Wort war „aber", ein anderer auf „…", also mitten
+    in einem abgerissenen Satz.
+
+    Der Grund ist die Satzzerlegung selbst: sie trennt auch an einer langen Sprechpause, und eine
+    Pause nach einem Komma ist kein Satzende. Deshalb wird hier am Wortlaut geprueft und nicht an
+    der Zerlegung.
+    """
+    _span, a, b = _span_words(words, sents, first, last)
+    if a > len(words) - 1 or b > len(words) - 1 or a > b:
+        return {"passed": True, "detail": "Abschnitt nicht pruefbar"}
+    letztes = str(words[b].get("text") or "")
+    davor = str(words[a - 1].get("text") or "") if a > 0 else ""
+    probleme = []
+    if a > 0 and not _endet_satz(davor):
+        probleme.append(f"faengt mitten im Satz an, davor steht \u201e{davor}\u201c")
+    if not _endet_satz(letztes):
+        probleme.append(f"endet mitten im Satz auf \u201e{letztes}\u201c")
+    if probleme:
+        return {"passed": False, "detail": "; ".join(probleme)}
+    return {"passed": True, "detail": "Start und Ende an Satzgrenzen"}
+
+
 def _standalone_gate(r: dict) -> dict:
     reasons = []
     if r.get("needs_earlier_context"):
@@ -390,7 +447,7 @@ def deterministic_gates(words: list[dict], sents: list[Sentence], first: int, la
     return {
         "standalone": _standalone_gate(rubric),
         "fidelity": _fidelity_gate(words, sents, first, last),
-        "sentence_boundaries": {"passed": True, "detail": "Start und Ende an Satzgrenzen"},
+        "sentence_boundaries": _satzgrenzen_gate(words, sents, first, last),
         "verb_bracket": _verb_bracket_gate(words, sents, first, last),
         "no_open_loop": _open_loop_gate(sents, last),
     }
@@ -634,10 +691,20 @@ def evaluate_span(
 # -- Auswahl -------------------------------------------------------------------------------------
 
 
-def _iou(a: CandidateResult, b: CandidateResult) -> float:
-    inter = max(0.0, min(a.end_s, b.end_s) - max(a.start_s, b.start_s))
-    union = max(a.end_s, b.end_s) - min(a.start_s, b.start_s)
-    return inter / union if union > 0 else 0.0
+def gemeinsamer_anteil(a_start: float, a_ende: float, b_start: float, b_ende: float) -> float:
+    """Wie viel vom KUERZEREN der beiden Abschnitte im anderen steckt, 0 bis 1.
+
+    Nicht IoU: bei sehr unterschiedlichen Laengen verschwindet eine vollstaendige Ueberdeckung des
+    kurzen Abschnitts im grossen Nenner. Ein Clip, der ganz in einem anderen liegt, kommt hier
+    immer auf 1,0, egal wie lang der andere ist.
+    """
+    inter = max(0.0, min(a_ende, b_ende) - max(a_start, b_start))
+    kuerzer = min(a_ende - a_start, b_ende - b_start)
+    return inter / kuerzer if kuerzer > 0 else 0.0
+
+
+def _ueberdeckung(a: CandidateResult, b: CandidateResult) -> float:
+    return gemeinsamer_anteil(a.start_s, a.end_s, b.start_s, b.end_s)
 
 
 def select_best(cands: list[CandidateResult], limit: int = MAX_CANDIDATES) -> tuple[list[CandidateResult], list[dict]]:
@@ -646,7 +713,18 @@ def select_best(cands: list[CandidateResult], limit: int = MAX_CANDIDATES) -> tu
     kept: list[CandidateResult] = []
     dropped: list[dict] = []
     for c in ordered:
-        clash = next((k for k in kept if _iou(c, k) >= OVERLAP_SUPPRESS_IOU), None)
+        # Ein gerissenes Tor ist kein Geschmacksurteil, sondern ein feststellbarer Fehler im
+        # Schnitt: der Clip endet vor dem „aber", das ihm den Sinn gibt, er verweist auf etwas
+        # Unsichtbares, oder er faengt mitten im Satz an. Bisher wirkte das nur auf die
+        # Reihenfolge, und war Platz da, wurde der Clip trotzdem gebaut. An drei echten Quellen
+        # gemessen riss bei jeder genau ein Kandidat ein Tor, und alle drei wurden gerendert.
+        #
+        # Lieber ein Clip weniger als einer, von dem wir schon wissen, dass er kaputt ist.
+        if not c.gate_passed:
+            grund = "; ".join(str(g.get("detail") or "") for g in c.gates.values() if not g.get("passed"))
+            dropped.append({"reason": "gate", "first_sent": c.first_sent, "last_sent": c.last_sent, "total": c.total, "detail": grund})
+            continue
+        clash = next((k for k in kept if _ueberdeckung(c, k) >= OVERLAP_SUPPRESS_ANTEIL), None)
         if clash is not None:
             dropped.append({"reason": "overlap", "first_sent": c.first_sent, "last_sent": c.last_sent, "total": c.total})
             continue
@@ -720,6 +798,7 @@ def run(
         if on_progress:
             on_progress(done, len(order), len(raw))
     report.candidates, dropped = select_best(raw, max_candidates)
+    report.verworfen = [c for c in raw if all(c is not k for k in report.candidates)]
     report.discarded.extend(dropped)
     return report
 

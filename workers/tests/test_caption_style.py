@@ -218,3 +218,57 @@ def test_eszett_wird_vor_der_laengenrechnung_umgewandelt():
     woerter = [{"text": "Strauß", "start": 0.0, "end": 0.5, "speaker": "SPEAKER_00"}]
     ass = c.to_ass(woerter, preset=c.style_anwenden(c.preset_for("tiktok_words"), {"all_caps": True}))
     assert "STRAUSS" in ass
+
+
+# -- Der Plan muss beschreiben, was gerendert wurde -------------------------------------------------
+from chopstr_worker.pipeline import render_plan  # noqa: E402
+
+
+def test_der_plan_traegt_den_eingestellten_stil_und_nicht_die_vorgabe():
+    """Der Plan ist die Beschreibung des Renders UND der Idempotenz-Schluessel.
+
+    Trug er nur die Preset-Vorgaben, blieb eine Stilaenderung folgenlos: der Hash aenderte sich
+    nicht, und der Render wurde als „schon vorhanden" uebersprungen. Eine andere Textfarbe kam so
+    nie im Clip an.
+    """
+    stil = {"font_px": 120, "all_caps": True, "base_color": "#00ff9c", "outline_px": 12, "bottom_margin_px": 420, "words_per_card": 3}
+    angewendet = c.style_anwenden(c.scaled_preset("reels_words", 1080, 1920), stil, 1.0)
+    block = render_plan.caption_block(angewendet, 1080, 1920, cards=44, bereits_skaliert=True)
+    assert block["font_px"] == 120
+    assert block["all_caps"] is True
+    assert block["base_color"] == c.ass_farbe("#00ff9c")
+    assert block["outline_px"] == 12
+    assert block["words_per_card"] == 3
+    assert block["baseline_y"] == c.PRESETS["reels_words"].safe.bottom - 420
+
+
+def test_eine_stilaenderung_aendert_den_idempotenz_hash():
+    def hash_fuer(stil: dict) -> str:
+        p = c.style_anwenden(c.scaled_preset("reels_words", 1080, 1920), stil, 1.0)
+        plan = {"captions": render_plan.caption_block(p, 1080, 1920, cards=44, bereits_skaliert=True)}
+        return render_plan.plan_hash(plan, 1, 1)
+
+    grund = hash_fuer({})
+    # Jede dieser Aenderungen veraendert das Bild und muss deshalb den Hash veraendern.
+    for stil in (
+        {"base_color": "#00ff9c"},
+        {"highlight_color": "#ff0000"},
+        {"all_caps": True},
+        {"bold": False},
+        {"outline_px": 12},
+        {"box": True},
+        {"bottom_margin_px": 420},
+        {"font_px": 120},
+        {"words_per_card": 3},
+    ):
+        assert hash_fuer(stil) != grund, f"{stil} bleibt ohne Wirkung, der Render wuerde uebersprungen"
+
+
+def test_ein_unveraenderter_stil_laesst_den_hash_stehen():
+    """Sonst wuerde jeder Lauf neu rendern, auch wenn sich nichts geaendert hat."""
+    def hash_fuer() -> str:
+        p = c.style_anwenden(c.scaled_preset("reels_words", 1080, 1920), {"font_px": 120}, 1.0)
+        plan = {"captions": render_plan.caption_block(p, 1080, 1920, cards=44, bereits_skaliert=True)}
+        return render_plan.plan_hash(plan, 1, 1)
+
+    assert hash_fuer() == hash_fuer()

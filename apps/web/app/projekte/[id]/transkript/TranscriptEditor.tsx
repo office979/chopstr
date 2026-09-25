@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sprecherName } from "@/lib/transcript/sprechername";
+import { ersetzungFuer, nachfrageSatz, weitereStellen } from "@/lib/transcript/vorkommen";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Button } from "@/components/ui/Button";
 import { Toggle } from "@/components/ui/Toggle";
@@ -83,6 +84,10 @@ export function TranscriptEditor({ sourceId, title, durationS, videoSrc, transcr
   const [corrections, setCorrections] = useState<Map<number, Correction>>(new Map());
   const [speakerNames, setSpeakerNames] = useState<Record<string, string>>(transcript.stats.speaker_names ?? {});
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  /* Nach einer Korrektur: steht dasselbe Wort noch woanders? Ein Eigenname, den die
+   * Spracherkennung falsch hört, steht im ganzen Video falsch, und vierzig Einzelklicks sind der
+   * Punkt, an dem Leute aufhören zu korrigieren. */
+  const [auchAnderswo, setAuchAnderswo] = useState<{ stellen: number[]; alt: string; neu: string } | null>(null);
   const [editingSpeaker, setEditingSpeaker] = useState<number | null>(null);
   const [removeFillers, setRemoveFillers] = useState(false);
   const [version, setVersion] = useState(transcript.version);
@@ -161,6 +166,7 @@ export function TranscriptEditor({ sourceId, title, durationS, videoSrc, transcr
         const orig = original[index];
         if (!orig || orig.text === text) {
           next.delete(index);
+          setAuchAnderswo(null);
         } else {
           const existing = next.get(index);
           next.set(index, {
@@ -168,12 +174,38 @@ export function TranscriptEditor({ sourceId, title, durationS, videoSrc, transcr
             new_text: text,
             add_to_vocab: existing?.add_to_vocab ?? /^[A-ZÄÖÜ]/.test(text),
           });
+          /* Angeboten, nicht getan: eine Sammeländerung, die von selbst passiert, ist keine
+           * Erleichterung, sondern ein Schreck. */
+          const stellen = weitereStellen(original, index, orig.text, next.keys());
+          setAuchAnderswo(stellen.length > 0 ? { stellen, alt: orig.text, neu: text } : null);
         }
         return next;
       });
     },
     [original],
   );
+
+  const alleAendern = useCallback(() => {
+    if (!auchAnderswo) return;
+    const { stellen, neu } = auchAnderswo;
+    setWords((prev) => {
+      const next = [...prev];
+      for (const i of stellen) next[i] = reclassify(prev[i], ersetzungFuer(prev[i].text, neu));
+      return next;
+    });
+    setCorrections((prev) => {
+      const next = new Map(prev);
+      for (const i of stellen) {
+        const orig = original[i];
+        if (!orig) continue;
+        const ersetzt = ersetzungFuer(orig.text, neu);
+        if (ersetzt === orig.text) continue;
+        next.set(i, { old_text: orig.text, new_text: ersetzt, add_to_vocab: false });
+      }
+      return next;
+    });
+    setAuchAnderswo(null);
+  }, [auchAnderswo, original]);
 
   const renameSpeaker = (speaker: string, raw: string) => {
     const value = raw.trim();
@@ -259,6 +291,21 @@ export function TranscriptEditor({ sourceId, title, durationS, videoSrc, transcr
               Die Sprechertrennung ist auf diesem Server nicht eingerichtet. Alle Wörter hängen an
               einer Person. Wer spricht, lässt sich hier von Hand zuordnen.
             </p>
+          )}
+          {auchAnderswo && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+              <p className="min-w-0 text-sm text-text-2">
+                {nachfrageSatz(auchAnderswo.stellen.length, auchAnderswo.alt, auchAnderswo.neu)}
+              </p>
+              <div className="flex shrink-0 gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setAuchAnderswo(null)}>
+                  Nur hier
+                </Button>
+                <Button size="sm" onClick={alleAendern}>
+                  Überall ändern
+                </Button>
+              </div>
+            </div>
           )}
           {(hint || showTextMode) && (
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">

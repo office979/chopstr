@@ -65,6 +65,33 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Fingerabdruck an die Adressen von CSS und JavaScript hängen.
+      #
+      # GitHub Pages liefert beides mit "cache-control: max-age=600" aus. Zehn Minuten lang hält
+      # ein Browser also die alte Datei fest - und trifft damit auf das NEUE HTML. Wer in diesem
+      # Fenster vorbeikommt, sieht eine Seite, deren neue Bausteine keine Gestaltung haben. Genau
+      # das ist am 25.09.2026 passiert, als Navigation und Produktbild dazukamen.
+      #
+      # Mit dem Fingerabdruck zeigt neues HTML auf eine Adresse, die noch nie im Zwischenspeicher
+      # war. Der alte Eintrag darf dort ruhig liegen bleiben, er wird nie wieder gefragt.
+      #
+      # Nur beim Ausliefern, nicht im Repository: lokal soll "styles.css" einfach "styles.css"
+      # heissen, und niemand soll eine Zahl von Hand hochzählen müssen.
+      - name: CSS und JavaScript mit Fingerabdruck versehen
+        run: |
+          css=$(sha256sum site/styles.css | cut -c1-10)
+          js=$(sha256sum site/anmeldung.js | cut -c1-10)
+          sed -i \
+            -e "s|href=\"styles.css\"|href=\"styles.css?v=$css\"|g" \
+            -e "s|src=\"anmeldung.js\"|src=\"anmeldung.js?v=$js\"|g" \
+            site/*.html
+          echo "styles.css?v=$css / anmeldung.js?v=$js" >> "$GITHUB_STEP_SUMMARY"
+          # Gegenprobe: bleibt irgendwo eine Adresse ohne Fingerabdruck stehen, war das sed falsch.
+          if grep -n 'href="styles.css"\|src="anmeldung.js"' site/*.html; then
+            echo "Eine Adresse ohne Fingerabdruck ist stehen geblieben." >&2
+            exit 1
+          fi
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

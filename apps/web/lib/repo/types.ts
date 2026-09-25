@@ -465,6 +465,20 @@ export interface RenderPlan {
   versions: { captions_de: string; render: string; reframe: string };
 }
 
+/* Ein technischer Befund an der fertigen Videodatei (Migration 0014).
+ *
+ * Geschrieben vom Worker nach dem Clippen, gelesen von lib/clips/ausgabe.ts. „fehler" verhindert
+ * Download und Veröffentlichung, „hinweis" steht nur an der Karte. */
+export interface TechnikBefund {
+  /* Was geprüft wurde: ton, pegel, dauer, aufloesung, schwarzbild, untertitel. */
+  pruefung: string;
+  ergebnis: "ok" | "hinweis" | "fehler";
+  /* Ein Satz für den Nutzer, kein Messprotokoll. */
+  text: string;
+  /* Der gemessene Wert, falls einer anfiel. Für den Support, nicht für den Kunden. */
+  gemessen: string | null;
+}
+
 export interface Clip {
   id: string;
   source_id: string;
@@ -506,6 +520,10 @@ export interface Clip {
   provenance: Provenance;
   render_error: string | null;
   rendered_at: string | null;
+  /* Die technische Prüfung der fertigen Datei (Migration 0014). null heisst: nicht geprüft, das
+   * gilt für Videos aus der Zeit vor dieser Prüfung. Nicht geprüft ist kein Befund und sperrt
+   * nichts. */
+  export_checks: TechnikBefund[] | null;
   /* Eigene Löschfrist des Clips (Migration 0006): workspaces.render_retention_days ab Erstellung,
    * unabhängig von der kürzeren Frist der Quelle. Gesetzt vom Trigger, nicht von der Web-App. */
   delete_after: string | null;

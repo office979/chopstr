@@ -222,6 +222,7 @@ function toClip(r: Row): Clip {
     provenance: jsonValue<Clip["provenance"]>(r.provenance, {}),
     render_error: (r.render_error as string | null) ?? null,
     rendered_at: isoOrNull(r.rendered_at),
+    export_checks: jsonValue<Clip["export_checks"]>(r.export_checks, null),
     delete_after: isoOrNull(r.delete_after),
     deleted_at: isoOrNull(r.deleted_at),
     created_by: (r.created_by as string | null) ?? null,

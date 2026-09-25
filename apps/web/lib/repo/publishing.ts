@@ -245,6 +245,7 @@ export function toClipWithExtras(r: Row): ClipWithExtras {
     provenance: json<Clip["provenance"]>(r.provenance, {}),
     render_error: (r.render_error as string | null) ?? null,
     rendered_at: iso(r.rendered_at),
+    export_checks: json<Clip["export_checks"]>(r.export_checks, null),
     /* Eigene Löschfrist des Clips (Migration 0006): Renderings überleben ihre Quelle. */
     delete_after: iso(r.delete_after),
     deleted_at: iso(r.deleted_at),

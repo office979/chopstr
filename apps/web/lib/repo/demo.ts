@@ -724,6 +724,7 @@ export const demoRepo: Repo = {
         loudness: null,
         provenance: {},
         render_error: null,
+        export_checks: null,
         rendered_at: null,
         /* In Postgres setzt das ein Trigger (Migration 0006); hier von Hand, sonst hätte der
          * Testmodus keine Frist am Clip und die Seite nach dem Löschen kein Datum. */

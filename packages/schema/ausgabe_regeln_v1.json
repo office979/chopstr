@@ -1,0 +1,114 @@
+{
+  "version": "ausgabe_regeln_v1",
+  "zweck": "Eine Clipfassung verlässt chopstr auf genau zwei Wegen: als Download oder als Veröffentlichung. Bis hierher entschied jeder Weg für sich, und der Download prüfte nur die Gastfreigabe. Damit konnte ein veraltetes, nie geprüftes oder technisch kaputtes Video hinausgehen. Diese Datei ist die eine Liste der Gründe, die das verhindern. Web-Oberfläche, Web-Routen und Worker lesen dieselbe Liste.",
+  "hinweis_reihenfolge": "Die Reihenfolge ist die Reihenfolge der Anzeige: der erste zutreffende Grund ist der, der dem Nutzer genannt wird. Oben steht, was zuerst zu tun ist.",
+  "regeln": [
+    {
+      "code": "verworfen",
+      "sperrt": [
+        "herunterladen",
+        "veroeffentlichen"
+      ],
+      "text": "Dieser Vorschlag ist verworfen.",
+      "hilfe": "Zurückholen, wenn er doch hinausgehen soll."
+    },
+    {
+      "code": "clippen_laeuft",
+      "sperrt": [
+        "herunterladen",
+        "veroeffentlichen"
+      ],
+      "text": "Das Video wird gerade geclippt.",
+      "hilfe": "Kurz warten. Sobald es fertig ist, steht die Datei bereit."
+    },
+    {
+      "code": "clippen_gescheitert",
+      "sperrt": [
+        "herunterladen",
+        "veroeffentlichen"
+      ],
+      "text": "Das Clippen hat nicht geklappt.",
+      "hilfe": "Nochmal versuchen."
+    },
+    {
+      "code": "datei_fehlt",
+      "sperrt": [
+        "herunterladen",
+        "veroeffentlichen"
+      ],
+      "text": "Für diesen Clip gibt es noch keine Videodatei.",
+      "hilfe": "Einmal Video clippen."
+    },
+    {
+      "code": "inhalt_fehler",
+      "sperrt": [
+        "herunterladen",
+        "veroeffentlichen"
+      ],
+      "text": "Der Schnitt verändert, was gesagt wurde.",
+      "hilfe": "Erst im Text oder in der Timeline beheben, sonst geht etwas hinaus, das so nie gesagt wurde."
+    },
+    {
+      "code": "technik_fehler",
+      "sperrt": [
+        "herunterladen",
+        "veroeffentlichen"
+      ],
+      "text": "Die fertige Datei hat die technische Prüfung nicht bestanden.",
+      "hilfe": "Einmal neu clippen. Bleibt es dabei, bitte melden."
+    },
+    {
+      "code": "datei_veraltet",
+      "sperrt": [
+        "herunterladen",
+        "veroeffentlichen"
+      ],
+      "text": "Das geclippte Video zeigt nicht mehr, was eingestellt ist.",
+      "hilfe": "Einmal neu clippen, sonst geht ein alter Stand hinaus."
+    },
+    {
+      "code": "gast_offen",
+      "sperrt": [
+        "herunterladen",
+        "veroeffentlichen"
+      ],
+      "text": "Die Person, die du gefragt hast, hat noch nicht geantwortet.",
+      "hilfe": "Auf die Antwort warten oder die Frage zurücknehmen."
+    },
+    {
+      "code": "gast_veraltet",
+      "sperrt": [
+        "herunterladen",
+        "veroeffentlichen"
+      ],
+      "text": "Der Clip wurde nach der Freigabe geändert.",
+      "hilfe": "Die Person hat eine andere Fassung gesehen. Bitte noch einmal fragen."
+    },
+    {
+      "code": "nicht_freigegeben",
+      "sperrt": [
+        "veroeffentlichen"
+      ],
+      "text": "Der Clip ist noch nicht freigegeben.",
+      "hilfe": "Ansehen und freigeben. Herunterladen geht auch vorher."
+    },
+    {
+      "code": "vertrag_fehlt",
+      "sperrt": [
+        "veroeffentlichen"
+      ],
+      "text": "Ein Vertrag fehlt noch.",
+      "hilfe": "Den Auftragsverarbeitungsvertrag annehmen, dann geht es weiter.",
+      "href": "/rechtliches/avv"
+    },
+    {
+      "code": "tarif",
+      "sperrt": [
+        "veroeffentlichen"
+      ],
+      "text": "In deinem Tarif kannst du nicht direkt posten.",
+      "hilfe": "Herunterladen und selbst posten geht. Für das direkte Posten den Tarif wechseln.",
+      "href": "/einstellungen/abrechnung"
+    }
+  ]
+}

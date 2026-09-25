@@ -39,7 +39,6 @@ import {
   formatClipDuration,
   mediaUrl,
 } from "@/lib/clips/labels";
-import { RENDER_STEP } from "@/lib/pipeline";
 import { compositionDuration } from "@/lib/clips/render-demo";
 import { ASPECT_SIZE, PLATFORM_DEFAULT_PRESET } from "@/lib/clips/presets";
 import { FASSUNG_FORMATE, FORMAT_HILFT_BEI, fassungMoeglich } from "@/lib/clips/fassungen";
@@ -760,7 +759,9 @@ export function ClipBoard({
           {live && (
             <span className="flex items-center gap-2 text-ai-soft">
               <span className="h-1.5 w-1.5 rounded-full bg-ai-soft" aria-hidden="true" />
-              {RENDER_STEP.label} live
+              {/* Die Anzeige gilt der ganzen Liste und nicht einem Clip: „Clip wird erstellt live"
+                  stand über einer Seite, auf der gerade drei entstehen. */}
+              Clips werden erstellt
             </span>
           )}
           {connection === "error" && !allSettled && <span className="text-attention">Verbindung unterbrochen, versuche erneut</span>}

@@ -1,0 +1,73 @@
+# chopstr.io - die Warteseite veröffentlichen.
+#
+# Läuft nur, wenn sich unter site/ etwas geändert hat, und nur auf main. Damit gilt genau das,
+# was verabredet ist: auf einem Zweig arbeiten, auf main zusammenführen, und erst dann ist es
+# draussen. Ein Push auf einen Feature-Zweig ändert die Website nicht.
+#
+# Es wird nichts gebaut. site/ ist reines HTML, CSS und eine Datei JavaScript - was im Repository
+# liegt, liegt danach auf dem Server. Ohne Bauschritt kann der Bau auch nicht kaputtgehen.
+
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  # Von Hand auslösbar, falls die Seite einmal ohne Änderung neu hinaus soll.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Zwei Läufe gleichzeitig würden sich gegenseitig überholen. Der jüngere gewinnt, aber ein
+# laufender wird zu Ende gebracht: sonst steht die Seite kurz gar nicht da.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  veroeffentlichen:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ein Impressum mit Lücken ist in Österreich und Deutschland abmahnfähig. Der Lauf bricht
+      # deswegen nicht ab - es ist Ferdis Seite und seine Entscheidung, wann sie hinausgeht -
+      # aber die Warnung steht unübersehbar in der Zusammenfassung des Laufs.
+      - name: Rechtstexte auf offene Lücken prüfen
+        run: |
+          anzahl=$(grep -c 'class="luecke"' site/impressum.html site/datenschutz.html | awk -F: '{s+=$2} END {print s+0}')
+          if [ "$anzahl" -gt 0 ]; then
+            {
+              echo "### ⚠️ $anzahl offene Stelle(n) in den Rechtstexten"
+              echo ""
+              echo "Impressum oder Datenschutzerklärung enthalten noch Platzhalter."
+              echo "Vor dem Umlegen der Domain chopstr.io ausfüllen."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Ebenso: eine Warteliste ohne Ziel nimmt keine Adresse entgegen.
+      - name: Ziel der Warteliste prüfen
+        run: |
+          if grep -q '^const ENDPUNKT = "";' site/anmeldung.js; then
+            {
+              echo "### ⚠️ Die Warteliste ist noch nicht scharf geschaltet"
+              echo ""
+              echo "In site/anmeldung.js fehlt die Web-App-Adresse des Apps Script."
+              echo "Siehe site/apps-script/README.md."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: pages
+        uses: actions/deploy-pages@v4

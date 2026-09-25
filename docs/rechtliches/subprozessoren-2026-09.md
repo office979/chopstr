@@ -16,6 +16,20 @@ status: Vorlage, vor Vertragsschluss aktualisieren
 | [EU-SMTP-Anbieter] | Transaktions-E-Mails | EU | EU |
 | Stripe | Zahlungsabwicklung (nur Rechnungsdaten, keine Videos) | USA / IE | EU-Entität Stripe Payments Europe |
 
+## Website und Warteliste (chopstr.io)
+
+Betrifft nicht das Produkt, sondern nur die öffentliche Warteseite.
+
+| Subprozessor | Zweck | Sitz | Verarbeitungsort |
+|---|---|---|---|
+| GitHub | Auslieferung der statischen Seite (GitHub Pages), Server-Protokolle | USA | global (CDN) |
+| Google Ireland Limited | Warteliste: E-Mail-Adressen in Google Sheets, Eintragung über Apps Script | IE | EU, Übermittlung an Google LLC (USA) nicht ausgeschlossen |
+
+Rechtsgrundlage für die Eintragung ist die Einwilligung (Art. 6 Abs. 1 lit. a DSGVO), für die
+Drittlandübermittlung der Angemessenheitsbeschluss zum EU-US Data Privacy Framework. Diese
+Verarbeitung ist ausdrücklich vom EU-Versprechen des Produkts ausgenommen und wird auf
+chopstr.io/datenschutz.html so benannt.
+
 Hinweis: US-Konzernmütter unterliegen dem CLOUD Act. Dieses Restrisiko wird im Tarif Standard offengelegt.
 
 ## Tarif Sovereign

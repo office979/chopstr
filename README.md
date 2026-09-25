@@ -390,6 +390,36 @@ rendert ohne Overlays und meldet es im Event (`captions_burned = false`). Für T
 das PyPI-Paket `imageio-ffmpeg` ein statisches ffmpeg mit libass (`pip install imageio-ffmpeg`, Binary in den
 `PATH` verlinken). Das Docker-Image (`python:3.12-slim` + Debian-ffmpeg) bringt libass mit.
 
+## chopstr.io — die Warteseite
+
+`site/` ist eine eigenständige Website: die Landingpage als Warteliste, mit einem Feld für die
+E-Mail-Adresse. Sie liegt unter **chopstr.io** und hat mit der Anwendung nichts zu tun außer der
+Gestaltung.
+
+**Warum getrennt.** Die Landingpage in `apps/web/app/produkt/page.tsx` ist Teil der Anwendung:
+Next.js, Auth, Middleware, API-Routen, Datenbank. GitHub Pages liefert nur Dateien aus und führt
+nichts aus — die Anwendung lässt sich dort nicht hinstellen. `site/` ist deshalb reines HTML, CSS
+und eine Datei JavaScript, ohne Bauschritt. Der Preis ist eine Doppelung: ändert sich ein Token in
+`packages/design/tokens.css`, muss es in `site/styles.css` nachgezogen werden. Eine Warteseite,
+die von einem Build abhängt, ist eine Warteseite, die irgendwann nicht mehr baut.
+
+**Wie sie hinausgeht.** `.github/workflows/pages.yml` veröffentlicht `site/` bei jedem Push auf
+`main`, der etwas darunter geändert hat. Auf einem Zweig arbeiten ändert nichts an der Website;
+erst das Zusammenführen auf `main` ist der Start.
+
+**Wohin die Adressen laufen.** In ein Google Sheet, über ein Google Apps Script, dessen Quelltext
+in `site/apps-script/Code.gs` liegt. Die Einrichtung steht Schritt für Schritt in
+`site/apps-script/README.md`. Solange dort keine Adresse eingetragen ist, sagt das Formular
+ehrlich, dass die Warteliste noch nicht scharf geschaltet ist.
+
+**Was vor dem Start fehlen darf und was nicht.** `site/impressum.html` und
+`site/datenschutz.html` enthalten orange markierte Lücken (`class="luecke"`) für die Firmendaten.
+Die müssen ausgefüllt sein, bevor chopstr.io erreichbar ist: eine geschäftliche Website ohne
+vollständiges Impressum ist in Österreich und Deutschland abmahnfähig. Der Pages-Workflow schreibt
+eine Warnung in die Zusammenfassung, solange etwas offen ist, bricht aber nicht ab.
+
+**Lokal ansehen:** `python3 -m http.server 4173 --directory site`
+
 ## Arbeitsregeln
 
 - Kleine, überprüfbare Schritte. Nach jedem Schritt: was gebaut, wie getestet, was offen.

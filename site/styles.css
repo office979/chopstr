@@ -1,0 +1,463 @@
+/* chopstr · Warteliste — Design-Sprache „Lichtbruch“
+ *
+ * WARUM HIER EIGENES CSS STEHT. Die Landingpage in apps/web/app/produkt/page.tsx ist Teil der
+ * Anwendung: Next.js, Tailwind, Auth, Middleware, API-Routen. GitHub Pages liefert nur Dateien
+ * aus und führt nichts aus - die Anwendung lässt sich dort nicht hinstellen. Diese Seite ist
+ * deshalb eine eigenständige Datei ohne Bauschritt, die dieselbe Sprache spricht.
+ *
+ * Der Preis ist eine Doppelung: ändert sich ein Token in packages/design/tokens.css, muss es hier
+ * nachgezogen werden. Das ist bewusst in Kauf genommen - eine Warteseite, die von einem Build
+ * abhängt, ist eine Warteseite, die irgendwann nicht mehr baut.
+ */
+
+@font-face {
+  font-family: "Geist";
+  src: url("fonts/Geist-Variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --bg: #000000;
+  --glass: rgba(255, 255, 255, 0.05);
+
+  --text: #f4f5fe;
+  --text-2: #a1a1aa;
+  --text-3: #71717a;
+
+  --line: rgba(255, 255, 255, 0.12);
+  --line-strong: rgba(255, 255, 255, 0.18);
+
+  --brand: #020cf5;
+  --ai: #2f6bff;
+  --ai-soft: #5b8cff;
+  --attention: #ff7a45;
+  --danger: #ff5c5c;
+  --gut: #3fd27e;
+
+  --radius-card: 30px;
+  --radius-inner: 18px;
+  --radius-pill: 999px;
+
+  --ease: cubic-bezier(0.22, 0.8, 0.2, 1);
+  --dur-fast: 220ms;
+
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --tracking-display: -0.03em;
+
+  --breite: 1200px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 1ms; }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+}
+
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: var(--tracking-display); line-height: 1.1; }
+p { margin: 0; }
+ul, ol { margin: 0; padding: 0; list-style: none; }
+a { color: inherit; }
+img, svg { display: block; max-width: 100%; }
+
+/* --- Hintergrund: driftende Blasen, wie in der Anwendung ------------------------------------ */
+
+.blasen {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.blase { position: absolute; border-radius: 9999px; filter: blur(120px); will-change: transform; }
+.blase-a { width: 46vw; height: 46vw; left: 12vw; top: -18vw; background: rgba(2, 12, 245, 0.38); animation: drift 28s var(--ease) infinite alternate; }
+.blase-b { width: 34vw; height: 34vw; right: -10vw; top: 22vh; background: rgba(2, 12, 245, 0.28); animation: drift 34s var(--ease) infinite alternate-reverse; }
+.blase-c { width: 52vw; height: 40vw; left: 28vw; bottom: -26vw; background: rgba(27, 26, 98, 0.7); animation: drift 40s var(--ease) infinite alternate; }
+.blase-d { width: 22vw; height: 22vw; left: -6vw; top: 48vh; background: rgba(47, 107, 255, 0.18); animation: drift 30s var(--ease) infinite alternate-reverse; }
+@keyframes drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(4vw, 3vh, 0) scale(1.12); }
+}
+@media (max-width: 1023px) {
+  .blase { filter: blur(80px); }
+  .blase-a { width: 90vw; height: 90vw; left: -10vw; top: -40vw; }
+  .blase-b { width: 70vw; height: 70vw; }
+}
+@media (prefers-reduced-motion: reduce) { .blase { animation: none; } }
+
+/* --- Gerüst ---------------------------------------------------------------------------------- */
+
+.inhalt { position: relative; z-index: 10; }
+.mitte { margin: 0 auto; max-width: var(--breite); padding-left: 16px; padding-right: 16px; }
+@media (min-width: 640px) { .mitte { padding-left: 32px; padding-right: 32px; } }
+
+.kopf {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(20px);
+}
+.kopf-reihe { display: flex; height: 64px; align-items: center; gap: 24px; }
+.kopf-aktion { margin-left: auto; }
+
+/* Sprung zum Inhalt: sichtbar nur, wenn er den Fokus hat. */
+.sprung {
+  position: absolute;
+  left: -9999px;
+  top: 8px;
+  z-index: 50;
+  border-radius: var(--radius-pill);
+  background: var(--text);
+  color: #000;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.sprung:focus { left: 16px; }
+
+/* --- Abschnitte ------------------------------------------------------------------------------ */
+
+.abschnitt { padding-top: 80px; padding-bottom: 80px; scroll-margin-top: 80px; }
+@media (min-width: 640px) { .abschnitt { padding-top: 112px; padding-bottom: 112px; } }
+
+.abschnitt-kopf { margin: 0 auto 48px; max-width: 720px; text-align: center; }
+.augenbraue { font-size: 14px; font-weight: 500; color: var(--ai-soft); }
+.abschnitt-titel { margin-top: 12px; font-size: 30px; }
+@media (min-width: 640px) { .abschnitt-titel { font-size: 48px; } }
+
+/* --- Hero ------------------------------------------------------------------------------------ */
+
+.hero { padding-top: 64px; padding-bottom: 64px; text-align: center; }
+@media (min-width: 640px) { .hero { padding-top: 96px; } }
+
+.plakette {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 6px 12px;
+  font-size: 14px;
+  color: var(--text-2);
+}
+.punkt { width: 6px; height: 6px; border-radius: 9999px; background: var(--ai-soft); }
+.punkt-puls { animation: pulsieren 2.4s var(--ease) infinite; }
+@keyframes pulsieren {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.8); }
+}
+@media (prefers-reduced-motion: reduce) { .punkt-puls { animation: none; } }
+
+.hero-titel { margin: 24px auto 0; max-width: 900px; font-size: 38px; line-height: 1.05; }
+@media (min-width: 640px) { .hero-titel { font-size: 60px; } }
+@media (min-width: 1024px) { .hero-titel { font-size: 72px; } }
+
+.hero-text { margin: 24px auto 0; max-width: 640px; font-size: 18px; line-height: 1.6; color: var(--text-2); }
+@media (min-width: 640px) { .hero-text { font-size: 20px; } }
+
+.haken-liste {
+  margin: 20px auto 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 20px;
+  font-size: 14px;
+  color: var(--text-3);
+}
+.haken { display: flex; align-items: center; gap: 8px; }
+.haken svg { color: var(--ai-soft); }
+
+/* --- Das Anmeldefeld ------------------------------------------------------------------------- */
+
+.warteliste { margin: 36px auto 0; max-width: 520px; text-align: left; }
+
+.feldreihe { display: flex; flex-direction: column; gap: 10px; }
+@media (min-width: 520px) { .feldreihe { flex-direction: row; } }
+
+.feld {
+  flex: 1;
+  height: 52px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.45);
+  padding: 0 22px;
+  font-family: inherit;
+  font-size: 16px;
+  color: var(--text);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.feld::placeholder { color: var(--text-3); }
+.feld:hover { border-color: var(--line-strong); }
+.feld:focus { outline: none; border-color: rgba(255, 255, 255, 0.5); }
+.feld[aria-invalid="true"] { border-color: var(--danger); }
+
+.knopf {
+  display: inline-flex;
+  height: 52px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--text);
+  padding: 0 28px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  color: #000;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.knopf:hover { background: #fff; box-shadow: 0 0 32px rgba(244, 245, 254, 0.25); }
+.knopf:disabled { opacity: 0.55; cursor: default; box-shadow: none; }
+
+.knopf-rand {
+  display: inline-flex;
+  height: 48px;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  padding: 0 28px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.knopf-rand:hover { border-color: rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.05); }
+
+.knopf-klein { height: 40px; padding: 0 20px; font-size: 14px; }
+
+/* Sichtbar nur für Vorleseprogramme. Das Feld trägt einen Platzhalter, aber ein Platzhalter ist
+   keine Beschriftung: er verschwindet beim Tippen, und Vorleseprogramme lesen ihn nicht verlässlich. */
+.nur-vorlesen {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Die Falle für Maschinen. Nicht display:none - manche Ausfüllroboter überspringen das; ein Feld
+   ausserhalb des Bildes füllen sie aus, Menschen sehen es nie. */
+.falle {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.einwilligung {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+.einwilligung input {
+  margin: 2px 0 0;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: var(--brand);
+}
+.einwilligung a { color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; }
+.einwilligung a:hover { color: var(--text); }
+
+.meldung { margin-top: 14px; font-size: 14px; line-height: 1.5; }
+.meldung-fehler { color: var(--danger); }
+.meldung-warte { color: var(--text-2); }
+
+.erfolg {
+  margin: 36px auto 0;
+  max-width: 520px;
+  border-radius: var(--radius-inner);
+  border: 1px solid rgba(63, 210, 126, 0.35);
+  background: rgba(63, 210, 126, 0.1);
+  padding: 22px 24px;
+  text-align: left;
+}
+.erfolg-titel { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 500; color: var(--text); }
+.erfolg-titel svg { color: var(--gut); flex: none; }
+.erfolg p { margin-top: 8px; font-size: 14px; line-height: 1.6; color: var(--text-2); }
+
+/* --- Karten ---------------------------------------------------------------------------------- */
+
+.raster { display: grid; gap: 16px; }
+@media (min-width: 768px) {
+  .raster-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .raster-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+@media (min-width: 640px) { .raster-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .raster-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.spalte-4 { grid-column: span 4; }
+.spalte-2 { grid-column: span 2; }
+@media (max-width: 767px) { .spalte-4, .spalte-2 { grid-column: span 1; } }
+
+.karte {
+  border-radius: var(--radius-card);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 24px;
+}
+@media (min-width: 640px) { .karte { padding: 32px; } }
+.karte h3 { font-size: 18px; font-weight: 500; }
+@media (min-width: 640px) { .karte h3 { font-size: 20px; } }
+.karte p { margin-top: 8px; line-height: 1.6; color: var(--text-2); }
+
+.kreis {
+  display: flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: rgba(255, 122, 69, 0.15);
+  color: var(--attention);
+  margin-bottom: 20px;
+}
+.ziffer {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 1px solid rgba(2, 12, 245, 0.6);
+  background: rgba(2, 12, 245, 0.3);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+  margin-bottom: 20px;
+}
+
+.beleg-wert { font-family: var(--font-mono); font-size: 28px; font-weight: 500; letter-spacing: -0.02em; }
+.beleg-text { margin-top: 12px; font-size: 14px; line-height: 1.6; color: var(--text-2); }
+
+.zitat-vorher, .zitat-nachher {
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.zitat-vorher { background: rgba(255, 255, 255, 0.05); color: var(--text-3); text-decoration: line-through; text-decoration-color: rgba(255, 92, 92, 0.7); }
+.zitat-nachher { background: rgba(47, 107, 255, 0.1); color: var(--text); margin-top: 8px; }
+.zitat-nachher em { font-style: normal; color: var(--ai-soft); }
+
+/* --- Plattformleiste -------------------------------------------------------------------------- */
+
+.plattformen { border-top: 1px solid rgba(255, 255, 255, 0.06); border-bottom: 1px solid rgba(255, 255, 255, 0.06); background: rgba(0, 0, 0, 0.3); }
+.plattformen-reihe { display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 32px 0; }
+@media (min-width: 640px) { .plattformen-reihe { flex-direction: row; justify-content: space-between; } }
+.plattformen-reihe ul { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 40px; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-2); }
+
+/* --- Fragen ------------------------------------------------------------------------------------ */
+
+.fragen { margin: 0 auto; max-width: 820px; display: flex; flex-direction: column; gap: 12px; }
+.frage {
+  border-radius: var(--radius-inner);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 16px 20px;
+}
+.frage[open] { background: rgba(255, 255, 255, 0.05); }
+.frage summary {
+  display: flex;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 16px;
+  font-weight: 500;
+}
+.frage summary::-webkit-details-marker { display: none; }
+.frage summary span { color: var(--text-3); transition: transform var(--dur-fast) var(--ease); flex: none; }
+.frage[open] summary span { transform: rotate(45deg); }
+.frage p { margin-top: 12px; line-height: 1.6; color: var(--text-2); }
+
+/* --- Abschluss und Fuß -------------------------------------------------------------------------- */
+
+.abschluss {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(135deg, rgba(2, 12, 245, 0.42) 0%, rgba(20, 34, 255, 0.22) 45%, rgba(27, 26, 98, 0.35) 100%);
+  padding: 56px 24px;
+  text-align: center;
+  margin-bottom: 96px;
+}
+@media (min-width: 640px) { .abschluss { padding: 80px 48px; } }
+.abschluss h2 { margin: 0 auto; max-width: 720px; font-size: 28px; color: #fff; }
+@media (min-width: 640px) { .abschluss h2 { font-size: 44px; } }
+.abschluss > p { margin: 16px auto 0; max-width: 520px; font-size: 18px; color: rgba(255, 255, 255, 0.75); }
+
+.fuss { position: relative; z-index: 10; border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.fuss-reihe {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 32px 0;
+  font-size: 14px;
+  color: var(--text-3);
+}
+@media (min-width: 640px) { .fuss-reihe { flex-direction: row; align-items: center; justify-content: space-between; } }
+.fuss-reihe ul { display: flex; flex-wrap: wrap; gap: 20px; }
+.fuss-reihe a { text-decoration: none; }
+.fuss-reihe a:hover { color: var(--text-2); }
+
+/* --- Rechtstexte --------------------------------------------------------------------------------- */
+
+.rechtstext { margin: 0 auto; max-width: 760px; padding-top: 56px; padding-bottom: 96px; }
+.rechtstext h1 { font-size: 34px; }
+.rechtstext h2 { margin-top: 40px; font-size: 21px; }
+.rechtstext p, .rechtstext li { margin-top: 12px; line-height: 1.7; color: var(--text-2); }
+.rechtstext ul { list-style: disc; padding-left: 22px; }
+.rechtstext a { color: var(--ai-soft); }
+.rechtstext dl { margin-top: 12px; }
+.rechtstext dt { margin-top: 12px; font-weight: 500; color: var(--text); }
+.rechtstext dd { margin: 4px 0 0; color: var(--text-2); }
+.luecke {
+  border-radius: 8px;
+  border: 1px dashed rgba(255, 122, 69, 0.6);
+  background: rgba(255, 122, 69, 0.1);
+  padding: 2px 8px;
+  color: var(--attention);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.hinweiskasten {
+  margin-top: 24px;
+  border-radius: var(--radius-inner);
+  border: 1px solid rgba(255, 122, 69, 0.4);
+  background: rgba(255, 122, 69, 0.08);
+  padding: 18px 22px;
+}
+.hinweiskasten p { margin-top: 0; color: var(--text-2); }

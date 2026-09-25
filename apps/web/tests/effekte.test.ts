@@ -14,6 +14,7 @@ import {
   gleich,
   hinzufuegen,
   lesen,
+  ANSTIEG_S,
   MIN_DAUER_S,
   STAERKE,
   verschieben,
@@ -23,41 +24,49 @@ import {
 const e = (art: "zoom_in" | "zoom_out", ab: number, dauer: number): Effekt => ({ art, ab_s: ab, dauer_s: dauer });
 
 describe("die Bewegung", () => {
-  it("geht bei „näher heran“ schnell rein und langsam raus", () => {
-    const x = [e("zoom_in", 2, 1.4)];
+  it("fährt bei „Zoom in“ sanft hinein und bleibt dann", () => {
+    /* Vorher fuhr er wieder zurück, solange der Block lief. Das sah aus wie Wackeln. */
+    const x = [e("zoom_in", 2, 2)];
     expect(faktor(x, 1.9)).toBe(1);
     expect(faktor(x, 2)).toBe(1);
-    expect(faktor(x, 2 + 1.4 * 0.18)).toBeCloseTo(1 + STAERKE, 9);
-    const frueh = faktor(x, 2.6) - faktor(x, 2.9);
-    const spaet = faktor(x, 3.0) - faktor(x, 3.3);
-    expect(frueh).toBeGreaterThan(spaet);
-    expect(spaet).toBeGreaterThan(0);
+    expect(faktor(x, 2 + ANSTIEG_S)).toBeCloseTo(1 + STAERKE, 9);
+    for (const t of [2.5, 3, 3.5, 4]) expect(faktor(x, t)).toBeCloseTo(1 + STAERKE, 9);
+    expect(faktor(x, 4.01)).toBe(1);
   });
 
-  it("macht das Bild bei „Zoom out“ kleiner", () => {
-    /* Spiegelbild von „Zoom in": schnell kleiner, dann langsam zurück. Rundherum steht Schwarz. */
-    const x = [e("zoom_out", 0, 1)];
+  it("fährt ohne Knick los und kommt ohne Knick an", () => {
+    /* Ein linearer Anstieg setzt sichtbar an und bricht sichtbar ab - genau das nimmt man als
+     * Ruckeln wahr. Die Steigung muss an beiden Enden gegen null gehen. */
+    const x = [e("zoom_in", 0, 2)];
+    const steigung = (t: number) => (faktor(x, t + 0.01) - faktor(x, t)) / 0.01;
+    expect(Math.abs(steigung(0))).toBeLessThan(0.05);
+    expect(Math.abs(steigung(ANSTIEG_S - 0.02))).toBeLessThan(0.15);
+    expect(steigung(ANSTIEG_S / 2)).toBeGreaterThan(0.2);
+  });
+
+  it("macht das Bild bei „Zoom out“ kleiner und lässt es so", () => {
+    const x = [e("zoom_out", 0, 2)];
     expect(faktor(x, 0)).toBeCloseTo(1, 9);
-    expect(faktor(x, 0.18)).toBeCloseTo(1 - STAERKE, 9);
-    expect(faktor(x, 0.5)).toBeLessThan(1);
-    expect(faktor(x, 1)).toBeCloseTo(1, 9);
+    expect(faktor(x, ANSTIEG_S)).toBeCloseTo(1 - STAERKE, 9);
+    expect(faktor(x, 1.5)).toBeCloseTo(1 - STAERKE, 9);
   });
 
-  it("endet immer wieder bei eins", () => {
+  it("wirkt nur, solange sein Block läuft", () => {
     /* Sonst addieren sich zwei Effekte, und nach dem dritten ist das Bild eine Briefmarke. */
     for (const art of ["zoom_in", "zoom_out"] as const) {
-      expect(faktor([e(art, 1, 1.5)], 2.5)).toBeCloseTo(1, 9);
+      expect(faktor([e(art, 1, 1.5)], 2.51)).toBe(1);
       expect(faktor([e(art, 1, 1.5)], 9)).toBe(1);
     }
   });
 
   it("stimmt mit den Werten des Renderers überein", () => {
     /* Abgelesen aus pipeline/effekte.py. Zwei Umsetzungen derselben Kurve brauchen einen Anker. */
-    const x = [e("zoom_in", 1, 1)];
-    expect(faktor(x, 1.18)).toBeCloseTo(1.1, 4);
-    expect(faktor(x, 1.5)).toBeCloseTo(1.0372, 4);
-    expect(faktor(x, 2)).toBeCloseTo(1, 4);
-    expect(faktor([e("zoom_out", 1, 1)], 1.5)).toBeCloseTo(0.9628, 4);
+    const x = [e("zoom_in", 1, 2)];
+    expect(faktor(x, 1.1)).toBeCloseTo(1.0126, 4);
+    expect(faktor(x, 1.25)).toBeCloseTo(1.0583, 4);
+    expect(faktor(x, 1.45)).toBeCloseTo(1.1, 4);
+    expect(faktor(x, 2.5)).toBeCloseTo(1.1, 4);
+    expect(faktor([e("zoom_out", 1, 1)], 1.2)).toBeCloseTo(0.9583, 4);
   });
 });
 

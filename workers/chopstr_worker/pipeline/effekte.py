@@ -4,10 +4,15 @@ WOZU. Ein Zoom betont. Bisher kannte der Renderer nur einen langsamen Push-in ü
 Einstellung (``motion.zoom_to``) - eine Grundbewegung, die immer läuft und nichts hervorhebt. Was
 fehlte, war die Stelle: „hier, auf dieses Wort, für anderthalb Sekunden".
 
-DIE BEWEGUNG. „Hinein" geht schnell näher heran und lässt langsam wieder los. „Heraus" ist sein
-Spiegelbild: das Bild wird kleiner, und rundherum steht Schwarz. Beide enden wieder bei 1,0, damit
-ein Effekt nie einen Zustand hinterlässt - zwei Effekte hintereinander addieren sich sonst, und
-nach dem dritten ist das Bild eine Briefmarke.
+DIE BEWEGUNG. Sanft hinein, dann BLEIBEN. Der Zoom fährt über ``ANSTIEG`` Sekunden weich auf seinen
+Wert und hält ihn bis zum Ende des Blocks; dort endet der Effekt, und das Bild ist wieder normal.
+Das ist der Punch-in, wie ihn Kurzvideos benutzen.
+
+Vorher fuhr er wieder zurück, solange der Block lief. Das sah aus wie Wackeln: eine Bewegung hin
+und gleich wieder her, mitten im Satz. Wer betonen will, geht näher heran und BLEIBT dort, solange
+der Satz dauert.
+
+„Heraus" ist das Spiegelbild: das Bild wird kleiner, rundherum steht Schwarz.
 
 WARUM ES EINEN RAND BRAUCHT. Kleiner zu werden heisst, mehr zu zeigen als da ist. ``zoompan`` kann
 nur hineingehen (``z >= 1``). Deshalb wird das Bild vor dem Zoom auf eine grössere schwarze Fläche
@@ -39,8 +44,10 @@ STANDARD_DAUER_S = 1.0
 # kostet Aufloesung, weil das Bild vorher hochskaliert werden muss.
 RESERVE = 1.25
 
-# Anteil der Dauer, in dem „hinein" sein Ziel erreicht. Kurz, deshalb wirkt es wie ein Schlag.
-ANSTIEG = 0.18
+# Wie lange die Fahrt dauert, in Sekunden. Danach steht das Bild still. Eine feste Zeit und kein
+# Anteil der Dauer: ein Block von vier Sekunden soll nicht viermal so langsam hineinfahren wie
+# einer von einer Sekunde - die Fahrt ist immer dieselbe Bewegung, nur das Halten wird länger.
+ANSTIEG_S = 0.45
 
 # Zwei Betonungen dicht hintereinander heben sich auf: das Bild wackelt, und betont ist nichts
 # mehr. Mindestens so viele Sekunden zwischen zwei automatisch gesetzten Effekten.
@@ -121,25 +128,27 @@ def faktor(effekte: list[Effekt], t: float) -> float:
     die Tests halten die anderen daran fest."""
     z = 1.0
     for e in effekte:
-        u = (t - e.ab_s) / e.dauer_s
-        if u < 0.0 or u > 1.0:
+        if t < e.ab_s or t > e.ab_s + e.dauer_s:
             continue
-        z += _vorzeichen(e.art) * STAERKE * _form(u)
+        z += _vorzeichen(e.art) * STAERKE * _form(t - e.ab_s, e.dauer_s)
     return z
 
 
-def _form(u: float) -> float:
-    """Der Verlauf von 0 bis 1 über die Dauer, als Anteil der vollen Stärke.
+def _form(t_im_effekt: float, dauer_s: float) -> float:
+    """Der Verlauf über den Block, als Anteil der vollen Stärke: 0 am Anfang, 1 ab dem Ende der Fahrt.
 
-    In ``ANSTIEG`` schnell auf 1, danach sanft zurück auf 0 (quadratisch, also am Anfang schneller
-    als am Ende - das ist das „Ausfaden"). Beide Arten teilen sich diese Kurve; sie unterscheiden
-    sich nur im Vorzeichen."""
-    if u <= ANSTIEG:
-        # Smoothstep: startet und endet ohne Knick, sonst sieht man den Ansatz.
-        x = u / ANSTIEG
-        return x * x * (3.0 - 2.0 * x)
-    rest = (u - ANSTIEG) / (1.0 - ANSTIEG)
-    return (1.0 - rest) ** 2
+    Smoothstep für die Fahrt: sie startet und endet ohne Knick. Ein linearer Anstieg setzt sichtbar
+    an und bricht sichtbar ab, und genau das nimmt man als Ruckeln wahr.
+
+    Danach bleibt der Wert auf 1. Beide Arten teilen sich die Kurve und unterscheiden sich nur im
+    Vorzeichen."""
+    fahrt = min(ANSTIEG_S, dauer_s)
+    if fahrt <= 0:
+        return 1.0
+    if t_im_effekt >= fahrt:
+        return 1.0
+    x = max(0.0, t_im_effekt) / fahrt
+    return x * x * (3.0 - 2.0 * x)
 
 
 def _vorzeichen(art: str) -> float:
@@ -159,13 +168,12 @@ def ffmpeg_ausdruck(effekte: list[Effekt], fps: float) -> str:
         return f"{RESERVE:.4f}"
     teile = ["1"]
     for e in effekte:
-        u = f"((on/{fps:g})-{e.ab_s:.3f})/{e.dauer_s:.3f}"
+        fahrt = min(ANSTIEG_S, e.dauer_s)
+        seit = f"((on/{fps:g})-{e.ab_s:.3f})"
         drin = f"between(on/{fps:g},{e.ab_s:.3f},{e.ab_s + e.dauer_s:.3f})"
-        x = f"(({u})/{ANSTIEG:.3f})"
-        anstieg = f"({x}*{x}*(3-2*{x}))"
-        rest = f"((({u})-{ANSTIEG:.3f})/{1.0 - ANSTIEG:.3f})"
-        form = f"if(lte({u},{ANSTIEG:.3f}),{anstieg},pow(1-{rest},2))"
-        teile.append(f"if({drin},{_vorzeichen(e.art) * STAERKE:.4f}*({form}),0)")
+        x = f"min(1,max(0,{seit}/{fahrt:.3f}))"
+        form = f"({x}*{x}*(3-2*({x})))"
+        teile.append(f"if({drin},{_vorzeichen(e.art) * STAERKE:.4f}*{form},0)")
     return f"{RESERVE:.4f}*(" + "+".join(teile) + ")"
 
 

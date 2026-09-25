@@ -177,9 +177,10 @@ in **Clipzeit**; beim ersten Clippen setzt `workers/chopstr_worker/pipeline/effe
 welche, dort wo eine Zahl oder eine Ankündigung fällt. Im Editor stehen sie unter „Effekte“ und als
 eigene Spur in der Zeitleiste: verschieben, länger ziehen, entfernen.
 
-„Zoom in“ geht schnell näher heran und lässt langsam los, „Zoom out“ ist sein Spiegelbild: das Bild
-wird kleiner, rundherum steht Schwarz. Beide enden wieder bei 1,0 – sonst addieren sich zwei
-Effekte, und nach dem dritten ist das Bild eine Briefmarke.
+„Zoom in“ fährt sanft näher heran und BLEIBT dort, solange der Block dauert; am Blockende ist das
+Bild wieder normal. Das ist der Punch-in, wie ihn Kurzvideos benutzen. „Zoom out“ ist sein
+Spiegelbild: das Bild wird kleiner, rundherum steht Schwarz. Ein Effekt wirkt nur, solange sein Block läuft – sonst addieren
+sich zwei, und nach dem dritten ist das Bild eine Briefmarke.
 
 Kleiner zu werden heisst, mehr zu zeigen als da ist; `zoompan` kann nur hineingehen. Deshalb liegt
 das Bild vor dem Zoom auf einer grösseren schwarzen Fläche (`RESERVE`), und der Ruhezustand ist

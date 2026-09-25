@@ -185,6 +185,10 @@ export function Timeline({
     [ausX, onMarkeVerschieben],
   );
 
+  /* Welcher Block angeklickt ist. Ein schmaler Block hat keinen Platz für Knöpfe; ausgewählt
+   * bekommt er darunter eine Zeile mit dem, was möglich ist. */
+  const [effektWahl, setEffektWahl] = useState<number | null>(null);
+
   /* Was gerade gezogen wird. Nur für die Anzeige: gespeichert wird beim Loslassen. */
   const [ziehtEffekt, setZiehtEffekt] = useState<{ index: number; was: "verschieben" | "dauer"; wert: number } | null>(
     null,
@@ -550,55 +554,89 @@ export function Timeline({
 
           {/* Effekte: eine eigene Spur.
               Die Blöcke liegen in Clipzeit und werden für die Anzeige in Quellzeit umgerechnet -
-              deshalb wandert ein Effekt mit, wenn davor etwas herausgeschnitten wird. */}
+              deshalb wandert ein Effekt mit, wenn davor etwas herausgeschnitten wird.
+
+              Ein Block von einer Sekunde ist bei einem Video von einer Minute neun Bildpunkte
+              breit. Darin war das Kreuz zum Entfernen breiter als der Block und verdeckte alles,
+              auch den Griff zum Ziehen. Deshalb: eine Mindestbreite zum Fassen, und die Knöpfe
+              erscheinen erst, wenn wirklich Platz ist. Solange keiner da ist, wird der gewählte
+              Block mit der Entfernen-Taste gelöscht. */}
           <div className="relative mt-1 h-7 w-full rounded-[6px] bg-black/25">
             {effekteSicht.map((e, i) => {
               const vonQ = inQuellzeit(schnitt, e.ab_s);
               const bisQ = inQuellzeit(schnitt, e.ab_s + e.dauer_s);
               if (!(bisQ > vonQ)) return null;
+              const anteilBreite = (bisQ - vonQ) / sichtbar;
+              const breitePx = anteilBreite * breite;
+              const platzFuerKnoepfe = breitePx >= 66;
+              const gewaehlt = effektWahl === i;
               return (
                 <div
                   key={`${e.art}-${e.ab_s}`}
                   onPointerDown={canEdit ? effektZiehen(i, "verschieben") : undefined}
                   className={cn(
-                    "absolute top-0 flex h-full items-center overflow-hidden rounded-[6px] border border-ai/60 bg-ai/20 px-2",
+                    "absolute top-0 flex h-full items-center overflow-hidden rounded-[6px] border px-1",
+                    gewaehlt ? "border-white bg-ai/35" : "border-ai/60 bg-ai/20",
                     canEdit && "cursor-grab",
                   )}
-                  style={{ left: `${anteil(vonQ) * 100}%`, width: `${((bisQ - vonQ) / sichtbar) * 100}%` }}
+                  style={{ left: `${anteil(vonQ) * 100}%`, width: `${anteilBreite * 100}%`, minWidth: 28 }}
                   title={`${EFFEKT_LABEL[e.art]} ab ${e.ab_s.toFixed(1)} s, ${e.dauer_s.toFixed(1)} s lang`}
                 >
-                  <span className="truncate text-[11px] text-text-2">{EFFEKT_LABEL[e.art]}</span>
+                  {platzFuerKnoepfe && (
+                    <span className="truncate pl-1 text-[11px] text-text-2">{EFFEKT_LABEL[e.art]}</span>
+                  )}
                   {canEdit && (
                     <>
-                      {/* Rechter Rand: länger oder kürzer ziehen. */}
-                      <button
-                        type="button"
-                        onPointerDown={effektZiehen(i, "dauer")}
-                        onKeyDown={(ev) => {
-                          const schritt = ev.shiftKey ? 0.5 : 0.1;
-                          const ziel =
-                            e.dauer_s + (ev.key === "ArrowLeft" ? -schritt : ev.key === "ArrowRight" ? schritt : 0);
-                          if (ziel === e.dauer_s) return;
-                          ev.preventDefault();
-                          ev.stopPropagation();
-                          onEffektDauer(i, Math.round(ziel * 100) / 100);
-                        }}
-                        aria-label={`${EFFEKT_LABEL[e.art]} länger oder kürzer machen, mit Pfeiltasten oder Ziehen`}
-                        className="absolute right-5 top-0 h-full w-3 cursor-ew-resize focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
-                      >
-                        <span className="mx-auto block h-full w-[3px] bg-ai" />
-                      </button>
+                      {/* Der ganze Block ist ein Ziel für die Tastatur: auswählen, mit den
+                          Pfeiltasten schieben, mit Entfernen löschen. Ohne das wäre ein schmaler
+                          Block nur mit der Maus erreichbar. */}
                       <button
                         type="button"
                         onPointerDown={(ev) => ev.stopPropagation()}
-                        onClick={() => onEffektWeg(i)}
-                        aria-label={`${EFFEKT_LABEL[e.art]} bei ${e.ab_s.toFixed(1)} Sekunden entfernen`}
-                        className="transition-soft absolute right-0.5 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full text-text-3 hover:bg-white/10 hover:text-text focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
-                      >
-                        <svg width="8" height="8" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-                          <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                        </svg>
-                      </button>
+                        onClick={() => setEffektWahl(gewaehlt ? null : i)}
+                        onKeyDown={(ev) => {
+                          if (ev.key === "Delete" || ev.key === "Backspace") {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            onEffektWeg(i);
+                            setEffektWahl(null);
+                            return;
+                          }
+                          const schritt = ev.shiftKey ? 1 : 0.1;
+                          const ziel = e.ab_s + (ev.key === "ArrowLeft" ? -schritt : ev.key === "ArrowRight" ? schritt : 0);
+                          if (ziel === e.ab_s) return;
+                          ev.preventDefault();
+                          ev.stopPropagation();
+                          onEffektVerschieben(i, Math.max(0, Math.round(ziel * 100) / 100));
+                        }}
+                        aria-label={`${EFFEKT_LABEL[e.art]} ab ${e.ab_s.toFixed(1)} Sekunden, ${e.dauer_s.toFixed(1)} Sekunden lang. Pfeiltasten verschieben, Entfernen löscht.`}
+                        className="absolute inset-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/70"
+                      />
+                      {/* Rechter Rand: länger oder kürzer ziehen. Nur wenn Platz ist - sonst läge
+                          der Griff über dem ganzen Block und das Verschieben ginge nicht mehr. */}
+                      {platzFuerKnoepfe && (
+                        <>
+                          <button
+                            type="button"
+                            onPointerDown={effektZiehen(i, "dauer")}
+                            aria-label={`${EFFEKT_LABEL[e.art]} länger oder kürzer ziehen`}
+                            className="absolute right-5 top-0 h-full w-3 cursor-ew-resize focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
+                          >
+                            <span className="mx-auto block h-full w-[3px] bg-ai" />
+                          </button>
+                          <button
+                            type="button"
+                            onPointerDown={(ev) => ev.stopPropagation()}
+                            onClick={() => onEffektWeg(i)}
+                            aria-label={`${EFFEKT_LABEL[e.art]} bei ${e.ab_s.toFixed(1)} Sekunden entfernen`}
+                            className="transition-soft absolute right-0.5 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full text-text-3 hover:bg-white/10 hover:text-text focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
+                          >
+                            <svg width="8" height="8" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                              <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                            </svg>
+                          </button>
+                        </>
+                      )}
                     </>
                   )}
                 </div>
@@ -610,6 +648,42 @@ export function Timeline({
               </span>
             )}
           </div>
+
+          {/* Was mit dem gewählten Block geht, in Worten. Bei einem Block von neun Bildpunkten
+              passt kein Kreuz hinein, und ohne diese Zeile wüsste niemand, wie er ihn loswird. */}
+          {canEdit && effektWahl != null && effekteSicht[effektWahl] && (
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-2">
+              <span>
+                {EFFEKT_LABEL[effekteSicht[effektWahl].art]} ab {effekteSicht[effektWahl].ab_s.toFixed(1)} s,{" "}
+                {effekteSicht[effektWahl].dauer_s.toFixed(1)} s lang
+              </span>
+              <button
+                type="button"
+                onClick={() => onEffektDauer(effektWahl, Math.max(MIN_DAUER_S, effekteSicht[effektWahl].dauer_s - 0.5))}
+                className="transition-soft rounded-pill border border-line px-2 py-0.5 hover:border-line-strong hover:text-text"
+              >
+                kürzer
+              </button>
+              <button
+                type="button"
+                onClick={() => onEffektDauer(effektWahl, effekteSicht[effektWahl].dauer_s + 0.5)}
+                className="transition-soft rounded-pill border border-line px-2 py-0.5 hover:border-line-strong hover:text-text"
+              >
+                länger
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onEffektWeg(effektWahl);
+                  setEffektWahl(null);
+                }}
+                className="transition-soft rounded-pill border border-line px-2 py-0.5 hover:border-danger/50 hover:text-danger"
+              >
+                entfernen
+              </button>
+              <span className="text-text-3">Pfeiltasten verschieben, Entfernen löscht.</span>
+            </div>
+          )}
 
           {/* Der Abspielkopf über allem */}
           <div

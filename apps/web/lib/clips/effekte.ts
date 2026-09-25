@@ -26,15 +26,17 @@ export const EFFEKT_LABEL: Record<EffektArt, string> = {
 /* Was der Effekt tut, in einem Satz. Steht in der Auswahl, damit niemand raten muss, was
  * „Näher heran" im fertigen Video heisst. */
 export const EFFEKT_SATZ: Record<EffektArt, string> = {
-  zoom_in: "Geht schnell näher heran und lässt langsam wieder los. Betont ein Wort.",
-  zoom_out: "Macht das Bild kurz kleiner, rundherum steht Schwarz. Setzt eine Zäsur.",
+  zoom_in: "Fährt sanft näher heran und bleibt dort, solange der Block dauert.",
+  zoom_out: "Fährt sanft heraus, rundherum steht Schwarz, und bleibt dort.",
 };
 
 export const STAERKE = 0.1;
 export const MIN_DAUER_S = 0.4;
 export const MAX_DAUER_S = 6;
 export const STANDARD_DAUER_S = 1;
-const ANSTIEG = 0.18;
+/* Wie lange die Fahrt dauert, in Sekunden. Danach steht das Bild still. Spiegel von
+ * pipeline/effekte.ANSTIEG_S. */
+export const ANSTIEG_S = 0.45;
 
 function zahl(v: unknown, ersatz: number): number {
   const f = typeof v === "number" ? v : Number(v);
@@ -82,25 +84,23 @@ export function entzerren(effekte: Effekt[]): Effekt[] {
   return aus;
 }
 
-/* Der Verlauf über die Dauer: schnell auf volle Stärke, dann sanft zurück auf null. Beide Arten
- * teilen sich die Kurve und unterscheiden sich nur im Vorzeichen - „out" macht das Bild kleiner,
- * und rundherum steht Schwarz. Spiegel von pipeline/effekte._form. */
-function form(u: number): number {
-  if (u <= ANSTIEG) {
-    const x = u / ANSTIEG;
-    return x * x * (3 - 2 * x);
-  }
-  const rest = (u - ANSTIEG) / (1 - ANSTIEG);
-  return (1 - rest) ** 2;
+/* Der Verlauf über den Block: sanft hinein und dann BLEIBEN. Smoothstep für die Fahrt, weil ein
+ * linearer Anstieg sichtbar ansetzt und sichtbar abbricht - das nimmt man als Ruckeln wahr.
+ * Danach bleibt der Wert auf 1. Spiegel von pipeline/effekte._form. */
+function form(tImEffekt: number, dauerS: number): number {
+  const fahrt = Math.min(ANSTIEG_S, dauerS);
+  if (fahrt <= 0) return 1;
+  if (tImEffekt >= fahrt) return 1;
+  const x = Math.max(0, tImEffekt) / fahrt;
+  return x * x * (3 - 2 * x);
 }
 
 /* Der Zoomfaktor zum Zeitpunkt t (Sekunden im Clip). 1 heisst: unberührt. */
 export function faktor(effekte: Effekt[], t: number): number {
   let z = 1;
   for (const e of effekte) {
-    const u = (t - e.ab_s) / e.dauer_s;
-    if (u < 0 || u > 1) continue;
-    z += (e.art === "zoom_out" ? -1 : 1) * STAERKE * form(u);
+    if (t < e.ab_s || t > e.ab_s + e.dauer_s) continue;
+    z += (e.art === "zoom_out" ? -1 : 1) * STAERKE * form(t - e.ab_s, e.dauer_s);
   }
   return z;
 }

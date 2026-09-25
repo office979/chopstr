@@ -5,33 +5,41 @@ from __future__ import annotations
 from chopstr_worker.pipeline import effekte as ef
 
 
-def test_hinein_geht_schnell_rein_und_langsam_raus():
-    e = [ef.Effekt("zoom_in", 2.0, 1.4)]
+def test_hinein_faehrt_sanft_und_bleibt_dann():
+    """Vorher fuhr der Zoom zurueck, solange der Block lief. Das sah aus wie Wackeln: eine Bewegung
+    hin und gleich wieder her, mitten im Satz."""
+    e = [ef.Effekt("zoom_in", 2.0, 2.0)]
     assert ef.faktor(e, 1.9) == 1.0
     assert ef.faktor(e, 2.0) == 1.0
-    # Nach knapp einem Fuenftel der Dauer ist die volle Staerke erreicht.
-    assert abs(ef.faktor(e, 2.0 + 1.4 * ef.ANSTIEG) - (1 + ef.STAERKE)) < 1e-9
-    # Danach faellt es, und zwar am Anfang schneller als am Ende.
-    frueh = ef.faktor(e, 2.6) - ef.faktor(e, 2.9)
-    spaet = ef.faktor(e, 3.0) - ef.faktor(e, 3.3)
-    assert frueh > spaet > 0
+    assert abs(ef.faktor(e, 2.0 + ef.ANSTIEG_S) - (1 + ef.STAERKE)) < 1e-9
+    for t in (2.5, 3.0, 3.5, 4.0):
+        assert abs(ef.faktor(e, t) - (1 + ef.STAERKE)) < 1e-9
+    assert ef.faktor(e, 4.01) == 1.0
 
 
-def test_heraus_macht_das_bild_kleiner():
-    """Spiegelbild von „hinein": schnell kleiner, dann langsam zurueck auf normal. Rundherum steht
-    Schwarz, dafuer gibt es die Reserve in der Filterkette."""
-    e = [ef.Effekt("zoom_out", 0.0, 1.0)]
+def test_die_fahrt_setzt_ohne_knick_an_und_kommt_ohne_knick_an():
+    """Ein linearer Anstieg setzt sichtbar an und bricht sichtbar ab - genau das nimmt man als
+    Ruckeln wahr. Die Steigung muss an beiden Enden gegen null gehen."""
+    e = [ef.Effekt("zoom_in", 0.0, 2.0)]
+    steigung = lambda t: (ef.faktor(e, t + 0.01) - ef.faktor(e, t)) / 0.01  # noqa: E731
+    assert abs(steigung(0.0)) < 0.05
+    assert abs(steigung(ef.ANSTIEG_S - 0.02)) < 0.15
+    assert steigung(ef.ANSTIEG_S / 2) > 0.2
+
+
+def test_heraus_macht_das_bild_kleiner_und_laesst_es_so():
+    """Spiegelbild von „hinein". Rundherum steht Schwarz, dafuer gibt es die Reserve in der Kette."""
+    e = [ef.Effekt("zoom_out", 0.0, 2.0)]
     assert abs(ef.faktor(e, 0.0) - 1.0) < 1e-9
-    assert abs(ef.faktor(e, ef.ANSTIEG) - (1 - ef.STAERKE)) < 1e-9
-    assert ef.faktor(e, 0.5) < 1.0
-    assert abs(ef.faktor(e, 1.0) - 1.0) < 1e-9
+    assert abs(ef.faktor(e, ef.ANSTIEG_S) - (1 - ef.STAERKE)) < 1e-9
+    assert abs(ef.faktor(e, 1.5) - (1 - ef.STAERKE)) < 1e-9
 
 
-def test_jeder_effekt_endet_wieder_bei_eins():
+def test_ein_effekt_wirkt_nur_solange_sein_block_laeuft():
     """Sonst addieren sich zwei Effekte, und nach dem dritten ist das Bild eine Briefmarke."""
     for art in ef.ARTEN:
         e = [ef.Effekt(art, 1.0, 1.5)]
-        assert abs(ef.faktor(e, 2.5) - 1.0) < 1e-9
+        assert ef.faktor(e, 2.51) == 1.0
         assert ef.faktor(e, 5.0) == 1.0
 
 

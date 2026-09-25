@@ -330,3 +330,21 @@ export const VORGABE: Required<Omit<CaptionStyle, "preset">> = {
 export function mitVorgabe(stil: CaptionStyle | null | undefined): Required<Omit<CaptionStyle, "preset">> & { preset?: string } {
   return { ...VORGABE, ...(stil ?? {}) };
 }
+
+/* Eine von Hand getippte Farbe verstehen.
+ *
+ * Der Farbwert stand in der Oberfläche bisher nur da: ein `<input type="color">` daneben und
+ * rechts die Zahl zum Ansehen. Wer die Farbe seiner Marke treffen will - „#020CF5", nicht
+ * irgendein Blau - muss sie im Farbrad des Betriebssystems suchen. Mit der Tastatur geht das je
+ * nach System gar nicht. Deshalb nimmt das Feld jetzt Text an, und diese Funktion sagt, was gilt.
+ *
+ * Grosszügig beim Lesen: mit und ohne Raute, gross und klein, und die Kurzform „#f0a" als
+ * „#ff00aa". Streng beim Ergebnis: immer sechs Stellen klein geschrieben, damit der Vergleich mit
+ * den Vorschlägen und dem Renderplan aufgeht. Null heisst: noch keine gültige Farbe, der Nutzer
+ * tippt vermutlich noch. */
+export function hexEingabe(roh: string): string | null {
+  const w = roh.trim().replace(/^#/, "").toLowerCase();
+  if (/^[0-9a-f]{3}$/.test(w)) return `#${w[0]}${w[0]}${w[1]}${w[1]}${w[2]}${w[2]}`;
+  if (/^[0-9a-f]{6}$/.test(w)) return `#${w}`;
+  return null;
+}

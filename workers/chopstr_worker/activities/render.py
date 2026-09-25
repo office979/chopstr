@@ -734,6 +734,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         woerter=len(out_words),
         untertitelkarten=len(cards),
         untertitel_eingebrannt=result.captions_burned,
+        schrift_ersetzt=schrift_note,
     )
     checks = [f"{b.pruefung}: {b.text}" for b in befunde if b.ergebnis != "ok"]
     notes.extend(f"Pruefung {c}" for c in checks)

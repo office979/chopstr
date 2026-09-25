@@ -101,6 +101,7 @@ def pruefen(
     woerter: int,
     untertitelkarten: int,
     untertitel_eingebrannt: bool,
+    schrift_ersetzt: str | None = None,
 ) -> list[Befund]:
     """Alle Prüfungen an einer fertigen Datei, in der Reihenfolge des Katalogs.
 
@@ -227,6 +228,21 @@ def pruefen(
         )
     else:
         aus.append(Befund("untertitel", "ok", f"{untertitelkarten} Untertitelkarten im Bild.", None))
+
+    # Die gewaehlte Schrift. Fehlt ihre Datei, brennt libass etwas anderes ein - der Clip ist
+    # brauchbar, sieht aber nicht aus wie eingestellt. Bisher stand das nur in einer Notiz des
+    # Renderlaufs, die nach dem Verarbeiten niemand mehr sieht. Nie ein Fehler: ein Video wegen
+    # einer Schrift zu sperren waere unverhaeltnismaessig.
+    aus.append(
+        Befund("schrift", "ok", "Die eingestellte Schrift ist im Bild.", None)
+        if not schrift_ersetzt
+        else Befund(
+            "schrift",
+            "hinweis",
+            "Die eingestellte Schrift liegt auf diesem Server nicht vor, im Bild steht eine andere. Der Clip ist brauchbar, sieht aber nicht aus wie eingestellt.",
+            schrift_ersetzt,
+        )
+    )
 
     return aus
 

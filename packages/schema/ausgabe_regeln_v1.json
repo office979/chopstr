@@ -172,6 +172,11 @@
         "code": "untertitel",
         "name": "Untertitel im Bild",
         "fehler_wenn": "Es gibt gesprochene Wörter, aber keine eingebrannten Untertitelkarten."
+      },
+      {
+        "code": "schrift",
+        "name": "Schrift im Bild",
+        "fehler_wenn": "Nie ein Fehler. Die gewählte Schrift fehlt und es wurde eine andere eingebrannt: der Clip ist brauchbar, sieht aber nicht aus wie eingestellt."
       }
     ]
   },

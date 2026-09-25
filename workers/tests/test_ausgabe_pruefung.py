@@ -47,7 +47,7 @@ def test_eine_saubere_datei_besteht_alles():
     assert ap.fehlertext(b) is None
     # Auch die bestandenen Pruefungen stehen in der Liste: nur so ist spaeter zu unterscheiden,
     # ob etwas geprueft und in Ordnung war oder gar nicht geprueft wurde.
-    assert len(b) == 9
+    assert len(b) == 10
 
 
 def test_ohne_tonspur_ist_es_ein_fehler():
@@ -129,6 +129,19 @@ def test_die_grenzwerte_kommen_aus_der_gemeinsamen_datei():
         d = json.load(f)
     codes = {p["code"] for p in d["technische_pruefungen"]["pruefungen"]}
     assert {b.pruefung for b in lauf()} == codes
+
+
+def test_eine_fehlende_schrift_ist_ein_hinweis_und_kein_fehler():
+    """Ein Video wegen einer Schrift zu sperren waere unverhaeltnismaessig - aber es
+    stillschweigend anders aussehen zu lassen, ist auch keine Loesung."""
+    b = lauf(schrift_ersetzt="Schriftdatei Anton.ttf fehlt in /fonts")
+    assert ergebnis(b, "schrift") == "hinweis"
+    assert ap.schlimmstes(b) == "hinweis"
+    assert "nicht aus wie eingestellt" in next(x.text for x in b if x.pruefung == "schrift")
+
+
+def test_ohne_ersetzung_ist_die_schrift_in_ordnung():
+    assert ergebnis(lauf(), "schrift") == "ok"
 
 
 def test_die_liste_ist_als_json_ablegbar():

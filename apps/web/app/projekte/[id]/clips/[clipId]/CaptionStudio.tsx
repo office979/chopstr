@@ -14,6 +14,7 @@ import {
   GRENZEN,
   HIGHLIGHT_FARBEN,
   alsHex,
+  hexEingabe,
   LOOKS,
   type CaptionStyle,
   type Look,
@@ -512,8 +513,13 @@ export function CaptionStudio({
                   onChange={(e) => setzen({ highlight_color: e.target.value })}
                   className="h-9 w-9 cursor-pointer rounded-full border-2 border-white/20 bg-transparent disabled:cursor-not-allowed disabled:opacity-60"
                 />
-                <span className="text-xs tabular-nums text-text-3">{s.highlight_color}</span>
               </label>
+              <HexFeld
+                wert={s.highlight_color}
+                onChange={(v) => setzen({ highlight_color: v })}
+                disabled={!canEdit}
+                label="Hervorhebungsfarbe als Hex-Wert"
+              />
             </div>
           )}
         </section>
@@ -1006,7 +1012,7 @@ function Farbwahl({
           onChange={(e) => onChange(e.target.value)}
           className="h-10 w-14 cursor-pointer rounded-inner border border-line bg-transparent disabled:cursor-not-allowed disabled:opacity-60"
         />
-        <span className="text-sm text-text-2">{wert}</span>
+        <HexFeld wert={wert} onChange={onChange} disabled={disabled} label={`${label} als Hex-Wert`} />
       </div>
     </div>
   );
@@ -1055,5 +1061,53 @@ function Textprobe({ stil }: { stil: ReturnType<typeof mitVorgabe> }) {
         Zeigt Farben, Kontur und Kasten sofort. Wie es im Video sitzt, siehst du links in der Vorschau.
       </p>
     </section>
+  );
+}
+
+/* Der Farbwert zum Lesen UND zum Tippen.
+ *
+ * Bisher stand hier ein `<span>`: die Zahl war sichtbar, aber nicht erreichbar. Wer die Farbe
+ * seiner Marke treffen will - „#020CF5", nicht irgendein Blau - musste sie im Farbrad des
+ * Betriebssystems suchen, und mit der Tastatur geht das je nach System gar nicht. Das ist der
+ * Kern der Meldung „die Farbauswahl ist teilweise nicht benutzbar".
+ *
+ * Beim Tippen ist jede Zwischenstufe ungültig („#ff"). Das darf die Farbe nicht zurücksetzen und
+ * ist auch kein Fehler, den man anschreien muss: der Entwurf bleibt stehen, übernommen wird erst,
+ * was vollständig ist. Beim Verlassen des Feldes springt es auf den geltenden Wert zurück, damit
+ * niemand mit einer halben Eingabe dasteht und glaubt, sie sei gespeichert. */
+function HexFeld({
+  wert,
+  onChange,
+  disabled,
+  label,
+}: {
+  wert: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  label: string;
+}) {
+  const [entwurf, setEntwurf] = useState<string | null>(null);
+  const gezeigt = entwurf ?? wert;
+  const gueltig = entwurf == null || hexEingabe(entwurf) != null;
+  return (
+    <input
+      type="text"
+      inputMode="text"
+      spellCheck={false}
+      aria-label={label}
+      aria-invalid={!gueltig || undefined}
+      value={gezeigt}
+      disabled={disabled}
+      onChange={(e) => {
+        setEntwurf(e.target.value);
+        const hex = hexEingabe(e.target.value);
+        if (hex) onChange(hex);
+      }}
+      onBlur={() => setEntwurf(null)}
+      className={cn(
+        "w-[92px] rounded-inner border bg-black/40 px-2 py-1 font-mono text-xs tabular-nums text-text transition-soft focus:outline-none disabled:opacity-60",
+        gueltig ? "border-line hover:border-line-strong focus:border-white/50" : "border-attention",
+      )}
+    />
   );
 }

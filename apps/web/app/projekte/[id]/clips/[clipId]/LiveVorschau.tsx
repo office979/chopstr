@@ -114,7 +114,6 @@ export function LiveVorschau({
       const jetzt = v ? v.currentTime - clipStartQuelle : 0;
       const z = effektFaktor(effekte, jetzt);
       rahmen.style.transform = Math.abs(z - 1) < 0.0005 ? "" : `scale(${z.toFixed(4)})`;
-      rahmen.style.transformOrigin = "center center";
       window.requestAnimationFrame(takt);
     };
     window.requestAnimationFrame(takt);
@@ -207,7 +206,18 @@ export function LiveVorschau({
 
   return (
     <GlassCard padding="none" className="overflow-hidden">
-      <div ref={zoomRahmen} className="relative mx-auto w-full max-w-[340px] overflow-hidden bg-black" style={{ aspectRatio: ASPEKT[aspect] }}>
+      <div className="relative mx-auto w-full max-w-[340px] overflow-hidden bg-black" style={{ aspectRatio: ASPEKT[aspect] }}>
+        {/* Der Zoom greift NUR hier hinein, nicht am Rahmen.
+          *
+          * Vorher lag die Skalierung am Rahmen - dann wuchs der ganze Kasten auf der Seite, statt
+          * dass das Bild naeher kommt. Das sah aus, als sei nur die Vorschau groesser geworden,
+          * und die Frage „wird das Video ueberhaupt gezoomt" war berechtigt.
+          *
+          * Der Rahmen bleibt jetzt, wie er ist, und schneidet ab: bei „naeher heran" waechst das
+          * Bild darueber hinaus, bei „weiter weg" wird sein schwarzer Grund rundherum sichtbar -
+          * genau wie im fertigen Video. Die Untertitel bleiben draussen, denn der Renderer brennt
+          * sie NACH dem Zoom ein. */}
+        <div ref={zoomRahmen} className="absolute inset-0" style={{ transformOrigin: "center center" }}>
         {/* Keine eigenen Bedienelemente des Browsers: das Video ist vergroessert, damit der
           * Ausschnitt den Rahmen fuellt, und seine Leiste waere es dann auch - halb ausserhalb des
           * Bildes. Gespult wird in der Zeitleiste darunter, hier braucht es nur Start und Pause. */}
@@ -238,6 +248,7 @@ export function LiveVorschau({
         >
           Dein Browser kann dieses Video nicht abspielen.
         </video>
+        </div>
         {woerter.length > 0 && (
           <CaptionVorschau stil={stil} woerter={woerter} zeit={zeit} onHoehe={onCaptionHoehe} />
         )}

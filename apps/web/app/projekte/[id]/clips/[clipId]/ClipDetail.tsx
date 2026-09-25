@@ -27,6 +27,7 @@ import { dialogOffen, leertasteGehoertDemElement, tipptGerade } from "@/lib/tast
 import { rueckwegMerken } from "@/lib/clips/rueckweg";
 import {
   dauerAendern as effektDauer,
+  gleich as effekteGleich,
   entfernen as effektEntfernen,
   lesen as effekteLesen,
   verschieben as effektVerschieben,
@@ -439,32 +440,19 @@ export function ClipDetail({
    * Renderlauf legt dann auch keine automatischen mehr an. */
   const [effekte, setEffekte] = useState<Effekt[]>(() => effekteLesen(effekteAnfang ?? [], schnittDauer(komposition)));
   const [effekteGesichert, setEffekteGesichert] = useState<Effekt[]>(effekte);
+  const effekteGeaendert = !effekteGleich(effekte, effekteGesichert);
+  /* Ein Knopf für beides: Schnitt und Effekte hängen an derselben Zeitleiste, und zwei
+   * Speicherknöpfe nebeneinander sind eine Auswahlaufgabe. */
+  const etwasGeaendert = schnittGeaendert || effekteGeaendert;
   /* Die Länge des Clips in Clipzeit: daran hängt, wie weit ein Effekt geschoben werden darf. */
   const clipDauer = useMemo(() => schnittDauer(schnitt), [schnitt]);
 
-  const effekteSpeichern = useCallback(
-    async (naechste: Effekt[]) => {
-      setEffekte(naechste);
-      try {
-        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/effekte`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ effekte: naechste }),
-        });
-        const data = (await res.json()) as { error?: string; effekte?: Effekt[] };
-        if (!res.ok || !data.effekte) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
-        setEffekte(data.effekte);
-        setEffekteGesichert(data.effekte);
-      } catch (err) {
-        setMessage({
-          tone: "error",
-          text: err instanceof Error ? err.message : "Die Effekte konnten nicht gespeichert werden",
-          nochmal: () => void effekteSpeichern(naechste),
-        });
-      }
-    },
-    [sourceId, clipId],
-  );
+  /* Eine Änderung an den Effekten wird NICHT sofort gespeichert.
+   *
+   * Vorher ging jede Bewegung sofort an den Server. Das war unsichtbar: unten stand „Schnitt
+   * gespeichert", und wer einen Effekt setzte, sah keinen Hinweis, dass sich etwas geändert hat -
+   * und hielt es für verloren. Jetzt gehören Schnitt und Effekte demselben Knopf. */
+  const effekteAendern = useCallback((naechste: Effekt[]) => setEffekte(naechste), []);
 
   /* Zeigt das gebaute Video noch, was eingestellt ist? Dieselbe Rechnung wie im Renderstand, hier
    * gebraucht, um es direkt am Umschalter zu sagen: wer auf „Zuletzt gebaut" klickt, soll dort
@@ -716,23 +704,63 @@ export function ClipDetail({
     [merken, standJetzt, markenSpeichern],
   );
 
+  /* Ein Speichern für beides: Schnitt und Effekte.
+   *
+   * Der Schnitt zuerst, denn die Effekte werden am Server gegen die Cliplänge geprüft - und die
+   * hängt am Schnitt. Andersherum würde ein Effekt an einer Stelle abgewiesen, die es nach dem
+   * Speichern des Schnitts längst gibt. */
   const schnittSichern = async () => {
     setSchnittSaving(true);
     setMessage(null);
     try {
-      const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/schnitt`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ composition: schnitt }),
-      });
-      const data = (await res.json()) as { error?: string; composition?: Schnitt; needs_render?: boolean };
-      if (!res.ok || !data.composition) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
-      setSchnitt(data.composition);
-      setGesichert(data.composition);
-      setMessage({
-        tone: "ok",
-        text: data.needs_render ? "Schnitt gespeichert. Das Video muss neu geclippt werden." : "Schnitt gespeichert.",
-      });
+      if (schnittGeaendert) {
+        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/schnitt`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ composition: schnitt }),
+        });
+        const data = (await res.json()) as { error?: string; composition?: Schnitt; needs_render?: boolean };
+        if (!res.ok || !data.composition) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
+        setSchnitt(data.composition);
+        setGesichert(data.composition);
+      }
+      if (effekteGeaendert) {
+        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/effekte`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ effekte }),
+        });
+        const data = (await res.json()) as { error?: string; effekte?: Effekt[]; needs_render?: boolean };
+        if (!res.ok || !data.effekte) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
+        setEffekte(data.effekte);
+        setEffekteGesichert(data.effekte);
+      }
+      /* Und gleich neu clippen.
+       *
+       * „Gespeichert, das Video muss neu geclippt werden" war eine Aufgabe, die das Programm
+       * dem Menschen gab, obwohl es sie selbst erledigen kann: es gibt nichts zu entscheiden.
+       * Wer speichert, will das Ergebnis sehen. Der Lauf läuft im Hintergrund, die Vorschau
+       * zeigt ihn an.
+       *
+       * Immer, nicht nur wenn schon einmal geclippt wurde: auch beim ersten Mal will man das
+       * Ergebnis sehen, ohne noch einen Knopf zu suchen.
+       *
+       * Schlägt das Anstossen fehl, ist das kein verlorenes Speichern: die Änderung liegt sicher
+       * in der Datenbank, und der Knopf „Video clippen" steht weiterhin daneben. */
+      try {
+        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/render`, { method: "POST" });
+        const data = (await res.json()) as { error?: string };
+        /* 409 heisst: es läuft schon. Das ist kein Fehler, sondern genau das, was man wollte. */
+        if (!res.ok && res.status !== 409) throw new Error(data.error ?? "Das Clippen liess sich nicht anstossen");
+        setMessage({ tone: "ok", text: "Gespeichert. Das Video wird geclippt." });
+      } catch (err) {
+        setMessage({
+          tone: "error",
+          text: `Gespeichert. Das Clippen liess sich nicht anstossen: ${
+            err instanceof Error ? err.message : "unbekannter Fehler"
+          }`,
+        });
+      }
     } catch (err) {
       setMessage({
         tone: "error",
@@ -999,9 +1027,9 @@ export function ClipDetail({
           <Timeline
             effekte={effekte}
             clipDauerS={clipDauer}
-            onEffektVerschieben={(i, abS) => void effekteSpeichern(effektVerschieben(effekte, i, abS, clipDauer))}
-            onEffektDauer={(i, d) => void effekteSpeichern(effektDauer(effekte, i, d, clipDauer))}
-            onEffektWeg={(i) => void effekteSpeichern(effektEntfernen(effekte, i))}
+            onEffektVerschieben={(i, abS) => effekteAendern(effektVerschieben(effekte, i, abS, clipDauer))}
+            onEffektDauer={(i, d) => effekteAendern(effektDauer(effekte, i, d, clipDauer))}
+            onEffektWeg={(i) => effekteAendern(effektEntfernen(effekte, i))}
             bereichVonS={bereichVon}
             bereichBisS={bereichBis}
             schnitt={schnitt}
@@ -1069,7 +1097,7 @@ export function ClipDetail({
             zeitImClip={inClipzeit(schnitt, currentTime)}
             clipDauer={clipDauer}
             canEdit={canEdit}
-            onAendern={(naechste) => void effekteSpeichern(naechste)}
+            onAendern={effekteAendern}
           />
 
           {/* Speichern ganz unten rechts, wo man nach dem Arbeiten hinkommt.
@@ -1078,16 +1106,14 @@ export function ClipDetail({
               nahm dafür eine Zeile quer über die Seite. */}
           {canEdit && (
             <div className="flex justify-end">
+              {/* Ein Knopf, ein Wort. Er ist aus, solange es nichts zu speichern gibt - ein
+                  Knopf, der immer klickbar ist, sagt nichts darüber, ob etwas offen ist. */}
               <Button
-                variant={schnittGeaendert ? "primary" : "ghost"}
-                disabled={!schnittGeaendert || schnittSaving}
+                variant={etwasGeaendert ? "primary" : "ghost"}
+                disabled={!etwasGeaendert || schnittSaving}
                 onClick={() => void schnittSichern()}
               >
-                {schnittSaving
-                  ? "Wird gespeichert"
-                  : schnittGeaendert
-                    ? `Schnitt speichern · ${neueDauer.toFixed(1).replace(".", ",")} s`
-                    : "Schnitt gespeichert"}
+                {schnittSaving ? "Wird gespeichert" : "Speichern"}
               </Button>
             </div>
           )}

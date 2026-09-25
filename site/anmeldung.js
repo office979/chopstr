@@ -15,7 +15,7 @@
 /* Die Web-App-Adresse des Apps Script. Endet auf /exec, nicht auf /dev.
  * Solange hier nichts steht, sagt das Formular ehrlich, dass es noch nicht eingerichtet ist -
  * statt so zu tun, als sei die Adresse angekommen. */
-const ENDPUNKT = "";
+const ENDPUNKT = "https://script.google.com/macros/s/AKfycbx3R5pU3alqdQFSAUeS-Ook-VoqOY3mY1EJzrpmwOcJOlLQIrzeTNnzbEh2uOJ_-BdOkQ/exec";
 
 /* Wie lange „Danke" stehen bleibt, bevor wieder ein Formular da ist. Null heisst: dauerhaft. */
 const MELDUNGEN = {

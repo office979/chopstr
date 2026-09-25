@@ -8,6 +8,8 @@ import { getRepo } from "@/lib/repo";
 import { getPublishingRepo } from "@/lib/repo/publishing";
 import { requirePublishingPage } from "@/lib/publishing/auth";
 import { decisionCheck, posteriorAOverB, successMetricLabel, variantStats } from "@/lib/experiments/stats";
+import { DEFAULT_CAPABILITIES, erfolgKennzahlFuer } from "@/lib/publishing/capabilities";
+import { CONNECTION_PLATFORM_LABELS, connectionPlatformFor } from "@/lib/publishing/platforms";
 import { CLIP_STATUS_LABELS, PLATFORM_LABELS, patternLabel } from "@/lib/clips/labels";
 import { PUBLICATION_STATUS_LABELS } from "@/lib/publishing/platforms";
 import { formatDateTime } from "@/lib/format";
@@ -46,7 +48,19 @@ export default async function ExperimentPage({ params }: Props) {
   const b = clips.find((c) => c.variant === "B") ?? null;
   const sa = a ? variantStats(a.id, publications, feedback) : null;
   const sb = b ? variantStats(b.id, publications, feedback) : null;
-  const check = decisionCheck(experiment, sa, sb);
+  /* Was kann die Zielplattform überhaupt liefern?
+   *
+   * Der Test misst die Folgequote. Die Fähigkeitstabelle sagt, dass TikTok, Instagram und
+   * LinkedIn neue Folgende keinem einzelnen Beitrag zuordnen - dort kommt diese Zahl nie. Ohne
+   * diese Auskunft las der Test eine fehlende Zahl als „noch nicht da" und wartete auf etwas, das
+   * nicht kommt. Die tatsächlich benutzte Verbindung sticht, denn ihre Fähigkeiten können
+   * abweichen; ohne Publikation gilt der Standard der Plattform. */
+  const genutzteVerbindung = publications.find((p) => p.connection_id)?.connection_id ?? null;
+  const verbindung = genutzteVerbindung ? await pub.getConnection(genutzteVerbindung) : null;
+  const zielPlattform = verbindung?.platform ?? (a ? connectionPlatformFor(a.platform) : "manual");
+  const caps = verbindung?.capabilities ?? DEFAULT_CAPABILITIES[zielPlattform];
+  const erfolg = erfolgKennzahlFuer(caps, CONNECTION_PLATFORM_LABELS[zielPlattform]);
+  const check = decisionCheck(experiment, sa, sb, erfolg);
   const confidence = experiment.confidence ?? (sa && sb ? posteriorAOverB(sa, sb, id) : null);
   const source = a ? await repo.getSource(a.source_id) : null;
 
@@ -163,8 +177,12 @@ export default async function ExperimentPage({ params }: Props) {
           confidence={confidence}
           ready={check.ready}
           reasons={check.reasons}
-          metricLabel={successMetricLabel(sa ?? sb)}
+          metricLabel={successMetricLabel(sa ?? sb, erfolg)}
         />
+        {/* Warum nach dieser Zahl verglichen wird. Steht hier, weil „Save-Quote" ohne Begründung
+            nach einem Zufall aussieht - und weil eine fehlende Zahl nicht null bedeutet, sondern
+            dass diese Plattform sie nicht herausgibt. */}
+        <p className="mt-3 text-xs text-text-2">{erfolg.satz}</p>
       </GlassCard>
     </PageShell>
   );

@@ -1,5 +1,6 @@
 import type { Publication, PerformanceFeedback, Experiment } from "@/lib/repo/types-publishing";
 import { Rng, seedFromString } from "./random";
+import { ERFOLG_LABEL, type ErfolgWahl } from "@/lib/publishing/capabilities";
 
 /* Hook-A/B (PHASE5.md): Entscheidung frühestens 48 h nach beiden Publikationen und ab min_exposure Views je Variante.
  * Konfidenz = Posterior P(A > B) über Beta-Verteilungen der Folgequote (follows / views), Monte-Carlo mit 2.000
@@ -41,8 +42,26 @@ export interface DecisionCheck {
   reasons: string[];
 }
 
-export function decisionCheck(experiment: Experiment, a: VariantStats | null, b: VariantStats | null, now = Date.now()): DecisionCheck {
+/* Die Bedingungen für eine Entscheidung.
+ *
+ * ``erfolg`` sagt, was diese Plattform überhaupt liefern kann. Ohne diese Auskunft las der Test
+ * eine fehlende Zahl als „noch nicht da" und wartete auf etwas, das nie kommt: die Folgequote
+ * gibt es auf TikTok, Instagram und LinkedIn gar nicht. Fehlend ist nicht null, und fehlend ist
+ * auch kein Misserfolg. */
+export function decisionCheck(
+  experiment: Experiment,
+  a: VariantStats | null,
+  b: VariantStats | null,
+  erfolg: ErfolgWahl | null = null,
+  now = Date.now(),
+): DecisionCheck {
   const reasons: string[] = [];
+  if (erfolg && !erfolg.aufrufeMoeglich) {
+    /* Ohne Aufrufe gibt es keine Quote. Das ist keine Verzögerung, sondern eine Grenze, und sie
+     * gehört als solche benannt statt als ewiges „noch keine Views gemeldet". */
+    reasons.push(erfolg.satz);
+  }
+  if (erfolg && erfolg.kennzahl === "keine") reasons.push(erfolg.satz);
   if (experiment.status === "decided") return { ready: false, reasons: ["Das Experiment ist bereits entschieden."] };
   if (!a || !b) reasons.push("Beide Varianten brauchen einen Clip.");
   for (const [label, v] of [
@@ -59,7 +78,13 @@ export function decisionCheck(experiment: Experiment, a: VariantStats | null, b:
       const hours = Math.ceil((DECISION_MIN_AGE_MS - age) / 3_600_000);
       reasons.push(`Variante ${label}: 48 Stunden nach der Veröffentlichung sind noch nicht um (noch ${hours} h).`);
     }
-    if (v.views == null) reasons.push(`Variante ${label}: noch keine Views gemeldet.`);
+    if (v.views == null) {
+      reasons.push(
+        erfolg && !erfolg.aufrufeMoeglich
+          ? `Variante ${label}: von dieser Plattform kommen keine Aufrufe.`
+          : `Variante ${label}: noch keine Aufrufe gemeldet.`,
+      );
+    }
     else if (v.views < experiment.min_exposure) reasons.push(`Variante ${label}: ${v.views.toLocaleString("de-AT")} von ${experiment.min_exposure.toLocaleString("de-AT")} Views Mindestexposure.`);
   }
   return { ready: reasons.length === 0, reasons };
@@ -85,10 +110,15 @@ export function posteriorAOverB(a: VariantStats, b: VariantStats, seed: string):
   return wins / MC_DRAWS;
 }
 
-export function successMetricLabel(v: VariantStats | null): string {
-  if (!v) return "Folgequote";
-  if (v.follows != null) return "Folgequote";
-  if (v.saves != null) return "Save-Quote (kein Folge-Signal)";
-  if (v.likes != null) return "Like-Quote (kein Folge-Signal)";
+/* Wonach wird verglichen?
+ *
+ * Mit ``erfolg`` beantwortet das schon vor der ersten Zahl, was diese Plattform liefern kann.
+ * Vorher stand dort „Folgequote", bis Daten eintrafen - auf einer Plattform, die Folgende keinem
+ * einzelnen Beitrag zuordnet, also unter Umständen für immer. */
+export function successMetricLabel(v: VariantStats | null, erfolg?: ErfolgWahl | null): string {
+  if (v?.follows != null) return "Folgequote";
+  if (v?.saves != null) return "Save-Quote (kein Folge-Signal)";
+  if (v?.likes != null) return "Like-Quote (kein Folge-Signal)";
+  if (erfolg) return erfolg.kennzahl === "follows" ? "Folgequote" : `${ERFOLG_LABEL[erfolg.kennzahl]} (kein Folge-Signal)`;
   return "Folgequote";
 }

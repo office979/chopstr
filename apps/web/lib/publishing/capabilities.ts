@@ -157,3 +157,84 @@ export function maskMetrics(raw: Partial<MetricSet> | null | undefined, caps: Ca
   }
   return out;
 }
+
+/* Welche Erfolgskennzahl diese Plattform überhaupt liefern kann.
+ *
+ * Der A/B-Test misst die Folgequote: wie viele Leute folgen dir nach diesem Clip. Das ist die
+ * richtige Frage - und die Tabelle oben sagt, dass genau sie auf TikTok, Instagram und LinkedIn
+ * gar nicht beantwortet wird (``follow_attribution: false``). Ein Test, der auf eine Zahl wartet,
+ * die nie kommt, wartet für immer, und die Oberfläche versprach bis hierher trotzdem
+ * „Folgequote".
+ *
+ * Fehlt eine Zahl, heisst das nicht null. Es heisst, dass diese Plattform sie nicht herausgibt.
+ * Der Unterschied entscheidet darüber, ob ein Test „läuft noch" oder „lässt sich hier nicht
+ * automatisch entscheiden".
+ */
+export type ErfolgKennzahl = "follows" | "saves" | "likes" | "keine";
+
+export const ERFOLG_LABEL: Record<ErfolgKennzahl, string> = {
+  follows: "Folgequote",
+  saves: "Save-Quote",
+  likes: "Like-Quote",
+  keine: "keine vergleichbare Zahl",
+};
+
+export interface ErfolgWahl {
+  kennzahl: ErfolgKennzahl;
+  /* Liefert die Plattform sie sicher, oder nur unter Umständen? */
+  sicher: boolean;
+  /* Kann diese Plattform überhaupt Aufrufe melden? Ohne sie ist keine Quote zu bilden. */
+  aufrufeMoeglich: boolean;
+  satz: string;
+}
+
+function moeglich(v: CapabilityValue): boolean {
+  return v === true || v === "conditional";
+}
+
+export function erfolgKennzahlFuer(caps: Capabilities, plattformName: string): ErfolgWahl {
+  const aufrufeMoeglich = moeglich(caps.views);
+  const kennzahl: ErfolgKennzahl = moeglich(caps.follow_attribution)
+    ? "follows"
+    : moeglich(caps.saves)
+      ? "saves"
+      : moeglich(caps.likes)
+        ? "likes"
+        : "keine";
+  const sicher =
+    kennzahl === "follows"
+      ? caps.follow_attribution === true
+      : kennzahl === "saves"
+        ? caps.saves === true
+        : kennzahl === "likes"
+          ? caps.likes === true
+          : false;
+
+  if (!aufrufeMoeglich) {
+    return {
+      kennzahl,
+      sicher: false,
+      aufrufeMoeglich,
+      satz: `${plattformName} meldet keine Aufrufe. Ohne sie lässt sich keine Quote bilden; trag die Zahlen von Hand ein, dann rechnet chopstr damit.`,
+    };
+  }
+  if (kennzahl === "keine") {
+    return { kennzahl, sicher: false, aufrufeMoeglich, satz: `${plattformName} gibt keine Zahl heraus, mit der sich zwei Fassungen vergleichen lassen.` };
+  }
+  if (kennzahl === "follows") {
+    return {
+      kennzahl,
+      sicher,
+      aufrufeMoeglich,
+      satz: sicher
+        ? `Gewertet wird die Folgequote: neue Folgende je 1.000 Aufrufe.`
+        : `Gewertet wird die Folgequote, sofern ${plattformName} sie im Einzelfall herausgibt.`,
+    };
+  }
+  return {
+    kennzahl,
+    sicher,
+    aufrufeMoeglich,
+    satz: `${plattformName} ordnet neue Folgende keinem einzelnen Beitrag zu. Gewertet wird deshalb die ${ERFOLG_LABEL[kennzahl]}.`,
+  };
+}

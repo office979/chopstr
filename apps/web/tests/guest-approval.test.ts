@@ -16,9 +16,13 @@ describe("exportBlocked", () => {
     expect(exportBlocked(clip(true), undefined)).toBe(true);
   });
 
-  it("gibt erst mit einer Zusage frei", () => {
-    expect(exportBlocked(clip(true), { decision: "changes" } as GuestApproval)).toBe(true);
+  it("gibt mit JEDER Antwort frei, auch einer ablehnenden", () => {
+    /* Nach einem „so nicht" will man den Clip ansehen und überarbeiten, und dafür braucht man die
+     * Datei. Herunterladen ist kein Veröffentlichen - das bleibt gesperrt, siehe ausgabe.ts
+     * (gast_nein). */
     expect(exportBlocked(clip(true), { decision: "approved" } as GuestApproval)).toBe(false);
+    expect(exportBlocked(clip(true), { decision: "changes" } as GuestApproval)).toBe(false);
+    expect(exportBlocked(clip(true), { decision: "rejected" } as GuestApproval)).toBe(false);
   });
 });
 

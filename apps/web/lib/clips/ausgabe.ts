@@ -39,6 +39,7 @@ export type AusgabeCode =
   | "inhalt_fehler"
   | "technik_fehler"
   | "gast_offen"
+  | "gast_nein"
   | "gast_veraltet"
   | "nicht_freigegeben"
   | "vertrag_fehlt"
@@ -82,8 +83,15 @@ export interface AusgabeEingabe {
    * und alte Videos nachträglich zu sperren wäre eine Behauptung über etwas, das niemand gemessen
    * hat. */
   technik: TechnikBefund[] | null;
-  /* Eine Gastfreigabe ist verlangt, aber noch nicht erteilt. */
+  /* Eine Freigabe ist verlangt, aber es gibt noch KEINE Antwort. Solange geht gar nichts hinaus.
+   *
+   * Vorher hiess das „alles ausser Zustimmung", und damit sperrte auch eine Absage den Download.
+   * Das ging zu weit: wer den Clip heruntergeladen hätte, um ihn nach der Absage zu überarbeiten,
+   * kam nicht an die Datei. Herunterladen ist kein Veröffentlichen. */
   gastOffen: boolean;
+  /* Es gibt eine Antwort, und sie ist keine Zusage (abgelehnt oder fehlerhaft). Das sperrt NUR
+   * das Veröffentlichen - genau dafür ist die Frage gestellt worden. */
+  gastNein: boolean;
   /* Es gibt eine Freigabe, aber der Clip wurde danach geändert. */
   gastVeraltet: boolean;
   /* Nur für das Veröffentlichen. Beim Herunterladen spielen sie keine Rolle. */
@@ -117,6 +125,7 @@ export function ausgabe(zweck: Zweck, e: AusgabeEingabe): Ausgabe {
   if (s.befunde.some((b) => b.schwere === "fehler" && b.art === "sinn")) treffer.push("inhalt_fehler");
   if (e.technik?.some((t) => t.ergebnis === "fehler")) treffer.push("technik_fehler");
   if (e.gastOffen) treffer.push("gast_offen");
+  if (e.gastNein) treffer.push("gast_nein");
   if (e.gastVeraltet) treffer.push("gast_veraltet");
   if (s.redaktion !== "freigegeben" && s.redaktion !== "verworfen") treffer.push("nicht_freigegeben");
   if (e.vertragUnterschrieben === false) treffer.push("vertrag_fehlt");

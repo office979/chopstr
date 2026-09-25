@@ -163,6 +163,11 @@ An der Karte steht EIN Wort dazu, gerechnet in `apps/web/lib/clips/pruefstand.ts
 | Fehlerhaft | orange | die Person meldet: daran stimmt etwas nicht |
 | Freigegeben | grün | bestätigt |
 
+**Herunterladen geht ab der ersten Antwort — auch nach einer Absage.** Nach einem „so nicht" will
+man den Clip ansehen und überarbeiten, und dafür braucht man die Datei. **Veröffentlichen bleibt
+gesperrt**, solange keine Zusage da ist (`gast_nein` in den Ausgaberegeln): genau dafür ist die
+Frage gestellt worden.
+
 **„Fehlerhaft" ist das Urteil eines Menschen, nicht der Befund der Maschine.** Ein gescheiterter
 Renderlauf oder ein Schnitt, der eine Verneinung wegschneidet, sperrt den Download und steht als
 eigene Plakette daneben — mit der Zusage hat er nichts zu tun.

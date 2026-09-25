@@ -1113,6 +1113,19 @@ export function ClipBoard({
 
                   </div>
 
+                  {/* Was die gefragte Person geschrieben hat.
+                      Hier stand „Noch gesperrt: Du wartest auf die Antwort" - an einem Clip, der
+                      längst eine Antwort hatte. Das war die Sperrbegründung des Downloads, und die
+                      passte nicht mehr: seit jede Antwort die Datei freigibt, ist sie nur noch
+                      richtig, solange wirklich niemand geantwortet hat. An ihrer Stelle steht das,
+                      wofür gefragt wurde: das Feedback. */}
+                  {approval?.decision != null && (
+                    <p className="text-sm text-text-2">
+                      <span className="text-text-3">Rückmeldung: </span>
+                      {approval.comment?.trim() ? approval.comment : "Kein Feedback"}
+                    </p>
+                  )}
+
                   {/* Der Gast hat eine andere Fassung gesehen: ein ganzer Satz, der eine eigene
                       Zeile braucht. */}
                   {freigabeAlt && <p className="text-xs text-attention">{FREIGABE_VERALTET_MESSAGE}</p>}

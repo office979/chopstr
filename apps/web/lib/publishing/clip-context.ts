@@ -74,7 +74,8 @@ export async function loadClipContext(sourceId: string, clipId: string): Promise
   const eingabe = {
     stand,
     technik: clip.export_checks,
-    gastOffen: clip.guest_approval_required && approval?.decision !== "approved",
+    gastOffen: clip.guest_approval_required && approval?.decision == null,
+    gastNein: clip.guest_approval_required && approval?.decision != null && approval.decision !== "approved",
     gastVeraltet: freigabeVeraltet(approval ?? undefined, clip.updated_at),
   };
   const herunterladen = ausgabe("herunterladen", eingabe);

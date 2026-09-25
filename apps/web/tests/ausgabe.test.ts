@@ -63,7 +63,7 @@ function stand(over: Partial<Clip> = {}) {
 }
 
 function eingabe(over: Partial<AusgabeEingabe> = {}): AusgabeEingabe {
-  return { stand: stand(), technik: null, gastOffen: false, gastVeraltet: false, ...over };
+  return { stand: stand(), technik: null, gastOffen: false, gastNein: false, gastVeraltet: false, ...over };
 }
 
 const codes = (zweck: Zweck, e: AusgabeEingabe) =>
@@ -131,6 +131,19 @@ describe("was nur das Veröffentlichen sperrt", () => {
 describe("die Gastfreigabe", () => {
   it("sperrt, solange niemand geantwortet hat", () => {
     expect(codes("herunterladen", eingabe({ gastOffen: true }))).toContain("gast_offen");
+  });
+
+  it("lässt den Download frei, sobald eine Antwort da ist - auch eine ablehnende", () => {
+    /* Nach einem „so nicht" will man den Clip ansehen und überarbeiten, und dafür braucht man die
+     * Datei. Herunterladen ist kein Veröffentlichen. */
+    const e = eingabe({ gastOffen: false, gastNein: true, vertragUnterschrieben: true, tarifDarfPosten: true });
+    expect(ausgabe("herunterladen", e).erlaubt).toBe(true);
+  });
+
+  it("sperrt das Veröffentlichen, wenn die Person nicht zugestimmt hat", () => {
+    const e = eingabe({ gastOffen: false, gastNein: true, vertragUnterschrieben: true, tarifDarfPosten: true });
+    expect(ausgabe("veroeffentlichen", e).erlaubt).toBe(false);
+    expect(codes("veroeffentlichen", e)).toContain("gast_nein");
   });
 
   it("sperrt, wenn nach der Freigabe noch geändert wurde", () => {

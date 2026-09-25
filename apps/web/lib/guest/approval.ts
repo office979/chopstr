@@ -52,9 +52,15 @@ export function guestStatus(clip: Pick<Clip, "guest_approval_required">, latest:
 }
 
 /* Export gesperrt, solange guest_approval_required und keine approved-Entscheidung vorliegt */
+/* Sperrt die Freigabe den Download?
+ *
+ * Nur, solange keine Antwort da ist. Vorher hiess die Regel „alles ausser Zustimmung", und damit
+ * sperrte auch eine Absage die Datei. Das ging zu weit: nach einem „so nicht" will man den Clip
+ * ansehen und überarbeiten, und dafür braucht man ihn. Herunterladen ist kein Veröffentlichen -
+ * das bleibt gesperrt, siehe lib/clips/ausgabe (gast_nein). */
 export function exportBlocked(clip: Pick<Clip, "guest_approval_required">, latest: GuestApproval | undefined): boolean {
   if (!clip.guest_approval_required) return false;
-  return latest?.decision !== "approved";
+  return latest?.decision == null;
 }
 
 /* Gilt die Freigabe noch für das, was jetzt herauskäme?

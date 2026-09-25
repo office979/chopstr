@@ -461,3 +461,122 @@ img, svg { display: block; max-width: 100%; }
   padding: 18px 22px;
 }
 .hinweiskasten p { margin-top: 0; color: var(--text-2); }
+
+/* --- Produktbild im Hero ------------------------------------------------------------------------
+ *
+ * Aus HTML statt Screenshot, genau wie in components/landing/ProductMockup.tsx: lädt ohne
+ * Bilddatei, bleibt auf jedem Bildschirm scharf und geht nie „veraltet" - ein Screenshot zeigt
+ * irgendwann eine Oberfläche, die es nicht mehr gibt. Rein dekorativ, deshalb aria-hidden.
+ */
+
+.bild { position: relative; margin: 64px auto 0; width: 100%; max-width: 1040px; text-align: left; user-select: none; }
+@media (min-width: 640px) { .bild { margin-top: 80px; } }
+.bild-schein {
+  position: absolute;
+  left: -40px; right: -40px; top: -40px; bottom: 0;
+  border-radius: 48px;
+  background: rgba(2, 12, 245, 0.2);
+  filter: blur(64px);
+}
+.bild-fenster {
+  position: relative;
+  overflow: hidden;
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(7, 7, 15, 0.9);
+}
+.bild-leiste { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding: 12px 16px; }
+.bild-punkt { width: 10px; height: 10px; border-radius: 9999px; background: rgba(255, 255, 255, 0.15); }
+.bild-adresse {
+  display: none;
+  margin: 0 auto;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 4px 40px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+}
+@media (min-width: 640px) { .bild-adresse { display: block; } }
+
+.bild-inhalt { display: grid; gap: 16px; padding: 16px; }
+@media (min-width: 640px) { .bild-inhalt { padding: 24px; } }
+@media (min-width: 768px) { .bild-inhalt { grid-template-columns: 1fr 220px; gap: 24px; } }
+
+.bild-spalte { display: flex; min-width: 0; flex-direction: column; gap: 12px; }
+.bild-kopf { display: flex; align-items: center; justify-content: space-between; }
+.bild-kopf p { font-size: 14px; font-weight: 500; }
+.bild-dauer { display: none; border-radius: 10px; background: rgba(255, 255, 255, 0.06); padding: 4px 8px; font-size: 11px; color: var(--text-2); }
+@media (min-width: 640px) { .bild-dauer { display: block; } }
+
+.bild-moment { border-radius: 18px; border: 1px solid rgba(91, 140, 255, 0.4); background: rgba(47, 107, 255, 0.1); padding: 16px; }
+.bild-moment-kopf { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.bild-moment-kopf p { font-size: 14px; font-weight: 500; }
+.bild-laenge { flex: none; font-family: var(--font-mono); font-size: 12px; color: var(--ai-soft); }
+.bild-zitat { margin-top: 8px; font-size: 13px; line-height: 1.6; color: var(--text-2); }
+.bild-marken { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+.bild-marke { border-radius: 10px; background: rgba(255, 255, 255, 0.07); padding: 4px 8px; font-size: 11px; color: var(--text-2); }
+.bild-knoepfe { margin-top: 16px; display: flex; gap: 8px; }
+.bild-knopf-hell { border-radius: 9999px; background: var(--text); padding: 6px 14px; font-size: 12px; font-weight: 500; color: #000; }
+.bild-knopf-rand { border-radius: 9999px; border: 1px solid rgba(255, 255, 255, 0.15); padding: 6px 14px; font-size: 12px; color: var(--text-2); }
+
+.bild-zeile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 12px 16px;
+}
+.bild-zeile p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text-2); }
+.bild-zeile span { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--text-3); }
+
+.bild-zeitleiste { margin-top: 4px; display: flex; height: 32px; align-items: flex-end; gap: 3px; }
+.bild-zeitleiste span { flex: 1; border-radius: 2px; background: rgba(255, 255, 255, 0.1); }
+.bild-zeitleiste span.gewaehlt { background: rgba(91, 140, 255, 0.8); }
+
+.bild-handy { display: none; margin: 0 auto; width: 200px; }
+@media (min-width: 768px) { .bild-handy { display: block; } }
+.bild-handy-rahmen {
+  position: relative;
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  border-radius: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: linear-gradient(180deg, #141432 0%, #0a0a18 55%, #05050c 100%);
+}
+.bild-handy-licht { position: absolute; left: 24px; right: 24px; top: 22%; height: 38%; border-radius: 9999px; background: rgba(255, 255, 255, 0.06); filter: blur(6px); }
+.bild-handy-kopf { position: absolute; left: 50%; top: 20%; height: 64px; width: 64px; transform: translateX(-50%); border-radius: 9999px; background: rgba(255, 255, 255, 0.1); }
+.bild-handy-koerper { position: absolute; left: 50%; top: 34%; height: 96px; width: 112px; transform: translateX(-50%); border-radius: 40px 40px 0 0; background: rgba(255, 255, 255, 0.07); }
+.bild-handy-hook {
+  position: absolute;
+  left: 12px; right: 12px; top: 16px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 6px 8px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #fff;
+}
+.bild-handy-untertitel {
+  position: absolute;
+  left: 16px; right: 16px; bottom: 18%;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #fff;
+}
+.bild-handy-untertitel mark { border-radius: 3px; background: #ffd700; padding: 0 4px; color: #000; }
+
+/* --- Navigation oben ------------------------------------------------------------------------- */
+
+.kopf-links { display: none; flex: 1; align-items: center; justify-content: center; gap: 32px; font-size: 14px; color: var(--text-2); }
+@media (min-width: 768px) { .kopf-links { display: flex; } }
+.kopf-links a { text-decoration: none; transition: color var(--dur-fast) var(--ease); }
+.kopf-links a:hover { color: var(--text); }
+@media (min-width: 768px) { .kopf-aktion { margin-left: 0; } }

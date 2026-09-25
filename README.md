@@ -167,9 +167,27 @@ An der Karte steht EIN Wort dazu, gerechnet in `apps/web/lib/clips/pruefstand.ts
 Renderlauf oder ein Schnitt, der eine Verneinung wegschneidet, sperrt den Download und steht als
 eigene Plakette daneben — mit der Zusage hat er nichts zu tun.
 
-Die Seite, auf der die gefragte Person antwortet, ist noch nicht gebaut. Die Daten dafür stehen
-(`guest_approvals`, `GuestDecision` = `approved | rejected | changes`), der Link wird schon
-erzeugt.
+### Ein Paket, ein Link
+
+`freigaben` (Migration 0016) ist die Klammer um mehrere Clips; die Urteile bleiben je Clip in
+`guest_approvals` (`freigabe_id`), denn entschieden wird je Clip. Vorher hing jede Freigabe an
+genau einem Clip: wer zwölf abzeichnen lassen wollte, verschickte zwölf Links.
+
+**Die E-Mail ist freiwillig.** Der Link entsteht so oder so und steht sofort im Fenster zum
+Kopieren; viele schicken ihn über WhatsApp oder Slack. Mit Adresse geht zusätzlich eine Mail
+hinaus.
+
+**Wiederfinden:** jede Freigabe steht unter **Freigaben** in der Seitenleiste, mit Link, Video,
+Marke, Anzahl und dem Stand der Antworten. Ohne diese Seite wäre ein Link, den niemand kopiert
+hat, verloren — und ein neuer Link würde den alten ins Leere laufen lassen.
+
+**Warum die laufende Nummer nicht in der Adresse steht:** sie ist erratbar. Stünde sie dort, käme
+man von „Freigabe 3" auf „Freigabe 4" und sähe die Clips eines fremden Kunden — ohne Anmeldung,
+denn dieser Link *ist* der Zugang. Die Nummer ist der Name nach innen (`Freigabe 7`, überschreibbar),
+das Token der Weg von aussen.
+
+Die öffentliche Seite unter `/freigabe/<token>` zeigt alle Clips des Pakets, jeden mit seinen drei
+Knöpfen. Einzelfreigaben von früher (Token eines Clips) funktionieren dort weiterhin.
 
 ## Wann eine Clipfassung hinausgehen darf
 

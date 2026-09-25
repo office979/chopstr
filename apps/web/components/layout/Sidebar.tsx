@@ -50,6 +50,14 @@ export function Sidebar({ user }: { user: NavUser | null }) {
    * /marke, der Pfad auf den Clipseiten sagt „Marke", und drei Namen für eine Sache zwingen zum
    * Raten. */
   if (user?.canBrand) main.push({ href: "/marke", label: "Branding", icon: <IconBrand />, match: (p) => p.startsWith("/marke") });
+  /* „Freigaben": hier stehen die verschickten Links.
+   *
+   * Der Link zu einer Freigabe steht beim Verschicken im Fenster - und wer ihn dort nicht kopiert
+   * oder später verliert, hatte bisher keinen Weg zurück. Es gab keine Stelle, an der ein
+   * verschickter Link noch einmal auftaucht. Diese ist es. */
+  if (canExt(user?.role, "guest_approval.request")) {
+    main.push({ href: "/freigaben", label: "Freigaben", icon: <IconFreigabe />, match: (p) => p.startsWith("/freigaben") });
+  }
 
   const publishing: NavItem[] = [];
   if (canExt(user?.role, "series.manage")) publishing.push({ href: "/serien", label: "Serien", icon: <IconStack />, match: (p) => p.startsWith("/serien") });
@@ -275,6 +283,14 @@ const IconBrand = () => (
     <circle cx="8.6" cy="7.4" r="1.05" fill="currentColor" stroke="none" />
     <circle cx="6.7" cy="12.4" r="1.05" fill="currentColor" stroke="none" />
     <path d="M12 2a10 10 0 0 0 0 20c.9 0 1.6-.7 1.6-1.6 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.6 1.6-1.6H16a6 6 0 0 0 6-6C22 6 17.5 2 12 2Z" />
+  </Svg>
+);
+/* Eine Person mit einem Haken: jemanden um eine Zusage bitten. */
+const IconFreigabe = () => (
+  <Svg>
+    <path d="M15 20v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1" />
+    <circle cx="8.5" cy="7" r="3.5" />
+    <path d="m16 11.5 2 2 4-4" />
   </Svg>
 );
 const IconStack = () => (

@@ -38,7 +38,11 @@ interface ApiResponse {
   approval?: { decision: Decision | null; comment: string | null; decided_at: string | null };
 }
 
-/* Drei Entscheidungen: Freigeben, Änderungen wünschen (Kommentar Pflicht), Ablehnen (Kommentar Pflicht).
+/* Drei Entscheidungen: Freigeben, Fehlerhaft (Kommentar Pflicht), Ablehnen (Kommentar Pflicht).
+ *
+ * „Fehlerhaft" hiess hier „Änderungen wünschen". Im Team steht an der Karte aber „Fehlerhaft" -
+ * zwei Wörter für dieselbe Antwort, und wer beide Seiten sieht, hält sie für zwei Dinge. Der Wert
+ * in der Datenbank bleibt ``changes``: er ist seit der ersten Fassung so und sagt dasselbe.
  *
  * Ein Wunsch hängt fast immer an einer Stelle: „das Ende passt nicht", „hier fehlt ein Schnitt".
  * Bis hierher ging nur der Satz mit, nicht die Stelle - und wer ihn las, suchte sie von Hand.
@@ -184,7 +188,7 @@ export function GuestDecision({ token, view }: { token: string; view: GuestView 
                   {busy && mode === null ? "Wird gespeichert" : "Freigeben"}
                 </Button>
                 <Button variant="ghost" onClick={() => setMode("changes")} aria-pressed={mode === "changes"} disabled={busy}>
-                  Änderungen wünschen
+                  Fehlerhaft
                 </Button>
                 <Button variant="danger" onClick={() => setMode("rejected")} aria-pressed={mode === "rejected"} disabled={busy}>
                   Ablehnen
@@ -199,7 +203,7 @@ export function GuestDecision({ token, view }: { token: string; view: GuestView 
                   }}
                 >
                   <label htmlFor={commentId} className="text-sm font-medium">
-                    {mode === "changes" ? "Was soll geändert werden?" : "Warum lehnst du ab?"} <span className="text-text-2">(Pflicht)</span>
+                    {mode === "changes" ? "Was stimmt nicht?" : "Warum lehnst du ab?"} <span className="text-text-2">(Pflicht)</span>
                   </label>
                   <Textarea id={commentId} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={mode === "changes" ? "z. B. Bitte diesen Satz herausnehmen." : "z. B. Ich möchte in diesem Kontext nicht zitiert werden."} />
                   {/* Die Stelle geht mit. Der Gast muss dafür nichts tun ausser anhalten, und das
@@ -221,7 +225,7 @@ export function GuestDecision({ token, view }: { token: string; view: GuestView 
                       Abbrechen
                     </Button>
                     <Button type="submit" size="sm" variant={mode === "rejected" ? "danger" : "primary"} className={cn(mode === "rejected" && "border border-danger/50")} disabled={busy || !comment.trim()}>
-                      {busy ? "Wird gespeichert" : mode === "changes" ? "Änderungen senden" : "Ablehnung senden"}
+                      {busy ? "Wird gespeichert" : mode === "changes" ? "Als fehlerhaft melden" : "Ablehnung senden"}
                     </Button>
                   </div>
                 </form>

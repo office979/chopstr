@@ -528,10 +528,18 @@ export function ClipBoard({
 
   /* Eine angeforderte Freigabe kommt aus der Antwort der Route zurück - es braucht also keine
    * zweite Abfrage, um den Zustand an der Karte richtig zu stellen. */
-  const onRequested = useCallback((approval: GuestApproval) => {
-    setApprovals((prev) => new Map(prev).set(approval.clip_id, approval));
-    applyClips(clipsRef.current.map((c) => (c.id === approval.clip_id ? { ...c, guest_approval_required: true } : c)));
-  }, [applyClips]);
+  const onRequested = useCallback(
+    (neue: GuestApproval[]) => {
+      setApprovals((prev) => {
+        const next = new Map(prev);
+        for (const a of neue) next.set(a.clip_id, a);
+        return next;
+      });
+      const betroffen = new Set(neue.map((a) => a.clip_id));
+      applyClips(clipsRef.current.map((c) => (betroffen.has(c.id) ? { ...c, guest_approval_required: true } : c)));
+    },
+    [applyClips],
+  );
 
   /* Nach dem Verschicken sind die Kreuze erledigt. Einen Knopf „Auswahl aufheben" gibt es nicht
    * mehr, also hebt sie sich selbst auf - sonst bliebe sie stehen und die nächste Anfrage ginge
@@ -720,7 +728,6 @@ export function ClipBoard({
           {connection === "error" && !allSettled && <span className="text-attention">Verbindung unterbrochen, versuche erneut</span>}
           {demo && <Badge tone="ai">Testmodus</Badge>}
           <FreigabeSenden
-            sourceId={sourceId}
             clips={zurFreigabe}
             erlaubt={canRequestGuest}
             tarifErlaubt={planAllowsGuest}
@@ -1198,16 +1205,19 @@ function GesperrtKnopf({ grund, children }: { grund: string | null; children: Re
 
 /* Clips zur Bestätigung schicken.
  *
- * Die Freigabe ist die Zusage der dritten Person - der, auf deren Konto gepostet wird. Sie stand
- * vorher als „Jemanden um Freigabe bitten" an JEDER Karte: bei vierzehn Clips vierzehnmal
- * derselbe Knopf, vierzehnmal dieselbe Mailadresse eintippen. Gefragt wird aber einmal, für alles,
- * was hinausgehen soll.
+ * Die Freigabe ist die Zusage der Person, für die die Clips gemacht werden. Sie stand vorher als
+ * „Jemanden um Freigabe bitten" an JEDER Karte: bei vierzehn Clips vierzehnmal derselbe Knopf,
+ * vierzehnmal dieselbe Mailadresse eintippen, und die Person bekam vierzehn Links. Gefragt wird
+ * aber einmal, für alles, was hinausgehen soll - und sie bekommt EINEN Link.
  *
- * Deshalb steht der Knopf jetzt oben und arbeitet auf einer Menge: den ausgewählten Clips, oder -
- * wenn nichts ausgewählt ist - allen, die eine fertige Datei haben und noch auf eine Antwort
- * warten. Was er nicht tut: einen Clip verschicken, über den schon entschieden ist. */
+ * DIE E-MAIL IST FREIWILLIG. Der Link entsteht so oder so und steht sofort zum Kopieren da; die
+ * meisten schicken ihn über WhatsApp oder Slack weiter. Ist eine Adresse dabei, geht zusätzlich
+ * eine Mail hinaus.
+ *
+ * WARUM DIE FREIGABE EINEN NAMEN HAT. Wer das Fenster schliesst, ohne den Link zu verschicken,
+ * findet ihn unter „Freigaben" in der Seitenleiste wieder - aber nur, wenn dort etwas steht, das
+ * er wiedererkennt. Ohne eigenen Namen heisst sie „Freigabe 7". */
 function FreigabeSenden({
-  sourceId,
   clips,
   erlaubt,
   tarifErlaubt,
@@ -1216,7 +1226,6 @@ function FreigabeSenden({
   onFreigabe,
   onFertig,
 }: {
-  sourceId: string;
   /* Die Clips, um die es geht, mit ihrer Beschriftung für die Liste im Fenster. */
   clips: { id: string; label: string }[];
   /* Wie viele Clips angekreuzt sind. Null heisst: es gilt die ganze sichtbare Liste. */
@@ -1225,65 +1234,81 @@ function FreigabeSenden({
   tarifErlaubt: boolean;
   tarifName: string;
   /* Je angefragtem Clip: die Antwort der Route, damit die Karte sofort stimmt. */
-  onFreigabe: (approval: GuestApproval) => void;
+  onFreigabe: (approvals: GuestApproval[]) => void;
   /* Wenn das Fenster geschlossen wird und etwas hinausging. */
   onFertig: () => void;
 }) {
   const [offen, setOffen] = useState(false);
-  const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [text, setText] = useState("");
   const [laeuft, setLaeuft] = useState(false);
   const [fehler, setFehler] = useState<string | null>(null);
-  const [fertig, setFertig] = useState<{ anzahl: number; gescheitert: number } | null>(null);
-  const emailId = useId();
+  const [link, setLink] = useState<string | null>(null);
+  const [kopiert, setKopiert] = useState(false);
   const nameId = useId();
+  const emailId = useId();
   const textId = useId();
 
   if (!erlaubt) return null;
 
-  const senden = async () => {
+  const oeffnen = () => {
+    setName("");
+    setEmail("");
+    setText("");
+    setLink(null);
+    setFehler(null);
+    setKopiert(false);
+    setOffen(true);
+  };
+
+  const anlegen = async () => {
     setLaeuft(true);
     setFehler(null);
-    let gut = 0;
-    let schlecht = 0;
-    for (const c of clips) {
-      try {
-        const res = await fetch(`/api/projects/${sourceId}/clips/${c.id}/guest-approval`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            /* Ohne eigenen Namen die Adresse: die Route will ein Feld, und „" stünde später als
-               leere Zeile in der Freigabeansicht. */
-            guest_name: name.trim() || email.trim(),
-            guest_email: email.trim(),
-            message: text.trim(),
-          }),
-        });
-        const data = (await res.json()) as { approval?: GuestApproval; error?: string };
-        if (!res.ok || !data.approval) throw new Error(data.error ?? "");
-        onFreigabe(data.approval);
-        gut += 1;
-      } catch {
-        schlecht += 1;
-      }
+    try {
+      const res = await fetch("/api/freigaben", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          clip_ids: clips.map((c) => c.id),
+          guest_email: email.trim() || null,
+          message: text.trim(),
+        }),
+      });
+      const data = (await res.json()) as { link?: string; error?: string; approvals?: GuestApproval[] };
+      if (!res.ok || !data.link) throw new Error(data.error ?? "Die Freigabe konnte nicht angelegt werden");
+      setLink(data.link);
+      if (data.approvals) onFreigabe(data.approvals);
+    } catch (err) {
+      setFehler(err instanceof Error ? err.message : "Die Freigabe konnte nicht angelegt werden");
+    } finally {
+      setLaeuft(false);
     }
-    setLaeuft(false);
-    setFertig({ anzahl: gut, gescheitert: schlecht });
+  };
+
+  const kopieren = async () => {
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      setKopiert(true);
+      window.setTimeout(() => setKopiert(false), 2000);
+    } catch {
+      /* Manche Browser verweigern die Zwischenablage ohne Nutzergeste im selben Takt. Dann bleibt
+       * der Link im Feld stehen und lässt sich von Hand markieren - deshalb ein Eingabefeld und
+       * kein reiner Text. */
+      setKopiert(false);
+    }
+  };
+
+  const schliessen = () => {
+    setOffen(false);
+    if (link) onFertig();
   };
 
   return (
     <>
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={() => {
-          setFertig(null);
-          setFehler(null);
-          setOffen(true);
-        }}
-        title="Die Person fragen, auf deren Konto gepostet wird"
-      >
+      <Button size="sm" variant="ghost" onClick={oeffnen} title="Die Person fragen, auf deren Konto gepostet wird">
         <IconFreigabe />
         {/* Die Zahl steht am Knopf und nicht mehr in einer eigenen Leiste: sie ist die einzige
             Auskunft, die man beim Ankreuzen braucht. */}
@@ -1292,53 +1317,27 @@ function FreigabeSenden({
 
       <Modal
         open={offen}
-        onClose={() => !laeuft && setOffen(false)}
+        onClose={() => !laeuft && schliessen()}
         title="Zur Freigabe senden"
-        description="Die Person bekommt einen Link, sieht die Clips und sagt Ja oder Nein. Ohne Konto bei chopstr."
+        description="Die Person bekommt einen Link, sieht die Clips und sagt zu jedem Ja, Nein oder „da stimmt etwas nicht“. Ohne Konto bei chopstr."
       >
         {!tarifErlaubt ? (
           <div className="flex flex-col gap-4">
-            <p className="text-sm text-text-2">
-              Im Tarif {tarifName} ist die Freigabe durch Externe nicht enthalten.
-            </p>
+            <p className="text-sm text-text-2">Im Tarif {tarifName} ist die Freigabe durch Externe nicht enthalten.</p>
             <div className="flex justify-end">
-              <Button variant="ghost" onClick={() => setOffen(false)}>
+              <Button variant="ghost" onClick={schliessen}>
                 Schliessen
-              </Button>
-            </div>
-          </div>
-        ) : fertig ? (
-          <div className="flex flex-col gap-4">
-            <p className="text-sm text-text">
-              {fertig.anzahl === 1 ? "Ein Clip wurde zur Freigabe geschickt." : `${fertig.anzahl} Clips wurden zur Freigabe geschickt.`}
-            </p>
-            {fertig.gescheitert > 0 && (
-              <p className="text-sm text-attention">
-                {fertig.gescheitert === 1
-                  ? "Bei einem Clip hat es nicht geklappt. Versuch es bei dem noch einmal."
-                  : `Bei ${fertig.gescheitert} Clips hat es nicht geklappt. Versuch es bei denen noch einmal.`}
-              </p>
-            )}
-            <div className="flex justify-end">
-              <Button
-                onClick={() => {
-                  setOffen(false);
-                  if (fertig.anzahl > 0) onFertig();
-                }}
-              >
-                Fertig
               </Button>
             </div>
           </div>
         ) : clips.length === 0 ? (
           <div className="flex flex-col gap-4">
             <p className="text-sm text-text-2">
-              Gerade gibt es nichts zu schicken: entweder ist über alle Clips schon entschieden,
-              oder es liegt noch keine fertige Datei vor. Wähl einzelne Clips aus, wenn du
-              bestimmte meinst.
+              Gerade gibt es nichts zu schicken: entweder wurde schon alles verschickt, oder es liegt
+              noch keine fertige Datei vor. Kreuz einzelne Clips an, wenn du bestimmte meinst.
             </p>
             <div className="flex justify-end">
-              <Button variant="ghost" onClick={() => setOffen(false)}>
+              <Button variant="ghost" onClick={schliessen}>
                 Schliessen
               </Button>
             </div>
@@ -1349,46 +1348,88 @@ function FreigabeSenden({
               {clips.length === 1 ? "Ein Clip geht hinaus:" : `${clips.length} Clips gehen hinaus:`}{" "}
               <span className="text-text">{clips.map((c) => c.label).join(", ")}</span>
             </p>
+
+            <label className="flex flex-col gap-1.5" htmlFor={nameId}>
+              <span className="text-sm text-text">Name dieser Freigabe</span>
+              <span className="text-xs text-text-3">
+                Damit du sie unter „Freigaben“ wiederfindest. Leer lassen geht auch.
+              </span>
+              <input
+                id={nameId}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                disabled={link != null}
+                placeholder="Jobster, Woche 12"
+                className="transition-soft rounded-inner border border-line bg-black/40 px-4 py-2.5 text-[15px] text-text placeholder:text-text-3 hover:border-line-strong focus:border-white/50 focus:outline-none disabled:opacity-60"
+              />
+            </label>
+
             <label className="flex flex-col gap-1.5" htmlFor={emailId}>
-              <span className="text-sm text-text">E-Mail der Person</span>
+              <span className="text-sm text-text">E-Mail (freiwillig)</span>
+              <span className="text-xs text-text-3">Mit Adresse geht zusätzlich eine Mail hinaus.</span>
               <input
                 id={emailId}
                 type="email"
                 autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                disabled={link != null}
                 placeholder="name@firma.at"
-                className="transition-soft rounded-inner border border-line bg-black/40 px-4 py-2.5 text-[15px] text-text placeholder:text-text-3 hover:border-line-strong focus:border-white/50 focus:outline-none"
+                className="transition-soft rounded-inner border border-line bg-black/40 px-4 py-2.5 text-[15px] text-text placeholder:text-text-3 hover:border-line-strong focus:border-white/50 focus:outline-none disabled:opacity-60"
               />
             </label>
-            <label className="flex flex-col gap-1.5" htmlFor={nameId}>
-              <span className="text-sm text-text">Name (freiwillig)</span>
-              <input
-                id={nameId}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Wie die Person angesprochen wird"
-                className="transition-soft rounded-inner border border-line bg-black/40 px-4 py-2.5 text-[15px] text-text placeholder:text-text-3 hover:border-line-strong focus:border-white/50 focus:outline-none"
-              />
-            </label>
+
             <label className="flex flex-col gap-1.5" htmlFor={textId}>
-              <span className="text-sm text-text">Nachricht (freiwillig)</span>
+              <span className="text-sm text-text">Kommentar (freiwillig)</span>
               <textarea
                 id={textId}
                 rows={2}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
+                disabled={link != null}
                 placeholder="Schau bitte drüber, ob das so raus darf."
-                className="transition-soft rounded-inner border border-line bg-black/40 px-4 py-2.5 text-[15px] text-text placeholder:text-text-3 hover:border-line-strong focus:border-white/50 focus:outline-none"
+                className="transition-soft rounded-inner border border-line bg-black/40 px-4 py-2.5 text-[15px] text-text placeholder:text-text-3 hover:border-line-strong focus:border-white/50 focus:outline-none disabled:opacity-60"
               />
             </label>
+
+            {/* Der Link steht im selben Fenster, direkt unter den Feldern. Wer ihn hier übersieht,
+                findet ihn unter „Freigaben" in der Seitenleiste wieder. */}
+            <div className="flex flex-col gap-1.5 rounded-inner border border-line p-3">
+              <span className="text-sm text-text">Freigabe-Link</span>
+              {link ? (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      readOnly
+                      value={link}
+                      onFocus={(e) => e.currentTarget.select()}
+                      aria-label="Freigabe-Link"
+                      className="min-w-0 flex-1 rounded-inner border border-line bg-black/40 px-3 py-2 text-sm text-text"
+                    />
+                    <Button size="sm" variant="ghost" onClick={() => void kopieren()}>
+                      {kopiert ? "Kopiert" : "Kopieren"}
+                    </Button>
+                  </div>
+                  <span className="text-xs text-text-3">
+                    Auch später zu finden unter „Freigaben“ in der Seitenleiste.
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-xs text-text-3">
+                    Entsteht, sobald du unten auf „Link erzeugen“ drückst. Vorher gibt es nichts zu kopieren.
+                  </span>
+                  <Button size="sm" onClick={() => void anlegen()} disabled={laeuft} className="self-start">
+                    {laeuft ? "Wird angelegt" : "Link erzeugen"}
+                  </Button>
+                </>
+              )}
+            </div>
+
             {fehler && <p className="text-sm text-attention">{fehler}</p>}
             <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="ghost" onClick={() => setOffen(false)} disabled={laeuft}>
-                Abbrechen
-              </Button>
-              <Button onClick={() => void senden()} disabled={laeuft || !email.trim().includes("@")}>
-                {laeuft ? "Wird geschickt" : "Senden"}
+              <Button variant={link ? "primary" : "ghost"} onClick={schliessen} disabled={laeuft}>
+                Fertig
               </Button>
             </div>
           </div>

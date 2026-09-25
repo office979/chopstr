@@ -11,13 +11,13 @@ export const GUEST_STATUS_LABELS: Record<GuestStatus, string> = {
   pending: "Wartet auf Antwort",
   expired: "Link abgelaufen",
   approved: "Freigegeben",
-  changes: "Änderungen gewünscht",
+  changes: "Fehlerhaft",
   rejected: "Abgelehnt",
 };
 
 export const DECISION_LABELS: Record<GuestDecision, string> = {
   approved: "Freigegeben",
-  changes: "Änderungen gewünscht",
+  changes: "Fehlerhaft",
   rejected: "Abgelehnt",
 };
 
@@ -27,6 +27,12 @@ export function isGuestDecision(v: unknown): v is GuestDecision {
 
 export function isExpired(a: GuestApproval, now = Date.now()): boolean {
   return Boolean(a.expires_at && Date.parse(a.expires_at) <= now);
+}
+
+/* Dasselbe für ein Freigabe-Paket, das nur seine Frist kennt. Als eigene Funktion und nicht als
+ * Vergleich im JSX: ein Date.now() mitten im Zeichnen ist bei jedem Durchgang eine andere Zahl. */
+export function fristAbgelaufen(expiresAt: string | null, now = Date.now()): boolean {
+  return Boolean(expiresAt && Date.parse(expiresAt) <= now);
 }
 
 /* Jüngste Freigabe je Clip (Liste ist neueste zuerst sortiert) */

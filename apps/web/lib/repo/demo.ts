@@ -9,6 +9,7 @@ import type {
   Clip,
   DeletionJob,
   DpaAcceptance,
+  Freigabe,
   GuestApproval,
   GuestApprovalView,
   HookVersion,
@@ -78,6 +79,7 @@ interface DemoState {
   usage: UsagePeriod;
   usageHistory: UsagePeriod[];
   guestApprovals: GuestApproval[];
+  freigaben: Freigabe[];
   billingEventIds: Set<string>;
   dpaAcceptances: DpaAcceptance[];
   deletionJobs: DeletionJob[];
@@ -220,6 +222,7 @@ function createState(): DemoState {
     },
     usageHistory: seedUsageHistory(now),
     guestApprovals: [],
+    freigaben: [],
     billingEventIds: new Set(),
     dpaAcceptances: [],
     deletionJobs: [],
@@ -1199,6 +1202,99 @@ export const demoRepo: Repo = {
     clip.guest_approval_required = true;
     clip.updated_at = nowIso();
     return { ...approval };
+  },
+
+  /* Freigabe-Pakete im Testmodus. Dieselbe Rechnung wie in Postgres, nur auf den Listen im
+   * Speicher - damit die Oberfläche auch ohne Datenbank durchprobiert werden kann. */
+  async createFreigabe(input) {
+    const s = state();
+    const { userId } = await currentSession();
+    const nummer = s.freigaben.reduce((max, f) => Math.max(max, f.nummer), 0) + 1;
+    const freigabe: Freigabe = {
+      id: uuid(),
+      workspace_id: s.workspace.id,
+      nummer,
+      /* Ohne eigenen Namen die laufende Nummer - wie in Postgres. */
+      name: input.name.trim() || `Freigabe ${nummer}`,
+      token: input.token,
+      guest_email: input.guest_email,
+      message: input.message,
+      expires_at: input.expires_at,
+      created_at: nowIso(),
+    };
+    s.freigaben.push(freigabe);
+    const approvals: GuestApproval[] = [];
+    for (const clipId of input.clipIds) {
+      const clip = s.clips.find((c) => c.id === clipId);
+      const clipToken = input.clipTokens[clipId];
+      if (!clip || !clipToken) continue;
+      const approval: GuestApproval = {
+        id: uuid(),
+        clip_id: clipId,
+        freigabe_id: freigabe.id,
+        guest_name: freigabe.name,
+        guest_email: input.guest_email,
+        token: clipToken,
+        message: input.message,
+        requested_by: userId,
+        expires_at: input.expires_at,
+        decision: null,
+        comment: null,
+        comment_at_s: null,
+        decided_at: null,
+        viewed_at: null,
+        created_at: nowIso(),
+      };
+      s.guestApprovals.push(approval);
+      approvals.push({ ...approval });
+      clip.guest_approval_required = true;
+      clip.updated_at = nowIso();
+    }
+    return { freigabe: { ...freigabe }, approvals };
+  },
+
+  async listFreigaben() {
+    const s = state();
+    return s.freigaben
+      .slice()
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((f) => {
+        const eintraege = s.guestApprovals.filter((g) => g.freigabe_id === f.id);
+        const clips = eintraege.map((g) => s.clips.find((c) => c.id === g.clip_id)).filter(Boolean) as Clip[];
+        const quellen = clips.map((c) => s.sources.find((x) => x.id === c.source_id)).filter(Boolean) as Source[];
+        const zaehle = (d: GuestApproval["decision"]) => eintraege.filter((g) => g.decision === d).length;
+        return {
+          ...f,
+          clips: eintraege.length,
+          offen: zaehle(null),
+          freigegeben: zaehle("approved"),
+          abgelehnt: zaehle("rejected"),
+          fehlerhaft: zaehle("changes"),
+          videos: [...new Set(quellen.map((q) => q.title).filter(Boolean))],
+          marken: [...new Set(quellen.map((q) => s.brandProfiles.find((b) => b.id === q.brand_profile_id)?.name).filter(Boolean))] as string[],
+        };
+      });
+  },
+
+  async getFreigabeByToken(token) {
+    const s = state();
+    const freigabe = s.freigaben.find((f) => f.token === token);
+    if (!freigabe) return null;
+    const eintraege = [];
+    for (const g of s.guestApprovals.filter((x) => x.freigabe_id === freigabe.id)) {
+      const v = await this.getGuestApprovalByToken(g.token);
+      if (v) eintraege.push(v);
+    }
+    return { freigabe: { ...freigabe }, workspace_name: s.workspace.name, eintraege };
+  },
+
+  async loescheFreigabe(id) {
+    const s = state();
+    const i = s.freigaben.findIndex((f) => f.id === id);
+    if (i < 0) return false;
+    s.freigaben.splice(i, 1);
+    s.guestApprovals = s.guestApprovals.filter((g) => g.freigabe_id !== id);
+    return true;
   },
 
   async listGuestApprovals(sourceId) {

@@ -978,6 +978,8 @@ export interface GuestApproval {
   token: string;
   message: string | null;
   requested_by: string | null;
+  /* Zu welchem Paket gehört dieses Urteil? NULL = Einzelfreigabe aus der Zeit davor. */
+  freigabe_id?: string | null;
   expires_at: string | null;
   decision: GuestDecision | null;
   comment: string | null;
@@ -988,6 +990,57 @@ export interface GuestApproval {
   decided_at: string | null;
   viewed_at: string | null;
   created_at: string;
+}
+
+/* Eine Freigabe: ein Paket von Clips mit EINEM Link (Migration 0016).
+ *
+ * Bisher hing jede Freigabe an genau einem Clip. Wer zwölf Clips abzeichnen lassen wollte,
+ * verschickte zwölf Links. Gefragt wird aber einmal - deshalb diese Klammer. Die Urteile bleiben
+ * je Clip in `guest_approvals`, denn die Person entscheidet je Clip. */
+export interface Freigabe {
+  id: string;
+  workspace_id: string;
+  /* Fortlaufend je Arbeitsbereich. Der NAME nach innen, nicht die Adresse: sie wäre erratbar,
+   * und dieser Link ist der Zugang. */
+  nummer: number;
+  name: string;
+  token: string;
+  guest_email: string | null;
+  message: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+/* Eine Zeile in „Meine Freigaben": die Freigabe plus das, was ohne Aufklappen zählt. */
+export interface FreigabeZeile extends Freigabe {
+  clips: number;
+  offen: number;
+  freigegeben: number;
+  abgelehnt: number;
+  fehlerhaft: number;
+  /* Aus welchen Videos die Clips stammen, und für welche Marken. Mehrzahl, weil eine Freigabe
+   * Clips aus mehreren Videos enthalten kann. */
+  videos: string[];
+  marken: string[];
+}
+
+export interface FreigabeEingabe {
+  name: string;
+  clipIds: string[];
+  guest_email: string | null;
+  message: string | null;
+  token: string;
+  expires_at: string | null;
+  /* Je Clip ein eigenes Token: die Person entscheidet je Clip, und die bestehende Entscheidungs-
+   * Route arbeitet auf dem Clip-Token. */
+  clipTokens: Record<string, string>;
+}
+
+/* Was die öffentliche Seite braucht: das Paket und je Clip dieselbe Ansicht wie bisher. */
+export interface FreigabePaket {
+  freigabe: Freigabe;
+  workspace_name: string;
+  eintraege: GuestApprovalView[];
 }
 
 export interface GuestApprovalInput {
@@ -1121,6 +1174,12 @@ export interface BlockBRepo {
   listGuestApprovals(sourceId: string): Promise<GuestApproval[]>;
   /* Öffentlich, ohne Sitzung: Freigabe samt Clip-Daten per Token */
   getGuestApprovalByToken(token: string): Promise<GuestApprovalView | null>;
+  /* Ein Paket anlegen: die Klammer plus je Clip ein Urteil, das noch aussteht. Zurück kommen
+   * beide - die Oberfläche braucht die Urteile, um die Karten sofort richtig zu stellen. */
+  createFreigabe(input: FreigabeEingabe): Promise<{ freigabe: Freigabe; approvals: GuestApproval[] }>;
+  listFreigaben(): Promise<FreigabeZeile[]>;
+  getFreigabeByToken(token: string): Promise<FreigabePaket | null>;
+  loescheFreigabe(id: string): Promise<boolean>;
   markGuestApprovalViewed(token: string): Promise<void>;
   /* Entscheidung des Gastes (ohne Sitzung); null wenn Token unbekannt, abgelaufen oder schon entschieden */
   decideGuestApproval(token: string, decision: GuestDecision, comment: string | null, beiS: number | null, ip: string | null): Promise<GuestApproval | null>;

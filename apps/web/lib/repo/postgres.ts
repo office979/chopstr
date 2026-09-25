@@ -14,6 +14,7 @@ import type {
   ClipStatus,
   DeletionJob,
   DpaAcceptance,
+  Freigabe,
   GuestApproval,
   GuestApprovalView,
   HookVersion,
@@ -440,6 +441,20 @@ function toGuestApproval(r: Row): GuestApproval {
     comment_at_s: num(r.comment_at_s),
     decided_at: isoOrNull(r.decided_at),
     viewed_at: isoOrNull(r.viewed_at),
+    created_at: isoOrNull(r.created_at) ?? "",
+  };
+}
+
+function toFreigabe(r: Row): Freigabe {
+  return {
+    id: r.id as string,
+    workspace_id: r.workspace_id as string,
+    nummer: Number(r.nummer ?? 0),
+    name: (r.name as string) ?? "",
+    token: r.token as string,
+    guest_email: (r.guest_email as string | null) ?? null,
+    message: (r.message as string | null) ?? null,
+    expires_at: isoOrNull(r.expires_at),
     created_at: isoOrNull(r.created_at) ?? "",
   };
 }
@@ -1542,6 +1557,115 @@ export const postgresRepo: Repo = {
         spoken_hook: (hook?.spoken_hook as string | null) ?? null,
         post_caption: captions[platform] ?? Object.values(captions)[0] ?? null,
       };
+    });
+  },
+
+  /* ------------------------------------------------------------------------------------------
+   * Freigabe-Pakete (Migration 0016)
+   * ---------------------------------------------------------------------------------------- */
+
+  async createFreigabe(input) {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      /* Die laufende Nummer in derselben Transaktion holen und setzen. Zwei Leute, die im selben
+       * Augenblick eine Freigabe anlegen, bekämen sonst dieselbe Zahl; der eindeutige Index
+       * (workspace_id, nummer) fängt das ab, aber dann wäre eine der beiden gescheitert. */
+      const naechste = await tx`
+        select coalesce(max(nummer), 0) + 1 as n from freigaben where workspace_id = ${session.workspaceId}`;
+      const nummer = Number((naechste[0] as Row).n ?? 1);
+      /* Ohne eigenen Namen die laufende Nummer: „Freigabe 7" ist für den Kunden eine Zahl, mit
+       * der er etwas anfangen kann - anders als eine Kennung aus 32 Zeichen. */
+      const name = input.name.trim() || `Freigabe ${nummer}`;
+      const rows = await tx`
+        insert into freigaben (workspace_id, nummer, name, token, guest_email, message, expires_at, created_by)
+        values (${session.workspaceId}, ${nummer}, ${name}, ${input.token}, ${input.guest_email},
+                ${input.message}, ${input.expires_at}, ${session.userId})
+        returning *`;
+      const freigabe = toFreigabe(rows[0] as Row);
+      const approvals: GuestApproval[] = [];
+      for (const clipId of input.clipIds) {
+        const clipToken = input.clipTokens[clipId];
+        if (!clipToken) continue;
+        const g = await tx`
+          insert into guest_approvals (clip_id, freigabe_id, guest_name, guest_email, message, requested_by, token, expires_at)
+          values (${clipId}, ${freigabe.id}, ${freigabe.name}, ${input.guest_email}, ${input.message},
+                  ${session.userId}, ${clipToken}, ${input.expires_at})
+          returning *`;
+        approvals.push(toGuestApproval(g[0] as Row));
+        await tx`update clips set guest_approval_required = true where id = ${clipId}`;
+      }
+      return { freigabe, approvals };
+    });
+  },
+
+  async listFreigaben() {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`
+        select f.*,
+               count(g.id)                                              as clips,
+               count(*) filter (where g.decision is null)               as offen,
+               count(*) filter (where g.decision = 'approved')          as freigegeben,
+               count(*) filter (where g.decision = 'rejected')          as abgelehnt,
+               count(*) filter (where g.decision = 'changes')           as fehlerhaft,
+               coalesce(array_agg(distinct s.title) filter (where s.title is not null), '{}') as videos,
+               coalesce(array_agg(distinct b.name)  filter (where b.name  is not null), '{}') as marken
+        from freigaben f
+        left join guest_approvals g on g.freigabe_id = f.id
+        left join clips c           on c.id = g.clip_id
+        left join sources s         on s.id = c.source_id
+        left join brand_profiles b  on b.id = s.brand_profile_id
+        where f.workspace_id = ${session.workspaceId}
+        group by f.id
+        order by f.created_at desc`;
+      return rows.map((r) => {
+        const row = r as Row;
+        return {
+          ...toFreigabe(row),
+          clips: Number(row.clips ?? 0),
+          offen: Number(row.offen ?? 0),
+          freigegeben: Number(row.freigegeben ?? 0),
+          abgelehnt: Number(row.abgelehnt ?? 0),
+          fehlerhaft: Number(row.fehlerhaft ?? 0),
+          videos: (row.videos as string[] | null) ?? [],
+          marken: (row.marken as string[] | null) ?? [],
+        };
+      });
+    });
+  },
+
+  async getFreigabeByToken(token) {
+    const paket = await withAuthContext(async (tx) => {
+      const rows = await tx`select * from freigaben where token = ${token}`;
+      if (!rows.length) return null;
+      const freigabe = toFreigabe(rows[0] as Row);
+      const ws = await tx`select name from workspaces where id = ${freigabe.workspace_id}`;
+      const marken = await tx`
+        select g.token from guest_approvals g where g.freigabe_id = ${freigabe.id}
+        order by g.created_at`;
+      return {
+        freigabe,
+        workspace_name: ((ws[0] as Row | undefined)?.name as string) ?? "",
+        tokens: marken.map((r) => (r as Row).token as string),
+      };
+    });
+    if (!paket) return null;
+    /* Je Clip dieselbe Ansicht wie bei einer Einzelfreigabe. Eine Abfrage je Eintrag statt eines
+     * zweiten grossen SELECT: ein Paket hat eine Handvoll Clips, und so gibt es die Sicht auf
+     * einen Clip genau einmal im Code. */
+    const eintraege: GuestApprovalView[] = [];
+    for (const t of paket.tokens) {
+      const v = await this.getGuestApprovalByToken(t);
+      if (v) eintraege.push(v);
+    }
+    return { freigabe: paket.freigabe, workspace_name: paket.workspace_name, eintraege };
+  },
+
+  async loescheFreigabe(id) {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`delete from freigaben where id = ${id} and workspace_id = ${session.workspaceId} returning id`;
+      return rows.length > 0;
     });
   },
 

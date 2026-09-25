@@ -4,10 +4,15 @@ WOZU. Ein Zoom betont. Bisher kannte der Renderer nur einen langsamen Push-in ü
 Einstellung (``motion.zoom_to``) - eine Grundbewegung, die immer läuft und nichts hervorhebt. Was
 fehlte, war die Stelle: „hier, auf dieses Wort, für anderthalb Sekunden".
 
-DIE BEWEGUNG. „Hinein" geht schnell hinein und lässt langsam wieder los; das ist die Betonung, wie
-sie in Kurzvideos üblich ist. „Heraus" beginnt nah und zieht sich gleichmässig zurück - eine
-Öffnung, kein Schlag. Beide enden wieder bei 1,0, damit ein Effekt nie einen Zustand hinterlässt:
-zwei Effekte hintereinander addieren sich sonst, und nach dem dritten ist das Bild eine Briefmarke.
+DIE BEWEGUNG. „Hinein" geht schnell näher heran und lässt langsam wieder los. „Heraus" ist sein
+Spiegelbild: das Bild wird kleiner, und rundherum steht Schwarz. Beide enden wieder bei 1,0, damit
+ein Effekt nie einen Zustand hinterlässt - zwei Effekte hintereinander addieren sich sonst, und
+nach dem dritten ist das Bild eine Briefmarke.
+
+WARUM ES EINEN RAND BRAUCHT. Kleiner zu werden heisst, mehr zu zeigen als da ist. ``zoompan`` kann
+nur hineingehen (``z >= 1``). Deshalb wird das Bild vor dem Zoom auf eine grössere schwarze Fläche
+gelegt (``RESERVE``), und der Ruhezustand ist dann nicht ``z = 1``, sondern ``z = RESERVE``. Von
+dort aus geht es in beide Richtungen.
 
 DIE ZEITRECHNUNG. ``ab_s`` ist die Sekunde IM FERTIGEN CLIP, wie bei den Zeitmarken. Wer den
 Schnitt ändert, verschiebt damit die Effekte - richtig so, sie hängen an dem, was gesagt wird.
@@ -27,7 +32,12 @@ STAERKE = 0.10
 
 MIN_DAUER_S = 0.4
 MAX_DAUER_S = 6.0
-STANDARD_DAUER_S = 1.4
+STANDARD_DAUER_S = 1.0
+
+# Wieviel schwarze Flaeche rund um das Bild vorgehalten wird, damit „heraus" ueberhaupt moeglich
+# ist. 1,25 erlaubt eine Verkleinerung auf 80 Prozent - mehr braucht niemand, und jeder Prozentpunkt
+# kostet Aufloesung, weil das Bild vorher hochskaliert werden muss.
+RESERVE = 1.25
 
 # Anteil der Dauer, in dem „hinein" sein Ziel erreicht. Kurz, deshalb wirkt es wie ein Schlag.
 ANSTIEG = 0.18
@@ -114,18 +124,16 @@ def faktor(effekte: list[Effekt], t: float) -> float:
         u = (t - e.ab_s) / e.dauer_s
         if u < 0.0 or u > 1.0:
             continue
-        z += STAERKE * _form(e.art, u)
+        z += _vorzeichen(e.art) * STAERKE * _form(u)
     return z
 
 
-def _form(art: str, u: float) -> float:
+def _form(u: float) -> float:
     """Der Verlauf von 0 bis 1 über die Dauer, als Anteil der vollen Stärke.
 
-    ``zoom_in``: in ``ANSTIEG`` schnell auf 1, danach sanft zurück auf 0 (quadratisch, also am
-    Anfang schneller als am Ende - das ist das „Ausfaden").
-    ``zoom_out``: beginnt bei 1 und geht gleichmässig sanft auf 0."""
-    if art == "zoom_out":
-        return (1.0 - u) ** 2
+    In ``ANSTIEG`` schnell auf 1, danach sanft zurück auf 0 (quadratisch, also am Anfang schneller
+    als am Ende - das ist das „Ausfaden"). Beide Arten teilen sich diese Kurve; sie unterscheiden
+    sich nur im Vorzeichen."""
     if u <= ANSTIEG:
         # Smoothstep: startet und endet ohne Knick, sonst sieht man den Ansatz.
         x = u / ANSTIEG
@@ -134,26 +142,31 @@ def _form(art: str, u: float) -> float:
     return (1.0 - rest) ** 2
 
 
+def _vorzeichen(art: str) -> float:
+    return -1.0 if art == "zoom_out" else 1.0
+
+
 def ffmpeg_ausdruck(effekte: list[Effekt], fps: float) -> str:
-    """Derselbe Verlauf als Ausdruck für ``zoompan``.
+    """Derselbe Verlauf als ``z``-Ausdruck für ``zoompan``.
+
+    Der Ruhezustand ist ``RESERVE`` und nicht 1: das Bild liegt auf einer groesseren schwarzen
+    Flaeche, und erst dadurch kann „heraus" ueberhaupt kleiner werden. Der zurueckgegebene Ausdruck
+    ist also ``RESERVE * faktor``.
 
     ``on`` ist die Nummer des Ausgabeframes, geteilt durch die Bildrate also die Sekunde im Clip.
     Die Summanden stehen hintereinander; ausserhalb seiner Zeit liefert jeder 0."""
     if not effekte:
-        return "1"
+        return f"{RESERVE:.4f}"
     teile = ["1"]
     for e in effekte:
         u = f"((on/{fps:g})-{e.ab_s:.3f})/{e.dauer_s:.3f}"
         drin = f"between(on/{fps:g},{e.ab_s:.3f},{e.ab_s + e.dauer_s:.3f})"
-        if e.art == "zoom_out":
-            form = f"pow(1-{u},2)"
-        else:
-            x = f"(({u})/{ANSTIEG:.3f})"
-            anstieg = f"({x}*{x}*(3-2*{x}))"
-            rest = f"((({u})-{ANSTIEG:.3f})/{1.0 - ANSTIEG:.3f})"
-            form = f"if(lte({u},{ANSTIEG:.3f}),{anstieg},pow(1-{rest},2))"
-        teile.append(f"if({drin},{STAERKE:.4f}*({form}),0)")
-    return "+".join(teile)
+        x = f"(({u})/{ANSTIEG:.3f})"
+        anstieg = f"({x}*{x}*(3-2*{x}))"
+        rest = f"((({u})-{ANSTIEG:.3f})/{1.0 - ANSTIEG:.3f})"
+        form = f"if(lte({u},{ANSTIEG:.3f}),{anstieg},pow(1-{rest},2))"
+        teile.append(f"if({drin},{_vorzeichen(e.art) * STAERKE:.4f}*({form}),0)")
+    return f"{RESERVE:.4f}*(" + "+".join(teile) + ")"
 
 
 def automatisch(woerter: list[dict], clip_dauer_s: float) -> list[Effekt]:

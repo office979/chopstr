@@ -370,9 +370,16 @@ def video_chain(
     if effekte and not caps.get("zoompan", True):
         notes.append("ffmpeg ohne zoompan-Filter, Effekte wurden weggelassen")
     elif effekte:
+        # Erst hochskalieren (zoompan quantisiert je Bild, sonst springt die Bewegung in Stufen),
+        # dann schwarze Reserve ringsherum: ohne sie koennte „heraus" nicht kleiner werden, denn
+        # zoompan kann nur hineingehen. Der Ruhezustand ist deshalb z = RESERVE.
         ausdruck = effekte_mod.ffmpeg_ausdruck(effekte, fps)
+        gross_w, gross_h = out_w * 2, out_h * 2
+        rand_w = int(round(gross_w * effekte_mod.RESERVE))
+        rand_h = int(round(gross_h * effekte_mod.RESERVE))
         chain += (
-            f"[vc]scale={out_w * 2}:{out_h * 2}:flags=lanczos,"
+            f"[vc]scale={gross_w}:{gross_h}:flags=lanczos,"
+            f"pad={rand_w}:{rand_h}:(ow-iw)/2:(oh-ih)/2:black,"
             f"zoompan=z='{ausdruck}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={out_w}x{out_h}:fps={fps:g},"
             f"setsar=1[ve];"
         )

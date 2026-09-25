@@ -34,11 +34,13 @@ describe("die Bewegung", () => {
     expect(spaet).toBeGreaterThan(0);
   });
 
-  it("beginnt bei „weiter weg“ nah und zieht sich zurück", () => {
-    const x = [e("zoom_out", 0, 2)];
-    expect(faktor(x, 0)).toBeCloseTo(1 + STAERKE, 9);
-    expect(faktor(x, 1)).toBeLessThan(faktor(x, 0.5));
-    expect(faktor(x, 2)).toBeCloseTo(1, 9);
+  it("macht das Bild bei „Zoom out“ kleiner", () => {
+    /* Spiegelbild von „Zoom in": schnell kleiner, dann langsam zurück. Rundherum steht Schwarz. */
+    const x = [e("zoom_out", 0, 1)];
+    expect(faktor(x, 0)).toBeCloseTo(1, 9);
+    expect(faktor(x, 0.18)).toBeCloseTo(1 - STAERKE, 9);
+    expect(faktor(x, 0.5)).toBeLessThan(1);
+    expect(faktor(x, 1)).toBeCloseTo(1, 9);
   });
 
   it("endet immer wieder bei eins", () => {
@@ -51,10 +53,11 @@ describe("die Bewegung", () => {
 
   it("stimmt mit den Werten des Renderers überein", () => {
     /* Abgelesen aus pipeline/effekte.py. Zwei Umsetzungen derselben Kurve brauchen einen Anker. */
-    const x = [e("zoom_in", 2, 1.4)];
-    expect(faktor(x, 2.15)).toBeCloseTo(1.0641, 4);
-    expect(faktor(x, 2.25)).toBeCloseTo(1.1, 4);
-    expect(faktor(x, 2.7)).toBeCloseTo(1.0372, 4);
+    const x = [e("zoom_in", 1, 1)];
+    expect(faktor(x, 1.18)).toBeCloseTo(1.1, 4);
+    expect(faktor(x, 1.5)).toBeCloseTo(1.0372, 4);
+    expect(faktor(x, 2)).toBeCloseTo(1, 4);
+    expect(faktor([e("zoom_out", 1, 1)], 1.5)).toBeCloseTo(0.9628, 4);
   });
 });
 
@@ -75,7 +78,10 @@ describe("was gelesen wird", () => {
 
   it("lässt zwei Effekte nie übereinander liegen", () => {
     const aus = lesen([e("zoom_in", 1, 2), e("zoom_out", 1.5, 2)], 30);
-    for (let t = 0; t < 10; t += 0.05) expect(faktor(aus, t)).toBeLessThanOrEqual(1 + STAERKE + 1e-9);
+    for (let t = 0; t < 10; t += 0.05) {
+      expect(faktor(aus, t)).toBeLessThanOrEqual(1 + STAERKE + 1e-9);
+      expect(faktor(aus, t)).toBeGreaterThanOrEqual(1 - STAERKE - 1e-9);
+    }
   });
 });
 

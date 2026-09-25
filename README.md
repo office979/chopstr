@@ -177,9 +177,13 @@ in **Clipzeit**; beim ersten Clippen setzt `workers/chopstr_worker/pipeline/effe
 welche, dort wo eine Zahl oder eine Ankündigung fällt. Im Editor stehen sie unter „Effekte“ und als
 eigene Spur in der Zeitleiste: verschieben, länger ziehen, entfernen.
 
-„Näher heran“ geht schnell hinein und lässt langsam los, „Weiter weg“ beginnt nah und zieht sich
-gleichmässig zurück. Beide enden wieder bei 1,0 – sonst addieren sich zwei Effekte, und nach dem
-dritten ist das Bild eine Briefmarke.
+„Zoom in“ geht schnell näher heran und lässt langsam los, „Zoom out“ ist sein Spiegelbild: das Bild
+wird kleiner, rundherum steht Schwarz. Beide enden wieder bei 1,0 – sonst addieren sich zwei
+Effekte, und nach dem dritten ist das Bild eine Briefmarke.
+
+Kleiner zu werden heisst, mehr zu zeigen als da ist; `zoompan` kann nur hineingehen. Deshalb liegt
+das Bild vor dem Zoom auf einer grösseren schwarzen Fläche (`RESERVE`), und der Ruhezustand ist
+`z = RESERVE` statt 1.
 
 `NULL` in der Spalte heisst „noch nie gesetzt“, eine leere Liste „ausdrücklich keine“. Nur dieser
 Unterschied verhindert, dass der nächste Renderlauf die Entscheidung des Menschen überschreibt.

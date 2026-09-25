@@ -17,11 +17,14 @@ def test_hinein_geht_schnell_rein_und_langsam_raus():
     assert frueh > spaet > 0
 
 
-def test_heraus_beginnt_nah_und_zieht_sich_zurueck():
-    e = [ef.Effekt("zoom_out", 0.0, 2.0)]
-    assert abs(ef.faktor(e, 0.0) - (1 + ef.STAERKE)) < 1e-9
-    assert ef.faktor(e, 1.0) < ef.faktor(e, 0.5)
-    assert abs(ef.faktor(e, 2.0) - 1.0) < 1e-9
+def test_heraus_macht_das_bild_kleiner():
+    """Spiegelbild von „hinein": schnell kleiner, dann langsam zurueck auf normal. Rundherum steht
+    Schwarz, dafuer gibt es die Reserve in der Filterkette."""
+    e = [ef.Effekt("zoom_out", 0.0, 1.0)]
+    assert abs(ef.faktor(e, 0.0) - 1.0) < 1e-9
+    assert abs(ef.faktor(e, ef.ANSTIEG) - (1 - ef.STAERKE)) < 1e-9
+    assert ef.faktor(e, 0.5) < 1.0
+    assert abs(ef.faktor(e, 1.0) - 1.0) < 1e-9
 
 
 def test_jeder_effekt_endet_wieder_bei_eins():
@@ -131,8 +134,11 @@ def test_der_ffmpeg_ausdruck_bildet_dieselbe_kurve():
     }
     for on in range(0, 250):
         wert = eval(ausdruck.replace("if(", "iff("), {"iff": umgebung["if"], **umgebung, "on": on})  # noqa: S307
-        assert abs(wert - ef.faktor(e, on / 25)) < 1e-9, f"Frame {on}"
+        # Der Ausdruck liefert die zoompan-Zahl, also RESERVE mal den sichtbaren Faktor.
+        assert abs(wert / ef.RESERVE - ef.faktor(e, on / 25)) < 1e-9, f"Frame {on}"
 
 
-def test_ohne_effekte_bleibt_der_ausdruck_eine_eins():
-    assert ef.ffmpeg_ausdruck([], 25) == "1"
+def test_ohne_effekte_bleibt_der_ausdruck_der_ruhezustand():
+    """Der Ruhezustand ist RESERVE und nicht 1: das Bild liegt auf einer groesseren schwarzen
+    Flaeche, und genau dort sieht man es unveraendert."""
+    assert float(ef.ffmpeg_ausdruck([], 25)) == ef.RESERVE

@@ -114,9 +114,6 @@ export default async function ClipPage({ params }: Props) {
         shots={clip.render_plan?.shots ?? []}
         quelleBreite={source.width ?? null}
         komposition={clip.composition}
-        /* Der Schnitt aus dem letzten Bauen. Daran haengt der Hinweis „das Video zeigt noch den
-         * alten Schnitt"; ohne Plan gibt es nichts zu vergleichen. */
-        gerenderteSegmente={clip.render_plan?.segments ?? null}
         /* Die Befunde zu diesem Clip: was der Schnitt am Sinn verändert, was die Analyse markiert
            hat, was die technische Prüfung an der Datei gefunden hat. Sie standen bisher nur in der
            Clip-Übersicht, nicht auf der Seite, auf der entschieden wird. Gerechnet auf dem Server,

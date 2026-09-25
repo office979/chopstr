@@ -19,21 +19,21 @@ export interface Effekt {
 export const EFFEKT_ARTEN: EffektArt[] = ["zoom_in", "zoom_out"];
 
 export const EFFEKT_LABEL: Record<EffektArt, string> = {
-  zoom_in: "Näher heran",
-  zoom_out: "Weiter weg",
+  zoom_in: "Zoom in",
+  zoom_out: "Zoom out",
 };
 
 /* Was der Effekt tut, in einem Satz. Steht in der Auswahl, damit niemand raten muss, was
  * „Näher heran" im fertigen Video heisst. */
 export const EFFEKT_SATZ: Record<EffektArt, string> = {
   zoom_in: "Geht schnell näher heran und lässt langsam wieder los. Betont ein Wort.",
-  zoom_out: "Beginnt nah und zieht sich ruhig zurück. Öffnet eine Szene.",
+  zoom_out: "Macht das Bild kurz kleiner, rundherum steht Schwarz. Setzt eine Zäsur.",
 };
 
 export const STAERKE = 0.1;
 export const MIN_DAUER_S = 0.4;
 export const MAX_DAUER_S = 6;
-export const STANDARD_DAUER_S = 1.4;
+export const STANDARD_DAUER_S = 1;
 const ANSTIEG = 0.18;
 
 function zahl(v: unknown, ersatz: number): number {
@@ -82,8 +82,10 @@ export function entzerren(effekte: Effekt[]): Effekt[] {
   return aus;
 }
 
-function form(art: EffektArt, u: number): number {
-  if (art === "zoom_out") return (1 - u) ** 2;
+/* Der Verlauf über die Dauer: schnell auf volle Stärke, dann sanft zurück auf null. Beide Arten
+ * teilen sich die Kurve und unterscheiden sich nur im Vorzeichen - „out" macht das Bild kleiner,
+ * und rundherum steht Schwarz. Spiegel von pipeline/effekte._form. */
+function form(u: number): number {
   if (u <= ANSTIEG) {
     const x = u / ANSTIEG;
     return x * x * (3 - 2 * x);
@@ -98,7 +100,7 @@ export function faktor(effekte: Effekt[], t: number): number {
   for (const e of effekte) {
     const u = (t - e.ab_s) / e.dauer_s;
     if (u < 0 || u > 1) continue;
-    z += STAERKE * form(e.art, u);
+    z += (e.art === "zoom_out" ? -1 : 1) * STAERKE * form(u);
   }
   return z;
 }

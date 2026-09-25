@@ -19,7 +19,6 @@ import {
   dauer as schnittDauer,
   inClipzeit,
   gleich as schnittGleich,
-  zusammenziehen,
   type Schnitt,
 } from "@/lib/clips/schnitt";
 import { pruefen } from "@/lib/clips/untertitel-pruefung";
@@ -29,6 +28,7 @@ import { rueckwegMerken } from "@/lib/clips/rueckweg";
 import {
   dauerAendern as effektDauer,
   entfernen as effektEntfernen,
+  faktor as effektFaktor,
   lesen as effekteLesen,
   verschieben as effektVerschieben,
   type Effekt,
@@ -94,7 +94,6 @@ interface Props {
   komposition: Schnitt;
   /* Der Schnitt, der im gebauten Video steckt. Weicht er vom gespeicherten ab, zeigt das Video
    * ein altes Ergebnis, und das muss dastehen. */
-  gerenderteSegmente: Schnitt | null;
   quelleDauerS: number;
   wellenformSrc: string | null;
   /* Ist das Video fertig analysiert? Ohne das lässt sich nicht sagen, ob eine fehlende Tonspur
@@ -167,7 +166,6 @@ export function ClipDetail({
   shots,
   quelleBreite,
   komposition,
-  gerenderteSegmente,
   quelleDauerS,
   wellenformSrc,
   quelleFertig,
@@ -432,13 +430,6 @@ export function ClipDetail({
   }, [vorStapel, standJetzt, standSetzen]);
 
   const schnittGeaendert = !schnittGleich(schnitt, gesichert);
-  /* Verglichen wird in der Form, die auch im Plan steht: der Renderer zieht durchgehende
-   * Abschnitte zusammen. Ohne das gaelte ein geteilter, frisch gebauter Clip fuer immer als
-   * veraltet. */
-  const schnittVeraltet =
-    Boolean(clipSrc) &&
-    gerenderteSegmente != null &&
-    !schnittGleich(zusammenziehen(gesichert), zusammenziehen(gerenderteSegmente));
   const neueDauer = schnittDauer(schnitt);
 
   /* Die Effekte dieses Clips.
@@ -451,6 +442,12 @@ export function ClipDetail({
   const [effekteGesichert, setEffekteGesichert] = useState<Effekt[]>(effekte);
   /* Die Länge des Clips in Clipzeit: daran hängt, wie weit ein Effekt geschoben werden darf. */
   const clipDauer = useMemo(() => schnittDauer(schnitt), [schnitt]);
+
+  /* Wie nah das Bild an dieser Stelle wirkt, nach den gesetzten Effekten.
+   *
+   * Gerechnet aus der Stelle, die gerade läuft, in Clipzeit. Ohne diese Zeile sieht man von einem
+   * neu gesetzten Effekt bis zum nächsten Clippen nichts, und er wirkt kaputt. */
+  const effektZoom = useMemo(() => effektFaktor(effekte, inClipzeit(schnitt, currentTime)), [effekte, schnitt, currentTime]);
 
   const effekteSpeichern = useCallback(
     async (naechste: Effekt[]) => {
@@ -941,6 +938,7 @@ export function ClipDetail({
               onLaeuft={setLaeuft}
               shots={shots}
               zeitmarken={markenSicht}
+              zoom={effektZoom}
               stil={stil}
               woerter={clipWords}
               onCaptionHoehe={canEdit ? (px) => setStil((v) => ({ ...v, bottom_margin_px: px })) : undefined}
@@ -1041,32 +1039,6 @@ export function ClipDetail({
             onVor={vor}
           />
 
-          {canEdit && (
-            <GlassCard padding="md" selected={schnittGeaendert}>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-col gap-1">
-                  <p className="text-sm text-text">
-                    {schnittGeaendert
-                      ? `Schnitt geändert, noch nicht gespeichert. Neue Länge ${neueDauer.toFixed(1).replace(".", ",")} s.`
-                      : schnittVeraltet
-                        ? "Schnitt gespeichert. Das geclippte Video hat ihn noch nicht."
-                        : `Gespeichert. Länge ${neueDauer.toFixed(1).replace(".", ",")} s.`}
-                  </p>
-                  {(schnittGeaendert || schnittVeraltet) && (
-                    <p className="text-sm text-text-2">{'Links unter „Mit deinen Änderungen“ siehst du ihn schon.'}</p>
-                  )}
-                </div>
-                <Button
-                  variant={schnittGeaendert ? "primary" : "ghost"}
-                  disabled={!schnittGeaendert || schnittSaving}
-                  onClick={() => void schnittSichern()}
-                >
-                  {schnittSaving ? "Wird gespeichert" : "Schnitt speichern"}
-                </Button>
-              </div>
-            </GlassCard>
-          )}
-
           {/* Der Bildausschnitt gehört zum Schneiden: beides hängt an der Stelle, an der der
               Abspielkopf steht. Vorher lag er in einer eigenen Spalte weit unten, und man musste
               zwischen Timeline und Ausschnitt hin und her scrollen. */}
@@ -1104,6 +1076,26 @@ export function ClipDetail({
             canEdit={canEdit}
             onAendern={(naechste) => void effekteSpeichern(naechste)}
           />
+
+          {/* Speichern ganz unten rechts, wo man nach dem Arbeiten hinkommt.
+              Vorher stand hier eine ganze Karte mit einem Satz über den Speicherstand. Der Satz
+              beantwortete eine Frage, die links unter der Vorschau schon beantwortet ist, und
+              nahm dafür eine Zeile quer über die Seite. */}
+          {canEdit && (
+            <div className="flex justify-end">
+              <Button
+                variant={schnittGeaendert ? "primary" : "ghost"}
+                disabled={!schnittGeaendert || schnittSaving}
+                onClick={() => void schnittSichern()}
+              >
+                {schnittSaving
+                  ? "Wird gespeichert"
+                  : schnittGeaendert
+                    ? `Schnitt speichern · ${neueDauer.toFixed(1).replace(".", ",")} s`
+                    : "Schnitt gespeichert"}
+              </Button>
+            </div>
+          )}
           </div>
 
           <div hidden={bereich !== "text"} className="flex min-w-0 flex-col gap-4">

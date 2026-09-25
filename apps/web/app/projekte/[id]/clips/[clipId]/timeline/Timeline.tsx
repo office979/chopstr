@@ -185,11 +185,24 @@ export function Timeline({
     [ausX, onMarkeVerschieben],
   );
 
+  /* Was gerade gezogen wird. Nur für die Anzeige: gespeichert wird beim Loslassen. */
+  const [ziehtEffekt, setZiehtEffekt] = useState<{ index: number; was: "verschieben" | "dauer"; wert: number } | null>(
+    null,
+  );
+
   /* Einen Effekt verschieben oder an seinem rechten Rand verlängern.
    *
    * Der Zeiger liefert Quellzeit, gespeichert wird Clipzeit - deshalb die Umrechnung bei jedem
    * Schritt. Übernommen wird erst beim Loslassen: ein Speichern je Mausbewegung wäre ein Dutzend
    * Schreibvorgänge für eine Geste. */
+  /* Einen Effekt verschieben oder an seinem rechten Rand verlängern.
+   *
+   * Der Block folgt der Maus, solange gezogen wird: ein Griff, der erst beim Loslassen springt,
+   * fühlt sich kaputt an, und man trifft die Stelle nicht. Gespeichert wird trotzdem erst beim
+   * Loslassen - ein Schreibvorgang je Mausbewegung wären Dutzende für eine Geste.
+   *
+   * Der Zeiger liefert Quellzeit, gespeichert wird Clipzeit; deshalb die Umrechnung bei jedem
+   * Schritt. */
   const effektZiehen = useCallback(
     (index: number, was: "verschieben" | "dauer") => (e: React.PointerEvent) => {
       e.preventDefault();
@@ -202,14 +215,16 @@ export function Timeline({
         if (quelle == null) return;
         const clipzeit = inClipzeit(schnitt, quelle);
         letzte = was === "verschieben" ? Math.max(0, clipzeit) : Math.max(MIN_DAUER_S, clipzeit - effekt.ab_s);
+        setZiehtEffekt({ index, was, wert: Math.round(letzte * 100) / 100 });
       };
       const ende = () => {
         window.removeEventListener("pointermove", los);
         window.removeEventListener("pointerup", ende);
+        setZiehtEffekt(null);
         if (letzte == null) return;
         if (was === "verschieben") {
-          if (Math.abs(letzte - effekt.ab_s) > 0.05) onEffektVerschieben(index, Math.round(letzte * 100) / 100);
-        } else if (Math.abs(letzte - effekt.dauer_s) > 0.05) {
+          if (Math.abs(letzte - effekt.ab_s) > 0.02) onEffektVerschieben(index, Math.round(letzte * 100) / 100);
+        } else if (Math.abs(letzte - effekt.dauer_s) > 0.02) {
           onEffektDauer(index, Math.round(letzte * 100) / 100);
         }
       };
@@ -218,6 +233,18 @@ export function Timeline({
     },
     [ausX, effekte, schnitt, onEffektVerschieben, onEffektDauer],
   );
+
+  /* Die Effekte so, wie sie gerade aussehen sollen - mit der laufenden Bewegung darin. */
+  const effekteSicht = useMemo(() => {
+    if (!ziehtEffekt) return effekte;
+    return effekte.map((e, i) =>
+      i !== ziehtEffekt.index
+        ? e
+        : ziehtEffekt.was === "verschieben"
+          ? { ...e, ab_s: ziehtEffekt.wert }
+          : { ...e, dauer_s: Math.max(MIN_DAUER_S, ziehtEffekt.wert) },
+    );
+  }, [effekte, ziehtEffekt]);
 
   const imClip = useMemo(() => {
     let vorher = 0;
@@ -373,7 +400,16 @@ export function Timeline({
         </div>
 
         <div className="min-w-0 flex-1">
-        <Lineal vonS={fensterVon} bisS={fensterBis} breitePx={breite} />
+        {/* Ein Klick auf die Zeitskala setzt den Abspielkopf. Vorher war sie nur Beschriftung:
+            man sah 3:30 stehen und konnte nicht hin. */}
+        <div
+          role="presentation"
+          onPointerDown={ziehen((t) => onSeek(t))}
+          className="cursor-pointer"
+          title="Klicken setzt den Abspielkopf"
+        >
+          <Lineal vonS={fensterVon} bisS={fensterBis} breitePx={breite} />
+        </div>
 
         <div
           ref={spurRef}
@@ -516,7 +552,7 @@ export function Timeline({
               Die Blöcke liegen in Clipzeit und werden für die Anzeige in Quellzeit umgerechnet -
               deshalb wandert ein Effekt mit, wenn davor etwas herausgeschnitten wird. */}
           <div className="relative mt-1 h-7 w-full rounded-[6px] bg-black/25">
-            {effekte.map((e, i) => {
+            {effekteSicht.map((e, i) => {
               const vonQ = inQuellzeit(schnitt, e.ab_s);
               const bisQ = inQuellzeit(schnitt, e.ab_s + e.dauer_s);
               if (!(bisQ > vonQ)) return null;
@@ -568,7 +604,7 @@ export function Timeline({
                 </div>
               );
             })}
-            {effekte.length === 0 && (
+            {effekteSicht.length === 0 && (
               <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-text-3">
                 Keine Effekte
               </span>

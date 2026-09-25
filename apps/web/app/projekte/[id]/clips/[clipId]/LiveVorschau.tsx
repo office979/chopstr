@@ -38,6 +38,12 @@ interface Props {
   onLaeuft?: (laeuft: boolean) => void;
   shots: RenderShot[];
   zeitmarken: Zeitmarke[];
+  /* Der Zoomfaktor der Effekte an der Stelle, die gerade läuft. 1 heisst: unberührt.
+   *
+   * Gerechnet wird er mit derselben Kurve wie im Renderer (lib/clips/effekte.faktor, Spiegel von
+   * pipeline/effekte). Das ist keine zweite Wahrheit, sondern dieselbe Formel - und ohne sie
+   * sieht man von einem gesetzten Effekt bis zum nächsten Clippen gar nichts. */
+  zoom?: number;
   stil: CaptionStyle;
   woerter: TranscriptWord[];
   /* Die Höhe der Untertitel lässt sich direkt im Bild ziehen. Ohne diese Rückmeldung bleibt es
@@ -73,6 +79,7 @@ export function LiveVorschau({
   onLaeuft,
   shots,
   zeitmarken,
+  zoom = 1,
   stil,
   woerter,
   onCaptionHoehe,
@@ -159,9 +166,18 @@ export function LiveVorschau({
       }
     : { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 
+  /* Der Effekt-Zoom liegt ÜBER dem Ausschnitt: er verändert nicht, welcher Teil des Originals
+   * gezeigt wird, sondern wie nah das Ergebnis wirkt. Unter 1 wird das Bild kleiner, und der
+   * schwarze Grund des Rahmens wird rundherum sichtbar - genau wie im fertigen Video. */
+  const zoomLage: React.CSSProperties =
+    Math.abs(zoom - 1) < 0.001 ? {} : { transform: `scale(${zoom.toFixed(4)})`, transformOrigin: "center center" };
+
   return (
     <GlassCard padding="none" className="overflow-hidden">
-      <div className="relative mx-auto w-full max-w-[340px] overflow-hidden bg-black" style={{ aspectRatio: ASPEKT[aspect] }}>
+      <div
+        className="relative mx-auto w-full max-w-[340px] overflow-hidden bg-black"
+        style={{ aspectRatio: ASPEKT[aspect], ...zoomLage }}
+      >
         {/* Keine eigenen Bedienelemente des Browsers: das Video ist vergroessert, damit der
           * Ausschnitt den Rahmen fuellt, und seine Leiste waere es dann auch - halb ausserhalb des
           * Bildes. Gespult wird in der Zeitleiste darunter, hier braucht es nur Start und Pause. */}

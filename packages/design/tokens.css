@@ -50,6 +50,10 @@
   /* Status */
   --ok: #f4f5fe;                 /* helles Icon im --line-mute-Kreis */
   --danger: #ff5c5c;
+  /* Freigegeben. Gruen und nicht die Markenfarbe: „freigegeben" ist eine Aussage ueber den Clip
+   * und keine Aussage ueber chopstr, und Blau stand hier neben einem blauen Knopf. */
+  --gut: #3fd27e;
+  --gut-soft: rgba(63, 210, 126, 0.16);
 
   /* Geometrie */
   --radius-card: 30px;

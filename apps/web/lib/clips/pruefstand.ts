@@ -278,6 +278,42 @@ export function pruefstand({
   return { redaktion, qualitaet, datei, befunde, postbereit };
 }
 
+/* Der eine Zustand, der an der Karte steht.
+ *
+ * Die drei Achsen oben sind die Rechnung; das hier ist die Antwort in einem Wort. Vorher standen
+ * an einer Karte bis zu drei Plaketten nebeneinander („Vorgeschlagen", „Fehler", „Wird geclippt"),
+ * und der Kunde musste sie selbst zusammenzählen.
+ *
+ * Worum es dabei geht, ist die Freigabe durch die dritte Person - die, auf deren Konto gepostet
+ * wird. Deshalb heisst der Ruhezustand „Bestätigung ausstehend" und nicht „Vorgeschlagen": es
+ * fehlt keine Idee, es fehlt eine Zusage.
+ *
+ * Die Reihenfolge ist Absicht. Eine Absage beendet die Sache, auch wenn technisch etwas offen
+ * ist. Ein technischer Fehler kommt vor die Freigabe: ein kaputtes Video ist nicht freigegeben,
+ * egal was jemand angeklickt hat. */
+export type FreigabeStand = "ausstehend" | "abgelehnt" | "fehlerhaft" | "freigegeben";
+
+export const FREIGABE_LABEL: Record<FreigabeStand, string> = {
+  ausstehend: "Bestätigung ausstehend",
+  abgelehnt: "Abgelehnt",
+  fehlerhaft: "Fehlerhaft",
+  freigegeben: "Freigegeben",
+};
+
+export const FREIGABE_SATZ: Record<FreigabeStand, string> = {
+  ausstehend: "Noch niemand hat bestätigt, dass dieser Clip so gepostet werden darf.",
+  abgelehnt: "Dieser Clip soll so nicht hinaus.",
+  fehlerhaft: "Am Clip oder an der Datei stimmt etwas nicht. Das gehört zuerst behoben.",
+  freigegeben: "Bestätigt. Der Clip darf so gepostet werden.",
+};
+
+export function freigabeStand(p: Pruefstand, freigabe?: GuestApproval | null): FreigabeStand {
+  if (p.redaktion === "verworfen" || freigabe?.decision === "rejected") return "abgelehnt";
+  if (p.qualitaet === "fehler" || p.datei === "fehlgeschlagen") return "fehlerhaft";
+  if (p.redaktion === "freigegeben") return "freigegeben";
+  return "ausstehend";
+}
+
 /* Was als Nächstes zu tun ist, in der Reihenfolge, in der es weh tut. Genau eine Handlung je
  * Karte: vier gleichrangige Knöpfe sind keine Führung, sondern eine Auswahlaufgabe. */
 export type AktionId =
@@ -376,13 +412,15 @@ export function rang(p: Pruefstand): number {
  * „was muss ich noch anfassen". */
 export type FilterId = "alle" | "fehler" | "wird_erstellt" | "postbereit" | "freigegeben" | "verworfen";
 
+/* Dieselben Wörter wie an der Karte. „Fehler beheben" und „Verworfen" standen hier, während an
+ * der Karte „Fehlerhaft" und „Abgelehnt" steht - zwei Namen für dieselbe Sache auf einer Seite. */
 export const FILTER_LABEL: Record<FilterId, string> = {
   alle: "Alle",
-  fehler: "Fehler beheben",
+  fehler: "Fehlerhaft",
   wird_erstellt: "Wird geclippt",
   postbereit: "Bereit zum Posten",
   freigegeben: "Freigegeben",
-  verworfen: "Verworfen",
+  verworfen: "Abgelehnt",
 };
 
 export function passtZuFilter(p: Pruefstand, f: FilterId): boolean {

@@ -145,6 +145,27 @@ Alle Variablen mit Erklärung stehen in [`.env.example`](.env.example). Die wich
 | `EGRESS_ALLOWLIST` | zusätzliche erlaubte Hosts für ausgehende Worker-Aufrufe. |
 | `CHOPSTR_AUSGABE_REGELN` | Pfad zum Regelkatalog `packages/schema/ausgabe_regeln_v1.json`, falls ein Image ihn woanders ablegt. Web-App und Worker lesen dieselbe Datei. |
 
+## Die vier Zustände eines Clips
+
+An der Karte steht EIN Wort, nicht drei Plaketten nebeneinander. Es beantwortet die Frage, um die
+es auf dieser Seite geht: darf das so gepostet werden? Gerechnet in
+`apps/web/lib/clips/pruefstand.ts` (`freigabeStand`), aus denselben drei Achsen wie alles andere.
+
+| Zustand | Farbe | wann |
+| --- | --- | --- |
+| Bestätigung ausstehend | grau | Ruhezustand: niemand hat geantwortet |
+| Abgelehnt | rot | verworfen, oder die gefragte Person hat Nein gesagt |
+| Fehlerhaft | orange | sinnverändernder Schnitt, technischer Befund, fehlgeschlagener Lauf |
+| Freigegeben | grün | bestätigt |
+
+Die Reihenfolge ist Absicht: eine Absage beendet die Sache, auch wenn technisch etwas offen ist,
+und ein Fehler kommt vor die Freigabe — ein kaputtes Video ist nicht freigegeben, egal was jemand
+angeklickt hat.
+
+**Freigabe heisst: die Zusage der dritten Person**, auf deren Konto gepostet wird. Sie wird einmal
+für eine Menge Clips angefordert (Knopf oben rechts in der Clip-Liste), nicht je Karte: bei
+vierzehn Clips war das vierzehnmal derselbe Knopf und vierzehnmal dieselbe Mailadresse.
+
 ## Wann eine Clipfassung hinausgehen darf
 
 Ein Clip verlässt chopstr auf zwei Wegen: als Download oder als Veröffentlichung. Über beide

@@ -1,14 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { SilentPreview, type PreviewFont } from "@/components/clips/SilentPreview";
 import { Modal } from "@/components/ui/Modal";
-import { ClipApproval } from "./ClipApproval";
 import type { Aspect, Candidate, CaptionVersion, Clip, GuestApproval, HookVersion, PipelineEvent } from "@/lib/repo/types";
 import {
   EXPORT_BLOCKED_MESSAGE,
@@ -29,8 +28,10 @@ import {
   passtZuFilter,
   pruefstand,
   rang,
-  REDAKTION_LABEL,
-  REDAKTION_SATZ,
+  FREIGABE_LABEL,
+  FREIGABE_SATZ,
+  freigabeStand,
+  type FreigabeStand,
   type FilterId,
   type Pruefstand,
 } from "@/lib/clips/pruefstand";
@@ -458,6 +459,24 @@ export function ClipBoard({
     return { freigebbar, gesperrt, grund, schonFrei };
   }, [auswahl, staende]);
 
+  /* Welche Clips gehen zur Bestätigung hinaus?
+   *
+   * Die ausgewählten, wenn welche ausgewählt sind - sonst alle sichtbaren, über die noch nicht
+   * entschieden ist und von denen es eine fertige Datei gibt. Einen Clip ohne Datei zu schicken
+   * hiesse, jemanden auf eine leere Seite zu schicken; einen abgelehnten noch einmal zu schicken
+   * hiesse, dieselbe Frage zweimal zu stellen. */
+  const zurFreigabe = useMemo(() => {
+    const quelle = auswahl.size > 0 ? sichtbar.filter((c) => auswahl.has(c.id)) : sichtbar;
+    return quelle
+      .filter((c) => {
+        const p = staende.get(c.id);
+        if (!p) return false;
+        if (auswahl.size > 0) return Boolean(c.file_key);
+        return Boolean(c.file_key) && freigabeStand(p, approvals.get(c.id) ?? null) === "ausstehend";
+      })
+      .map((c) => ({ id: c.id, label: `${PLATFORM_LABELS[c.platform]} ${ASPECT_LABELS[c.aspect]}` }));
+  }, [auswahl, sichtbar, staende, approvals]);
+
   /* Den Prüfstand setzen, einzeln oder für die ganze Auswahl. */
   const reviewSetzen = useCallback(
     async (ids: string[], review: Clip["review"]) => {
@@ -530,6 +549,8 @@ export function ClipBoard({
     [sourceId, details],
   );
 
+  /* Eine angeforderte Freigabe kommt aus der Antwort der Route zurück - es braucht also keine
+   * zweite Abfrage, um den Zustand an der Karte richtig zu stellen. */
   const onRequested = useCallback((approval: GuestApproval) => {
     setApprovals((prev) => new Map(prev).set(approval.clip_id, approval));
     applyClips(clipsRef.current.map((c) => (c.id === approval.clip_id ? { ...c, guest_approval_required: true } : c)));
@@ -707,7 +728,7 @@ export function ClipBoard({
           {zaehler.get("fehler") ? `, ${zaehler.get("fehler")} mit einem Fehler` : ""}
           {zaehler.get("postbereit") ? `, ${zaehler.get("postbereit")} bereit zum Posten` : ""}.
         </p>
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-3 text-xs">
           {live && (
             <span className="flex items-center gap-2 text-ai-soft">
               <span className="h-1.5 w-1.5 rounded-full bg-ai-soft" aria-hidden="true" />
@@ -716,6 +737,14 @@ export function ClipBoard({
           )}
           {connection === "error" && !allSettled && <span className="text-attention">Verbindung unterbrochen, versuche erneut</span>}
           {demo && <Badge tone="ai">Testmodus</Badge>}
+          <FreigabeSenden
+            sourceId={sourceId}
+            clips={zurFreigabe}
+            erlaubt={canRequestGuest}
+            tarifErlaubt={planAllowsGuest}
+            tarifName={planName}
+            onFreigabe={onRequested}
+          />
         </div>
       </div>
 
@@ -920,13 +949,14 @@ export function ClipBoard({
           const mp4 = clip.file_key && mediaBase ? `/api/projects/${sourceId}/clips/${clip.id}/download?kind=mp4` : null;
           /* Jede Handlung fragt denselben Rechner. Vorher entschied jeder Knopf für sich, ob er
            * anklickbar ist, und daher stand „Korrektur nötig" neben einem offenen „Freigeben". */
-          const darfFreigeben = aktionStand("freigeben", p);
           const darfLaden = aktionStand("herunterladen", p, {
             exportGesperrt: blocked ? EXPORT_BLOCKED_MESSAGE : demo ? "Im Testmodus gibt es keine Dateien" : null,
             hatDatei: Boolean(mp4),
           });
-          const darfGast = aktionStand("gast_fragen", p);
           const naechste = hauptaktion(p);
+          /* Der eine Zustand, der an der Karte steht. Gerechnet aus denselben drei Achsen und
+             der Antwort des Gastes - siehe lib/clips/pruefstand.freigabeStand. */
+          const freigabe_stand = freigabeStand(p, approval ?? null);
           const bearbeiten = `/projekte/${sourceId}/clips/${clip.id}`;
           const poster = mediaUrl(mediaBase, clip.poster_key);
           const video = isDone(clip) ? mediaUrl(mediaBase, clip.file_key) : null;
@@ -1021,42 +1051,23 @@ export function ClipBoard({
                     )}
                   </div>
 
-                  {/* Warum hat der Computer diesen Ausschnitt vorgeschlagen? Der Satz kommt aus
-                      der Analyse dieses Clips und stand vorher zugeklappt ganz unten. Wer prüfen
-                      soll, ob ein Vorschlag taugt, braucht die Begründung zuerst und nicht zuletzt. */}
-                  {kandidat?.rubric.proposal_why && (
-                    <p className="line-clamp-2 text-sm text-text-2">
-                      {/* Kein „weil" davor: der Satz aus der Analyse ist ein Hauptsatz, und
-                          „Vorgeschlagen, weil die Zahl steht am Anfang" ist kein Deutsch. */}
-                      <span className="text-text-3">Warum vorgeschlagen: </span>
-                      {kandidat.rubric.proposal_why}
-                    </p>
-                  )}
+                  {/* „Warum vorgeschlagen: Heuristik ohne Sprachmodell, Diskursmarker …" stand
+                      hier einmal. Das ist die Arbeitsweise der Maschine und keine Auskunft, mit
+                      der ein Kunde etwas anfängt - sie stand an jeder Karte und schob das
+                      Wesentliche nach unten. */}
 
-                  {/* Die drei Achsen. Gezeigt wird, was etwas aussagt: die redaktionelle
-                      Entscheidung immer, Qualität und Datei nur, wenn sie nicht in Ordnung sind.
-                      Eine Karte mit drei grünen Plaketten sagt dasselbe wie eine mit keiner und
-                      kostet dreimal so viel Aufmerksamkeit. */}
+                  {/* EIN Zustand, nicht drei Plaketten nebeneinander.
+                      Vorher standen „Vorgeschlagen", „Fehler" und „Wird geclippt" nebeneinander,
+                      und wer die Karte ansah, musste sie selbst zusammenzählen. Die vier Zustände
+                      beantworten die Frage, um die es hier geht: darf das so gepostet werden?
+                      „Wird geclippt" steht weiter daneben, denn das ist keine Antwort darauf,
+                      sondern eine laufende Maschine. */}
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                    {p.postbereit ? (
-                      <span
-                        title="Freigegeben, ohne offenen Fehler, und die geclippte Datei ist aktuell."
-                        className="inline-flex h-6 items-center rounded-pill border border-brand/60 bg-brand/15 px-2.5 text-[12px] font-medium text-text"
-                      >
-                        Bereit zum Posten
-                      </span>
-                    ) : (
-                      <Pille ton={p.redaktion === "freigegeben" ? "gut" : "ruhig"} titel={REDAKTION_SATZ[p.redaktion]}>
-                        {REDAKTION_LABEL[p.redaktion]}
-                      </Pille>
-                    )}
-                    {p.qualitaet === "fehler" && (
-                      <Pille ton="fehler" titel="Am Inhalt stimmt etwas nicht.">
-                        Fehler
-                      </Pille>
-                    )}
-                    {p.datei !== "aktuell" && (
-                      <Pille ton={p.datei === "fehlgeschlagen" ? "achtung" : "ruhig"} titel={DATEI_SATZ[p.datei]}>
+                    <Pille ton={FREIGABE_TON[freigabe_stand]} titel={FREIGABE_SATZ[freigabe_stand]}>
+                      {FREIGABE_LABEL[freigabe_stand]}
+                    </Pille>
+                    {(p.datei === "wird_erstellt" || p.datei === "keine") && (
+                      <Pille ton="ruhig" titel={DATEI_SATZ[p.datei]}>
                         {DATEI_LABEL[p.datei]}
                       </Pille>
                     )}
@@ -1097,45 +1108,31 @@ export function ClipBoard({
                   {/* Eine Zeile, eine hervorgehobene Handlung, der Rest eine Ebene tiefer.
                       Vorher standen hier sechs gleichrangige Knöpfe. Sechs Möglichkeiten sind
                       keine Führung, sondern eine Auswahlaufgabe vor der eigentlichen Aufgabe. */}
+                  {/* Immer derselbe erste Knopf: Herunterladen.
+                      Vorher stand hier je nach Zustand „Clip prüfen", „Fehler beheben", „Video
+                      clippen" oder „Herunterladen" - vier verschiedene Knöpfe an derselben Stelle,
+                      und man musste jede Karte einzeln lesen, um zu wissen, was der Klick tut.
+                      Gesperrt sagt er, was ihm fehlt. */}
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-2">
-                    {naechste.id === "pruefen" && (
-                      <Button size="sm" onClick={() => void openZoom(clip)}>
-                        Clip prüfen
-                      </Button>
-                    )}
-                    {(naechste.id === "beheben" || naechste.id === "neu_bauen") && (
-                      <Link
-                        href={bearbeiten}
-                        className="transition-soft inline-flex h-9 items-center rounded-pill bg-text px-4 text-sm font-medium text-black hover:bg-white"
+                    {darfLaden.erlaubt && mp4 ? (
+                      <a
+                        href={mp4}
+                        download
+                        className="transition-soft inline-flex h-9 items-center gap-2 rounded-pill bg-text px-4 text-sm font-medium text-black hover:bg-white"
                       >
-                        {naechste.label}
-                      </Link>
+                        <IconDownload />
+                        Herunterladen
+                      </a>
+                    ) : (
+                      <GesperrtKnopf grund={darfLaden.grund}>
+                        <IconDownload />
+                        Herunterladen
+                      </GesperrtKnopf>
                     )}
-                    {naechste.id === "herunterladen" &&
-                      (darfLaden.erlaubt && mp4 ? (
-                        <a
-                          href={mp4}
-                          download
-                          className="transition-soft inline-flex h-9 items-center gap-2 rounded-pill bg-text px-4 text-sm font-medium text-black hover:bg-white"
-                        >
-                          <IconDownload />
-                          Herunterladen
-                        </a>
-                      ) : (
-                        <GesperrtKnopf grund={darfLaden.grund}>
-                          <IconDownload />
-                          Herunterladen
-                        </GesperrtKnopf>
-                      ))}
                     {naechste.id === "zurueckholen" && (
-                      <Button size="sm" disabled={sammelLaeuft} onClick={() => void reviewSetzen([clip.id], "offen")}>
+                      <Button size="sm" variant="ghost" disabled={sammelLaeuft} onClick={() => void reviewSetzen([clip.id], "offen")}>
                         Zurückholen
                       </Button>
-                    )}
-                    {naechste.id === "warten" && (
-                      <span className="inline-flex h-9 items-center rounded-pill border border-line px-4 text-sm text-text-3">
-                        Wird gebaut
-                      </span>
                     )}
 
                     <Weitere
@@ -1150,20 +1147,6 @@ export function ClipBoard({
                       laeuft={sammelLaeuft}
                       onReview={(r) => void reviewSetzen([clip.id], r)}
                       onLoeschen={() => setDeleteTarget(clip)}
-                    />
-                    {/* Gastfreigabe, Posten und Serie standen darunter, durch eine Linie
-                        getrennt - zwei Zeilen fuer eine Handvoll Knoepfe. Jetzt eine Zeile. */}
-                    <ClipApproval
-                      sourceId={sourceId}
-                      clipId={clip.id}
-                      clipLabel={`${PLATFORM_LABELS[clip.platform]} ${ASPECT_LABELS[clip.aspect]}`}
-                      guestApprovalRequired={clip.guest_approval_required}
-                      current={approval ?? null}
-                      canRequest={canRequestGuest && darfGast.erlaubt}
-                      gesperrtGrund={darfGast.grund}
-                      planAllows={planAllowsGuest}
-                      planName={planName}
-                      onRequested={onRequested}
                     />
                     {/* Was aus dem Clip geworden ist. Ohne diese Zeile endete die Kette am
                         fertigen Clip: Posten und Kennzahlen gab es nur als Schnittstelle, und
@@ -1187,21 +1170,6 @@ export function ClipBoard({
                       />
                     )}
 
-                    {/* Freigeben sitzt am rechten Rand und immer an derselben Stelle: das ist die
-                        eine Entscheidung, um die es auf dieser Seite geht, und sie soll nicht
-                        zwischen den anderen Knoepfen wandern, je nachdem wie viele davon gerade
-                        da sind. Gesperrt sagt sie, warum. */}
-                    {p.redaktion !== "verworfen" && p.redaktion !== "freigegeben" && (
-                      <span className="ml-auto">
-                        {darfFreigeben.erlaubt ? (
-                          <Button size="sm" disabled={sammelLaeuft} onClick={() => void reviewSetzen([clip.id], "bereit")}>
-                            Freigeben
-                          </Button>
-                        ) : (
-                          <GesperrtKnopf grund={darfFreigeben.grund}>Freigeben</GesperrtKnopf>
-                        )}
-                      </span>
-                    )}
                   </div>
 
                   {/* Der Gast hat eine andere Fassung gesehen: ein ganzer Satz, der eine eigene
@@ -1262,7 +1230,9 @@ function Pille({
       title={titel}
       className={cn(
         "inline-flex h-6 items-center rounded-pill border px-2.5 text-[12px] font-medium",
-        ton === "gut" && "border-brand/60 bg-brand/15 text-text",
+        /* Grün und nicht die Markenfarbe: „freigegeben" ist eine Aussage über den Clip, und
+           Blau stand hier neben einem blauen Knopf. */
+        ton === "gut" && "border-gut/60 bg-gut/15 text-text",
         ton === "achtung" && "border-attention/60 bg-attention/15 text-text",
         ton === "fehler" && "border-danger/60 bg-danger/15 text-text",
         ton === "ruhig" && "border-line text-text-2",
@@ -1291,6 +1261,211 @@ function GesperrtKnopf({ grund, children }: { grund: string | null; children: Re
     </span>
   );
 }
+
+/* Clips zur Bestätigung schicken.
+ *
+ * Die Freigabe ist die Zusage der dritten Person - der, auf deren Konto gepostet wird. Sie stand
+ * vorher als „Jemanden um Freigabe bitten" an JEDER Karte: bei vierzehn Clips vierzehnmal
+ * derselbe Knopf, vierzehnmal dieselbe Mailadresse eintippen. Gefragt wird aber einmal, für alles,
+ * was hinausgehen soll.
+ *
+ * Deshalb steht der Knopf jetzt oben und arbeitet auf einer Menge: den ausgewählten Clips, oder -
+ * wenn nichts ausgewählt ist - allen, die eine fertige Datei haben und noch auf eine Antwort
+ * warten. Was er nicht tut: einen Clip verschicken, über den schon entschieden ist. */
+function FreigabeSenden({
+  sourceId,
+  clips,
+  erlaubt,
+  tarifErlaubt,
+  tarifName,
+  onFreigabe,
+}: {
+  sourceId: string;
+  /* Die Clips, um die es geht, mit ihrer Beschriftung für die Liste im Fenster. */
+  clips: { id: string; label: string }[];
+  erlaubt: boolean;
+  tarifErlaubt: boolean;
+  tarifName: string;
+  /* Je angefragtem Clip: die Antwort der Route, damit die Karte sofort stimmt. */
+  onFreigabe: (approval: GuestApproval) => void;
+}) {
+  const [offen, setOffen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [text, setText] = useState("");
+  const [laeuft, setLaeuft] = useState(false);
+  const [fehler, setFehler] = useState<string | null>(null);
+  const [fertig, setFertig] = useState<{ anzahl: number; gescheitert: number } | null>(null);
+  const emailId = useId();
+  const nameId = useId();
+  const textId = useId();
+
+  if (!erlaubt) return null;
+
+  const senden = async () => {
+    setLaeuft(true);
+    setFehler(null);
+    let gut = 0;
+    let schlecht = 0;
+    for (const c of clips) {
+      try {
+        const res = await fetch(`/api/projects/${sourceId}/clips/${c.id}/guest-approval`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            /* Ohne eigenen Namen die Adresse: die Route will ein Feld, und „" stünde später als
+               leere Zeile in der Freigabeansicht. */
+            guest_name: name.trim() || email.trim(),
+            guest_email: email.trim(),
+            message: text.trim(),
+          }),
+        });
+        const data = (await res.json()) as { approval?: GuestApproval; error?: string };
+        if (!res.ok || !data.approval) throw new Error(data.error ?? "");
+        onFreigabe(data.approval);
+        gut += 1;
+      } catch {
+        schlecht += 1;
+      }
+    }
+    setLaeuft(false);
+    setFertig({ anzahl: gut, gescheitert: schlecht });
+  };
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => {
+          setFertig(null);
+          setFehler(null);
+          setOffen(true);
+        }}
+        title="Die Person fragen, auf deren Konto gepostet wird"
+      >
+        <IconFreigabe />
+        Zur Freigabe senden
+      </Button>
+
+      <Modal
+        open={offen}
+        onClose={() => !laeuft && setOffen(false)}
+        title="Zur Freigabe senden"
+        description="Die Person bekommt einen Link, sieht die Clips und sagt Ja oder Nein. Ohne Konto bei chopstr."
+      >
+        {!tarifErlaubt ? (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-text-2">
+              Im Tarif {tarifName} ist die Freigabe durch Externe nicht enthalten.
+            </p>
+            <div className="flex justify-end">
+              <Button variant="ghost" onClick={() => setOffen(false)}>
+                Schliessen
+              </Button>
+            </div>
+          </div>
+        ) : fertig ? (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-text">
+              {fertig.anzahl === 1 ? "Ein Clip wurde zur Freigabe geschickt." : `${fertig.anzahl} Clips wurden zur Freigabe geschickt.`}
+            </p>
+            {fertig.gescheitert > 0 && (
+              <p className="text-sm text-attention">
+                {fertig.gescheitert === 1
+                  ? "Bei einem Clip hat es nicht geklappt. Versuch es bei dem noch einmal."
+                  : `Bei ${fertig.gescheitert} Clips hat es nicht geklappt. Versuch es bei denen noch einmal.`}
+              </p>
+            )}
+            <div className="flex justify-end">
+              <Button onClick={() => setOffen(false)}>Fertig</Button>
+            </div>
+          </div>
+        ) : clips.length === 0 ? (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-text-2">
+              Gerade gibt es nichts zu schicken: entweder ist über alle Clips schon entschieden,
+              oder es liegt noch keine fertige Datei vor. Wähl einzelne Clips aus, wenn du
+              bestimmte meinst.
+            </p>
+            <div className="flex justify-end">
+              <Button variant="ghost" onClick={() => setOffen(false)}>
+                Schliessen
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-text-2">
+              {clips.length === 1 ? "Ein Clip geht hinaus:" : `${clips.length} Clips gehen hinaus:`}{" "}
+              <span className="text-text">{clips.map((c) => c.label).join(", ")}</span>
+            </p>
+            <label className="flex flex-col gap-1.5" htmlFor={emailId}>
+              <span className="text-sm text-text">E-Mail der Person</span>
+              <input
+                id={emailId}
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@firma.at"
+                className="transition-soft rounded-inner border border-line bg-black/40 px-4 py-2.5 text-[15px] text-text placeholder:text-text-3 hover:border-line-strong focus:border-white/50 focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5" htmlFor={nameId}>
+              <span className="text-sm text-text">Name (freiwillig)</span>
+              <input
+                id={nameId}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Wie die Person angesprochen wird"
+                className="transition-soft rounded-inner border border-line bg-black/40 px-4 py-2.5 text-[15px] text-text placeholder:text-text-3 hover:border-line-strong focus:border-white/50 focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5" htmlFor={textId}>
+              <span className="text-sm text-text">Nachricht (freiwillig)</span>
+              <textarea
+                id={textId}
+                rows={2}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Schau bitte drüber, ob das so raus darf."
+                className="transition-soft rounded-inner border border-line bg-black/40 px-4 py-2.5 text-[15px] text-text placeholder:text-text-3 hover:border-line-strong focus:border-white/50 focus:outline-none"
+              />
+            </label>
+            {fehler && <p className="text-sm text-attention">{fehler}</p>}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="ghost" onClick={() => setOffen(false)} disabled={laeuft}>
+                Abbrechen
+              </Button>
+              <Button onClick={() => void senden()} disabled={laeuft || !email.trim().includes("@")}>
+                {laeuft ? "Wird geschickt" : "Senden"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+    </>
+  );
+}
+
+/* Die vier Zustände in Farbe. Grau ist der Ruhezustand: solange niemand geantwortet hat, ist
+ * nichts los - eine bunte Karte für „es fehlt noch eine Antwort" wäre Lärm. */
+const FREIGABE_TON: Record<FreigabeStand, "gut" | "achtung" | "fehler" | "ruhig"> = {
+  ausstehend: "ruhig",
+  abgelehnt: "fehler",
+  fehlerhaft: "achtung",
+  freigegeben: "gut",
+};
+
+/* Eine Person mit einem Haken: jemanden um eine Zusage bitten. */
+const IconFreigabe = () => (
+  <Svg size={16}>
+    <path d="M15 20v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1" />
+    <circle cx="8.5" cy="7" r="3.5" />
+    <path d="m16 11.5 2 2 4-4" />
+  </Svg>
+);
 
 /* Die zweite Ebene: alles, was es auch noch gibt, hinter einer benannten Klappe.
  *

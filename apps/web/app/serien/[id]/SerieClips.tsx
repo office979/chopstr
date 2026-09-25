@@ -8,7 +8,7 @@ import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/components/ui/cn";
 import { PLATFORM_LABELS, formatClipDuration } from "@/lib/clips/labels";
 import { FEATURE_LABELS, type VariationResult } from "@/lib/series/variation";
-import { REDAKTION_LABEL, type Pruefstand } from "@/lib/clips/pruefstand";
+import { FREIGABE_LABEL, freigabeStand, type Pruefstand } from "@/lib/clips/pruefstand";
 import { formatDateTime } from "@/lib/format";
 
 export interface SerienClip {
@@ -160,13 +160,13 @@ export function SerieClips({ serieId, serieName, zugeordnet, zurWahl, canEdit }:
                 <span
                   className={cn(
                     "inline-flex h-6 items-center rounded-pill border px-2.5 text-[12px] font-medium",
-                    c.stand.postbereit && "border-brand/60 bg-brand/15 text-text",
-                    !c.stand.postbereit && c.stand.qualitaet === "fehler" && "border-danger/60 bg-danger/15 text-text",
-                    !c.stand.postbereit && c.stand.qualitaet !== "fehler" && c.stand.datei === "fehlgeschlagen" && "border-attention/60 bg-attention/15 text-text",
-                    !c.stand.postbereit && c.stand.qualitaet !== "fehler" && c.stand.datei !== "fehlgeschlagen" && "border-line text-text-2",
+                    freigabeStand(c.stand) === "freigegeben" && "border-gut/60 bg-gut/15 text-text",
+                    freigabeStand(c.stand) === "abgelehnt" && "border-danger/60 bg-danger/15 text-text",
+                    freigabeStand(c.stand) === "fehlerhaft" && "border-attention/60 bg-attention/15 text-text",
+                    freigabeStand(c.stand) === "ausstehend" && "border-line text-text-2",
                   )}
                 >
-                  {c.stand.postbereit ? "Bereit zum Posten" : REDAKTION_LABEL[c.stand.redaktion]}
+                  {FREIGABE_LABEL[freigabeStand(c.stand)]}
                 </span>
                 {canEdit && (
                   <Button size="sm" variant="ghost" disabled={busy === c.id} onClick={() => void loesen(c)}>
@@ -193,7 +193,7 @@ export function SerieClips({ serieId, serieName, zugeordnet, zurWahl, canEdit }:
                 <p className="truncate text-sm text-text">{c.projekt}</p>
                 <p className="mt-0.5 text-xs text-text-2">
                   {PLATFORM_LABELS[c.plattform as keyof typeof PLATFORM_LABELS] ?? c.plattform} ·{" "}
-                  {formatClipDuration(c.dauerS)} · {REDAKTION_LABEL[c.stand.redaktion]}
+                  {formatClipDuration(c.dauerS)} · {FREIGABE_LABEL[freigabeStand(c.stand)]}
                 </p>
               </div>
               <Button size="sm" variant="ghost" disabled={busy === c.id} onClick={() => void zuordnen(c)}>

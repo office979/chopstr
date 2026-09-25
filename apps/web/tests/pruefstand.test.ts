@@ -14,6 +14,7 @@ import {
   pruefstand,
   rang,
   type PruefstandEingabe,
+  freigabeStand,
 } from "@/lib/clips/pruefstand";
 import type { Clip, GuestApproval, RenderPlan } from "@/lib/repo/types";
 import { assFarbe, LOOKS, mitVorgabe } from "@/lib/clips/caption-style";
@@ -258,6 +259,53 @@ describe("Reihenfolge und Filter", () => {
     const laeuft = pruefstand(eingabe({ clip: clip({ review: "bereit", status: "rendering", file_key: null }) }));
     expect(passtZuFilter(fertig, "postbereit")).toBe(true);
     expect(passtZuFilter(laeuft, "postbereit")).toBe(false);
+  });
+});
+
+describe("die vier Zustände an der Karte", () => {
+  /* Vorher standen bis zu drei Plaketten nebeneinander und der Kunde musste sie selbst
+   * zusammenzählen. Jetzt ein Wort, und die Reihenfolge entscheidet, welches. */
+  it("nennt einen unangetasteten Vorschlag „Bestätigung ausstehend“", () => {
+    expect(freigabeStand(pruefstand(eingabe()))).toBe("ausstehend");
+  });
+
+  it("nennt einen freigegebenen Clip freigegeben", () => {
+    expect(freigabeStand(pruefstand(eingabe({ clip: clip({ review: "bereit" }) })))).toBe("freigegeben");
+  });
+
+  it("nennt einen verworfenen Clip abgelehnt", () => {
+    expect(freigabeStand(pruefstand(eingabe({ clip: clip({ review: "verworfen" }) })))).toBe("abgelehnt");
+  });
+
+  it("nennt ihn auch abgelehnt, wenn die gefragte Person Nein gesagt hat", () => {
+    const f = { decision: "rejected" } as GuestApproval;
+    expect(freigabeStand(pruefstand(eingabe()), f)).toBe("abgelehnt");
+  });
+
+  it("nennt einen sinnverändernden Schnitt fehlerhaft", () => {
+    const c = clip({ fidelity_warnings: [{ type: "negation_removed", severity: "high", detail: [] }] });
+    expect(freigabeStand(pruefstand(eingabe({ clip: c })))).toBe("fehlerhaft");
+  });
+
+  it("nennt einen fehlgeschlagenen Lauf fehlerhaft", () => {
+    expect(freigabeStand(pruefstand(eingabe({ clip: clip({ status: "failed" }) })))).toBe("fehlerhaft");
+  });
+
+  it("stellt den Fehler vor die Freigabe: ein kaputtes Video ist nicht freigegeben", () => {
+    const c = clip({ review: "bereit", status: "failed" });
+    expect(freigabeStand(pruefstand(eingabe({ clip: c })))).toBe("fehlerhaft");
+  });
+
+  it("stellt die Absage vor alles andere: dann ist die Sache beendet", () => {
+    const c = clip({ review: "verworfen", status: "failed" });
+    expect(freigabeStand(pruefstand(eingabe({ clip: c })))).toBe("abgelehnt");
+  });
+
+  it("stört sich nicht daran, dass das Video noch geclippt wird", () => {
+    /* „wird geclippt" ist keine Antwort auf „darf das raus", sondern eine laufende Maschine.
+     * Die steht als eigene Plakette daneben. */
+    const c = clip({ status: "rendering", file_key: null });
+    expect(freigabeStand(pruefstand(eingabe({ clip: c })))).toBe("ausstehend");
   });
 });
 

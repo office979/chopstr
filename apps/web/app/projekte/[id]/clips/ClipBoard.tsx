@@ -1183,12 +1183,19 @@ export function ClipBoard({
                         Bewertung im Einzelnen
                       </summary>
                       <div className="mt-2 flex flex-col gap-2 rounded-inner border border-line p-3">
-                        <ul className="flex flex-wrap gap-x-4 gap-y-1">
+                        {/* Zur Note das Zitat, an dem sie hängt. „Aussage 7 von 10" ist für sich
+                            keine Begründung, sondern eine Zahl; wer zweifelt, will die Stelle
+                            lesen. Die Zitate stehen seit Phase 2 in der Rubrik und wurden
+                            nirgends angezeigt. */}
+                        <ul className="flex flex-col gap-1.5">
                           {RUBRIC_ORDER.filter((k) => kandidat.rubric.scores[k]).map((k) => (
                             <li key={k} className="text-xs text-text-2">
-                              {RUBRIC_LABELS[k]}{" "}
+                              <span>{RUBRIC_LABELS[k]}</span>{" "}
                               <span className="tabular-nums text-text">{kandidat.rubric.scores[k].value.toFixed(0)}</span>
                               <span className="text-text-3"> von 10</span>
+                              {kandidat.rubric.scores[k].evidence && (
+                                <span className="block text-text-3">{`„${kandidat.rubric.scores[k].evidence}“`}</span>
+                              )}
                             </li>
                           ))}
                         </ul>

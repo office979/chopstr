@@ -14,6 +14,7 @@ import type {
   ClipStatus,
   DeletionJob,
   DpaAcceptance,
+  GuestDecision,
   Freigabe,
   GuestApproval,
   GuestApprovalView,
@@ -1014,7 +1015,11 @@ export const postgresRepo: Repo = {
                c.render_plan->'output'->>'height'        as plan_h,
                c.render_plan->'brand'->>'profil_fassung' as marken_fassung,
                c.caption_style,
-               (select max(t.version) from transcript_versions t where t.source_id = c.source_id) as tv
+               (select max(t.version) from transcript_versions t where t.source_id = c.source_id) as tv,
+               -- Die jüngste Anfrage zu diesem Clip: ob es eine gibt, und wie sie ausging.
+               exists (select 1 from guest_approvals g where g.clip_id = c.id) as gast_gefragt,
+               (select g.decision from guest_approvals g where g.clip_id = c.id
+                 order by g.created_at desc limit 1) as gast_entscheidung
         from clips c join sources s2 on s2.id = c.source_id
         where c.status <> 'deleted' and c.deleted_at is null`;
       return (rows as Row[]).map((r) => ({
@@ -1042,6 +1047,8 @@ export const postgresRepo: Repo = {
         caption_style: jsonValue<Record<string, unknown> | null>(r.caption_style, null),
         transkript_version: num(r.tv),
         marken_fassung: num(r.marken_fassung),
+        gast_gefragt: Boolean(r.gast_gefragt),
+        gast_entscheidung: (r.gast_entscheidung as GuestDecision | null) ?? null,
       }));
     });
   },

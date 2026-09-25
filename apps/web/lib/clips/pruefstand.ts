@@ -488,45 +488,97 @@ export function standAusZeile(r: ClipStand): Pruefstand {
   });
 }
 
-/* Was an einem Video noch Arbeit macht, in den Worten der Prüfseite.
+/* Aus einer Zeile der Übersichtsabfrage den Freigabestand rechnen.
  *
- * Ein Clip kann in mehreren Zahlen stehen: ein freigegebener ohne technischen Fehler ist
- * freigegeben UND postbereit. Das ist kein Zählfehler, sondern die Folge davon, dass es drei
- * Fragen sind.
- *
- * „zu prüfen" und „veraltet" standen hier einmal. Beide sind weggefallen: „veraltet" kann es
- * nicht mehr geben, seit Speichern sofort neu clippt, und „zu prüfen" war nur die Umkehrung von
- * „noch nicht entschieden" - eine Zahl, die an jedem frischen Video gleich hoch war wie die Zahl
- * der Clips und deshalb nichts sagte. */
-export interface VideoStand {
-  gesamt: number;
-  fehler: number;
-  wirdGebaut: number;
-  postbereit: number;
-  freigegeben: number;
-  verworfen: number;
+ * Zwei Felder, nicht eines: „noch nie gefragt" und „gefragt, keine Antwort" sehen an der
+ * Entscheidung gleich aus (beides null) und sind doch zwei Zustände. */
+export function freigabeAusZeile(r: ClipStand, p: Pruefstand): FreigabeStand {
+  return freigabeStand(p, r.gast_gefragt ? ({ decision: r.gast_entscheidung } as GuestApproval) : null);
 }
 
-export function zaehlen(staende: Pruefstand[]): VideoStand {
-  const z: VideoStand = { gesamt: 0, fehler: 0, wirdGebaut: 0, postbereit: 0, freigegeben: 0, verworfen: 0 };
-  for (const p of staende) {
-    if (p.redaktion === "verworfen") {
-      z.verworfen += 1;
-      continue;
-    }
+/* Wie viele Clips eines Videos in welchem Freigabestand stehen.
+ *
+ * Gezählt werden CLIPS, nicht Videos: die Frage „was steht noch aus" beantwortet sich an den
+ * einzelnen Clips, denn jeder wird einzeln freigegeben. Hier standen einmal „Fehler beheben",
+ * „Wird geclippt" und „Bereit zum Posten" - drei verschiedene Fragen an derselben Stelle. Jetzt
+ * ist es eine Frage mit fünf Antworten, dieselben wie an der Clip-Karte. */
+export interface VideoStand {
+  gesamt: number;
+  nichtGesendet: number;
+  ausstehend: number;
+  abgelehnt: number;
+  fehlerhaft: number;
+  freigegeben: number;
+}
+
+export function zaehlen(staende: FreigabeStand[]): VideoStand {
+  const z: VideoStand = { gesamt: 0, nichtGesendet: 0, ausstehend: 0, abgelehnt: 0, fehlerhaft: 0, freigegeben: 0 };
+  for (const f of staende) {
     z.gesamt += 1;
-    if (p.redaktion === "freigegeben") z.freigegeben += 1;
-    if (p.qualitaet === "fehler") z.fehler += 1;
-    if (p.datei === "wird_erstellt") z.wirdGebaut += 1;
-    if (p.postbereit) z.postbereit += 1;
+    if (f === "nicht_gesendet") z.nichtGesendet += 1;
+    else if (f === "ausstehend") z.ausstehend += 1;
+    else if (f === "abgelehnt") z.abgelehnt += 1;
+    else if (f === "fehlerhaft") z.fehlerhaft += 1;
+    else z.freigegeben += 1;
   }
   return z;
+}
+
+/* Eine Zahl aus dem Stand holen, ohne fünf if-Zweige am Aufrufer. */
+export function zaehlerFuer(z: VideoStand, f: FreigabeStand): number {
+  switch (f) {
+    case "nicht_gesendet":
+      return z.nichtGesendet;
+    case "ausstehend":
+      return z.ausstehend;
+    case "abgelehnt":
+      return z.abgelehnt;
+    case "fehlerhaft":
+      return z.fehlerhaft;
+    case "freigegeben":
+      return z.freigegeben;
+  }
+}
+
+/* Dieselben Zustände in Kurzform, für die Stelle hinter einer Zahl: „1 ausstehend", „2 nicht
+ * freigegeben". Die langen Namen ergeben dort keinen Satz - „1 Bestätigung ausstehend" liest sich
+ * wie eine überschriebene Zeile, nicht wie eine Zahl mit ihrem Zustand. */
+export const FREIGABE_KURZ: Record<FreigabeStand, string> = {
+  nicht_gesendet: "nicht freigegeben",
+  ausstehend: "ausstehend",
+  abgelehnt: "abgelehnt",
+  fehlerhaft: "fehlerhaft",
+  freigegeben: "freigegeben",
+};
+
+/* Ein kurzer Satz unter der Zahl auf der Startseite. Er sagt, was zu tun ist - nicht, was der
+ * Zustand nochmal bedeutet; das steht schon als Überschrift daneben. */
+export const FREIGABE_HINWEIS: Record<FreigabeStand, string> = {
+  nicht_gesendet: "noch niemandem geschickt",
+  ausstehend: "warten auf Antwort",
+  abgelehnt: "so nicht gewollt",
+  fehlerhaft: "da stimmt etwas nicht",
+  freigegeben: "dürfen gepostet werden",
+};
+
+/* Die Zustände eines Videos in der Reihenfolge, in der sie an der Karte stehen sollen: was Arbeit
+ * macht zuerst. Leere Zustände fallen weg - fünf Nullen nebeneinander sagen nichts. */
+export function standListe(z: VideoStand): { stand: FreigabeStand; anzahl: number }[] {
+  const ordnung: FreigabeStand[] = ["fehlerhaft", "abgelehnt", "ausstehend", "freigegeben", "nicht_gesendet"];
+  const nach: Record<FreigabeStand, number> = {
+    nicht_gesendet: z.nichtGesendet,
+    ausstehend: z.ausstehend,
+    abgelehnt: z.abgelehnt,
+    fehlerhaft: z.fehlerhaft,
+    freigegeben: z.freigegeben,
+  };
+  return ordnung.filter((f) => nach[f] > 0).map((f) => ({ stand: f, anzahl: nach[f] }));
 }
 
 /* Die eine Aufgabe, die an diesem Video als Nächstes ansteht, mit dem Weg dorthin.
  *
  * Auf der Übersicht soll nicht stehen, wie viele Clips es gibt, sondern was zu tun ist. „3 Clips
- * prüfen" ist eine Aufgabe; „14 Clips" ist eine Zahl. */
+ * zur Freigabe schicken" ist eine Aufgabe; „14 Clips" ist eine Zahl. */
 export interface Aufgabe {
   text: string;
   /* Pfad relativ zum Video, samt Filter. */
@@ -534,16 +586,34 @@ export interface Aufgabe {
 }
 
 export function naechsteAufgabe(z: VideoStand): Aufgabe | null {
-  if (z.fehler > 0) {
-    return { text: z.fehler === 1 ? "1 Fehler beheben" : `${z.fehler} Fehler beheben`, pfad: "/clips#fehler" };
-  }
-  if (z.wirdGebaut > 0) {
-    return { text: z.wirdGebaut === 1 ? "1 Clip wird geclippt" : `${z.wirdGebaut} Clips werden geclippt`, pfad: "/clips" };
-  }
-  if (z.postbereit > 0) {
+  if (z.fehlerhaft > 0) {
     return {
-      text: z.postbereit === 1 ? "1 Clip herunterladen" : `${z.postbereit} Clips herunterladen`,
-      pfad: "/clips#postbereit",
+      text: z.fehlerhaft === 1 ? "1 Clip überarbeiten" : `${z.fehlerhaft} Clips überarbeiten`,
+      pfad: "/clips",
+    };
+  }
+  if (z.abgelehnt > 0) {
+    return {
+      text: z.abgelehnt === 1 ? "1 Clip wurde abgelehnt" : `${z.abgelehnt} Clips wurden abgelehnt`,
+      pfad: "/clips",
+    };
+  }
+  if (z.nichtGesendet > 0) {
+    return {
+      text: z.nichtGesendet === 1 ? "1 Clip zur Freigabe schicken" : `${z.nichtGesendet} Clips zur Freigabe schicken`,
+      pfad: "/clips",
+    };
+  }
+  if (z.ausstehend > 0) {
+    return {
+      text: z.ausstehend === 1 ? "1 Clip wartet auf Antwort" : `${z.ausstehend} Clips warten auf Antwort`,
+      pfad: "/clips",
+    };
+  }
+  if (z.freigegeben > 0) {
+    return {
+      text: z.freigegeben === 1 ? "1 Clip herunterladen" : `${z.freigegeben} Clips herunterladen`,
+      pfad: "/clips#freigegeben",
     };
   }
   return null;

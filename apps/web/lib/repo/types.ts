@@ -647,6 +647,13 @@ export interface ClipStand {
   /* Mit welcher Fassung des Markenprofils wurde geclippt? Null bei Videos aus der Zeit, bevor
    * das vermerkt wurde - dann ist die ehrliche Antwort „nicht vermerkt" und keine Zahl. */
   marken_fassung: number | null;
+  /* Die Freigabe durch die dritte Person, in zwei Feldern.
+   *
+   * Beide werden gebraucht, und keines reicht allein: „noch nie gefragt" und „gefragt, aber keine
+   * Antwort" sehen an der Entscheidung gleich aus (beides NULL) und sind doch zwei verschiedene
+   * Zustände - „Nicht freigegeben" und „Bestätigung ausstehend". */
+  gast_gefragt: boolean;
+  gast_entscheidung: GuestDecision | null;
 }
 
 export interface ClipCount {

@@ -861,6 +861,12 @@ export const demoRepo: Repo = {
           st.transcripts.filter((t) => t.source_id === c.source_id).reduce((m, t) => Math.max(m, t.version), 0) || null,
         marken_fassung:
           ((c.render_plan?.brand as { profil_fassung?: number } | undefined)?.profil_fassung) ?? null,
+        /* Die jüngste Anfrage zu diesem Clip: ob es eine gibt, und wie sie ausging. */
+        gast_gefragt: st.guestApprovals.some((g) => g.clip_id === c.id),
+        gast_entscheidung:
+          st.guestApprovals
+            .filter((g) => g.clip_id === c.id)
+            .sort((a2, b2) => b2.created_at.localeCompare(a2.created_at))[0]?.decision ?? null,
       }));
   },
 

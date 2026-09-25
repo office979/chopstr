@@ -6,8 +6,15 @@ import { requireSession } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
 import { mediaUrl } from "@/lib/clips/labels";
 import { Bibliothek, type ProjektZeile } from "./Bibliothek";
-import { projektZustand } from "@/lib/projekte/projekt-zustand";
-import { naechsteAufgabe, standAusZeile, zaehlen, type Pruefstand } from "@/lib/clips/pruefstand";
+import {
+  FREIGABE_HINWEIS,
+  FREIGABE_LABEL,
+  freigabeAusZeile,
+  standAusZeile,
+  zaehlen,
+  zaehlerFuer,
+  type FreigabeStand,
+} from "@/lib/clips/pruefstand";
 
 export const dynamic = "force-dynamic";
 
@@ -19,15 +26,13 @@ export default async function ProjectsPage() {
   const canUpload = can(session.role, "source.upload");
   const repo = getRepo();
   const sources = await repo.listSources();
-  /* Der Stand aller Clips in einer Abfrage, gerechnet mit demselben Modell wie auf der
-   * Prüfseite. Vorher zählte diese Seite selbst, und zwar schwächer: zwei verschiedene Namen
-   * standen beide auf vierzehn - über denselben vierzehn Clips, von denen keiner freigegeben
-   * war. */
+  /* Der Freigabestand aller Clips in einer Abfrage, gerechnet mit demselben Modell wie an der
+   * Clip-Karte. Gezählt werden CLIPS, nicht Videos: jeder Clip wird einzeln freigegeben. */
   const zeilenStand = await repo.listClipStands();
-  const staendeJeQuelle = new Map<string, Pruefstand[]>();
+  const staendeJeQuelle = new Map<string, FreigabeStand[]>();
   for (const r of zeilenStand) {
     const liste = staendeJeQuelle.get(r.source_id) ?? [];
-    liste.push(standAusZeile(r));
+    liste.push(freigabeAusZeile(r, standAusZeile(r)));
     staendeJeQuelle.set(r.source_id, liste);
   }
   const videoStaende = new Map(
@@ -81,33 +86,15 @@ export default async function ProjectsPage() {
     }
   }
 
-  const failedCount = sources.filter((s) => s.status === "failed").length;
-  /* Die Zahlen über alle Videos, aus denselben Ständen. */
-  const gesamt = [...videoStaende.values()].reduce(
-    (a, z) => ({
-      fehler: a.fehler + z.fehler,
-      wirdGebaut: a.wirdGebaut + z.wirdGebaut,
-      postbereit: a.postbereit + z.postbereit,
-    }),
-    { fehler: 0, wirdGebaut: 0, postbereit: 0 },
-  );
-  /* Das Video, bei dem die Arbeit anfängt: das dringendste zuerst. Ein Link auf „3 Clips prüfen"
-   * ohne Ziel wäre eine Zahl zum Anschauen. */
-  const dringend = [...videoStaende.entries()]
-    .map(([id, z]) => ({ id, z, auf: naechsteAufgabe(z) }))
-    .filter((x) => x.auf != null);
-  const zielFuer = (art: "fehler" | "wird_erstellt" | "postbereit") => {
-    const treffer = dringend.find((x) =>
-      art === "fehler" ? x.z.fehler > 0 : art === "wird_erstellt" ? x.z.wirdGebaut > 0 : x.z.postbereit > 0,
-    );
-    return treffer ? `/projekte/${treffer.id}/clips#${art}` : null;
+  /* Dieselben Zahlen über alle Videos zusammen: wie viele CLIPS in welchem Freigabestand stehen.
+   * Nicht wie viele Videos - freigegeben wird je Clip. */
+  const alle = zaehlen([...staendeJeQuelle.values()].flat());
+  /* Wohin eine Kachel führt: zum ersten Video, das Clips in diesem Zustand hat. Ohne Ziel wäre
+   * die Zahl nur zum Anschauen da. */
+  const zielFuer = (f: FreigabeStand) => {
+    const treffer = [...videoStaende.entries()].find(([, z]) => zaehlerFuer(z, f) > 0);
+    return treffer ? `/projekte/${treffer[0]}/clips` : null;
   };
-  /* „In Arbeit" heisst hier dasselbe wie in der Liste: der Zustand aus projektZustand, damit
-   * Kopfzahl und Karten nicht auseinanderlaufen. */
-  const activeCount = zeilen.filter((z) => {
-    const zu = projektZustand(z.source, z.clips);
-    return zu === "verarbeitung" || zu === "upload";
-  }).length;
 
   return (
     <PageShell width="wide">
@@ -116,40 +103,29 @@ export default async function ProjectsPage() {
         <div className="relative flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-[var(--tracking-display)] text-white sm:text-4xl">Meine Videos</h1>
-            <p className="mt-2 text-[15px] text-white/75">
-              Hallo {session.displayName.split(/\s+/)[0]}. Langes Video rein, kurze Clips raus.
-            </p>
           </div>
           {/* Der Weg zum Hochladen gehört auf die Seite selbst. In der Seitenleiste liegt er auf dem
            * Handy hinter dem Menü und ist damit unsichtbar. */}
           {canUpload && <ButtonLink href="/upload">Neues Video</ButtonLink>}
         </div>
-        {/* Zahlen erst, wenn es etwas zu zählen gibt. Vier Nullen sind für jemanden, der gerade
-         * anfängt, das größte Element der Seite und sagen nichts. */}
-        {sources.length > 0 && (
-          <dl className="relative mt-6 grid grid-cols-2 gap-3 lg:grid-cols-3">
-            {/* Drei Zahlen, die verschiedene Dinge zählen und jede zu ihrer Arbeitsliste führt.
-              * „Clips prüfen" und „Videos neu clippen" standen hier einmal daneben. Die erste war
-              * nur die Zahl der noch nicht entschiedenen Clips, also am frischen Video gleich der
-              * Gesamtzahl; die zweite kann es nicht mehr geben, seit Speichern sofort neu clippt. */}
-            <Stat
-              label="Fehler beheben"
-              value={gesamt.fehler}
-              hint={gesamt.fehler > 0 ? "hier stimmt der Inhalt nicht" : "nichts zu beheben"}
-              href={zielFuer("fehler")}
-            />
-            <Stat
-              label="Wird geclippt"
-              value={gesamt.wirdGebaut}
-              hint={gesamt.wirdGebaut > 0 ? "der Computer rechnet" : activeCount > 0 ? "erst wird das Video verarbeitet" : "gerade läuft nichts"}
-              href={zielFuer("wird_erstellt")}
-            />
-            <Stat
-              label="Bereit zum Posten"
-              value={gesamt.postbereit}
-              hint={failedCount > 0 ? `bei ${failedCount} ${failedCount === 1 ? "Video" : "Videos"} ging etwas schief` : "freigegeben und fertig geclippt"}
-              href={zielFuer("postbereit")}
-            />
+        {/* Zahlen erst, wenn es etwas zu zählen gibt. Fünf Nullen sind für jemanden, der gerade
+         * anfängt, das grösste Element der Seite und sagen nichts.
+         *
+         * Gezählt werden CLIPS in ihrem Freigabestand - dieselben fünf Zustände wie an der
+         * Clip-Karte. Vorher standen hier drei verschiedene Fragen nebeneinander („Fehler
+         * beheben", „Wird geclippt", „Bereit zum Posten"), und keine davon war die, um die es
+         * geht: darf das raus, und wer muss dafür noch etwas tun? */}
+        {sources.length > 0 && alle.gesamt > 0 && (
+          <dl className="relative mt-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
+            {(["nicht_gesendet", "ausstehend", "fehlerhaft", "abgelehnt", "freigegeben"] as FreigabeStand[]).map((f) => (
+              <Stat
+                key={f}
+                label={FREIGABE_LABEL[f]}
+                value={zaehlerFuer(alle, f)}
+                hint={FREIGABE_HINWEIS[f]}
+                href={zielFuer(f)}
+              />
+            ))}
           </dl>
         )}
       </section>

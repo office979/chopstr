@@ -13,11 +13,27 @@ import {
   projektSatz,
   projektZustand,
   PROJEKT_LABEL,
-  PROJEKT_RANG,
   type Hauptaktion,
   type ProjektZustand,
 } from "@/lib/projekte/projekt-zustand";
-import { naechsteAufgabe, type Aufgabe, type VideoStand } from "@/lib/clips/pruefstand";
+import {
+  FREIGABE_KURZ,
+  naechsteAufgabe,
+  standListe,
+  type Aufgabe,
+  type FreigabeStand,
+  type VideoStand,
+} from "@/lib/clips/pruefstand";
+
+/* Dieselben Farben wie an der Clip-Karte: grau solange niemand geantwortet hat, Farbe erst wenn
+ * jemand etwas gesagt hat. */
+const FREIGABE_TON: Record<FreigabeStand, "gut" | "achtung" | "fehler" | "ruhig"> = {
+  nicht_gesendet: "ruhig",
+  ausstehend: "ruhig",
+  abgelehnt: "fehler",
+  fehlerhaft: "achtung",
+  freigegeben: "gut",
+};
 import type { ClipCount, Source } from "@/lib/repo/types";
 
 export interface ProjektZeile {
@@ -37,7 +53,12 @@ interface Props {
   canUpload: boolean;
 }
 
-type Sortierung = "geaendert" | "name";
+/* Drei Ordnungen, und jede beantwortet eine andere Frage.
+ *
+ * Hier stand „Handlungsbedarf zuerst" - eine Reihenfolge aus dem Projektzustand, die niemand
+ * nachvollziehen konnte, weil der Massstab nirgends stand. Jetzt drei Fragen, die man sich
+ * wirklich stellt: wann kam das rein, wie heisst es, und wo hakt es. */
+type Sortierung = "datum" | "name" | "fehlerhaft";
 
 /* Die Bibliothek: welches Projekt soll ich fortsetzen?
  *
@@ -49,7 +70,7 @@ type Sortierung = "geaendert" | "name";
 export function Bibliothek({ zeilen, canDelete, canUpload }: Props) {
   const [suche, setSuche] = useState("");
   const [filter, setFilter] = useState<ProjektZustand | "alle">("alle");
-  const [sortierung, setSortierung] = useState<Sortierung>("geaendert");
+  const [sortierung, setSortierung] = useState<Sortierung>("datum");
 
   const mitZustand = useMemo(
     () => zeilen.map((z) => ({ ...z, zustand: projektZustand(z.source, z.clips) })),
@@ -73,12 +94,19 @@ export function Bibliothek({ zeilen, canDelete, canUpload }: Props) {
         z.source.title.toLowerCase().includes(begriff) || (z.marke ?? "").toLowerCase().includes(begriff)
       );
     });
+    const nachDatum = (x: (typeof gefiltert)[number], y: (typeof gefiltert)[number]) =>
+      new Date(y.source.created_at).getTime() - new Date(x.source.created_at).getTime();
     return [...gefiltert].sort((a, b) => {
       if (sortierung === "name") return a.source.title.localeCompare(b.source.title, "de");
-      const ra = PROJEKT_RANG[a.zustand];
-      const rb = PROJEKT_RANG[b.zustand];
-      if (ra !== rb) return ra - rb;
-      return new Date(b.source.updated_at).getTime() - new Date(a.source.updated_at).getTime();
+      if (sortierung === "fehlerhaft") {
+        /* Was eine Antwort bekommen hat, mit der man etwas tun muss, zuerst: erst fehlerhaft,
+         * dann abgelehnt. Innerhalb derselben Zahl wieder nach Datum, sonst wäre die Reihenfolge
+         * von der Laune der Datenbank abhängig. */
+        const p = (x: (typeof gefiltert)[number]) => (x.stand?.fehlerhaft ?? 0) * 1000 + (x.stand?.abgelehnt ?? 0);
+        const d = p(b) - p(a);
+        if (d !== 0) return d;
+      }
+      return nachDatum(a, b);
     });
   }, [mitZustand, suche, filter, sortierung]);
 
@@ -120,8 +148,9 @@ export function Bibliothek({ zeilen, canDelete, canUpload }: Props) {
             onChange={(e) => setSortierung(e.target.value as Sortierung)}
             className="transition-soft rounded-inner border border-line bg-black/40 px-3 py-2 text-sm text-text hover:border-line-strong focus:border-white/50 focus:outline-none"
           >
-            <option value="geaendert">Handlungsbedarf zuerst</option>
+            <option value="datum">Nach Datum</option>
             <option value="name">Nach Name</option>
+            <option value="fehlerhaft">Fehlerhaft zuerst</option>
           </select>
         </label>
       </div>
@@ -217,30 +246,27 @@ export function Bibliothek({ zeilen, canDelete, canUpload }: Props) {
                       </div>
                     )}
 
-                    {/* Die Clips nach Stand, jede Zahl ein Weg in ihre Liste. Vorher stand hier
-                        nur „14 Clips", und das beantwortet keine Frage. */}
-                    {stand && stand.gesamt > 0 && (
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                        {stand.fehler > 0 && (
-                          <ClipZahl href={`/projekte/${s.id}/clips#fehler`} ton="fehler">
-                            {stand.fehler} mit Fehler
-                          </ClipZahl>
-                        )}
-                        {stand.postbereit > 0 && (
-                          <ClipZahl href={`/projekte/${s.id}/clips#postbereit`} ton="gut">
-                            {stand.postbereit} bereit zum Posten
-                          </ClipZahl>
-                        )}
-                        {stand.wirdGebaut > 0 && <span className="text-text-3">{stand.wirdGebaut} werden geclippt</span>}
-                      </div>
-                    )}
-
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-3">
                       <span>
                         Länge <Timecode seconds={s.duration_s} className="text-inherit" />
                       </span>
                       <span>Zuletzt {formatDate(s.updated_at)}</span>
                     </div>
+
+                    {/* Wie die Clips dieses Videos stehen - dieselben fünf Zustände wie an der
+                        Clip-Karte und auf der Startseite. Nur was vorkommt: fünf Nullen
+                        nebeneinander sagen nichts und kosten trotzdem eine Zeile.
+                        Vorher standen hier „mit Fehler", „bereit zum Posten" und „werden
+                        geclippt" - drei verschiedene Fragen an derselben Stelle. */}
+                    {stand && stand.gesamt > 0 && (
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                        {standListe(stand).map(({ stand: f, anzahl }) => (
+                          <ClipZahl key={f} href={`/projekte/${s.id}/clips`} ton={FREIGABE_TON[f]}>
+                            {anzahl} {FREIGABE_KURZ[f]}
+                          </ClipZahl>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Nebeneinander statt untereinander: der Hauptknopf und daneben das Zeichen zum
@@ -296,7 +322,15 @@ function ZustandPille({ zustand }: { zustand: ProjektZustand }) {
 }
 
 /* Eine Clipzahl, die zu ihrer Liste führt. */
-function ClipZahl({ href, ton, children }: { href: string; ton?: "gut" | "achtung" | "fehler"; children: ReactNode }) {
+function ClipZahl({
+  href,
+  ton,
+  children,
+}: {
+  href: string;
+  ton?: "gut" | "achtung" | "fehler" | "ruhig";
+  children: ReactNode;
+}) {
   return (
     <Link
       href={href}
@@ -304,8 +338,10 @@ function ClipZahl({ href, ton, children }: { href: string; ton?: "gut" | "achtun
         "transition-soft rounded-pill border px-2.5 py-1 hover:border-line-strong",
         ton === "fehler" && "border-danger/50 text-text",
         ton === "achtung" && "border-attention/50 text-text",
-        ton === "gut" && "border-brand/50 text-text",
-        !ton && "border-line text-text-2",
+        /* Grün wie überall sonst, nicht die Markenfarbe: „freigegeben" ist eine Aussage über den
+           Clip und keine über chopstr. */
+        ton === "gut" && "border-gut/60 text-gut",
+        (!ton || ton === "ruhig") && "border-line text-text-2",
       )}
     >
       {children}

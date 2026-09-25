@@ -15,6 +15,8 @@ import {
   rang,
   type PruefstandEingabe,
   freigabeStand,
+  standListe,
+  zaehlen,
 } from "@/lib/clips/pruefstand";
 import type { Clip, GuestApproval, RenderPlan } from "@/lib/repo/types";
 import { assFarbe, LOOKS, mitVorgabe } from "@/lib/clips/caption-style";
@@ -309,6 +311,52 @@ describe("der Freigabestand an der Karte", () => {
     /* Aus der Zeit, in der das Team selbst freigab. Neue bekommen das nicht mehr. */
     expect(freigabeStand(pruefstand(eingabe({ clip: clip({ review: "bereit" }) })))).toBe("freigegeben");
     expect(freigabeStand(pruefstand(eingabe({ clip: clip({ review: "verworfen" }) })))).toBe("abgelehnt");
+  });
+});
+
+describe("die Zählung über alle Clips", () => {
+  /* Gezählt werden CLIPS und nicht Videos: jeder Clip wird einzeln freigegeben. */
+  it("zählt jeden Zustand einzeln", () => {
+    const z = zaehlen([
+      "nicht_gesendet",
+      "nicht_gesendet",
+      "ausstehend",
+      "abgelehnt",
+      "fehlerhaft",
+      "freigegeben",
+      "freigegeben",
+      "freigegeben",
+    ]);
+    expect(z).toEqual({
+      gesamt: 8,
+      nichtGesendet: 2,
+      ausstehend: 1,
+      abgelehnt: 1,
+      fehlerhaft: 1,
+      freigegeben: 3,
+    });
+  });
+
+  it("lässt leere Zustände aus der Liste an der Karte weg", () => {
+    /* Fünf Nullen nebeneinander sagen nichts und kosten trotzdem eine Zeile. */
+    const z = zaehlen(["freigegeben", "freigegeben"]);
+    expect(standListe(z)).toEqual([{ stand: "freigegeben", anzahl: 2 }]);
+  });
+
+  it("stellt an die Karte zuerst, was Arbeit macht", () => {
+    const z = zaehlen(["freigegeben", "nicht_gesendet", "fehlerhaft", "abgelehnt", "ausstehend"]);
+    expect(standListe(z).map((x) => x.stand)).toEqual([
+      "fehlerhaft",
+      "abgelehnt",
+      "ausstehend",
+      "freigegeben",
+      "nicht_gesendet",
+    ]);
+  });
+
+  it("ist bei nichts gezählt auch leer", () => {
+    expect(zaehlen([]).gesamt).toBe(0);
+    expect(standListe(zaehlen([]))).toEqual([]);
   });
 });
 

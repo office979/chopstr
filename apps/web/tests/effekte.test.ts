@@ -42,14 +42,17 @@ describe("die Bewegung", () => {
     expect(faktor(x, 20)).toBeCloseTo(1, 9);
   });
 
-  it("fährt ohne Knick los und kommt ohne Knick an", () => {
-    /* Ein linearer Verlauf setzt sichtbar an und bricht sichtbar ab - genau das nimmt man als
-     * Ruckeln wahr. Die Steigung muss an beiden Enden gegen null gehen. */
+  it("fährt schnell los und läuft langsam aus", () => {
+    /* Ease out: der Anschub gehört auf das Wort, das Ankommen darf sich Zeit lassen. Vorher stand
+     * hier Smoothstep - Steigung null an BEIDEN Enden, und die Betonung fiel als Bewegung gar
+     * nicht auf. */
     const x = [e("zoom_in", 0, 2)];
     const steigung = (t: number) => (faktor(x, t + 0.01) - faktor(x, t)) / 0.01;
-    expect(Math.abs(steigung(0.01))).toBeLessThan(0.02);
-    expect(Math.abs(steigung(1.97))).toBeLessThan(0.02);
-    expect(steigung(1)).toBeGreaterThan(0.05);
+    expect(steigung(0)).toBeGreaterThan(0.3);
+    const werte = Array.from({ length: 39 }, (_, i) => steigung(i / 20));
+    for (let i = 1; i < werte.length; i += 1) expect(werte[i]).toBeLessThanOrEqual(werte[i - 1] + 1e-9);
+    expect(Math.abs(steigung(1.97))).toBeLessThan(0.01);
+    expect(faktor(x, 0.2) - 1).toBeGreaterThan(0.34 * STAERKE);
   });
 
   it("begrenzt, wie weit es insgesamt gehen kann", () => {
@@ -70,10 +73,10 @@ describe("die Bewegung", () => {
   it("stimmt mit den Werten des Renderers überein", () => {
     /* Abgelesen aus pipeline/effekte.py. Zwei Umsetzungen derselben Kurve brauchen einen Anker. */
     const x = [e("zoom_in", 1, 1), e("zoom_out", 5, 1)];
-    expect(faktor(x, 1.25)).toBeCloseTo(1.016, 3);
-    expect(faktor(x, 1.5)).toBeCloseTo(1.05, 3);
-    expect(faktor(x, 3)).toBeCloseTo(1.1, 3);
-    expect(faktor(x, 5.5)).toBeCloseTo(1.05, 3);
+    expect(faktor(x, 1.25)).toBeCloseTo(1.123, 3);
+    expect(faktor(x, 1.5)).toBeCloseTo(1.1687, 3);
+    expect(faktor(x, 3)).toBeCloseTo(1.18, 3);
+    expect(faktor(x, 5.5)).toBeCloseTo(1.0112, 3);
     expect(faktor(x, 8)).toBeCloseTo(1.0, 3);
   });
 });

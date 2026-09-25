@@ -177,10 +177,14 @@ in **Clipzeit**; beim ersten Clippen setzt `workers/chopstr_worker/pipeline/effe
 welche, dort wo eine Zahl oder eine Ankündigung fällt. Im Editor stehen sie unter „Effekte“ und als
 eigene Spur in der Zeitleiste: verschieben, länger ziehen, entfernen.
 
-Ein Block ist die **Fahrt**, nicht der Zustand: über seine Länge fährt das Bild weich von der
-bisherigen Nähe auf die neue, und danach BLEIBT es dort – auch lange nach dem Block. Wer wieder
-heraus will, setzt ein „Zoom out“ dahinter. Die Länge des Blocks in der Zeitleiste ist die Dauer
-der Fahrt und wird an seinem rechten Rand gezogen.
+Ein Block ist die **Fahrt**, nicht der Zustand: über seine Länge fährt das Bild von der bisherigen
+Nähe auf die neue, und danach BLEIBT es dort – auch lange nach dem Block. Wer wieder heraus will,
+setzt ein „Zoom out“ dahinter. Die Länge des Blocks in der Zeitleiste ist die Dauer der Fahrt und
+wird an seinem rechten Rand gezogen.
+
+Die Fahrt läuft als **Ease out** (`1 − (1 − x)⁴`): schnell hinein, dann auslaufend. Nach einem
+Fünftel des Blocks sind knapp sechzig Prozent der Fahrt erledigt, nach der Hälfte
+vierundneunzig. `STAERKE` ist die Weite einer Fahrt (0,18 = achtzehn Prozent näher).
 
 „Zoom out“ ohne vorheriges „Zoom in“ macht das Bild kleiner, rundherum steht Schwarz. Kleiner zu
 werden heisst, mehr zu zeigen als da ist; `zoompan` kann nur hineingehen. Deshalb liegt das Bild

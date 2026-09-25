@@ -22,14 +22,22 @@ def test_heraus_holt_das_bild_zurueck():
     assert abs(ef.faktor(e, 20.0) - 1.0) < 1e-9
 
 
-def test_die_fahrt_setzt_ohne_knick_an_und_kommt_ohne_knick_an():
-    """Ein linearer Verlauf setzt sichtbar an und bricht sichtbar ab - genau das nimmt man als
-    Ruckeln wahr. Die Steigung muss an beiden Enden gegen null gehen."""
+def test_die_fahrt_geht_schnell_los_und_laeuft_langsam_aus():
+    """Ease out: der Anschub gehoert auf das Wort, das Ankommen darf sich Zeit lassen.
+
+    Vorher stand hier Smoothstep - Steigung null an BEIDEN Enden. Das war der Grund dafuer, dass
+    die Betonung als Bewegung gar nicht auffiel: die ersten Zehntelsekunden passierte nichts."""
     e = [ef.Effekt("zoom_in", 0.0, 2.0)]
     steigung = lambda t: (ef.faktor(e, t + 0.01) - ef.faktor(e, t)) / 0.01  # noqa: E731
-    assert abs(steigung(0.01)) < 0.02
-    assert abs(steigung(1.97)) < 0.02
-    assert steigung(1.0) > 0.05
+    # Sofort schnell: gleich zu Beginn die groesste Geschwindigkeit.
+    assert steigung(0.0) > 0.3
+    # Und danach nur noch langsamer - nie wieder schneller.
+    werte = [steigung(t / 20) for t in range(0, 39)]
+    assert all(a >= b - 1e-9 for a, b in zip(werte, werte[1:])), werte
+    # Am Ende laeuft sie aus, statt abzubrechen.
+    assert abs(steigung(1.97)) < 0.01
+    # Nach einem Zehntel der Fahrt ist schon mehr als ein Drittel geschafft.
+    assert ef.faktor(e, 0.2) - 1.0 > 0.34 * ef.STAERKE
 
 
 def test_die_wirkungen_werden_begrenzt():

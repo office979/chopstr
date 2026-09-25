@@ -30,7 +30,7 @@ export const EFFEKT_SATZ: Record<EffektArt, string> = {
   zoom_out: "Fährt wieder heraus. Ohne vorheriges Zoom in wird das Bild kleiner, rundherum Schwarz.",
 };
 
-export const STAERKE = 0.1;
+export const STAERKE = 0.18;
 export const MIN_DAUER_S = 0.4;
 export const MAX_DAUER_S = 6;
 export const STANDARD_DAUER_S = 1;
@@ -85,12 +85,15 @@ export function entzerren(effekte: Effekt[]): Effekt[] {
 }
 
 /* Wie weit die Fahrt fortgeschritten ist: 0 am Anfang des Blocks, 1 an seinem Ende und danach.
- * Smoothstep, damit sie ohne Knick ansetzt und ankommt. Spiegel von pipeline/effekte._form. */
+ *
+ * Ease out, vierte Potenz: schnell hinein, dann auslaufend. Spiegel von pipeline/effekte._form -
+ * dort steht, warum. Kurz: Smoothstep setzte an beiden Enden mit Steigung null an und wirkte
+ * dadurch träge; als Betonung fiel die Bewegung gar nicht auf. */
 function form(tImEffekt: number, dauerS: number): number {
   if (dauerS <= 0 || tImEffekt >= dauerS) return 1;
   if (tImEffekt <= 0) return 0;
-  const x = tImEffekt / dauerS;
-  return x * x * (3 - 2 * x);
+  const rest = 1 - tImEffekt / dauerS;
+  return 1 - rest * rest * rest * rest;
 }
 
 /* Der Zoomfaktor zum Zeitpunkt t (Sekunden im Clip). 1 heisst: unberührt. */

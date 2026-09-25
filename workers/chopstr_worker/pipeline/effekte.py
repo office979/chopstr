@@ -35,9 +35,10 @@ from typing import Any
 
 ARTEN = ("zoom_in", "zoom_out")
 
-# Wie nah der Zoom geht. Zehn Prozent sind bei einem hochkanten Clip deutlich sichtbar und noch
-# nicht ruckartig; darüber wird aus Betonung Effekthascherei.
-STAERKE = 0.10
+# Wie nah der Zoom geht. Achtzehn Prozent: bei zehn war die Betonung auf einem Handy kaum zu
+# sehen. Nach oben begrenzt die Aufloesung (vor dem Zoom wird auf das Doppelte skaliert) und der
+# Geschmack - ab etwa einem Viertel wird aus Betonung Effekthascherei.
+STAERKE = 0.18
 
 MIN_DAUER_S = 0.4
 MAX_DAUER_S = 6.0
@@ -142,14 +143,20 @@ def faktor(effekte: list[Effekt], t: float) -> float:
 def _form(t_im_effekt: float, dauer_s: float) -> float:
     """Wie weit die Fahrt fortgeschritten ist: 0 am Anfang des Blocks, 1 an seinem Ende und danach.
 
-    Smoothstep: die Fahrt setzt ohne Knick an und kommt ohne Knick an. Ein linearer Verlauf setzt
-    sichtbar an und bricht sichtbar ab, und genau das nimmt man als Ruckeln wahr."""
+    EASE OUT, vierte Potenz: schnell hinein, dann immer langsamer auslaufend. Nach einem Fuenftel
+    des Blocks sind knapp sechzig Prozent der Fahrt erledigt, nach der Haelfte vierundneunzig; der
+    Rest verlaeuft sich. Genau so liest man eine Betonung - der Anschub gehoert auf das Wort, das
+    Ankommen darf sich Zeit lassen.
+
+    Hier stand vorher Smoothstep (``x*x*(3-2x)``). Das setzt an BEIDEN Enden mit Steigung null an
+    und wirkt dadurch traege: nach einem Fuenftel des Blocks war erst ein Zehntel der Fahrt
+    geschafft, und die Bewegung fiel gar nicht als Betonung auf."""
     if dauer_s <= 0 or t_im_effekt >= dauer_s:
         return 1.0
     if t_im_effekt <= 0:
         return 0.0
-    x = t_im_effekt / dauer_s
-    return x * x * (3.0 - 2.0 * x)
+    rest = 1.0 - t_im_effekt / dauer_s
+    return 1.0 - rest * rest * rest * rest
 
 
 def _vorzeichen(art: str) -> float:
@@ -170,8 +177,10 @@ def ffmpeg_ausdruck(effekte: list[Effekt], fps: float) -> str:
     teile = ["1"]
     for e in effekte:
         seit = f"((on/{fps:g})-{e.ab_s:.3f})"
-        x = f"min(1,max(0,{seit}/{e.dauer_s:.3f}))"
-        form = f"({x}*{x}*(3-2*({x})))"
+        # Der Rest der Fahrt, nicht der zurueckgelegte Teil: damit steht die vierte Potenz einmal
+        # da und der Ausdruck bleibt lesbar.
+        rest = f"(1-min(1,max(0,{seit}/{e.dauer_s:.3f})))"
+        form = f"(1-pow({rest},4))"
         # Kein „between": die Wirkung bleibt, auch wenn der Block laengst vorbei ist.
         teile.append(f"{_vorzeichen(e.art) * STAERKE:.4f}*{form}")
     roh = "+".join(teile)
@@ -206,9 +215,10 @@ def automatisch(woerter: list[dict], clip_dauer_s: float) -> list[Effekt]:
         dauer = min(STANDARD_DAUER_S, clip_dauer_s - t)
         if dauer < MIN_DAUER_S:
             continue
-        # Kurz VOR dem Wort ansetzen, damit die Bewegung auf dem Wort ihren Höhepunkt hat und
-        # nicht erst danach.
-        ab = max(0.0, t - 0.15)
+        # Fast auf dem Wort ansetzen. Seit die Fahrt als Ease-out laeuft, liegt ihr Anschub am
+        # ANFANG des Blocks; ein Vorlauf von einer Sechstelsekunde haette die Betonung vor das
+        # Wort gelegt, auf dem sie sitzen soll.
+        ab = max(0.0, t - 0.05)
         aus.append(Effekt("zoom_in", round(ab, 3), round(dauer, 3)))
     return _entzerren(aus)
 

@@ -106,7 +106,7 @@ def test_die_bewegung_ruckelt_nicht(tmp_path):
 
     Vorher fuhr der Zoom hinein und gleich wieder heraus, solange der Block lief - das sah aus wie
     Wackeln. Dieser Test haelt fest, dass es innerhalb des Blocks keinen Schritt zurueck gibt und
-    kein Schritt nach vorn groesser ist als ein Fuenfzigstel."""
+    kein Schritt nach vorn groesser ist, als die Kurve ihn ueberhaupt machen kann."""
     effekt = ef.Effekt("zoom_in", 1.0, 2.0)
     video = tmp_path / "ruck.mp4"
     subprocess.run(
@@ -129,6 +129,13 @@ def test_die_bewegung_ruckelt_nicht(tmp_path):
     assert min(schritte) >= -pixel - 1e-6, f"Sprung zurueck waehrend der Fahrt: {min(schritte):.4f}"
     fenster = [werte[i] - werte[i - 5] for i in range(5, len(werte))]
     assert min(fenster) >= -1e-6, f"Rueckwaertsbewegung ueber fuenf Bilder: {min(fenster):.4f}"
-    assert max(schritte) <= 0.02, f"Sprung nach vorn: {max(schritte):.4f}"
+    # Die groesste Geschwindigkeit der Ease-out-Kurve steht am Anfang des Blocks: die Ableitung von
+    # 1-(1-x)^4 ist dort 4. Mehr als das kann ein Bild nicht weiterruecken, und ein Bildpunkt
+    # Messrauschen kommt dazu. Gerechnet statt als feste Zahl, damit der Test mitzieht, wenn sich
+    # STAERKE oder die Kurve aendert - und anschlaegt, wenn der Ausdruck etwas anderes tut.
+    # Zwei Bildpunkte Messrauschen: die gemessene Breite hat an JEDER Kante eine Rundung, und
+    # zoompan schneidet seinen Versatz ausserdem auf ganze Bildpunkte ab.
+    groesster_schritt = 4 * ef.STAERKE / effekt.dauer_s / 25 + 2 * pixel
+    assert max(schritte) <= groesster_schritt + 1e-6, f"Sprung nach vorn: {max(schritte):.4f}"
     # Und nach der Fahrt steht das Bild still - und bleibt nah.
     assert all(abs(v - (1 + ef.STAERKE)) < 0.02 for v in werte[-10:])

@@ -418,6 +418,12 @@ Die müssen ausgefüllt sein, bevor chopstr.io erreichbar ist: eine geschäftlic
 vollständiges Impressum ist in Österreich und Deutschland abmahnfähig. Der Pages-Workflow schreibt
 eine Warnung in die Zusammenfassung, solange etwas offen ist, bricht aber nicht ab.
 
+**Die Domain.** Gesetzt wird sie in den Repository-Einstellungen unter Pages (oder per
+`gh api -X PUT repos/office979/chopstr/pages -f cname=chopstr.io`), nicht durch die Datei
+`site/CNAME`: bei einer Veröffentlichung über Actions liest GitHub diese Datei nicht aus. Sie
+liegt trotzdem dabei, damit die Absicht im Repository steht und ein Wechsel auf einen
+Zweig-basierten Betrieb ohne Nachdenken funktioniert.
+
 **Lokal ansehen:** `python3 -m http.server 4173 --directory site`
 
 ## Arbeitsregeln

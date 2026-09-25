@@ -201,6 +201,7 @@ def build_plan(
     caption_text_field: str | None = None,
     zeitmarken: list[dict] | None = None,
     effekte: list[dict] | None = None,
+    musik: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Baut den Plan. ``caption_preset`` ist das Basis-Preset (Name oder 1080x1920-Objekt), die Skalierung passiert hier.
     ``sources`` erwartet ``storage_key``, ``transcript_version``, ``hook_version``, ``candidate_id``.
@@ -234,6 +235,9 @@ def build_plan(
         # Effekte auf der Clip-Zeitachse (Migration 0015). Sie stehen im Plan, weil der Vergleich
         # „zeigt das gebaute Video noch, was eingestellt ist" sie sonst nicht sehen wuerde.
         "effekte": list(effekte or []),
+        # Musik unter dem Clip (Migration 0017). Sie steht im Plan, damit der Vergleich „zeigt das
+        # gebaute Video noch, was eingestellt ist" sie sieht - und damit die Tonkette sie findet.
+        "musik": dict(musik) if musik else None,
         "captions": caption_block(
             caption_preset, out_w, out_h, caption_cards, caption_font, caption_top, caption_text_field, caption_preset_skaliert
         ),

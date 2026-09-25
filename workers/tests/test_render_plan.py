@@ -12,7 +12,7 @@ SEGMENTS = [{"start": 812.4, "end": 830.1, "role": "body"}, {"start": 840.0, "en
 SOURCES = {"storage_key": "uploads/abc", "transcript_version": 3, "hook_version": 1, "candidate_id": "cand-1"}
 CONTRACT_KEYS = {
     "contract", "platform", "aspect", "output", "segments", "filler_cuts", "reframe", "shots", "motion", "captions",
-    "title_card", "hook_overlay", "audio", "brand", "sources", "versions", "zeitmarken", "effekte",
+    "title_card", "hook_overlay", "audio", "brand", "sources", "versions", "zeitmarken", "effekte", "musik",
 }  # fmt: skip
 
 
@@ -30,6 +30,15 @@ def _plan(platform: str, aspect: str | None = None, **kw) -> dict:
         platform=platform, aspect=aspect, segments=SEGMENTS, reframe_result=_reframe(aspect), caption_cards=14,
         sources=SOURCES, **kw,
     )  # fmt: skip
+
+
+def test_musik_steht_unveraendert_im_plan():
+    """Wie die Zeitmarken: im Plan, damit der Vergleich „zeigt das Video noch, was eingestellt
+    ist" sie sieht - und damit die Tonkette sie ueberhaupt findet. Ohne Musik steht dort None und
+    nicht {}, denn „keine Musik" ist eine Aussage und kein leeres Stueck."""
+    m = {"quelle": "eigen", "datei": "musik/x.mp3", "name": "Sanft", "ab_s": 12.5, "lautstaerke_db": -18.0, "ducking": True}
+    assert _plan("linkedin", musik=m)["musik"] == m
+    assert _plan("linkedin")["musik"] is None
 
 
 def test_plan_has_all_contract_keys_and_is_json():

@@ -35,6 +35,7 @@ from pathlib import Path
 
 from . import captions_de, render_plan
 from . import effekte as effekte_mod
+from . import musik as musik_mod
 
 log = logging.getLogger("chopstr.render")
 
@@ -210,18 +211,43 @@ def _inputs(plan: dict) -> tuple[list[dict], list[dict]]:
     return shots, segments
 
 
-def input_args(src_path: str | os.PathLike, plan: dict) -> list[str]:
-    """``-ss``/``-t``/``-i`` je Shot (Video) und je Segment (Audio), in dieser Reihenfolge."""
+def input_args(src_path: str | os.PathLike, plan: dict, musik_path: str | os.PathLike | None = None) -> list[str]:
+    """``-ss``/``-t``/``-i`` je Shot (Video) und je Segment (Audio), in dieser Reihenfolge.
+
+    Die Musik haengt hinten dran, VOR dem Logo. Das ist kein Geschmack, sondern noetig: die
+    Lautheitsmessung (Pass 1) laeuft ohne Logo, der Render mit. Kaeme die Musik danach, haette sie
+    in beiden Laeufen eine andere Nummer - und Pass 2 wuerde einen Eingang mischen, der dort ein
+    Bild ist."""
     shots, segments = _inputs(plan)
     args: list[str] = []
     for item in [*shots, *segments]:
         start, end = float(item["start"]), float(item["end"])
         args += ["-ss", f"{start:.3f}", "-t", f"{max(end - start, 0.001):.3f}", "-i", str(src_path)]
+    if musik_path is not None:
+        args += ["-i", str(musik_path)]
     return args
 
 
-def audio_chain(plan: dict, first_input: int, loud_filter: str, compressor: bool) -> str:
-    """Audio: Segmente mit Micro-Fades, concat, optional Kompressor, Loudnorm, 48 kHz. Endet in ``[aout]``."""
+def musik_index(plan: dict) -> int:
+    """Die Eingangsnummer der Musik: direkt hinter Shots und Segmenten."""
+    shots, segments = _inputs(plan)
+    return len(shots) + len(segments)
+
+
+def audio_chain(
+    plan: dict,
+    first_input: int,
+    loud_filter: str,
+    compressor: bool,
+    musik: musik_mod.Musik | None = None,
+) -> str:
+    """Audio: Segmente mit Micro-Fades, concat, optional Musik, Kompressor, Loudnorm, 48 kHz.
+
+    Endet in ``[aout]``.
+
+    DIE MUSIK KOMMT VOR LOUDNORM. Andersherum waere die gemessene Endlautheit die von Sprache
+    ALLEIN, und der fertige Clip laege um die Musik darueber - also ueber dem, was die Plattformen
+    erwarten und leiser regeln. Deshalb steht die Mischung zwischen concat und dem Tail."""
     _, segments = _inputs(plan)
     fade = float(plan["audio"].get("micro_fade_ms", 20)) / 1000.0
     parts, labels = [], []
@@ -234,8 +260,13 @@ def audio_chain(plan: dict, first_input: int, loud_filter: str, compressor: bool
         )
         labels.append(f"[a{j}]")
     chain = "".join(parts) + "".join(labels) + f"concat=n={len(segments)}:v=0:a=1[ac];"
+    quelle = "[ac]"
+    if musik is not None:
+        dauer = sum(float(s["end"]) - float(s["start"]) for s in segments)
+        kette, quelle = musik_mod.ffmpeg_kette(musik, musik_index(plan), dauer)
+        chain += kette
     tail = (COMPRESSOR + "," if compressor else "") + loud_filter + f",aresample={AUDIO_RATE}"
-    return chain + f"[ac]{tail}[aout]"
+    return chain + f"{quelle}{tail}[aout]"
 
 
 def watermark_filter(plan: dict, logo_index: int) -> str:
@@ -457,12 +488,25 @@ def _run(cmd: list[str], what: str, level: str = "error") -> subprocess.Complete
     return r
 
 
-def measure_loudnorm(src_path: str | os.PathLike, plan: dict, compressor: bool = False) -> dict[str, float]:
-    """Pass 1: ``loudnorm=print_format=json`` über die Audio-Kette des Plans. Gibt die Messwerte zurück."""
+def measure_loudnorm(
+    src_path: str | os.PathLike,
+    plan: dict,
+    compressor: bool = False,
+    musik: musik_mod.Musik | None = None,
+    musik_path: str | os.PathLike | None = None,
+) -> dict[str, float]:
+    """Pass 1: ``loudnorm=print_format=json`` über die Audio-Kette des Plans. Gibt die Messwerte zurück.
+
+    Die Musik muss hier MIT gemessen werden. Ohne sie misst Pass 1 die Sprache allein, Pass 2
+    normalisiert darauf, und die Musik kommt obendrauf - der Clip waere zu laut."""
     shots, _ = _inputs(plan)
     loud = loudness_for(plan)
-    chain = audio_chain(plan, len(shots), loud.filter() + ":print_format=json", compressor)
-    r = _run([*input_args(src_path, plan), "-filter_complex", chain, "-map", "[aout]", "-f", "null", "-"], "Loudness-Messung", level="info")
+    chain = audio_chain(plan, len(shots), loud.filter() + ":print_format=json", compressor, musik)
+    r = _run(
+        [*input_args(src_path, plan, musik_path), "-filter_complex", chain, "-map", "[aout]", "-f", "null", "-"],
+        "Loudness-Messung",
+        level="info",
+    )
     m = re.findall(r"\{[^{}]*\"input_i\"[^{}]*\}", r.stderr, flags=re.DOTALL)
     if not m:
         raise RenderError("Loudness-Messung lieferte kein JSON")
@@ -494,6 +538,7 @@ def render_from_plan(
     crf: int = 19,
     font_path: str | os.PathLike | None = None,
     logo_path: str | os.PathLike | None = None,
+    musik_path: str | os.PathLike | None = None,
 ) -> RenderResult:
     """Rendert den Plan in ``out_path`` (MP4). Untertitel und Overlays sind best effort (siehe Modul-Docstring).
 
@@ -512,23 +557,31 @@ def render_from_plan(
     loud = loudness_for(plan)
     expected = round(sum(float(s["end"]) - float(s["start"]) for s in plan["segments"]), 3)
 
-    measured = measure_loudnorm(src_path, plan, compressor=False)
+    # Musik nur, wenn im Plan steht WAS und der Aufrufer sagt WO die Datei liegt. Fehlt eines von
+    # beidem, wird still ohne Musik gerendert - ein Clip ohne Musik ist besser als kein Clip.
+    musik = musik_mod.lesen(plan.get("musik")) if musik_path else None
+    if musik is None:
+        musik_path = None
+
+    measured = measure_loudnorm(src_path, plan, compressor=False, musik=musik, musik_path=musik_path)
     compressor = needs_compressor(measured.get("input_lra"))
     if compressor:
-        measured = measure_loudnorm(src_path, plan, compressor=True)
+        measured = measure_loudnorm(src_path, plan, compressor=True, musik=musik, musik_path=musik_path)
 
     shots, segments = _inputs(plan)
-    logo_index = len(shots) + len(segments) if logo is not None else None
+    # Das Logo kommt HINTER die Musik, siehe input_args.
+    logo_versatz = 1 if musik_path else 0
+    logo_index = len(shots) + len(segments) + logo_versatz if logo is not None else None
     vchain, notes, burned, title_drawn, hook_drawn, watermark = video_chain(
         plan, str(ass_path) if ass_path else None, font, caps, fdir, logo_index
     )
-    achain = audio_chain(plan, len(shots), loudnorm_pass2(loud, measured), compressor)
+    achain = audio_chain(plan, len(shots), loudnorm_pass2(loud, measured), compressor, musik)
     graph = vchain + ";" + achain
     fps = float(plan["output"].get("fps") or 25.0)
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     logo_args = ["-i", str(logo)] if watermark and logo is not None else []
     cmd = [
-        *input_args(src_path, plan), *logo_args,
+        *input_args(src_path, plan, musik_path), *logo_args,
         "-filter_complex", graph, "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-profile:v", "high", "-preset", x264_preset, "-crf", str(crf), "-pix_fmt", "yuv420p",
         "-r", f"{fps:g}", "-c:a", "aac", "-b:a", "192k", "-ar", str(AUDIO_RATE), "-movflags", "+faststart", str(out_path),

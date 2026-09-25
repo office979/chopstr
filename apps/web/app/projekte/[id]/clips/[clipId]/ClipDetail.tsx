@@ -468,14 +468,29 @@ export function ClipDetail({
    * Speicherknöpfe nebeneinander sind eine Auswahlaufgabe. */
   const etwasGeaendert = schnittGeaendert || effekteGeaendert || musikGeaendert;
 
+  /* Woher die Musikdatei kommt. Der Ablageschlüssel hängt als Kennung dran: lädt jemand ein
+   * anderes Stück hoch, ändert sich die Adresse, und der Browser holt die neue Datei statt der
+   * alten aus seinem Zwischenspeicher. */
+  const musikDatei = musik?.datei ?? null;
+  const musikSrc = useMemo(
+    () =>
+      musikDatei
+        ? `/api/projects/${sourceId}/clips/${clipId}/musik/datei?v=${encodeURIComponent(musikDatei)}`
+        : null,
+    [musikDatei, sourceId, clipId],
+  );
+
   /* Die Länge des Stücks messen, sobald eine Datei da ist. Ein Audio-Element im Speicher, kein
-   * Abspielen: das geht in jedem Browser und kostet nichts. */
+   * Abspielen: das geht in jedem Browser und kostet nichts.
+   *
+   * Ohne diese Zahl hätte das Verschieben der Musikspur keine Grenze - man könnte über das Ende
+   * des Stücks hinausziehen und bekäme Stille. */
   useEffect(() => {
-    if (!musik) {
+    if (!musikSrc) {
       setMusikDauer(null);
       return undefined;
     }
-    const url = `/api/projects/${sourceId}/clips/${clipId}/musik/datei`;
+    const url = musikSrc;
     const a = new Audio();
     let weg = false;
     const fertig = () => {
@@ -489,7 +504,7 @@ export function ClipDetail({
       a.removeEventListener("loadedmetadata", fertig);
       a.src = "";
     };
-  }, [musik, sourceId, clipId]);
+  }, [musikSrc]);
 
   /* Musik hochladen. Sie wird SOFORT gespeichert und nicht erst mit dem Speichern-Knopf: eine
    * Datei liegt danach ohnehin auf dem Server, und ein „ungespeichertes Hochladen" gibt es nicht. */
@@ -1051,6 +1066,9 @@ export function ClipDetail({
               clipStartQuelle={schnitt[0]?.start ?? 0}
               stil={stil}
               woerter={clipWords}
+              musik={musik}
+              musikSrc={musikSrc}
+              schnitt={schnitt}
               onCaptionHoehe={canEdit ? (px) => setStil((v) => ({ ...v, bottom_margin_px: px })) : undefined}
             />
           )}

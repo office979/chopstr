@@ -6,6 +6,8 @@ import { cn } from "@/components/ui/cn";
 import { ausschnittBerechnen, blickraumAnker } from "@/lib/clips/ausschnitt";
 import type { CaptionStyle } from "@/lib/clips/caption-style";
 import { faktor as effektFaktor, type Effekt } from "@/lib/clips/effekte";
+import { tonLage, type Musik } from "@/lib/clips/musik";
+import { dauer as schnittDauer, inClipzeit, type Schnitt } from "@/lib/clips/schnitt";
 import type { Aspect, RenderShot, TranscriptWord, Zeitmarke } from "@/lib/repo/types";
 import { CaptionVorschau } from "./CaptionStudio";
 
@@ -55,6 +57,15 @@ interface Props {
    * bei einem Schieber, und „wo steht der Text" ist eine Frage, die man sehen und nicht rechnen
    * will. */
   onCaptionHoehe?: (bottomMarginPx: number) => void;
+  /* Die Musik, wie sie GERADE eingestellt ist - auch ungespeichert. Wer die Lautstärke schiebt,
+   * soll das hören, ohne vorher zu speichern. */
+  musik?: Musik | null;
+  /* Woher die Musikdatei kommt. Getrennt von ``musik``, weil die Einstellung im Browser liegt und
+   * die Datei auf dem Server. */
+  musikSrc?: string | null;
+  /* Der Schnitt, um die Stelle im Clip zu kennen. Aus Quellzeit wird damit Clipzeit - und nur die
+   * zählt für die Musik, die entfernte Stellen ja nicht mitspielt. */
+  schnitt?: Schnitt;
 }
 
 /* Die Vorschau aus dem Quellvideo, mit allem was gerade eingestellt ist.
@@ -89,8 +100,12 @@ export function LiveVorschau({
   stil,
   woerter,
   onCaptionHoehe,
+  musik = null,
+  musikSrc = null,
+  schnitt = [],
 }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const musikRef = useRef<HTMLAudioElement | null>(null);
   const zoomRahmen = useRef<HTMLDivElement | null>(null);
 
   /* Den Zoom Bild für Bild setzen, nicht bei jedem ``timeupdate``.
@@ -124,6 +139,90 @@ export function LiveVorschau({
     };
   }, [effekte, clipStartQuelle]);
   const [laeuft, setLaeuft] = useState(false);
+
+  /* Wie lang der fertige Clip wird. Aus dem Schnitt, denn entfernte Stellen zählen nicht mit. */
+  const clipDauer = useMemo(() => {
+    const ausSchnitt = schnittDauer(schnitt);
+    if (ausSchnitt > 0) return ausSchnitt;
+    return clipEnd != null ? Math.max(0, clipEnd - clipStart) : 0;
+  }, [schnitt, clipStart, clipEnd]);
+
+  /* Die Musik in der Vorschau: ein zweites Tonelement, das dem Video hinterherläuft.
+   *
+   * Die Vorschau spielt das Quellvideo - darin ist keine Musik, die steckt erst im geclippten
+   * Clip. Ohne das hier stellt man eine Musik ein, drückt auf Abspielen und hört nichts.
+   *
+   * Drei Dinge müssen stimmen, sonst klingt es anders als das Ergebnis:
+   *   - die STELLE im Stück: ``ab_s`` plus die bisher abgespielte Clipzeit, nicht die Quellzeit.
+   *     Wer eine Stelle aus dem Clip entfernt hat, überspringt sie auch in der Musik.
+   *   - die BLENDEN am Anfang und Ende, sonst setzt die Musik mit einem Schlag ein.
+   *   - die ABSENKUNG unter der Stimme. Der Renderer misst dafür den Sprachpegel; hier gibt es
+   *     nur die Wortzeiten aus dem Transkript, also eine Schätzung (siehe lib/clips/musik).
+   *
+   * Nachgeführt wird Bild für Bild, aus demselben Grund wie beim Zoom: ``timeupdate`` feuert vier-
+   * bis fünfmal in der Sekunde, und eine Lautstärke, die fünfmal je Sekunde springt, pumpt hörbar. */
+  useEffect(() => {
+    const ton = musikRef.current;
+    if (!ton || !musik || !musikSrc) return undefined;
+    let laufend = true;
+    let absenkung = 1;
+    let startet = false;
+    let letzte = performance.now();
+    ton.volume = 0;
+
+    const takt = () => {
+      if (!laufend) return;
+      const video = videoRef.current;
+      window.requestAnimationFrame(takt);
+      if (!video) return;
+
+      const jetztMs = performance.now();
+      const dt = jetztMs - letzte;
+      letzte = jetztMs;
+
+      const quellzeit = video.currentTime;
+      const lage = tonLage({
+        musik,
+        clipzeit: schnitt.length > 0 ? inClipzeit(schnitt, quellzeit) : quellzeit - clipStart,
+        clipDauer,
+        spricht: woerter.some((w) => quellzeit >= w.start && quellzeit <= w.end),
+        absenkung,
+        dtMs: dt,
+        tonZeit: ton.currentTime,
+        tonLaenge: Number.isFinite(ton.duration) ? ton.duration : null,
+      });
+      absenkung = lage.absenkung;
+      ton.volume = lage.pegel;
+
+      /* Das Stück ist vor dem Clip zu Ende: anhalten und stehen lassen. */
+      if (lage.zuEnde) {
+        if (!ton.paused) ton.pause();
+        return;
+      }
+      if (lage.nachziehen) ton.currentTime = Math.max(0, lage.stelle);
+
+      /* Laufen und Stehen folgen dem Video, egal welcher Knopf es gestartet hat. */
+      if (video.paused) {
+        if (!ton.paused) ton.pause();
+      } else if (ton.paused && !startet) {
+        startet = true;
+        /* Kein Grund, die Vorschau zu stören, wenn der Browser den Ton verweigert: das Bild läuft
+         * weiter, und beim nächsten Klick - dann liegt eine Nutzereingabe vor - klappt es. */
+        void ton
+          .play()
+          .catch(() => undefined)
+          .finally(() => {
+            startet = false;
+          });
+      }
+    };
+
+    window.requestAnimationFrame(takt);
+    return () => {
+      laufend = false;
+      ton.pause();
+    };
+  }, [musik, musikSrc, schnitt, woerter, clipStart, clipDauer]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -253,6 +352,9 @@ export function LiveVorschau({
           Dein Browser kann dieses Video nicht abspielen.
         </video>
         </div>
+        {/* Die Musik. Ohne Bedienelemente und unsichtbar: sie gehört zum Video, nicht daneben -
+          * gespult und angehalten wird oben im Bild und unten in der Zeitleiste. */}
+        {musik && musikSrc && <audio ref={musikRef} src={musikSrc} preload="auto" hidden />}
         {woerter.length > 0 && (
           <CaptionVorschau stil={stil} woerter={woerter} zeit={zeit} onHoehe={onCaptionHoehe} />
         )}

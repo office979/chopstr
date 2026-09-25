@@ -285,6 +285,15 @@ Partnervertrag ausgehandelt und nicht über einen Schlüssel allein. Ohne diesen
 keine Bibliothek, und eine Auswahl zu zeigen, deren Stücke niemand rechtssicher verwenden darf,
 wäre schlimmer als keine.
 
+In der **Vorschau** läuft die Musik mit. Die Vorschau spielt das Quellvideo ab, damit jede
+Änderung sofort zu sehen ist, ohne zu clippen – Musik steckt aber erst im geclippten Clip. Also
+läuft ein zweites Tonelement mit der Musikdatei daneben: an derselben Stelle des Stücks
+(`ab_s` plus Clipzeit, entfernte Stellen übersprungen), mit denselben Blenden, und unter der
+Stimme leiser. Die Absenkung ist dabei **geschätzt**: der Renderer misst den Sprachpegel,
+die Vorschau kennt nur die Wortzeiten aus dem Transkript und rechnet mit zehn Dezibel. Auf das
+Dezibel genau ist nur der geclippte Clip. Die Regeln dafür stehen in `lib/clips/musik.ts`
+(`tonLage`), damit sie prüfbar sind und nicht im Player verstreut liegen.
+
 Eine **automatische Auswahl nach Stimmung** gibt es noch nicht; sie braucht ein Sprachmodell über
 dem Transkript (siehe `LLM_PROVIDER` in `.env.example`).
 

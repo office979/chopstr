@@ -30,6 +30,10 @@ function doPost(e) {
       return antwort(false, "kein_json");
     }
 
+    /* Zwei Arten von Nachricht kommen hier an: eine Anmeldung und eine nachgereichte Antwort.
+     * Ohne Angabe ist es eine Anmeldung - so war es vorher, und so bleibt es. */
+    if (String(daten.art || "") === "nachfrage") return nachfrageSpeichern(daten);
+
     var email = String(daten.email || "").trim().toLowerCase();
     if (!adresseSiehtEchtAus(email)) return antwort(false, "ungueltig");
     if (email.length > 254) return antwort(false, "ungueltig");
@@ -58,7 +62,7 @@ function doPost(e) {
       var heute = new Date();
       if (heuteGezaehlt(blatt, heute) >= MAX_JE_TAG) return antwort(false, "zu_viele");
 
-      blatt.appendRow([heute, email, quelle]);
+      blatt.appendRow([heute, email, quelle, "", ""]);
       return antwort(true, "eingetragen");
     } finally {
       schloss.releaseLock();
@@ -86,6 +90,12 @@ function adresseSiehtEchtAus(wert) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(wert);
 }
 
+var SPALTEN = ["Zeitpunkt", "E-Mail", "Quelle", "Tätigkeit", "Material je Monat"];
+
+/* Welche Spalte zu welcher Nachfrage gehört. Nur diese beiden dürfen nachträglich beschrieben
+ * werden - alles andere käme aus dem offenen Netz und hat in der Tabelle nichts verloren. */
+var NACHFRAGEN = { taetigkeit: 4, menge: 5 };
+
 function blattHolen() {
   var mappe = SpreadsheetApp.getActiveSpreadsheet();
   var blatt = mappe.getSheetByName(BLATT);
@@ -93,11 +103,55 @@ function blattHolen() {
     blatt = mappe.insertSheet(BLATT);
   }
   if (blatt.getLastRow() === 0) {
-    blatt.appendRow(["Zeitpunkt", "E-Mail", "Quelle"]);
-    blatt.getRange(1, 1, 1, 3).setFontWeight("bold");
+    blatt.appendRow(SPALTEN);
+    blatt.getRange(1, 1, 1, SPALTEN.length).setFontWeight("bold");
     blatt.setFrozenRows(1);
+    return blatt;
+  }
+  /* Eine Tabelle aus der Zeit vor den Nachfragen hat nur drei Spalten. Fehlende Überschriften
+   * werden ergänzt, vorhandene nicht angefasst - sonst überschriebe ein Lauf, was jemand von
+   * Hand umbenannt hat. */
+  for (var i = 0; i < SPALTEN.length; i++) {
+    var zelle = blatt.getRange(1, i + 1);
+    if (String(zelle.getValue()).trim() === "") {
+      zelle.setValue(SPALTEN[i]).setFontWeight("bold");
+    }
   }
   return blatt;
+}
+
+/* Eine Nachfrage nachtragen.
+ *
+ * Die Adresse steht zu diesem Zeitpunkt schon in der Tabelle - das Wertvolle ist also gesichert,
+ * und diese Antwort ist eine Zugabe. Genau darin liegt der Unterschied zu einem Formular, das
+ * sechs Fragen stellt, BEVOR es die Adresse bekommt: dort kostet jeder Abbruch einen Kontakt,
+ * hier kostet er nichts. */
+function nachfrageSpeichern(daten) {
+  var email = String(daten.email || "").trim().toLowerCase();
+  if (!adresseSiehtEchtAus(email)) return antwort(false, "ungueltig");
+
+  var spalte = NACHFRAGEN[String(daten.feld || "")];
+  if (!spalte) return antwort(false, "unbekanntes_feld");
+
+  var wert = String(daten.wert || "").trim().slice(0, 60);
+  if (!wert) return antwort(false, "leer");
+
+  var schloss = LockService.getScriptLock();
+  schloss.waitLock(10000);
+  try {
+    var blatt = blattHolen();
+    if (blatt.getLastRow() < 2) return antwort(false, "nicht_gefunden");
+    var adressen = blatt.getRange(2, 2, blatt.getLastRow() - 1, 1).getValues();
+    for (var i = adressen.length - 1; i >= 0; i--) {
+      if (String(adressen[i][0]).trim().toLowerCase() === email) {
+        blatt.getRange(i + 2, spalte).setValue(wert);
+        return antwort(true, "vermerkt");
+      }
+    }
+    return antwort(false, "nicht_gefunden");
+  } finally {
+    schloss.releaseLock();
+  }
 }
 
 function heuteGezaehlt(blatt, heute) {

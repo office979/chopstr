@@ -35,6 +35,7 @@
   --attention: #ff7a45;
   --danger: #ff5c5c;
   --gut: #3fd27e;
+  --gut-soft: rgba(63, 210, 126, 0.16);
 
   --radius-card: 30px;
   --radius-inner: 18px;
@@ -648,3 +649,32 @@ img, svg { display: block; max-width: 100%; }
 .gruender-name { font-size: 16px; font-weight: 500; color: var(--text); }
 .gruender-rolle { margin-top: 2px; font-family: var(--font-mono); font-size: 12px; color: var(--ai-soft); }
 .gruender-text { margin-top: 10px; font-size: 14px; line-height: 1.6; color: var(--text-3); }
+
+/* --- Die Nachfragen nach der Anmeldung -------------------------------------------------------- */
+
+.nachfragen { margin-top: 18px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.12); }
+.nachfragen-kopf { font-size: 13px; color: var(--text-3); }
+.nachfrage { margin-top: 14px; }
+.nachfrage-text { font-size: 14px; color: var(--text-2); }
+.nachfrage-knoepfe { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.nachfrage-knopf {
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 6px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.nachfrage-knopf:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.4); background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.nachfrage-knopf:disabled { cursor: default; }
+.nachfrage-knopf-gewaehlt { border-color: var(--gut); background: var(--gut-soft); color: var(--text); }
+.nachfrage-knopf-blass { opacity: 0.3; }
+
+/* Auf dem hellen Abschluss ist Weiss der Grund. */
+.warteliste-unten .nachfragen { border-top-color: rgba(255, 255, 255, 0.25); }
+.warteliste-unten .nachfragen-kopf,
+.warteliste-unten .nachfrage-text { color: rgba(255, 255, 255, 0.75); }
+.warteliste-unten .nachfrage-knopf { border-color: rgba(255, 255, 255, 0.35); color: rgba(255, 255, 255, 0.85); }

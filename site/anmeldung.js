@@ -144,9 +144,95 @@ function zeigeDanke(form, email) {
   text.textContent =
     "Wir schreiben an " + email + ", sobald chopstr startet. Sonst hörst du nichts von uns.";
 
-  kasten.append(titel, text);
+  kasten.append(titel, text, nachfragen(email));
   form.replaceWith(kasten);
   kasten.focus?.();
+}
+
+/* Die Nachfragen: zwei Fragen, je ein Klick, jederzeit zu ignorieren.
+ *
+ * WARUM HINTERHER UND NICHT VORHER. Ein Trichter, der sechs Fragen stellt, bevor er die Adresse
+ * bekommt, verliert bei jeder Frage Leute - und mit ihnen den Kontakt, um den es eigentlich ging.
+ * Hier ist die Adresse zu diesem Zeitpunkt längst gespeichert. Wer abbricht, kostet nichts; wer
+ * antwortet, ist eine Zugabe. Dasselbe Wissen, ohne das Risiko.
+ *
+ * Und es ist die höflichere Reihenfolge: erst geben wir die Zusage, dann fragen wir. */
+const FRAGEN = [
+  {
+    feld: "taetigkeit",
+    text: "Was machst du?",
+    werte: ["Agentur", "Creator", "Unternehmen", "Anderes"],
+  },
+  {
+    feld: "menge",
+    text: "Wie viel Material kommt bei dir im Monat zusammen?",
+    werte: ["Unter 2 Stunden", "2 bis 10 Stunden", "Mehr als 10 Stunden"],
+  },
+];
+
+function nachfragen(email) {
+  const block = document.createElement("div");
+  block.className = "nachfragen";
+
+  const einleitung = document.createElement("p");
+  einleitung.className = "nachfragen-kopf";
+  einleitung.textContent =
+    "Zwei Fragen noch? Freiwillig - sie helfen uns nur, die Reihenfolge festzulegen.";
+  block.append(einleitung);
+
+  let offen = FRAGEN.length;
+
+  for (const frage of FRAGEN) {
+    const zeile = document.createElement("div");
+    zeile.className = "nachfrage";
+
+    const text = document.createElement("p");
+    text.className = "nachfrage-text";
+    text.textContent = frage.text;
+
+    const reihe = document.createElement("div");
+    reihe.className = "nachfrage-knoepfe";
+
+    for (const wert of frage.werte) {
+      const knopf = document.createElement("button");
+      knopf.type = "button";
+      knopf.className = "nachfrage-knopf";
+      knopf.textContent = wert;
+      knopf.addEventListener("click", () => {
+        /* Sofort quittieren, nicht erst wenn die Antwort da ist: die Adresse liegt längst im
+         * Sheet, und ob dieser Zusatz ankommt, ändert für die Person nichts. */
+        reihe.querySelectorAll("button").forEach((b) => {
+          b.disabled = true;
+          if (b !== knopf) b.classList.add("nachfrage-knopf-blass");
+        });
+        knopf.classList.add("nachfrage-knopf-gewaehlt");
+        offen -= 1;
+        if (offen === 0) einleitung.textContent = "Danke, das war's.";
+        void senden({ art: "nachfrage", email: email, feld: frage.feld, wert: wert });
+      });
+      reihe.append(knopf);
+    }
+
+    zeile.append(text, reihe);
+    block.append(zeile);
+  }
+
+  return block;
+}
+
+/* Abschicken und vergessen. Schlägt es fehl, fehlt eine Zusatzangabe - kein Grund, jemandem, der
+ * gerade fertig ist, eine Fehlermeldung hinzustellen. */
+async function senden(nutzlast) {
+  if (!ENDPUNKT) return;
+  try {
+    await fetch(ENDPUNKT, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(nutzlast),
+    });
+  } catch {
+    /* absichtlich still */
+  }
 }
 
 if (document.readyState === "loading") {

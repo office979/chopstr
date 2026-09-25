@@ -1,78 +1,69 @@
-# Warteliste einrichten (Google Sheet + Apps Script)
+# Warteliste: wie sie aufgebaut ist
 
-Fünf Schritte, etwa zehn Minuten. Alles davon musst du selbst machen: es läuft in deinem
-Google-Konto, und dort komme ich nicht hin.
+**Eingerichtet und in Betrieb seit 26.09.2026.** Hier steht, was wo liegt und was zu tun ist,
+wenn sich etwas ändert. Zum Einrichten ist nichts mehr zu tun.
 
-## 1. Tabelle
+## Der Weg einer E-Mail-Adresse
 
-Die Tabelle **chopstr Warteliste** liegt bereits in Ferdis Google Drive (angelegt am 25.09.2026).
-Ihre Adresse steht bewusst nicht hier: dieses Repository ist öffentlich, und interne Dokumente
-gehören nicht in öffentlichen Quelltext.
+```
+Formular auf chopstr.io          site/index.html
+   -> fetch, Content-Type: text/plain    site/anmeldung.js  (ENDPUNKT, Zeile 18)
+      -> Apps Script "chopstr Warteliste", Web-App
+         -> Blatt "Warteliste" im Google Sheet "chopstr Warteliste"
+```
 
-Blatt und Kopfzeile legt das Skript beim ersten Eintrag selbst an — das Blatt heisst dann
-**Warteliste**, mit den Spalten Zeitpunkt, E-Mail und Quelle. Von Hand ist dort nichts zu tun.
+`text/plain` ist kein Versehen: damit gilt die Anfrage als „einfach", und der Browser fragt nicht
+vorher per OPTIONS nach. Apps Script beantwortet OPTIONS nicht, und die Anmeldung scheiterte,
+bevor sie gestellt wäre. Das Skript liest den Text selbst als JSON.
 
-## 2. Skript einfügen
+## Was wo liegt
 
-In der Tabelle: **Erweiterungen → Apps Script**. Der Editor öffnet sich mit einer leeren
-`Code.gs`. Deren Inhalt komplett löschen und den Inhalt von [`Code.gs`](Code.gs) aus diesem Ordner
-einfügen. Speichern (⌘S).
+| Teil | Wo |
+|---|---|
+| Tabelle | Google Drive von office@placemedia.at, **chopstr Warteliste**, Blatt **Warteliste** |
+| Skript | an die Tabelle gebunden: dort **Erweiterungen → Apps Script** |
+| Quelltext des Skripts | [`Code.gs`](Code.gs) in diesem Ordner — die versionierte Fassung |
+| Adresse der Web-App | `site/anmeldung.js`, Zeile 18 |
 
-## 3. Als Web-App veröffentlichen
+Die Adresse der Tabelle steht bewusst nicht hier: dieses Repository ist öffentlich.
 
-Oben rechts **Bereitstellen → Neue Bereitstellung**.
+## Einstellungen der Bereitstellung
 
 | Feld | Wert |
 |---|---|
-| Typ (Zahnrad links) | **Web-App** |
-| Beschreibung | `Warteliste chopstr.io` |
-| Ausführen als | **Ich** (dein Konto) |
+| Typ | Web-App |
+| Ausführen als | Ich (office@placemedia.at) |
 | Zugriff | **Jeder** |
 
 „Jeder" klingt weit, ist aber nötig: die Anmeldung kommt vom Browser eines Besuchers, der bei
-Google nicht angemeldet ist. Das Skript gibt nichts heraus – `doGet` antwortet mit einem Satz,
-und `doPost` schreibt nur. Die Liste selbst bleibt in deinem Drive.
+Google nicht angemeldet ist. Herausgegeben wird dabei nichts — `doGet` antwortet mit einem Satz,
+`doPost` schreibt nur. Die Liste bleibt in Ferdis Drive.
 
-Beim ersten Mal fragt Google nach der Berechtigung. Der Warnhinweis „Diese App wurde nicht
-überprüft" ist normal für eigene Skripte: **Erweitert → Weiter zu … (unsicher)**.
+## Wenn du Code.gs änderst
 
-Am Ende zeigt Google eine **Web-App-URL**. Sie endet auf `/exec`. Diese Adresse kopieren.
+Der Quelltext hier ist die Wahrheit, das Skript in Google ist die Kopie. Nach einer Änderung:
 
-## 4. Adresse in die Seite eintragen
+1. Inhalt von `Code.gs` in den Apps-Script-Editor kopieren, speichern
+2. **Bereitstellen → Bereitstellungen verwalten → Bearbeiten (Stift) → Version: Neu → Bereitstellen**
 
-In [`../anmeldung.js`](../anmeldung.js), ganz oben:
-
-```js
-const ENDPUNKT = "https://script.google.com/macros/s/AKfycb…/exec";
-```
-
-Solange dort nichts steht, sagt das Formular ehrlich, dass die Warteliste noch nicht scharf
-geschaltet ist – es tut nicht so, als sei die Adresse angekommen.
-
-## 5. Ausprobieren
-
-Seite öffnen, eine Adresse eintragen, ins Sheet schauen. Es muss eine Zeile mit Zeitpunkt,
-Adresse und Quelle dastehen. Dieselbe Adresse ein zweites Mal ergibt wieder „Du stehst auf der
-Liste", aber keine zweite Zeile.
-
-## Wenn du das Skript änderst
-
-Nach jeder Änderung **Bereitstellen → Bereitstellungen verwalten → Bearbeiten (Stift) → Version:
-Neu → Bereitstellen**. Ohne diesen Schritt läuft weiter die alte Fassung, und die Änderung wirkt
-nicht – das ist der Fehler, den man genau einmal macht.
-
-Die URL bleibt dabei gleich. Nur eine *neue Bereitstellung* (statt einer neuen Version) gibt eine
-neue URL, die dann auch in `anmeldung.js` nachgezogen werden muss.
+Ohne Schritt 2 läuft weiter die alte Fassung. Das ist der Fehler, den man genau einmal macht.
+Die Adresse bleibt dabei gleich; nur eine *neue Bereitstellung* (statt einer neuen Version) gibt
+eine neue Adresse, die dann auch in `anmeldung.js` nachgezogen werden muss.
 
 ## Was dieser Weg nicht kann
 
 - **Kein Double-Opt-in.** Es wird nicht geprüft, ob die Adresse der Person gehört, die sie
   eingetippt hat. Für eine Warteliste mit genau einer Mail zum Start ist das vertretbar. Wenn
-  daraus je ein Newsletter wird, braucht es einen echten Mailanbieter mit Bestätigungsmail.
+  daraus je ein Newsletter wird, braucht es einen Mailanbieter mit Bestätigungsmail.
 - **Kein Schutz gegen jemanden, der es darauf anlegt.** Die Adresse der Web-App steht im
-  ausgelieferten HTML – sie muss, sonst könnte kein Browser sie aufrufen. Dagegen hilft der
-  Deckel von 500 Einträgen je Tag (`MAX_JE_TAG` in `Code.gs`) und die Falle für Ausfüllroboter im
-  Formular. Beides hält Gelegenheitsmüll ab, keinen entschlossenen Angreifer.
+  ausgelieferten HTML — sie muss, sonst könnte kein Browser sie aufrufen. Dagegen hilft der
+  Deckel von 500 Einträgen je Tag (`MAX_JE_TAG` in `Code.gs`), die Adressprüfung und das
+  Fallenfeld im Formular. Das hält Gelegenheitsmüll ab, keinen entschlossenen Angreifer.
 - **Google ist ein US-Anbieter.** Auftragsverarbeitung über Google Ireland Ltd., Rechtsgrundlage
-  ist das EU-US Data Privacy Framework. Das steht so in der Datenschutzerklärung und muss dort
-  stehen bleiben, solange die Liste dort liegt.
+  für die Drittlandübermittlung ist das EU-US Data Privacy Framework. Das steht so in
+  `site/datenschutz.html` und muss dort stehen bleiben, solange die Liste dort liegt.
+- **Das Skript darf mehr, als es tut.** Die erteilte Berechtigung lautet „alle Google-Tabellen
+  sehen, bearbeiten, erstellen und löschen" — enger geht es bei `SpreadsheetApp` nicht. Das
+  Skript rührt nur das Blatt „Warteliste" in seiner eigenen Tabelle an; nachprüfbar in `Code.gs`.
+  Zurücknehmen lässt sich die Berechtigung unter myaccount.google.com → Sicherheit → Apps von
+  Drittanbietern, dann nimmt die Warteliste allerdings nichts mehr entgegen.

@@ -143,19 +143,26 @@ export function Sidebar({ user }: { user: NavUser | null }) {
 
   return (
     <>
+      {/* Der Platzhalter. Er steht IM FLUSS neben dem Inhalt und ist genau so breit wie die
+          Leiste, die gerade zu sehen ist - deshalb kann sich nichts mehr überdecken. Die Regeln
+          dazu stehen in globals.css, alle vier in einem Block (.nav-*). */}
+      <div aria-hidden="true" className="nav-platz" />
+
       {/* Breites Fenster: die ganze Leiste mit Text. */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[264px] border-r border-line bg-[#05050c]/80 backdrop-blur-xl lg:block print:hidden">
+      <aside className="nav-voll fixed inset-y-0 left-0 z-40 w-[264px] border-r border-line bg-[#05050c]/80 backdrop-blur-xl">
         {panel(false)}
       </aside>
 
       {/* Mittleres Fenster: dieselbe Leiste als schmale Schiene, nur Zeichen. Sie verschwindet
           nicht mehr - wo man ist, bleibt sichtbar, und jeder Bereich bleibt einen Klick entfernt. */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[64px] border-r border-line bg-[#05050c]/80 backdrop-blur-xl sm:block lg:hidden print:hidden">
+      <aside className="nav-schiene fixed inset-y-0 left-0 z-40 w-[64px] border-r border-line bg-[#05050c]/80 backdrop-blur-xl">
         {panel(true)}
       </aside>
 
-      {/* Handy: dafür ist auch eine Schiene zu breit. Kopfzeile mit Menüknopf. */}
-      <div className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-line bg-[#05050c]/85 px-4 backdrop-blur-xl sm:hidden print:hidden">
+      {/* Handy: dafür ist auch eine Schiene zu breit. Kopfzeile mit Menüknopf.
+          `fixed` und nicht `sticky`: als Element im Fluss wäre sie in der Zeile neben dem Inhalt
+          gelandet, seit die Leiste in einer Flex-Zeile steht. */}
+      <div className="nav-kopf fixed inset-x-0 top-0 z-40 h-14 items-center justify-between border-b border-line bg-[#05050c]/85 px-4 backdrop-blur-xl">
         <Link href="/" aria-label="chopstr Startseite">
           <Wordmark width={92} />
         </Link>
@@ -170,7 +177,7 @@ export function Sidebar({ user }: { user: NavUser | null }) {
         </button>
       </div>
       {drawerOpen && (
-        <div className="fixed inset-0 z-50 sm:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
+        <div className="nav-kopf fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Navigation">
           <button type="button" aria-label="Menü schließen" className="absolute inset-0 bg-black/70" onClick={() => setDrawerAt(null)} />
           <aside className="absolute inset-y-0 left-0 w-[280px] max-w-[85vw] border-r border-line bg-[#05050c]">{panel(false)}</aside>
         </div>

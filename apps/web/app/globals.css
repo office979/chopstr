@@ -401,3 +401,72 @@ input[type="range"].timeline::-moz-range-thumb {
   border: none;
   border-radius: inherit;
 }
+
+/* Die Seitenleiste und der Platz, den sie braucht - in EINEM Regelsatz.
+ *
+ * Vorher hingen vier Dinge an vier getrennten Stellen: die volle Leiste hatte ihre Klassen, die
+ * schmale Schiene ihre, die Kopfzeile fürs Handy ihre, und der Platz für den Inhalt stand als
+ * `sm:pl-[64px] lg:pl-[264px]` in einer ganz anderen Datei. Vier Regeln, die sich einig sein
+ * MÜSSEN, und sobald eine davon fehlte - ein halb nachgeladenes Stylesheet reicht - lag die
+ * Leiste über dem Text. Genau das war zu sehen, und mit „einmal neu laden" war es nicht getan.
+ *
+ * Jetzt entscheidet ein Block über alle vier. Sie können nicht mehr verschieden denken: wer
+ * diesen Block hat, hat ihn ganz.
+ *
+ * Bewusst klassische `min-width`-Abfragen statt der neuen Bereichsschreibweise `(width >= 40rem)`.
+ * Die versteht jeder Browser, der irgendwo im Einsatz ist, und diese vier Regeln sind die
+ * falschesten, die fehlen können. */
+
+/* Kopfzeile mit Menüknopf: nur auf dem Handy. */
+.nav-kopf {
+  display: flex;
+}
+/* Die schmale Schiene mit den Zeichen. */
+.nav-schiene {
+  display: none;
+}
+/* Die volle Leiste mit Text. */
+.nav-voll {
+  display: none;
+}
+/* Der Platzhalter IM FLUSS neben dem Inhalt. Er ist der Grund, warum sich nichts mehr überdecken
+ * kann: die Leiste selbst schwebt (position: fixed), aber dieser Klotz steht in der Zeile und
+ * schiebt den Inhalt zur Seite. Seine Breite ist immer die der Leiste, die gerade zu sehen ist. */
+.nav-platz {
+  display: none;
+  flex: none;
+}
+
+@media (min-width: 640px) {
+  .nav-kopf {
+    display: none;
+  }
+  .nav-schiene {
+    display: block;
+  }
+  .nav-platz {
+    display: block;
+    width: 64px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .nav-schiene {
+    display: none;
+  }
+  .nav-voll {
+    display: block;
+  }
+  .nav-platz {
+    width: 264px;
+  }
+}
+
+@media print {
+  .nav-kopf,
+  .nav-schiene,
+  .nav-voll,
+  .nav-platz {
+    display: none !important;
+  }
+}

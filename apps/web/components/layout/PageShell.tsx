@@ -69,10 +69,18 @@ export async function PageShell({ children, lightTone = "brand", width = "defaul
   return (
     <div className="relative min-h-dvh overflow-x-clip">
       <BlueBubbles tone={lightTone} />
-      <Sidebar user={navUser} />
-      {/* Platz für die Leiste: 64 für die schmale Schiene, 264 für die volle. Unter sm gibt es
-          keine Leiste, sondern die Kopfzeile mit dem Menüknopf. */}
-      <div className="relative z-10 flex min-h-dvh flex-col sm:pl-[64px] lg:pl-[264px]">
+      {/* Eine Zeile: links die Leiste, rechts der Inhalt.
+       *
+       * Vorher schwebte die Leiste und der Inhalt bekam links eine Polsterung in ihrer Breite -
+       * zwei Angaben in zwei Dateien, die sich einig sein mussten. Waren sie es nicht, lag die
+       * Leiste über dem Text. Jetzt reserviert die Leiste ihren Platz selbst (.nav-platz), und
+       * der Inhalt bekommt, was übrig bleibt. Überdecken ist damit nicht mehr möglich - nicht
+       * weil zwei Zahlen zufällig gleich sind, sondern weil es nur noch eine gibt.
+       *
+       * Oben 14 Einheiten Luft auf dem Handy: dort schwebt die Kopfzeile mit dem Menüknopf. */}
+      <div className="relative z-10 flex min-h-dvh">
+        <Sidebar user={navUser} />
+        <div className="flex min-h-dvh min-w-0 flex-1 flex-col pt-14 sm:pt-0">
         <main className={cn("mx-auto w-full flex-1 px-4 pb-16 pt-8 sm:px-8 lg:pt-12", widths[width], className)}>
           {deletionBanner && (
             <div className="print:hidden mb-6">
@@ -88,10 +96,11 @@ export async function PageShell({ children, lightTone = "brand", width = "defaul
           )}
           {children}
         </main>
-        <footer className="mx-auto flex w-full max-w-[1440px] items-center justify-between gap-3 px-4 pb-6 text-xs text-text-3 sm:px-8 print:hidden">
-          <span>chopstr · EU-verarbeitet</span>
-          <span className="font-mono">v{process.env.APP_VERSION ?? "0.1.0"}</span>
-        </footer>
+          <footer className="mx-auto flex w-full max-w-[1440px] items-center justify-between gap-3 px-4 pb-6 text-xs text-text-3 sm:px-8 print:hidden">
+            <span>chopstr · EU-verarbeitet</span>
+            <span className="font-mono">v{process.env.APP_VERSION ?? "0.1.0"}</span>
+          </footer>
+        </div>
       </div>
     </div>
   );

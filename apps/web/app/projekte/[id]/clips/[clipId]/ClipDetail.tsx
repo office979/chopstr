@@ -799,8 +799,9 @@ export function ClipDetail({
 
   return (
     <>
-      {/* Der Weg hierher. Er endet bei „Clips prüfen", und der Link dorthin führt in dieselbe
-          Liste zurück: Filter und Scrollstand werden dort wiederhergestellt. */}
+      {/* Der Weg hierher. Zwei Stufen statt drei: der Videoname IST die Clip-Liste, seit die
+          eigene Projektseite weggefallen ist. Der Link dorthin führt in dieselbe Liste zurück -
+          Filter und Scrollstand werden dort wiederhergestellt. */}
       <nav aria-label="Pfad" className="mb-4 flex flex-wrap items-center gap-1.5 text-sm text-text-2">
         <Link href="/" className="hover:text-text hover:underline">
           Meine Videos
@@ -808,14 +809,8 @@ export function ClipDetail({
         <span aria-hidden="true" className="text-text-3">
           ›
         </span>
-        <Link href={`/projekte/${sourceId}`} className="max-w-[220px] truncate hover:text-text hover:underline">
+        <Link href={`/projekte/${sourceId}/clips`} className="max-w-[260px] truncate hover:text-text hover:underline">
           {sourceTitle}
-        </Link>
-        <span aria-hidden="true" className="text-text-3">
-          ›
-        </span>
-        <Link href={`/projekte/${sourceId}/clips`} className="hover:text-text hover:underline">
-          Clips prüfen
         </Link>
         <span aria-hidden="true" className="text-text-3">
           ›

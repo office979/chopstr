@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageShell } from "@/components/layout/PageShell";
-import { GlassCard } from "@/components/ui/GlassCard";
-import { ButtonLink } from "@/components/ui/Button";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { getRepo } from "@/lib/repo";
+import { isTerminalStatus } from "@/lib/pipeline";
+import { isDemoMode, temporalConfigured } from "@/lib/env";
+import { PipelineLive } from "../PipelineLive";
 import { aspectForSource } from "@/lib/clips/presets";
 import { requireSession } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
@@ -43,18 +45,27 @@ export default async function ClipsPage({ params }: Props) {
   const clipIds = clips.map((c) => c.id);
   const [seriesList, extrasList] = await Promise.all([pub.listSeries(), pub.getClipExtras(clipIds)]);
 
+  /* Noch keine Clips? Dann zeigt diese Seite, wie weit der Computer ist.
+   *
+   * Das stand vorher auf einer eigenen Seite je Video, und von dort musste man weiterklicken.
+   * Solange gerechnet wird, ist der Fortschritt die Antwort auf die einzige Frage, die jemand
+   * hat; danach verschwindet er von selbst, weil dann Clips da sind. Eine Seite, die nach getaner
+   * Arbeit ein Datenblatt über einen abgeschlossenen Vorgang zeigt, braucht niemand. */
   if (clips.length === 0) {
+    const [events, candidateCount] = await Promise.all([repo.listPipelineEvents(id), repo.countCandidates(id)]);
+    const live = !isTerminalStatus(source.status);
     return (
-      <PageShell width="narrow" backgroundWord="Clips">
-        <GlassCard padding="lg" className="text-center">
-          <p className="text-lg font-medium">Noch keine Clips</p>
-          <p className="mx-auto mt-2 max-w-md text-text-2">
-            Clips entstehen von selbst, sobald der Computer dein Video durchgesehen hat.
-          </p>
-          <div className="mt-6 flex justify-center">
-            <ButtonLink href={`/projekte/${source.id}`}>Zum Video</ButtonLink>
-          </div>
-        </GlassCard>
+      <PageShell width="narrow" backgroundWord="Video" lightTone={live ? "ai" : "brand"}>
+        <Brotkrume titel={source.title} />
+        <PageHeader eyebrow="Video" title={source.title} />
+        <PipelineLive
+          sourceId={source.id}
+          initialStatus={source.status}
+          initialStatusMessage={source.status_message}
+          initialEvents={events}
+          candidateCount={candidateCount}
+          localWorker={!isDemoMode() && !temporalConfigured()}
+        />
       </PageShell>
     );
   }
@@ -63,23 +74,7 @@ export default async function ClipsPage({ params }: Props) {
 
   return (
     <PageShell width="wide" backgroundWord="Clips">
-      {/* Der Weg hierher, als Pfad. Wer aus einem Clip zurückkommt, muss ohne Zurück-Taste des
-          Browsers wissen, wo er ist und wie er eine Ebene höher kommt. */}
-      <nav aria-label="Pfad" className="mb-4 flex flex-wrap items-center gap-1.5 text-sm text-text-2">
-        <Link href="/" className="hover:text-text hover:underline">
-          Meine Videos
-        </Link>
-        <span aria-hidden="true" className="text-text-3">
-          ›
-        </span>
-        <Link href={`/projekte/${source.id}`} className="max-w-[260px] truncate hover:text-text hover:underline">
-          {source.title}
-        </Link>
-        <span aria-hidden="true" className="text-text-3">
-          ›
-        </span>
-        <span className="text-text">Clips prüfen</span>
-      </nav>
+      <Brotkrume titel={source.title} />
 
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Clips prüfen</h1>
@@ -123,5 +118,21 @@ export default async function ClipsPage({ params }: Props) {
         }}
       />
     </PageShell>
+  );
+}
+
+/* Der Weg hierher, als Pfad. Er endet beim VIDEO und nicht bei „Clips prüfen": diese Seite ist
+ * das Video - es gibt keine Ebene mehr darüber, seit die eigene Projektseite weggefallen ist. */
+function Brotkrume({ titel }: { titel: string }) {
+  return (
+    <nav aria-label="Pfad" className="mb-4 flex flex-wrap items-center gap-1.5 text-sm text-text-2">
+      <Link href="/" className="hover:text-text hover:underline">
+        Meine Videos
+      </Link>
+      <span aria-hidden="true" className="text-text-3">
+        ›
+      </span>
+      <span className="max-w-[320px] truncate text-text">{titel}</span>
+    </nav>
   );
 }

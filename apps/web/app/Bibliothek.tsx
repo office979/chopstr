@@ -209,7 +209,7 @@ export function Bibliothek({ zeilen, canDelete, canUpload }: Props) {
                   {/* Vorschaubild, wenn es eins gibt. Ein Projekt an seinem Bild wiederzuerkennen
                       geht schneller als über den Namen. */}
                   <Link
-                    href={`/projekte/${s.id}`}
+                    href={`/projekte/${s.id}/clips`}
                     aria-label={`${s.title} öffnen`}
                     className="transition-soft relative h-[72px] w-[72px] shrink-0 overflow-hidden rounded-[10px] border border-line bg-black hover:border-white/40"
                   >
@@ -230,7 +230,7 @@ export function Bibliothek({ zeilen, canDelete, canUpload }: Props) {
 
                   <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                     <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
-                      <Link href={`/projekte/${s.id}`} className="truncate text-[15px] font-medium text-text hover:underline">
+                      <Link href={`/projekte/${s.id}/clips`} className="truncate text-[15px] font-medium text-text hover:underline">
                         {s.title}
                       </Link>
                       {marke && <span className="truncate text-sm text-text-2">{marke}</span>}

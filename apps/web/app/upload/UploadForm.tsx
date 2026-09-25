@@ -147,7 +147,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
       return;
     }
     setPhase("done");
-    router.push(`/projekte/${result.id}`);
+    router.push(`/projekte/${result.id}/clips`);
   };
 
   const simulateUpload = async (data: ReturnType<typeof collect>) => {
@@ -319,7 +319,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
       try {
         const sourceId = await directUpload(data, clientRef);
         setPhase("done");
-        router.push(`/projekte/${sourceId}`);
+        router.push(`/projekte/${sourceId}/clips`);
       } catch (err) {
         setPhase("error");
         setNote(err instanceof Error ? err.message : String(err));
@@ -332,7 +332,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
     try {
       await realUpload(data, clientRef);
       setPhase("done");
-      router.push(`/projekte/${clientRef}`);
+      router.push(`/projekte/${clientRef}/clips`);
     } catch (err) {
       /* Kein Ausweichen auf eine Simulation mehr.
        *

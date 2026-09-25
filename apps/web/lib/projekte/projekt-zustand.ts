@@ -30,11 +30,20 @@ export interface Hauptaktion {
 
 /* Welche Handlung passt? Immer genau eine, und zwar die, die den Nutzer weiterbringt. Vier
  * gleichrangige Knöpfe je Zeile sind keine Führung, sondern eine Auswahlaufgabe. */
+/* Alle Wege führen in die Clip-Liste.
+ *
+ * Es gab einmal eine eigene Seite je Video, die den Fortschritt der Analyse zeigte („Der Computer
+ * ist fertig", fünf Häkchen, Zeitstempel). Solange gerechnet wird, ist das die Antwort auf die
+ * einzige Frage, die jemand hat - wie lange noch. Danach ist es ein Datenblatt über einen
+ * abgeschlossenen Vorgang, und man musste trotzdem darüber, um zu den Clips zu kommen.
+ *
+ * Deshalb steht der Fortschritt jetzt in der Clip-Liste, solange es keine Clips gibt, und ein
+ * leerer Pfad zeigt genau dorthin. */
 export function hauptaktion(zustand: ProjektZustand): Hauptaktion {
   switch (zustand) {
     case "upload":
     case "verarbeitung":
-      return { label: "Zusehen", pfad: "" };
+      return { label: "Zusehen", pfad: "/clips" };
     case "pruefen":
       return { label: "Clips prüfen", pfad: "/clips" };
     case "bereit":
@@ -42,7 +51,7 @@ export function hauptaktion(zustand: ProjektZustand): Hauptaktion {
     case "leer":
       return { label: "Text ansehen", pfad: "/transkript" };
     case "fehler":
-      return { label: "Fehler ansehen", pfad: "" };
+      return { label: "Fehler ansehen", pfad: "/clips" };
   }
 }
 

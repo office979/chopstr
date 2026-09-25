@@ -90,3 +90,39 @@ describe("interne Marken", () => {
     expect(thema("[33] , und dann kam die Rechnung.")).toBe("Und dann kam die Rechnung.");
   });
 });
+
+describe("die Sprecherkennung in allen Schreibweisen", () => {
+  /* Der Worker schreibt sie je nach Stelle verschieden. Die runde Form stand weiter in den
+   * Überschriften: ein Clip hiess „(SPEAKER_00) Wenn du jetzt Menschen einen Shortcut quasi
+   * gibst". Gemeldet von Ferdi an einem echten Projekt. */
+  it("nimmt die runde Klammer weg", () => {
+    expect(thema("[42] (SPEAKER_00) Menschen beispielsweise, die sich in so einer Situation befinden.")).not.toContain(
+      "SPEAKER",
+    );
+  });
+
+  it("beginnt danach beim ersten echten Wort", () => {
+    expect(thema("[42] (SPEAKER_00) Menschen beispielsweise, die sich befinden.")).toMatch(/^Menschen/);
+  });
+
+  it("nimmt auch die eckige und die blanke Form weg", () => {
+    for (const roh of [
+      "[SPEAKER_01] Das ist der Punkt.",
+      "SPEAKER_00: Das ist der Punkt.",
+      "SPEAKER_00 Das ist der Punkt.",
+      "(speaker_07) Das ist der Punkt.",
+    ]) {
+      expect(thema(roh)).not.toContain("SPEAKER");
+      expect(thema(roh).toLowerCase()).not.toContain("speaker");
+    }
+  });
+
+  it("lässt einen Sprecherwechsel mitten im Text nicht stehen", () => {
+    const roh = "(SPEAKER_00) Ich halte dagegen. (SPEAKER_01) Und ich sage: stimmt nicht.";
+    expect(fortsetzung(roh)).not.toContain("SPEAKER");
+  });
+
+  it("rührt ein Wort mit Klammern sonst nicht an", () => {
+    expect(thema("Das kostet (netto) dreitausend Euro.")).toContain("(netto)");
+  });
+});

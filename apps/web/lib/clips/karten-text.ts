@@ -12,8 +12,13 @@
 import { HARD_FILLERS, normalize, SOFT_FILLERS } from "@/lib/transcript/fillers";
 
 /* Das Präfix der Spracherkennung. In einer Ergebnisübersicht hat es nichts verloren: „SPEAKER_00"
- * ist eine Kennung aus der Diarisierung und kein Name. */
-const SPRECHER = /(^|\s)SPEAKER_\d+:?\s*/g;
+ * ist eine Kennung aus der Diarisierung und kein Name.
+ *
+ * Die Klammern gehören dazu. Der Worker schreibt die Kennung je nach Stelle als „SPEAKER_00:",
+ * als „[SPEAKER_00]" oder als „(SPEAKER_00)" - und genau die runde Form stand weiter in den
+ * Überschriften, weil dieser Ausdruck sie nicht kannte. Ein Clip hiess dann „(SPEAKER_00) Wenn du
+ * jetzt Menschen einen Shortcut quasi gibst". */
+const SPRECHER = /(^|\s)[([]?SPEAKER_\d+[)\]]?:?\s*/gi;
 
 /* Interne Marken in eckigen Klammern: [33], [SPEAKER_01], [inaudible], [Musik].
  *

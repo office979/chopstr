@@ -319,7 +319,12 @@ export function Timeline({
   };
 
   const springeZu = () => {
-    const teile = eingabe.trim().replace(",", ".").split(":");
+    /* Leeres Feld heisst „nichts tun". Ohne diese Zeile wird aus "" eine Null, und das Video
+     * springt an den Anfang - beim Verlassen des Feldes also jedes Mal, wenn niemand etwas
+     * eingetippt hat. */
+    const roh = eingabe.trim();
+    if (!roh) return;
+    const teile = roh.replace(",", ".").split(":");
     const sek = teile.length === 2 ? Number(teile[0]) * 60 + Number(teile[1]) : Number(teile[0]);
     if (Number.isFinite(sek)) onSeek(Math.max(bereichVonS, Math.min(bereichBisS, sek)));
   };
@@ -354,18 +359,19 @@ export function Timeline({
                   springeZu();
                 }
               }}
+              /* Ein Knopf „Springen" stand daneben. Er ist weg: die Eingabetaste tut dasselbe,
+                 und beim Verlassen des Feldes wird ohnehin gesprungen. */
+              onBlur={springeZu}
               placeholder="0:12"
-              aria-label="Zeitpunkt im Originalvideo, zum Beispiel 0:12"
+              aria-label="Zeitpunkt im Originalvideo, zum Beispiel 0:12 - Eingabetaste springt hin"
+              title="Zeit eintippen und Eingabetaste drücken"
               className="transition-soft w-[86px] rounded-inner border border-line bg-black/40 px-2.5 py-1.5 text-sm tabular-nums text-text placeholder:text-text-3 focus:border-white/50 focus:outline-none"
             />
-            <Button variant="ghost" size="sm" onClick={springeZu}>
-              Springen
-            </Button>
           </label>
         </div>
       </div>
 
-      {/* Steuerung: abspielen, Lupe, ganzes Video */}
+      {/* Steuerung: abspielen, Lupe, Verlauf */}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <Button variant="ghost" size="sm" onClick={onPlayPause} aria-label={laeuft ? "Anhalten" : "Abspielen"}>
           {laeuft ? "Pause" : "Abspielen"}
@@ -379,9 +385,6 @@ export function Timeline({
             +
           </Werkzeug>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => setLupe(1)} disabled={lupe === 1}>
-          Ganzes Video zeigen
-        </Button>
         <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
         <Button variant="ghost" size="sm" onClick={onZurueck} disabled={!kannZurueck}>
           Rückgängig

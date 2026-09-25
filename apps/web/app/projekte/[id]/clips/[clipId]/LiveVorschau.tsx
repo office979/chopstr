@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
+import { cn } from "@/components/ui/cn";
 import { ausschnittBerechnen, blickraumAnker } from "@/lib/clips/ausschnitt";
 import type { CaptionStyle } from "@/lib/clips/caption-style";
 import { faktor as effektFaktor, type Effekt } from "@/lib/clips/effekte";
@@ -260,6 +261,15 @@ export function LiveVorschau({
             Geteiltes Bild · erst im gebauten Clip zu sehen
           </span>
         )}
+        {/* Abspielen und Anhalten: die ganze Fläche ist der Knopf.
+         *
+         * Hier verschwand vorher nur das ZEICHEN (text-white/0), die schwarze Scheibe dahinter
+         * blieb stehen. Damit lag während des Abspielens dauerhaft ein dunkler Kreis mitten im
+         * Bild - genau dort, wo bei einem hochkanten Clip das Gesicht ist. Jetzt geht die ganze
+         * Scheibe mit.
+         *
+         * Sichtbar bleibt sie im Stillstand: ein stehendes Video ohne Abspielzeichen sieht aus
+         * wie ein Bild, und niemand klickt darauf. Läuft es, genügt der Mauszeiger. */}
         <button
           type="button"
           aria-label={laeuft ? "Anhalten" : "Abspielen"}
@@ -269,9 +279,16 @@ export function LiveVorschau({
             if (v.paused) void v.play();
             else v.pause();
           }}
-          className="transition-soft absolute inset-0 z-10 flex items-center justify-center text-white/0 hover:text-white/90 focus:text-white/90 focus:outline-none"
+          className="group absolute inset-0 z-10 flex items-center justify-center focus:outline-none"
         >
-          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-black/55 backdrop-blur-sm">
+          <span
+            className={cn(
+              "transition-soft flex h-14 w-14 items-center justify-center rounded-full bg-black/55 text-white/90 backdrop-blur-sm",
+              laeuft
+                ? "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+                : "opacity-100",
+            )}
+          >
             {laeuft ? (
               <svg width="18" height="20" viewBox="0 0 18 20" fill="currentColor" aria-hidden="true">
                 <rect x="1" y="1" width="5" height="18" rx="1.5" />

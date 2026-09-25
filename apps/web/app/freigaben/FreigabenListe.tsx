@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { GlassCard } from "@/components/ui/GlassCard";
+import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/components/ui/cn";
 import { formatDateTime } from "@/lib/format";
 import { fristAbgelaufen } from "@/lib/guest/approval";
@@ -13,7 +15,30 @@ import type { FreigabeZeile } from "@/lib/repo/types";
  * Aufgebaut wie die Clip-Liste: eine Karte je Eintrag, links was es ist, rechts was man damit tun
  * kann. Das Wichtigste ist der Link - er ist der Grund, warum es diese Seite gibt. */
 export function FreigabenListe({ freigaben, basis }: { freigaben: FreigabeZeile[]; basis: string }) {
+  const router = useRouter();
   const [kopiert, setKopiert] = useState<string | null>(null);
+  const [loeschen, setLoeschen] = useState<FreigabeZeile | null>(null);
+  const [laeuft, setLaeuft] = useState(false);
+  const [fehler, setFehler] = useState<string | null>(null);
+
+  const wirklichLoeschen = async () => {
+    if (!loeschen) return;
+    setLaeuft(true);
+    setFehler(null);
+    try {
+      const res = await fetch(`/api/freigaben/${loeschen.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const d = (await res.json()) as { error?: string };
+        throw new Error(d.error ?? "Die Freigabe konnte nicht gelöscht werden");
+      }
+      setLoeschen(null);
+      router.refresh();
+    } catch (err) {
+      setFehler(err instanceof Error ? err.message : "Die Freigabe konnte nicht gelöscht werden");
+    } finally {
+      setLaeuft(false);
+    }
+  };
 
   const kopieren = async (id: string, link: string) => {
     try {
@@ -78,6 +103,18 @@ export function FreigabenListe({ freigaben, basis }: { freigaben: FreigabeZeile[
                 >
                   Ansehen
                 </a>
+                {/* Zurückziehen. Rot, weil der Link damit ungültig wird - wer ihn schon hat, steht
+                    danach vor „Link ungültig". */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFehler(null);
+                    setLoeschen(f);
+                  }}
+                  className="transition-soft inline-flex h-9 items-center rounded-pill border border-danger/60 px-4 text-sm font-medium text-danger hover:bg-danger/15"
+                >
+                  Löschen
+                </button>
               </div>
 
               {abgelaufen && (
@@ -89,6 +126,39 @@ export function FreigabenListe({ freigaben, basis }: { freigaben: FreigabeZeile[
           </li>
         );
       })}
+
+      {/* Nachfragen, und dabei sagen, was daran unumkehrbar ist. Ein Link, den jemand schon in
+          seinem Postfach hat, funktioniert danach nicht mehr - das gehört vor den Klick, nicht
+          danach. */}
+      <Modal
+        open={loeschen != null}
+        onClose={() => !laeuft && setLoeschen(null)}
+        title="Freigabe löschen?"
+        description={
+          loeschen
+            ? `„${loeschen.name}“ mit ${loeschen.clips} ${loeschen.clips === 1 ? "Clip" : "Clips"}. Der Link wird ungültig: wer ihn schon hat, kann nicht mehr antworten. Die Clips stehen danach wieder auf „Nicht freigegeben“ und lassen sich neu verschicken.`
+            : ""
+        }
+      >
+        <div className="flex flex-col gap-4">
+          {loeschen != null && loeschen.freigegeben + loeschen.abgelehnt + loeschen.fehlerhaft > 0 && (
+            <p className="text-sm text-attention">
+              Achtung: {loeschen.freigegeben + loeschen.abgelehnt + loeschen.fehlerhaft} bereits gegebene
+              {loeschen.freigegeben + loeschen.abgelehnt + loeschen.fehlerhaft === 1 ? " Antwort geht" : " Antworten gehen"} mit
+              verloren, samt Rückmeldung.
+            </p>
+          )}
+          {fehler && <p className="text-sm text-attention">{fehler}</p>}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="ghost" onClick={() => setLoeschen(null)} disabled={laeuft}>
+              Abbrechen
+            </Button>
+            <Button variant="danger" onClick={() => void wirklichLoeschen()} disabled={laeuft}>
+              {laeuft ? "Wird gelöscht" : "Löschen"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </ul>
   );
 }
@@ -98,7 +168,10 @@ function Zahl({ ton, children }: { ton: "gut" | "achtung" | "fehler" | "ruhig"; 
     <span
       className={cn(
         "inline-flex h-6 items-center rounded-pill border px-2.5 font-medium",
-        ton === "gut" && "border-gut/60 bg-gut/15 text-text",
+        /* Grün, und zwar sichtbar: auch das WORT ist grün. Mit weisser Schrift auf zartem
+           Grün las sich „Freigegeben" auf der blauen Karte wie jede andere Plakette - der eine
+           Zustand, den man aus zwei Metern Entfernung erkennen will, war der unauffälligste. */
+        ton === "gut" && "border-gut/70 bg-gut/20 text-gut",
         ton === "achtung" && "border-attention/60 bg-attention/15 text-text",
         ton === "fehler" && "border-danger/60 bg-danger/15 text-text",
         ton === "ruhig" && "border-line text-text-2",

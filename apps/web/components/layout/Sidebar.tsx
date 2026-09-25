@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Mark } from "@/components/brand/Mark";
 import { Wordmark } from "@/components/brand/Wordmark";
 import { ROLE_LABELS, type Role } from "@/lib/auth/permissions";
 import { canExt } from "@/lib/auth/permissions-publishing";
@@ -72,42 +73,69 @@ export function Sidebar({ user }: { user: NavUser | null }) {
 
   const settingsActive = pathname.startsWith("/einstellungen");
 
-  const panel = (
-    <div className="flex h-full flex-col gap-6 px-4 py-6">
-      <Link href="/" aria-label="chopstr Startseite" className="flex items-center px-2">
-        <Wordmark width={112} />
+  /* Zwei Fassungen derselben Leiste.
+   *
+   * „kompakt" ist die schmale Schiene für mittlere Fenster: nur Zeichen, kein Text. Vorher
+   * verschwand die Leiste dort ganz und wurde zur Schublade hinter einem Menüknopf - der Weg zu
+   * „Meine Videos" ging damit von einem Klick auf zwei, und wo man gerade ist, war gar nicht mehr
+   * zu sehen. Die Zeichen allein sagen das weiter, und sie kosten 64 statt 264 Bildpunkte.
+   *
+   * Ohne Text braucht jeder Punkt seinen Namen woanders: title für die Maus, aria-label für
+   * Vorleseprogramme. Ein Zeichen ohne Namen ist ein Rätsel. */
+  const panel = (kompakt: boolean) => (
+    <div className={cn("flex h-full flex-col gap-6 py-6", kompakt ? "items-center px-2" : "px-4")}>
+      <Link
+        href="/"
+        aria-label="chopstr Startseite"
+        title={kompakt ? "chopstr Startseite" : undefined}
+        className={cn("flex items-center", kompakt ? "justify-center" : "px-2")}
+      >
+        {kompakt ? <Mark size={28} color="currentColor" className="text-white" /> : <Wordmark width={112} />}
       </Link>
 
       {user?.canUpload && (
         <Link
           href="/upload"
-          className="transition-soft flex h-11 items-center justify-center gap-2 rounded-inner border border-brand/60 bg-brand/35 text-sm font-medium text-white hover:bg-brand/50"
+          aria-label="Neues Video"
+          title={kompakt ? "Neues Video" : undefined}
+          className={cn(
+            "transition-soft flex items-center justify-center gap-2 rounded-inner border border-brand/60 bg-brand/35 text-sm font-medium text-white hover:bg-brand/50",
+            kompakt ? "h-11 w-11" : "h-11",
+          )}
         >
           <IconPlus />
-          Neues Video
+          {!kompakt && "Neues Video"}
         </Link>
       )}
 
-      <nav aria-label="Hauptnavigation" className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
-        <NavGroup items={main} pathname={pathname} />
+      <nav
+        aria-label="Hauptnavigation"
+        className={cn("flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto", kompakt && "w-full items-center")}
+      >
+        <NavGroup items={main} pathname={pathname} kompakt={kompakt} />
         {/* „Auswertung“ statt „Publishing“: so heißt die Gruppe im Bedienkonzept (Abschnitt 4) und
             sie enthält genau das, was dort steht — Serien, Tests, Berichte. */}
-        {publishing.length > 0 && <NavGroup title="Auswertung" items={publishing} pathname={pathname} />}
-        {tools.length > 0 && <NavGroup title="Werkzeuge" items={tools} pathname={pathname} />}
+        {publishing.length > 0 && <NavGroup title="Auswertung" items={publishing} pathname={pathname} kompakt={kompakt} />}
+        {tools.length > 0 && <NavGroup title="Werkzeuge" items={tools} pathname={pathname} kompakt={kompakt} />}
 
       </nav>
 
-      <div className="flex flex-col gap-1 border-t border-line pt-4">
+      <div className={cn("flex flex-col gap-1 border-t border-line pt-4", kompakt && "w-full items-center")}>
         {user && (
           <NavLink
             item={{ href: "/einstellungen", label: "Einstellungen", icon: <IconSettings />, match: () => settingsActive }}
             active={settingsActive}
+            kompakt={kompakt}
           />
         )}
         {user ? (
-          <ProfileMenu user={user} pathname={pathname} />
+          <ProfileMenu user={user} pathname={pathname} kompakt={kompakt} />
         ) : (
-          <NavLink item={{ href: "/anmelden", label: "Anmelden", icon: <IconUser />, match: () => false }} active={false} />
+          <NavLink
+            item={{ href: "/anmelden", label: "Anmelden", icon: <IconUser />, match: () => false }}
+            active={false}
+            kompakt={kompakt}
+          />
         )}
       </div>
     </div>
@@ -115,13 +143,19 @@ export function Sidebar({ user }: { user: NavUser | null }) {
 
   return (
     <>
-      {/* Desktop: feste Leiste links */}
+      {/* Breites Fenster: die ganze Leiste mit Text. */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-[264px] border-r border-line bg-[#05050c]/80 backdrop-blur-xl lg:block print:hidden">
-        {panel}
+        {panel(false)}
       </aside>
 
-      {/* Mobil: Kopfzeile mit Menüknopf */}
-      <div className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-line bg-[#05050c]/85 px-4 backdrop-blur-xl lg:hidden print:hidden">
+      {/* Mittleres Fenster: dieselbe Leiste als schmale Schiene, nur Zeichen. Sie verschwindet
+          nicht mehr - wo man ist, bleibt sichtbar, und jeder Bereich bleibt einen Klick entfernt. */}
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[64px] border-r border-line bg-[#05050c]/80 backdrop-blur-xl sm:block lg:hidden print:hidden">
+        {panel(true)}
+      </aside>
+
+      {/* Handy: dafür ist auch eine Schiene zu breit. Kopfzeile mit Menüknopf. */}
+      <div className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-line bg-[#05050c]/85 px-4 backdrop-blur-xl sm:hidden print:hidden">
         <Link href="/" aria-label="chopstr Startseite">
           <Wordmark width={92} />
         </Link>
@@ -136,23 +170,40 @@ export function Sidebar({ user }: { user: NavUser | null }) {
         </button>
       </div>
       {drawerOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
+        <div className="fixed inset-0 z-50 sm:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
           <button type="button" aria-label="Menü schließen" className="absolute inset-0 bg-black/70" onClick={() => setDrawerAt(null)} />
-          <aside className="absolute inset-y-0 left-0 w-[280px] max-w-[85vw] border-r border-line bg-[#05050c]">{panel}</aside>
+          <aside className="absolute inset-y-0 left-0 w-[280px] max-w-[85vw] border-r border-line bg-[#05050c]">{panel(false)}</aside>
         </div>
       )}
     </>
   );
 }
 
-function NavGroup({ title, items, pathname }: { title?: string; items: NavItem[]; pathname: string }) {
+function NavGroup({
+  title,
+  items,
+  pathname,
+  kompakt = false,
+}: {
+  title?: string;
+  items: NavItem[];
+  pathname: string;
+  kompakt?: boolean;
+}) {
   return (
-    <div className="flex flex-col gap-1">
-      {title && <p className="mb-1 px-3 text-[11px] font-medium uppercase tracking-[0.08em] text-text-3">{title}</p>}
-      <ul className="flex flex-col gap-1">
+    <div className={cn("flex flex-col gap-1", kompakt && "w-full items-center")}>
+      {/* Die Überschrift der Gruppe fällt in der Schiene weg: „Auswertung" auf 64 Bildpunkten
+          wäre ein abgeschnittenes Wort. Ein feiner Strich trennt stattdessen. */}
+      {title &&
+        (kompakt ? (
+          <span aria-hidden="true" className="my-1 h-px w-6 bg-line" />
+        ) : (
+          <p className="mb-1 px-3 text-[11px] font-medium uppercase tracking-[0.08em] text-text-3">{title}</p>
+        ))}
+      <ul className={cn("flex flex-col gap-1", kompakt && "w-full items-center")}>
         {items.map((item) => (
           <li key={item.href}>
-            <NavLink item={item} active={item.match(pathname)} />
+            <NavLink item={item} active={item.match(pathname)} kompakt={kompakt} />
           </li>
         ))}
       </ul>
@@ -160,24 +211,29 @@ function NavGroup({ title, items, pathname }: { title?: string; items: NavItem[]
   );
 }
 
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+function NavLink({ item, active, kompakt = false }: { item: NavItem; active: boolean; kompakt?: boolean }) {
   return (
     <Link
       href={item.href}
       aria-current={active ? "page" : undefined}
+      /* Ohne Text braucht der Punkt seinen Namen woanders: der Titel für die Maus, das Label für
+         Vorleseprogramme. Ein Zeichen ohne Namen ist ein Rätsel. */
+      aria-label={kompakt ? item.label : undefined}
+      title={kompakt ? item.label : undefined}
       className={cn(
-        "transition-soft relative flex h-11 items-center gap-3 rounded-inner px-3 text-sm font-medium",
+        "transition-soft relative flex h-11 items-center rounded-inner text-sm font-medium",
+        kompakt ? "w-11 justify-center" : "gap-3 px-3",
         active ? "bg-brand/15 text-text ring-1 ring-inset ring-brand/35" : "text-text-2 hover:bg-white/5 hover:text-text",
       )}
     >
-      {active && <span aria-hidden="true" className="absolute inset-y-2.5 left-0 w-[3px] rounded-r-full bg-brand" />}
+      {active && !kompakt && <span aria-hidden="true" className="absolute inset-y-2.5 left-0 w-[3px] rounded-r-full bg-brand" />}
       <span className={cn("flex h-5 w-5 items-center justify-center", active ? "text-[#6f78ff]" : "text-text-3")}>{item.icon}</span>
-      {item.label}
+      {!kompakt && item.label}
     </Link>
   );
 }
 
-function ProfileMenu({ user, pathname }: { user: NavUser; pathname: string }) {
+function ProfileMenu({ user, pathname, kompakt = false }: { user: NavUser; pathname: string; kompakt?: boolean }) {
   const [openAt, setOpenAt] = useState<string | null>(null);
   const open = openAt === pathname;
   const ref = useRef<HTMLDivElement>(null);
@@ -202,7 +258,15 @@ function ProfileMenu({ user, pathname }: { user: NavUser; pathname: string }) {
   return (
     <div ref={ref} className="relative">
       {open && (
-        <div role="menu" className="absolute bottom-[calc(100%+8px)] left-0 right-0 rounded-inner border border-line bg-raised p-1.5 text-sm">
+        <div
+          role="menu"
+          className={cn(
+            "absolute bottom-[calc(100%+8px)] rounded-inner border border-line bg-raised p-1.5 text-sm",
+            /* In der Schiene hätte das Menü 48 Bildpunkte Breite. Es bekommt eine eigene und
+               klappt nach rechts auf, statt sich an der Leiste auszurichten. */
+            kompakt ? "left-0 w-[220px]" : "left-0 right-0",
+          )}
+        >
           <MenuLink href="/profil">Profil</MenuLink>
           <MenuLink href="/workspaces">Team wechseln</MenuLink>
           {user.canBilling && <MenuLink href="/einstellungen/abrechnung">Abrechnung</MenuLink>}
@@ -224,23 +288,30 @@ function ProfileMenu({ user, pathname }: { user: NavUser; pathname: string }) {
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={kompakt ? `${user.name}, Konto und Team` : undefined}
+        title={kompakt ? `${user.name}${user.workspaceName ? ` · ${user.workspaceName}` : ""}` : undefined}
         onClick={() => setOpenAt(open ? null : pathname)}
         className={cn(
-          "transition-soft flex w-full items-center gap-3 rounded-inner p-2 text-left",
+          "transition-soft flex items-center rounded-inner text-left",
+          kompakt ? "h-11 w-11 justify-center" : "w-full gap-3 p-2",
           active ? "bg-white/10" : "hover:bg-white/5",
         )}
       >
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand/40 text-xs font-semibold text-white">{initials || "?"}</span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-text">{user.name}</span>
-          <span className="block truncate text-xs text-text-3">
-            {user.workspaceName ?? user.email}
-            {user.role ? ` · ${ROLE_LABELS[user.role]}` : ""}
-          </span>
-        </span>
-        <span className="text-text-3">
-          <IconChevrons />
-        </span>
+        {!kompakt && (
+          <>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-text">{user.name}</span>
+              <span className="block truncate text-xs text-text-3">
+                {user.workspaceName ?? user.email}
+                {user.role ? ` · ${ROLE_LABELS[user.role]}` : ""}
+              </span>
+            </span>
+            <span className="text-text-3">
+              <IconChevrons />
+            </span>
+          </>
+        )}
       </button>
     </div>
   );

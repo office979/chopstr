@@ -70,7 +70,9 @@ export async function PageShell({ children, lightTone = "brand", width = "defaul
     <div className="relative min-h-dvh overflow-x-clip">
       <BlueBubbles tone={lightTone} />
       <Sidebar user={navUser} />
-      <div className="relative z-10 flex min-h-dvh flex-col lg:pl-[264px]">
+      {/* Platz für die Leiste: 64 für die schmale Schiene, 264 für die volle. Unter sm gibt es
+          keine Leiste, sondern die Kopfzeile mit dem Menüknopf. */}
+      <div className="relative z-10 flex min-h-dvh flex-col sm:pl-[64px] lg:pl-[264px]">
         <main className={cn("mx-auto w-full flex-1 px-4 pb-16 pt-8 sm:px-8 lg:pt-12", widths[width], className)}>
           {deletionBanner && (
             <div className="print:hidden mb-6">

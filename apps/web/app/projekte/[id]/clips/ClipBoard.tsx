@@ -1184,9 +1184,10 @@ function Pille({
       title={titel}
       className={cn(
         "inline-flex h-6 items-center rounded-pill border px-2.5 text-[12px] font-medium",
-        /* Grün und nicht die Markenfarbe: „freigegeben" ist eine Aussage über den Clip, und
-           Blau stand hier neben einem blauen Knopf. */
-        ton === "gut" && "border-gut/60 bg-gut/15 text-text",
+        /* Grün, und zwar sichtbar: auch das WORT ist grün. Mit weisser Schrift auf zartem
+           Grün las sich „Freigegeben" auf der blauen Karte wie jede andere Plakette - der eine
+           Zustand, den man aus zwei Metern Entfernung erkennen will, war der unauffälligste. */
+        ton === "gut" && "border-gut/70 bg-gut/20 text-gut",
         ton === "achtung" && "border-attention/60 bg-attention/15 text-text",
         ton === "fehler" && "border-danger/60 bg-danger/15 text-text",
         ton === "ruhig" && "border-line text-text-2",

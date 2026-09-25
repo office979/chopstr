@@ -1293,7 +1293,11 @@ export const demoRepo: Repo = {
     const i = s.freigaben.findIndex((f) => f.id === id);
     if (i < 0) return false;
     s.freigaben.splice(i, 1);
+    /* Wie in Postgres: die Urteile gehen mit, und die Clips stehen wieder auf „Nicht
+     * freigegeben" - sonst bliebe der Download gesperrt ohne offene Frage. */
+    const betroffen = new Set(s.guestApprovals.filter((g) => g.freigabe_id === id).map((g) => g.clip_id));
     s.guestApprovals = s.guestApprovals.filter((g) => g.freigabe_id !== id);
+    for (const c of s.clips) if (betroffen.has(c.id)) c.guest_approval_required = false;
     return true;
   },
 

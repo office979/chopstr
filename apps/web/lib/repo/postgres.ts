@@ -1664,8 +1664,18 @@ export const postgresRepo: Repo = {
   async loescheFreigabe(id) {
     const session = await currentSession();
     return withContext(session, async (tx) => {
+      /* Erst merken, welche Clips daran hingen: nach dem Löschen sind die Urteile weg
+       * (on delete cascade) und damit auch die Spur zu ihnen. */
+      const betroffen = await tx`select clip_id from guest_approvals where freigabe_id = ${id}`;
       const rows = await tx`delete from freigaben where id = ${id} and workspace_id = ${session.workspaceId} returning id`;
-      return rows.length > 0;
+      if (!rows.length) return false;
+      /* Die Clips stehen wieder dort, wo sie vor dem Verschicken standen. Ohne diese Zeile bliebe
+       * `guest_approval_required` auf true und der Download gesperrt - an einem Clip, zu dem es
+       * gar keine Frage mehr gibt. */
+      for (const r of betroffen) {
+        await tx`update clips set guest_approval_required = false where id = ${(r as Row).clip_id as string}`;
+      }
+      return true;
     });
   },
 

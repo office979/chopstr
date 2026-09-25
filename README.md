@@ -186,6 +186,10 @@ hinaus.
 Marke, Anzahl und dem Stand der Antworten. Ohne diese Seite wäre ein Link, den niemand kopiert
 hat, verloren — und ein neuer Link würde den alten ins Leere laufen lassen.
 
+**Zurückziehen:** der rote Knopf dort löscht die Freigabe. Der Link wird ungültig, die Urteile
+gehen mit (`on delete cascade`), und die Clips stehen wieder auf „Nicht freigegeben" — also dort,
+wo sie vor dem Verschicken standen, und von dort lassen sie sich neu verschicken.
+
 **Warum die laufende Nummer nicht in der Adresse steht:** sie ist erratbar. Stünde sie dort, käme
 man von „Freigabe 3" auf „Freigabe 4" und sähe die Clips eines fremden Kunden — ohne Anmeldung,
 denn dieser Link *ist* der Zugang. Die Nummer ist der Name nach innen (`Freigabe 7`, überschreibbar),

@@ -177,17 +177,17 @@ in **Clipzeit**; beim ersten Clippen setzt `workers/chopstr_worker/pipeline/effe
 welche, dort wo eine Zahl oder eine Ankündigung fällt. Im Editor stehen sie unter „Effekte“ und als
 eigene Spur in der Zeitleiste: verschieben, länger ziehen, entfernen.
 
-„Zoom in“ fährt sanft näher heran und BLEIBT dort, solange der Block dauert; am Blockende ist das
-Bild wieder normal. Das ist der Punch-in, wie ihn Kurzvideos benutzen. „Zoom out“ ist sein
-Spiegelbild: das Bild wird kleiner, rundherum steht Schwarz. Ein Effekt wirkt nur, solange sein Block läuft – sonst addieren
-sich zwei, und nach dem dritten ist das Bild eine Briefmarke.
+Ein Block ist die **Fahrt**, nicht der Zustand: über seine Länge fährt das Bild weich von der
+bisherigen Nähe auf die neue, und danach BLEIBT es dort – auch lange nach dem Block. Wer wieder
+heraus will, setzt ein „Zoom out“ dahinter. Die Länge des Blocks in der Zeitleiste ist die Dauer
+der Fahrt und wird an seinem rechten Rand gezogen.
 
-Kleiner zu werden heisst, mehr zu zeigen als da ist; `zoompan` kann nur hineingehen. Deshalb liegt
-das Bild vor dem Zoom auf einer grösseren schwarzen Fläche (`RESERVE`), und der Ruhezustand ist
+„Zoom out“ ohne vorheriges „Zoom in“ macht das Bild kleiner, rundherum steht Schwarz. Kleiner zu
+werden heisst, mehr zu zeigen als da ist; `zoompan` kann nur hineingehen. Deshalb liegt das Bild
+vor dem Zoom auf einer grösseren schwarzen Fläche (`RESERVE`), und der Ruhezustand ist
 `z = RESERVE` statt 1.
 
-`NULL` in der Spalte heisst „noch nie gesetzt“, eine leere Liste „ausdrücklich keine“. Nur dieser
-Unterschied verhindert, dass der nächste Renderlauf die Entscheidung des Menschen überschreibt.
+Die Wirkungen addieren sich und werden auf `MIN_FAKTOR` bis `MAX_FAKTOR` begrenzt.
 
 Die Kurve steht zweimal da: im Worker als Wahrheit – der Renderer entscheidet, was im Bild
 passiert – und in `apps/web/lib/clips/effekte.ts` für die Oberfläche. Tests auf beiden Seiten halten

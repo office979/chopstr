@@ -634,6 +634,10 @@ export interface ClipStand {
   plan_reframe: { strategy?: string; detector?: string; faces_detected?: boolean } | null;
   aspect: Aspect;
   quell_aspekt: Aspect | null;
+  /* Die Effekte dieses Clips und die, mit denen geclippt wurde. Nur ihr Vergleich sagt, ob das
+   * Video noch zeigt, was eingestellt ist. */
+  effekte: { art: "zoom_in" | "zoom_out"; ab_s: number; dauer_s: number }[] | null;
+  plan_effekte: { art: "zoom_in" | "zoom_out"; ab_s: number; dauer_s: number }[] | null;
   plan_output_height: number | null;
   /* Der eigene Untertitelstil dieses Clips, falls einer gespeichert ist. */
   caption_style: Record<string, unknown> | null;

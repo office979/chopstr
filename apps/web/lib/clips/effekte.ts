@@ -26,17 +26,17 @@ export const EFFEKT_LABEL: Record<EffektArt, string> = {
 /* Was der Effekt tut, in einem Satz. Steht in der Auswahl, damit niemand raten muss, was
  * „Näher heran" im fertigen Video heisst. */
 export const EFFEKT_SATZ: Record<EffektArt, string> = {
-  zoom_in: "Fährt sanft näher heran und bleibt dort, solange der Block dauert.",
-  zoom_out: "Fährt sanft heraus, rundherum steht Schwarz, und bleibt dort.",
+  zoom_in: "Fährt näher heran und bleibt dort. Der Block ist die Fahrt.",
+  zoom_out: "Fährt wieder heraus. Ohne vorheriges Zoom in wird das Bild kleiner, rundherum Schwarz.",
 };
 
 export const STAERKE = 0.1;
 export const MIN_DAUER_S = 0.4;
 export const MAX_DAUER_S = 6;
 export const STANDARD_DAUER_S = 1;
-/* Wie lange die Fahrt dauert, in Sekunden. Danach steht das Bild still. Spiegel von
- * pipeline/effekte.ANSTIEG_S. */
-export const ANSTIEG_S = 0.45;
+/* Wie weit der Zoom insgesamt gehen darf. Spiegel von pipeline/effekte. */
+export const MAX_FAKTOR = 1.6;
+export const MIN_FAKTOR = 0.8;
 
 function zahl(v: unknown, ersatz: number): number {
   const f = typeof v === "number" ? v : Number(v);
@@ -84,14 +84,12 @@ export function entzerren(effekte: Effekt[]): Effekt[] {
   return aus;
 }
 
-/* Der Verlauf über den Block: sanft hinein und dann BLEIBEN. Smoothstep für die Fahrt, weil ein
- * linearer Anstieg sichtbar ansetzt und sichtbar abbricht - das nimmt man als Ruckeln wahr.
- * Danach bleibt der Wert auf 1. Spiegel von pipeline/effekte._form. */
+/* Wie weit die Fahrt fortgeschritten ist: 0 am Anfang des Blocks, 1 an seinem Ende und danach.
+ * Smoothstep, damit sie ohne Knick ansetzt und ankommt. Spiegel von pipeline/effekte._form. */
 function form(tImEffekt: number, dauerS: number): number {
-  const fahrt = Math.min(ANSTIEG_S, dauerS);
-  if (fahrt <= 0) return 1;
-  if (tImEffekt >= fahrt) return 1;
-  const x = Math.max(0, tImEffekt) / fahrt;
+  if (dauerS <= 0 || tImEffekt >= dauerS) return 1;
+  if (tImEffekt <= 0) return 0;
+  const x = tImEffekt / dauerS;
   return x * x * (3 - 2 * x);
 }
 
@@ -99,10 +97,10 @@ function form(tImEffekt: number, dauerS: number): number {
 export function faktor(effekte: Effekt[], t: number): number {
   let z = 1;
   for (const e of effekte) {
-    if (t < e.ab_s || t > e.ab_s + e.dauer_s) continue;
+    if (t <= e.ab_s) continue;
     z += (e.art === "zoom_out" ? -1 : 1) * STAERKE * form(t - e.ab_s, e.dauer_s);
   }
-  return z;
+  return Math.min(MAX_FAKTOR, Math.max(MIN_FAKTOR, z));
 }
 
 /* Einen Effekt anlegen, verschieben, verlängern oder entfernen. Alle vier geben eine neue,

@@ -46,6 +46,7 @@ import { RENDER_STEP } from "@/lib/pipeline";
 import { compositionDuration } from "@/lib/clips/render-demo";
 import { ASPECT_SIZE, PLATFORM_DEFAULT_PRESET } from "@/lib/clips/presets";
 import { FASSUNG_FORMATE, FORMAT_HILFT_BEI, fassungMoeglich } from "@/lib/clips/fassungen";
+import { lesen as effekteLesen } from "@/lib/clips/effekte";
 import { kommtVomClip } from "@/lib/clips/rueckweg";
 import type { ClipExtras, Series } from "@/lib/repo/types-publishing";
 import { ClipSeries } from "./ClipSeries";
@@ -398,6 +399,10 @@ export function ClipBoard({
           : stilAusPlan((clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null, clip.render_plan?.output.height),
         schnitt: clip.composition,
         zeitmarken: clip.zeitmarken,
+        /* Ohne die Effekte meldet die Liste ein geändertes Video als aktuell: der Renderplan
+         * trägt sie, die Karte verglich sie nicht. Wer einen Effekt setzte und zurückging, sah
+         * „Video aktuell" an einem Video, das den Effekt nicht hat. */
+        effekte: effekteLesen(extras[clip.id]?.effekte ?? [], compositionDuration(clip)),
       };
       /* „In Arbeit" heisst: jemand hat hier schon etwas eingestellt. Das ist etwas anderes als ein
        * roher Vorschlag, den noch niemand angesehen hat, und für die Frage „was muss ich noch

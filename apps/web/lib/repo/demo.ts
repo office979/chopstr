@@ -846,6 +846,8 @@ export const demoRepo: Repo = {
         plan_reframe: (c.render_plan?.reframe as { strategy?: string; detector?: string; faces_detected?: boolean }) ?? null,
         aspect: c.aspect,
         quell_aspekt: null,
+        effekte: null,
+        plan_effekte: null,
         plan_captions: (c.render_plan?.captions as unknown as Record<string, unknown>) ?? null,
         plan_segments: (c.render_plan?.segments as Clip["composition"]) ?? null,
         plan_zeitmarken: (c.render_plan?.zeitmarken as Zeitmarke[]) ?? null,

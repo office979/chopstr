@@ -504,6 +504,7 @@ export function standAusZeile(r: ClipStand, stil: CaptionStyle): Pruefstand {
             captions: r.plan_captions,
             segments: r.plan_segments ?? [],
             zeitmarken: r.plan_zeitmarken ?? [],
+            effekte: r.plan_effekte ?? [],
             sources: { transcript_version: r.plan_transcript_version },
             output: { height: r.plan_output_height },
           } as unknown as Clip["render_plan"])
@@ -513,6 +514,7 @@ export function standAusZeile(r: ClipStand, stil: CaptionStyle): Pruefstand {
       stil,
       schnitt: r.composition,
       zeitmarken: r.zeitmarken,
+      effekte: r.effekte ?? [],
     },
     bearbeitet: (r.caption_style != null && Object.keys(r.caption_style).length > 0) || r.zeitmarken.length > 0 || r.composition.length > 1,
     quellformatAbweichend: r.quell_aspekt != null && r.quell_aspekt !== r.aspect,

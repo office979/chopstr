@@ -4,13 +4,17 @@ WOZU. Ein Zoom betont. Bisher kannte der Renderer nur einen langsamen Push-in ü
 Einstellung (``motion.zoom_to``) - eine Grundbewegung, die immer läuft und nichts hervorhebt. Was
 fehlte, war die Stelle: „hier, auf dieses Wort, für anderthalb Sekunden".
 
-DIE BEWEGUNG. Sanft hinein, dann BLEIBEN. Der Zoom fährt über ``ANSTIEG`` Sekunden weich auf seinen
-Wert und hält ihn bis zum Ende des Blocks; dort endet der Effekt, und das Bild ist wieder normal.
-Das ist der Punch-in, wie ihn Kurzvideos benutzen.
+DIE BEWEGUNG IST EIN ZUSTANDSWECHSEL, KEIN AUSSCHLAG. Ein Block ist die FAHRT: über seine Länge
+fährt das Bild weich von der bisherigen Nähe auf die neue. Danach bleibt es dort - auch wenn der
+Block längst vorbei ist. Wer wieder herauswill, setzt einen „heraus" dahinter.
 
-Vorher fuhr er wieder zurück, solange der Block lief. Das sah aus wie Wackeln: eine Bewegung hin
-und gleich wieder her, mitten im Satz. Wer betonen will, geht näher heran und BLEIBT dort, solange
-der Satz dauert.
+Das ist der Unterschied zu einem Ausschlag, der hin und gleich wieder her geht: der sah aus wie
+Wackeln, mitten im Satz. Ein Schnittprogramm arbeitet mit Zuständen, und die Fahrt dazwischen ist
+das, was man in der Zeitleiste länger oder kürzer zieht.
+
+Die Wirkungen addieren sich: zwei „hinein" hintereinander gehen doppelt so nah. Begrenzt wird das
+auf ``MIN_FAKTOR`` bis ``MAX_FAKTOR`` - darüber hinaus gibt es keine Bildpunkte mehr, und darunter
+wäre das Bild eine Briefmarke.
 
 „Heraus" ist das Spiegelbild: das Bild wird kleiner, rundherum steht Schwarz.
 
@@ -44,10 +48,11 @@ STANDARD_DAUER_S = 1.0
 # kostet Aufloesung, weil das Bild vorher hochskaliert werden muss.
 RESERVE = 1.25
 
-# Wie lange die Fahrt dauert, in Sekunden. Danach steht das Bild still. Eine feste Zeit und kein
-# Anteil der Dauer: ein Block von vier Sekunden soll nicht viermal so langsam hineinfahren wie
-# einer von einer Sekunde - die Fahrt ist immer dieselbe Bewegung, nur das Halten wird länger.
-ANSTIEG_S = 0.45
+# Wie weit der Zoom insgesamt gehen darf. Nach oben begrenzt die Aufloesung: vor dem Zoom wird auf
+# das Doppelte skaliert, darueber hinaus wird das Bild weich. Nach unten begrenzt die Reserve, auf
+# der das Bild liegt (1/RESERVE = 0,8).
+MAX_FAKTOR = 1.6
+MIN_FAKTOR = 0.8
 
 # Zwei Betonungen dicht hintereinander heben sich auf: das Bild wackelt, und betont ist nichts
 # mehr. Mindestens so viele Sekunden zwischen zwei automatisch gesetzten Effekten.
@@ -128,26 +133,22 @@ def faktor(effekte: list[Effekt], t: float) -> float:
     die Tests halten die anderen daran fest."""
     z = 1.0
     for e in effekte:
-        if t < e.ab_s or t > e.ab_s + e.dauer_s:
+        if t <= e.ab_s:
             continue
         z += _vorzeichen(e.art) * STAERKE * _form(t - e.ab_s, e.dauer_s)
-    return z
+    return min(MAX_FAKTOR, max(MIN_FAKTOR, z))
 
 
 def _form(t_im_effekt: float, dauer_s: float) -> float:
-    """Der Verlauf über den Block, als Anteil der vollen Stärke: 0 am Anfang, 1 ab dem Ende der Fahrt.
+    """Wie weit die Fahrt fortgeschritten ist: 0 am Anfang des Blocks, 1 an seinem Ende und danach.
 
-    Smoothstep für die Fahrt: sie startet und endet ohne Knick. Ein linearer Anstieg setzt sichtbar
-    an und bricht sichtbar ab, und genau das nimmt man als Ruckeln wahr.
-
-    Danach bleibt der Wert auf 1. Beide Arten teilen sich die Kurve und unterscheiden sich nur im
-    Vorzeichen."""
-    fahrt = min(ANSTIEG_S, dauer_s)
-    if fahrt <= 0:
+    Smoothstep: die Fahrt setzt ohne Knick an und kommt ohne Knick an. Ein linearer Verlauf setzt
+    sichtbar an und bricht sichtbar ab, und genau das nimmt man als Ruckeln wahr."""
+    if dauer_s <= 0 or t_im_effekt >= dauer_s:
         return 1.0
-    if t_im_effekt >= fahrt:
-        return 1.0
-    x = max(0.0, t_im_effekt) / fahrt
+    if t_im_effekt <= 0:
+        return 0.0
+    x = t_im_effekt / dauer_s
     return x * x * (3.0 - 2.0 * x)
 
 
@@ -168,13 +169,13 @@ def ffmpeg_ausdruck(effekte: list[Effekt], fps: float) -> str:
         return f"{RESERVE:.4f}"
     teile = ["1"]
     for e in effekte:
-        fahrt = min(ANSTIEG_S, e.dauer_s)
         seit = f"((on/{fps:g})-{e.ab_s:.3f})"
-        drin = f"between(on/{fps:g},{e.ab_s:.3f},{e.ab_s + e.dauer_s:.3f})"
-        x = f"min(1,max(0,{seit}/{fahrt:.3f}))"
+        x = f"min(1,max(0,{seit}/{e.dauer_s:.3f}))"
         form = f"({x}*{x}*(3-2*({x})))"
-        teile.append(f"if({drin},{_vorzeichen(e.art) * STAERKE:.4f}*{form},0)")
-    return f"{RESERVE:.4f}*(" + "+".join(teile) + ")"
+        # Kein „between": die Wirkung bleibt, auch wenn der Block laengst vorbei ist.
+        teile.append(f"{_vorzeichen(e.art) * STAERKE:.4f}*{form}")
+    roh = "+".join(teile)
+    return f"{RESERVE:.4f}*min({MAX_FAKTOR:.3f},max({MIN_FAKTOR:.3f},{roh}))"
 
 
 def automatisch(woerter: list[dict], clip_dauer_s: float) -> list[Effekt]:

@@ -28,7 +28,6 @@ import { rueckwegMerken } from "@/lib/clips/rueckweg";
 import {
   dauerAendern as effektDauer,
   entfernen as effektEntfernen,
-  faktor as effektFaktor,
   lesen as effekteLesen,
   verschieben as effektVerschieben,
   type Effekt,
@@ -442,12 +441,6 @@ export function ClipDetail({
   const [effekteGesichert, setEffekteGesichert] = useState<Effekt[]>(effekte);
   /* Die Länge des Clips in Clipzeit: daran hängt, wie weit ein Effekt geschoben werden darf. */
   const clipDauer = useMemo(() => schnittDauer(schnitt), [schnitt]);
-
-  /* Wie nah das Bild an dieser Stelle wirkt, nach den gesetzten Effekten.
-   *
-   * Gerechnet aus der Stelle, die gerade läuft, in Clipzeit. Ohne diese Zeile sieht man von einem
-   * neu gesetzten Effekt bis zum nächsten Clippen nichts, und er wirkt kaputt. */
-  const effektZoom = useMemo(() => effektFaktor(effekte, inClipzeit(schnitt, currentTime)), [effekte, schnitt, currentTime]);
 
   const effekteSpeichern = useCallback(
     async (naechste: Effekt[]) => {
@@ -938,7 +931,8 @@ export function ClipDetail({
               onLaeuft={setLaeuft}
               shots={shots}
               zeitmarken={markenSicht}
-              zoom={effektZoom}
+              effekte={effekte}
+              clipStartQuelle={schnitt[0]?.start ?? 0}
               stil={stil}
               woerter={clipWords}
               onCaptionHoehe={canEdit ? (px) => setStil((v) => ({ ...v, bottom_margin_px: px })) : undefined}
@@ -1004,6 +998,7 @@ export function ClipDetail({
           <div hidden={bereich !== "schnitt"} className="flex min-w-0 flex-col gap-4">
           <Timeline
             effekte={effekte}
+            clipDauerS={clipDauer}
             onEffektVerschieben={(i, abS) => void effekteSpeichern(effektVerschieben(effekte, i, abS, clipDauer))}
             onEffektDauer={(i, d) => void effekteSpeichern(effektDauer(effekte, i, d, clipDauer))}
             onEffektWeg={(i) => void effekteSpeichern(effektEntfernen(effekte, i))}

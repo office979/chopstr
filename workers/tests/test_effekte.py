@@ -5,49 +5,55 @@ from __future__ import annotations
 from chopstr_worker.pipeline import effekte as ef
 
 
-def test_hinein_faehrt_sanft_und_bleibt_dann():
-    """Vorher fuhr der Zoom zurueck, solange der Block lief. Das sah aus wie Wackeln: eine Bewegung
-    hin und gleich wieder her, mitten im Satz."""
-    e = [ef.Effekt("zoom_in", 2.0, 2.0)]
+def test_der_block_ist_die_fahrt_und_danach_bleibt_der_zoom():
+    """Ein Zustandswechsel, kein Ausschlag. Vorher sprang das Bild am Blockende zurueck."""
+    e = [ef.Effekt("zoom_in", 2.0, 1.0)]
     assert ef.faktor(e, 1.9) == 1.0
     assert ef.faktor(e, 2.0) == 1.0
-    assert abs(ef.faktor(e, 2.0 + ef.ANSTIEG_S) - (1 + ef.STAERKE)) < 1e-9
-    for t in (2.5, 3.0, 3.5, 4.0):
+    assert abs(ef.faktor(e, 3.0) - (1 + ef.STAERKE)) < 1e-9
+    for t in (3.5, 6.0, 30.0):
         assert abs(ef.faktor(e, t) - (1 + ef.STAERKE)) < 1e-9
-    assert ef.faktor(e, 4.01) == 1.0
+
+
+def test_heraus_holt_das_bild_zurueck():
+    e = [ef.Effekt("zoom_in", 1.0, 1.0), ef.Effekt("zoom_out", 5.0, 1.0)]
+    assert abs(ef.faktor(e, 3.0) - (1 + ef.STAERKE)) < 1e-9
+    assert abs(ef.faktor(e, 6.0) - 1.0) < 1e-9
+    assert abs(ef.faktor(e, 20.0) - 1.0) < 1e-9
 
 
 def test_die_fahrt_setzt_ohne_knick_an_und_kommt_ohne_knick_an():
-    """Ein linearer Anstieg setzt sichtbar an und bricht sichtbar ab - genau das nimmt man als
+    """Ein linearer Verlauf setzt sichtbar an und bricht sichtbar ab - genau das nimmt man als
     Ruckeln wahr. Die Steigung muss an beiden Enden gegen null gehen."""
     e = [ef.Effekt("zoom_in", 0.0, 2.0)]
     steigung = lambda t: (ef.faktor(e, t + 0.01) - ef.faktor(e, t)) / 0.01  # noqa: E731
-    assert abs(steigung(0.0)) < 0.05
-    assert abs(steigung(ef.ANSTIEG_S - 0.02)) < 0.15
-    assert steigung(ef.ANSTIEG_S / 2) > 0.2
+    assert abs(steigung(0.01)) < 0.02
+    assert abs(steigung(1.97)) < 0.02
+    assert steigung(1.0) > 0.05
 
 
-def test_heraus_macht_das_bild_kleiner_und_laesst_es_so():
-    """Spiegelbild von „hinein". Rundherum steht Schwarz, dafuer gibt es die Reserve in der Kette."""
-    e = [ef.Effekt("zoom_out", 0.0, 2.0)]
+def test_die_wirkungen_werden_begrenzt():
+    """Sie addieren sich. Ohne Grenze waere das Bild nach fuenf Effekten unbrauchbar."""
+    viele = [ef.Effekt("zoom_in", float(t), 1.0) for t in range(0, 12, 2)]
+    assert ef.faktor(viele, 30.0) <= ef.MAX_FAKTOR + 1e-9
+    raus = [ef.Effekt("zoom_out", float(t), 1.0) for t in range(0, 12, 2)]
+    assert ef.faktor(raus, 30.0) >= ef.MIN_FAKTOR - 1e-9
+
+
+def test_heraus_ohne_vorheriges_hinein_macht_das_bild_kleiner():
+    """Rundherum steht Schwarz, dafuer gibt es die Reserve in der Filterkette."""
+    e = [ef.Effekt("zoom_out", 0.0, 1.0)]
     assert abs(ef.faktor(e, 0.0) - 1.0) < 1e-9
-    assert abs(ef.faktor(e, ef.ANSTIEG_S) - (1 - ef.STAERKE)) < 1e-9
-    assert abs(ef.faktor(e, 1.5) - (1 - ef.STAERKE)) < 1e-9
+    assert abs(ef.faktor(e, 1.0) - (1 - ef.STAERKE)) < 1e-9
+    assert abs(ef.faktor(e, 9.0) - (1 - ef.STAERKE)) < 1e-9
 
 
-def test_ein_effekt_wirkt_nur_solange_sein_block_laeuft():
-    """Sonst addieren sich zwei Effekte, und nach dem dritten ist das Bild eine Briefmarke."""
-    for art in ef.ARTEN:
-        e = [ef.Effekt(art, 1.0, 1.5)]
-        assert ef.faktor(e, 2.51) == 1.0
-        assert ef.faktor(e, 5.0) == 1.0
-
-
-def test_ausserhalb_seiner_zeit_tut_ein_effekt_nichts():
+def test_vor_dem_block_tut_ein_effekt_nichts():
+    """Davor nichts, danach alles: der Block ist die Fahrt, nicht der Zustand."""
     e = [ef.Effekt("zoom_in", 5.0, 1.0)]
     assert ef.faktor(e, 0.0) == 1.0
     assert ef.faktor(e, 4.99) == 1.0
-    assert ef.faktor(e, 6.01) == 1.0
+    assert abs(ef.faktor(e, 6.01) - (1 + ef.STAERKE)) < 1e-9
 
 
 def test_lesen_wirft_unbrauchbares_weg():
@@ -78,12 +84,14 @@ def test_lesen_loest_ueberschneidungen_auf():
     assert aus[1].ab_s >= aus[0].ab_s + aus[0].dauer_s
 
 
-def test_zwei_effekte_addieren_sich_nie_uebereinander():
+def test_zwei_fahrten_ueberschneiden_sich_nie():
+    """Zwei Fahrten uebereinander sind keine zwei Bewegungen, sondern eine unverstaendliche."""
     aus = ef.lesen(
         [{"art": "zoom_in", "ab_s": 1.0, "dauer_s": 2.0}, {"art": "zoom_out", "ab_s": 1.5, "dauer_s": 2.0}], 30.0
     )
+    assert aus[1].ab_s >= aus[0].ab_s + aus[0].dauer_s
     for t in [x / 20 for x in range(0, 200)]:
-        assert ef.faktor(aus, t) <= 1 + ef.STAERKE + 1e-9
+        assert ef.MIN_FAKTOR - 1e-9 <= ef.faktor(aus, t) <= ef.MAX_FAKTOR + 1e-9
 
 
 def _woerter(paare: list[tuple[float, str]]) -> list[dict]:

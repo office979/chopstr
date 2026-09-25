@@ -17,7 +17,7 @@ import {
   teilen,
   type Schnitt,
 } from "@/lib/clips/schnitt";
-import { EFFEKT_LABEL, MIN_DAUER_S, type Effekt } from "@/lib/clips/effekte";
+import { EFFEKT_LABEL, MAX_DAUER_S, MIN_DAUER_S, type Effekt } from "@/lib/clips/effekte";
 import type { RenderShot, Zeitmarke } from "@/lib/repo/types";
 import { Lineal, timecode } from "./Lineal";
 import { Wellenform, type WellenformDaten, type WellenformStand } from "./Wellenform";
@@ -49,6 +49,8 @@ interface Props {
   /* Effekte liegen in CLIPZEIT, anders als die Zeitmarken: eine Betonung hängt an dem, was gesagt
    * wird, und soll mitwandern, wenn davor etwas herausgeschnitten wird. */
   effekte: Effekt[];
+  /* Die Länge des fertigen Clips: daran wird beim Ziehen begrenzt. */
+  clipDauerS: number;
   onEffektVerschieben: (index: number, abS: number) => void;
   onEffektDauer: (index: number, dauerS: number) => void;
   onEffektWeg: (index: number) => void;
@@ -88,6 +90,7 @@ export function Timeline({
   onMarkeWeg,
   onMarkeVerschieben,
   effekte,
+  clipDauerS,
   onEffektVerschieben,
   onEffektDauer,
   onEffektWeg,
@@ -238,17 +241,21 @@ export function Timeline({
     [ausX, effekte, schnitt, onEffektVerschieben, onEffektDauer],
   );
 
-  /* Die Effekte so, wie sie gerade aussehen sollen - mit der laufenden Bewegung darin. */
+  /* Die Effekte so, wie sie gerade aussehen sollen - mit der laufenden Bewegung darin.
+   *
+   * Begrenzt wird schon hier und nicht erst beim Loslassen: sonst zeigt der Balken beim Ziehen
+   * dreizehn Sekunden und springt danach auf sechs zurück. Was man beim Ziehen sieht, muss das
+   * sein, was man bekommt. */
   const effekteSicht = useMemo(() => {
     if (!ziehtEffekt) return effekte;
     return effekte.map((e, i) =>
       i !== ziehtEffekt.index
         ? e
         : ziehtEffekt.was === "verschieben"
-          ? { ...e, ab_s: ziehtEffekt.wert }
-          : { ...e, dauer_s: Math.max(MIN_DAUER_S, ziehtEffekt.wert) },
+          ? { ...e, ab_s: Math.max(0, Math.min(ziehtEffekt.wert, clipDauerS - e.dauer_s)) }
+          : { ...e, dauer_s: Math.min(MAX_DAUER_S, Math.max(MIN_DAUER_S, ziehtEffekt.wert), clipDauerS - e.ab_s) },
     );
-  }, [effekte, ziehtEffekt]);
+  }, [effekte, ziehtEffekt, clipDauerS]);
 
   const imClip = useMemo(() => {
     let vorher = 0;
@@ -556,43 +563,44 @@ export function Timeline({
               Die Blöcke liegen in Clipzeit und werden für die Anzeige in Quellzeit umgerechnet -
               deshalb wandert ein Effekt mit, wenn davor etwas herausgeschnitten wird.
 
-              Ein Block von einer Sekunde ist bei einem Video von einer Minute neun Bildpunkte
-              breit. Darin war das Kreuz zum Entfernen breiter als der Block und verdeckte alles,
-              auch den Griff zum Ziehen. Deshalb: eine Mindestbreite zum Fassen, und die Knöpfe
-              erscheinen erst, wenn wirklich Platz ist. Solange keiner da ist, wird der gewählte
-              Block mit der Entfernen-Taste gelöscht. */}
+              DIE BREITE IST DIE WAHRHEIT: ein Block von einer Sekunde ist eine Sekunde breit, auch
+              wenn das bei einem langen Video wenige Bildpunkte sind. Ein aufgeblasener Block wäre
+              eine Lüge über die Länge der Fahrt.
+
+              Greifbar wird er trotzdem: über dem sichtbaren Balken liegen unsichtbare Flächen zum
+              Fassen - in der Mitte zum Verschieben, rechts zum Längerziehen. Sie sind breiter als
+              der Balken und ragen über ihn hinaus. */}
           <div className="relative mt-1 h-7 w-full rounded-[6px] bg-black/25">
             {effekteSicht.map((e, i) => {
               const vonQ = inQuellzeit(schnitt, e.ab_s);
               const bisQ = inQuellzeit(schnitt, e.ab_s + e.dauer_s);
               if (!(bisQ > vonQ)) return null;
-              const anteilBreite = (bisQ - vonQ) / sichtbar;
-              const breitePx = anteilBreite * breite;
-              const platzFuerKnoepfe = breitePx >= 66;
+              const links = anteil(vonQ) * 100;
+              const anteilBreite = ((bisQ - vonQ) / sichtbar) * 100;
               const gewaehlt = effektWahl === i;
               return (
-                <div
-                  key={`${e.art}-${e.ab_s}`}
-                  onPointerDown={canEdit ? effektZiehen(i, "verschieben") : undefined}
-                  className={cn(
-                    "absolute top-0 flex h-full items-center overflow-hidden rounded-[6px] border px-1",
-                    gewaehlt ? "border-white bg-ai/35" : "border-ai/60 bg-ai/20",
-                    canEdit && "cursor-grab",
-                  )}
-                  style={{ left: `${anteil(vonQ) * 100}%`, width: `${anteilBreite * 100}%`, minWidth: 28 }}
-                  title={`${EFFEKT_LABEL[e.art]} ab ${e.ab_s.toFixed(1)} s, ${e.dauer_s.toFixed(1)} s lang`}
-                >
-                  {platzFuerKnoepfe && (
-                    <span className="truncate pl-1 text-[11px] text-text-2">{EFFEKT_LABEL[e.art]}</span>
-                  )}
+                <div key={`${e.art}-${e.ab_s}`}>
+                  {/* Der sichtbare Balken: genau so lang wie die Fahrt. */}
+                  <div
+                    className={cn(
+                      "pointer-events-none absolute top-1 flex h-5 items-center justify-center overflow-hidden rounded-[4px] border",
+                      gewaehlt ? "border-white bg-ai/45" : "border-ai/70 bg-ai/25",
+                    )}
+                    style={{ left: `${links}%`, width: `${anteilBreite}%` }}
+                    title={`${EFFEKT_LABEL[e.art]} ab ${e.ab_s.toFixed(1)} s, Fahrt ${e.dauer_s.toFixed(1)} s`}
+                  >
+                    {anteilBreite * breite > 6600 / breite && (
+                      <span className="truncate px-1 text-[10px] text-text-2">{EFFEKT_LABEL[e.art]}</span>
+                    )}
+                  </div>
+
                   {canEdit && (
                     <>
-                      {/* Der ganze Block ist ein Ziel für die Tastatur: auswählen, mit den
-                          Pfeiltasten schieben, mit Entfernen löschen. Ohne das wäre ein schmaler
-                          Block nur mit der Maus erreichbar. */}
+                      {/* Fassen und verschieben. Mindestens 18 Bildpunkte breit, damit ein kurzer
+                          Block überhaupt zu treffen ist; zentriert über dem Balken. */}
                       <button
                         type="button"
-                        onPointerDown={(ev) => ev.stopPropagation()}
+                        onPointerDown={effektZiehen(i, "verschieben")}
                         onClick={() => setEffektWahl(gewaehlt ? null : i)}
                         onKeyDown={(ev) => {
                           if (ev.key === "Delete" || ev.key === "Backspace") {
@@ -609,34 +617,33 @@ export function Timeline({
                           ev.stopPropagation();
                           onEffektVerschieben(i, Math.max(0, Math.round(ziel * 100) / 100));
                         }}
-                        aria-label={`${EFFEKT_LABEL[e.art]} ab ${e.ab_s.toFixed(1)} Sekunden, ${e.dauer_s.toFixed(1)} Sekunden lang. Pfeiltasten verschieben, Entfernen löscht.`}
-                        className="absolute inset-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/70"
+                        aria-label={`${EFFEKT_LABEL[e.art]} ab ${e.ab_s.toFixed(1)} Sekunden, Fahrt ${e.dauer_s.toFixed(1)} Sekunden. Ziehen verschiebt, Pfeiltasten auch, Entfernen löscht.`}
+                        className="absolute top-0 h-full cursor-grab rounded-[4px] focus:outline-none focus-visible:ring-1 focus-visible:ring-white/70 active:cursor-grabbing"
+                        style={{
+                          left: `calc(${links}% + ${anteilBreite / 2}%)`,
+                          width: `max(18px, ${anteilBreite}%)`,
+                          transform: "translateX(-50%)",
+                        }}
                       />
-                      {/* Rechter Rand: länger oder kürzer ziehen. Nur wenn Platz ist - sonst läge
-                          der Griff über dem ganzen Block und das Verschieben ginge nicht mehr. */}
-                      {platzFuerKnoepfe && (
-                        <>
-                          <button
-                            type="button"
-                            onPointerDown={effektZiehen(i, "dauer")}
-                            aria-label={`${EFFEKT_LABEL[e.art]} länger oder kürzer ziehen`}
-                            className="absolute right-5 top-0 h-full w-3 cursor-ew-resize focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
-                          >
-                            <span className="mx-auto block h-full w-[3px] bg-ai" />
-                          </button>
-                          <button
-                            type="button"
-                            onPointerDown={(ev) => ev.stopPropagation()}
-                            onClick={() => onEffektWeg(i)}
-                            aria-label={`${EFFEKT_LABEL[e.art]} bei ${e.ab_s.toFixed(1)} Sekunden entfernen`}
-                            className="transition-soft absolute right-0.5 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full text-text-3 hover:bg-white/10 hover:text-text focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
-                          >
-                            <svg width="8" height="8" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-                              <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                            </svg>
-                          </button>
-                        </>
-                      )}
+                      {/* Der rechte Rand: hier wird die Fahrt länger oder kürzer. Die Fläche ragt
+                          über den Balken hinaus, sonst wäre sie bei einer Sekunde nicht zu treffen. */}
+                      <button
+                        type="button"
+                        onPointerDown={effektZiehen(i, "dauer")}
+                        onKeyDown={(ev) => {
+                          const schritt = ev.shiftKey ? 0.5 : 0.1;
+                          const ziel = e.dauer_s + (ev.key === "ArrowLeft" ? -schritt : ev.key === "ArrowRight" ? schritt : 0);
+                          if (ziel === e.dauer_s) return;
+                          ev.preventDefault();
+                          ev.stopPropagation();
+                          onEffektDauer(i, Math.round(ziel * 100) / 100);
+                        }}
+                        aria-label={`Fahrt von ${EFFEKT_LABEL[e.art]} länger oder kürzer ziehen, aktuell ${e.dauer_s.toFixed(1)} Sekunden`}
+                        className="absolute top-0 h-full w-[14px] cursor-ew-resize focus:outline-none focus-visible:ring-1 focus-visible:ring-white/70"
+                        style={{ left: `calc(${links + anteilBreite}% - 7px)` }}
+                      >
+                        <span className="mx-auto block h-5 w-[3px] translate-y-1 rounded-full bg-white/80" />
+                      </button>
                     </>
                   )}
                 </div>
@@ -649,28 +656,14 @@ export function Timeline({
             )}
           </div>
 
-          {/* Was mit dem gewählten Block geht, in Worten. Bei einem Block von neun Bildpunkten
-              passt kein Kreuz hinein, und ohne diese Zeile wüsste niemand, wie er ihn loswird. */}
+          {/* Was mit dem gewählten Block los ist. Kein „länger" und „kürzer" mehr: das geht am
+              rechten Rand des Blocks, und zwei Wege für dieselbe Sache sind einer zu viel. */}
           {canEdit && effektWahl != null && effekteSicht[effektWahl] && (
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-2">
               <span>
-                {EFFEKT_LABEL[effekteSicht[effektWahl].art]} ab {effekteSicht[effektWahl].ab_s.toFixed(1)} s,{" "}
-                {effekteSicht[effektWahl].dauer_s.toFixed(1)} s lang
+                {EFFEKT_LABEL[effekteSicht[effektWahl].art]} ab {effekteSicht[effektWahl].ab_s.toFixed(1)} s, Fahrt{" "}
+                {effekteSicht[effektWahl].dauer_s.toFixed(1)} s
               </span>
-              <button
-                type="button"
-                onClick={() => onEffektDauer(effektWahl, Math.max(MIN_DAUER_S, effekteSicht[effektWahl].dauer_s - 0.5))}
-                className="transition-soft rounded-pill border border-line px-2 py-0.5 hover:border-line-strong hover:text-text"
-              >
-                kürzer
-              </button>
-              <button
-                type="button"
-                onClick={() => onEffektDauer(effektWahl, effekteSicht[effektWahl].dauer_s + 0.5)}
-                className="transition-soft rounded-pill border border-line px-2 py-0.5 hover:border-line-strong hover:text-text"
-              >
-                länger
-              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -681,7 +674,7 @@ export function Timeline({
               >
                 entfernen
               </button>
-              <span className="text-text-3">Pfeiltasten verschieben, Entfernen löscht.</span>
+              <span className="text-text-3">Am rechten Rand ziehen macht die Fahrt länger.</span>
             </div>
           )}
 

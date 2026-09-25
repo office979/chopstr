@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { ausschnittBerechnen, blickraumAnker } from "@/lib/clips/ausschnitt";
 import type { CaptionStyle } from "@/lib/clips/caption-style";
+import { faktor as effektFaktor, type Effekt } from "@/lib/clips/effekte";
 import type { Aspect, RenderShot, TranscriptWord, Zeitmarke } from "@/lib/repo/types";
 import { CaptionVorschau } from "./CaptionStudio";
 
@@ -38,12 +39,15 @@ interface Props {
   onLaeuft?: (laeuft: boolean) => void;
   shots: RenderShot[];
   zeitmarken: Zeitmarke[];
-  /* Der Zoomfaktor der Effekte an der Stelle, die gerade läuft. 1 heisst: unberührt.
+  /* Die Effekte dieses Clips, in Clipzeit. Der Zoom wird hier Bild für Bild gerechnet.
    *
-   * Gerechnet wird er mit derselben Kurve wie im Renderer (lib/clips/effekte.faktor, Spiegel von
-   * pipeline/effekte). Das ist keine zweite Wahrheit, sondern dieselbe Formel - und ohne sie
-   * sieht man von einem gesetzten Effekt bis zum nächsten Clippen gar nichts. */
-  zoom?: number;
+   * Nicht als fertiger Faktor von aussen: der hing an ``timeupdate``, und das feuert je nach
+   * Browser vier- bis fünfmal in der Sekunde. Eine Fahrt über eine Sekunde bestand dann aus fünf
+   * Sprüngen - genau das „Springen", das man sah. Gerechnet wird mit derselben Kurve wie im
+   * Renderer (lib/clips/effekte, Spiegel von pipeline/effekte). */
+  effekte?: Effekt[];
+  /* Wo der Clip im Originalvideo beginnt: daraus wird die Clipzeit. */
+  clipStartQuelle?: number;
   stil: CaptionStyle;
   woerter: TranscriptWord[];
   /* Die Höhe der Untertitel lässt sich direkt im Bild ziehen. Ohne diese Rückmeldung bleibt es
@@ -79,12 +83,46 @@ export function LiveVorschau({
   onLaeuft,
   shots,
   zeitmarken,
-  zoom = 1,
+  effekte,
+  clipStartQuelle = 0,
   stil,
   woerter,
   onCaptionHoehe,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const zoomRahmen = useRef<HTMLDivElement | null>(null);
+
+  /* Den Zoom Bild für Bild setzen, nicht bei jedem ``timeupdate``.
+   *
+   * ``timeupdate`` feuert je nach Browser vier- bis fünfmal in der Sekunde. Eine Fahrt über eine
+   * Sekunde bestand daraus: fünf Sprünge. Mit ``requestAnimationFrame`` wird bei jedem Bild
+   * nachgerechnet, und die Fahrt ist so weich wie die Kurve.
+   *
+   * Geschrieben wird direkt ins ``style`` und nicht über den Zustand: ein setState je Bild wären
+   * sechzig Durchläufe der ganzen Seite in der Sekunde. */
+  useEffect(() => {
+    const rahmen = zoomRahmen.current;
+    if (!rahmen) return;
+    if (!effekte || effekte.length === 0) {
+      rahmen.style.transform = "";
+      return;
+    }
+    let laufend = true;
+    const takt = () => {
+      if (!laufend) return;
+      const v = videoRef.current;
+      const jetzt = v ? v.currentTime - clipStartQuelle : 0;
+      const z = effektFaktor(effekte, jetzt);
+      rahmen.style.transform = Math.abs(z - 1) < 0.0005 ? "" : `scale(${z.toFixed(4)})`;
+      rahmen.style.transformOrigin = "center center";
+      window.requestAnimationFrame(takt);
+    };
+    window.requestAnimationFrame(takt);
+    return () => {
+      laufend = false;
+      rahmen.style.transform = "";
+    };
+  }, [effekte, clipStartQuelle]);
   const [laeuft, setLaeuft] = useState(false);
 
   useEffect(() => {
@@ -166,18 +204,10 @@ export function LiveVorschau({
       }
     : { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" };
 
-  /* Der Effekt-Zoom liegt ÜBER dem Ausschnitt: er verändert nicht, welcher Teil des Originals
-   * gezeigt wird, sondern wie nah das Ergebnis wirkt. Unter 1 wird das Bild kleiner, und der
-   * schwarze Grund des Rahmens wird rundherum sichtbar - genau wie im fertigen Video. */
-  const zoomLage: React.CSSProperties =
-    Math.abs(zoom - 1) < 0.001 ? {} : { transform: `scale(${zoom.toFixed(4)})`, transformOrigin: "center center" };
 
   return (
     <GlassCard padding="none" className="overflow-hidden">
-      <div
-        className="relative mx-auto w-full max-w-[340px] overflow-hidden bg-black"
-        style={{ aspectRatio: ASPEKT[aspect], ...zoomLage }}
-      >
+      <div ref={zoomRahmen} className="relative mx-auto w-full max-w-[340px] overflow-hidden bg-black" style={{ aspectRatio: ASPEKT[aspect] }}>
         {/* Keine eigenen Bedienelemente des Browsers: das Video ist vergroessert, damit der
           * Ausschnitt den Rahmen fuellt, und seine Leiste waere es dann auch - halb ausserhalb des
           * Bildes. Gespult wird in der Zeitleiste darunter, hier braucht es nur Start und Pause. */}

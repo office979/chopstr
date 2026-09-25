@@ -165,7 +165,7 @@ def test_beiblaetter_brechen_wie_die_eingebrannten_untertitel():
     Stilen steht im Bild eine Zeile; die Beiblaetter brachen an anderen Stellen um."""
     woerter = [
         {"text": w, "start": i * 0.4, "end": i * 0.4 + 0.35}
-        for i, w in enumerate("Der Betrieb mit zwoelf Leuten hat im letzten Jahr mehr verdient".split())
+        for i, w in enumerate(["Der", "Betrieb", "mit", "zwoelf", "Leuten", "hat", "im", "letzten", "Jahr", "mehr", "verdient"])
     ]
     p = cap.preset_for("tiktok_words")
     assert p.max_lines == 1
@@ -183,7 +183,7 @@ def test_beiblaetter_bleiben_lesbar_und_uebernehmen_kein_wort_je_karte():
     niemand mit. Deshalb wird ``words_per_card`` bewusst nicht uebernommen."""
     woerter = [
         {"text": w, "start": i * 0.4, "end": i * 0.4 + 0.35}
-        for i, w in enumerate("Der Betrieb mit zwoelf Leuten hat im letzten Jahr mehr verdient".split())
+        for i, w in enumerate(["Der", "Betrieb", "mit", "zwoelf", "Leuten", "hat", "im", "letzten", "Jahr", "mehr", "verdient"])
     ]
     p = cap.preset_for("tiktok_words")
     assert p.words_per_card == 1
@@ -192,7 +192,7 @@ def test_beiblaetter_bleiben_lesbar_und_uebernehmen_kein_wort_je_karte():
 
 
 def test_alter_aufruf_mit_zeichenbreite_bleibt_gleich():
-    woerter = [{"text": w, "start": i * 0.4, "end": i * 0.4 + 0.35} for i, w in enumerate("eins zwei drei vier".split())]
+    woerter = [{"text": w, "start": i * 0.4, "end": i * 0.4 + 0.35} for i, w in enumerate(["eins", "zwei", "drei", "vier"])]
     a, breite = cap.beiblatt_karten(woerter, 30)
     assert breite == 30
     assert a == cap.build_cards(woerter, 30, 2, text_field="text")

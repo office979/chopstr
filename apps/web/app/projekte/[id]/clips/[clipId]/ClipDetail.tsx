@@ -33,8 +33,6 @@ import {
   type Effekt,
 } from "@/lib/clips/effekte";
 import { EffektListe } from "./EffektListe";
-import type { Befund } from "@/lib/clips/pruefstand";
-import { fassungSatz, type Fassung } from "@/lib/brand/fassung";
 import { ClipPreview } from "./ClipPreview";
 import { LiveVorschau } from "./LiveVorschau";
 import { ClipTextEditor } from "./ClipTextEditor";
@@ -98,17 +96,9 @@ interface Props {
   /* Ist das Video fertig analysiert? Ohne das lässt sich nicht sagen, ob eine fehlende Tonspur
    * noch kommt oder nie kommen wird. */
   quelleFertig: boolean;
-  /* Mit welcher Fassung der Marke wurde dieses Video geclippt? Null, wenn keine Marke zugeordnet
-   * ist. */
-  markenFassung: Fassung | null;
-  markenName: string | null;
   /* Die Farben dieser Marke, als schnelle Wahl bei den Untertiteln. Eine Agentur soll die
    * Kundenfarbe nicht bei jedem Clip aus einem Farbrad suchen. */
   markenFarben: string[];
-  /* Was an diesem Clip auffällt: ein Schnitt, der den Sinn verändert, ein Marker aus der Analyse
-   * („muss als Werbung gekennzeichnet werden"), ein Befund der technischen Prüfung. Gerechnet auf
-   * dem Server, siehe page.tsx. */
-  befunde: Befund[];
   clipStatus: ClipStatus;
   renderFehler: string | null;
   /* Ohne Markenprofil gibt es kein Wörterbuch, in das eine Schreibweise wandern könnte. */
@@ -123,14 +113,18 @@ interface Props {
  *
  * Vier und nicht acht: mehr Reiter beantworten die Frage „wo mache ich das?" nicht besser,
  * sondern verlagern sie nur. Die Reihenfolge ist die des Arbeitens - erst der Schnitt, dann der
- * Text, dann das Aussehen, zuletzt das Fertigmachen. */
-export type Bereich = "schnitt" | "text" | "untertitel" | "fertig";
+ * Text, dann das Aussehen.
+ *
+ * Ein vierter Bereich „Fertigstellen" stand hier einmal: Renderstand, eine Liste „Was noch offen
+ * ist" und ein Weg zurück in die Übersicht. Er ist weg. Seit Speichern sofort neu clippt, gibt es
+ * nichts mehr fertigzustellen - der Stand des Videos steht ohnehin dauerhaft unter der Vorschau,
+ * und der Weg zurück steht in der Brotkrume. */
+export type Bereich = "schnitt" | "text" | "untertitel";
 
 const BEREICHE: { id: Bereich; name: string; satz: string }[] = [
   { id: "schnitt", name: "Schnitt", satz: "Timeline und Bildausschnitt" },
   { id: "text", name: "Text", satz: "Gesprochene Wörter prüfen" },
   { id: "untertitel", name: "Untertitel", satz: "Aussehen, Position, Lesbarkeit" },
-  { id: "fertig", name: "Fertigstellen", satz: "Offenes prüfen, clippen, herunterladen" },
 ];
 
 export function ClipDetail({
@@ -165,10 +159,7 @@ export function ClipDetail({
   quelleDauerS,
   wellenformSrc,
   quelleFertig,
-  markenFassung,
-  markenName,
   markenFarben,
-  befunde,
   clipStatus,
   renderFehler,
   markeVorhanden,
@@ -941,15 +932,12 @@ export function ClipDetail({
           )}
           </div>
 
-          {/* Der Stand des gebauten Videos, kurz. Die lange Fassung mit allen Sätzen steht unter
-            * „Fertigstellen"; hier unter dem Video nahm sie ein Drittel der Höhe ein, die dem
-            * Video gehört. */}
-          {/* Unter „Fertigstellen" steht die ausführliche Fassung derselben Karte. Beide zugleich
-              wäre dieselbe Aussage zweimal auf einem Bildschirm. */}
-          <div hidden={bereich === "fertig"} className="mt-3 max-lg:order-3 max-lg:mt-0 max-lg:w-full">
+          {/* Der Stand des geclippten Videos, kurz und immer sichtbar. Die ausführliche Fassung
+              stand unter „Fertigstellen"; den Bereich gibt es nicht mehr, und gebraucht wurde sie
+              auch nicht - hier steht dasselbe in einer Zeile. */}
+          <div className="mt-3 max-lg:order-3 max-lg:mt-0 max-lg:w-full">
             <VorschauStatus
               kompakt
-              onMehr={() => setBereich("fertig")}
               sourceId={sourceId}
               clipId={clipId}
               canEdit={canEdit}
@@ -964,7 +952,7 @@ export function ClipDetail({
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
-          {/* Die vier Bereiche. Alle bleiben im Baum und werden nur ausgeblendet: ein Wechsel
+          {/* Die drei Bereiche. Alle bleiben im Baum und werden nur ausgeblendet: ein Wechsel
               setzt deshalb nichts zurück, weder die Abspielposition noch eine begonnene
               Texteingabe noch den gewählten Abschnitt in der Timeline. */}
           <div role="tablist" aria-label="Arbeitsbereich" className="flex flex-wrap gap-1 rounded-inner border border-line p-1">
@@ -982,7 +970,7 @@ export function ClipDetail({
                 )}
               >
                 {b.name}
-                {b.id === "fertig" && offeneUntertitel > 0 && (
+                {b.id === "untertitel" && offeneUntertitel > 0 && (
                   <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-attention align-middle" aria-hidden="true" />
                 )}
               </button>
@@ -1161,62 +1149,6 @@ export function ClipDetail({
 
           {/* Fertigstellen: was noch offen ist, das Bauen und der Download. Alles, was man ganz
               zum Schluss braucht, an einer Stelle statt über die Seite verteilt. */}
-          <div hidden={bereich !== "fertig"} className="flex min-w-0 flex-col gap-4">
-            <VorschauStatus
-              sourceId={sourceId}
-              clipId={clipId}
-              canEdit={canEdit}
-              offeneUntertitel={offeneUntertitel}
-              onNeuGebaut={() => router.refresh()}
-              status={clipStatus}
-              hatDatei={Boolean(clipSrc)}
-              renderFehler={renderFehler}
-            />
-
-            <GlassCard padding="md" className="flex flex-col gap-3">
-              <p className="text-sm font-medium text-text">Was noch offen ist</p>
-              {offeneAenderungen ? (
-                <p className="text-sm text-attention">
-                  {"Es gibt ungespeicherte Änderungen. Geclippt wird der gespeicherte Stand."}
-                </p>
-              ) : null}
-              {offeneUntertitel > 0 ? (
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm text-text-2">
-                    {offeneUntertitel === 1
-                      ? "Ein Untertitel ragt über den sicheren Bereich hinaus."
-                      : `${offeneUntertitel} Untertitel ragen über den sicheren Bereich hinaus.`}
-                  </p>
-                  <Button size="sm" variant="ghost" onClick={() => setBereich("untertitel")}>
-                    Zu den Untertiteln
-                  </Button>
-                </div>
-              ) : null}
-              {/* Die Fassung der Marke. Sie steht hier, weil hier auch der Knopf zum Neuclippen
-                  sitzt: die Antwort auf „meine Marke hat sich geändert" ist genau dieser Knopf. */}
-              {markenFassung && fassungSatz(markenFassung) && (
-                <p className={cn("text-sm", markenFassung.stand === "aelter" ? "text-attention" : "text-text-3")}>
-                  {markenName ? `Marke ${markenName}: ` : ""}
-                  {fassungSatz(markenFassung)}
-                </p>
-              )}
-              {/* Die Befunde zum Clip selbst. Sie standen bisher nur in der Clip-Übersicht - also
-                  nicht auf der Seite, auf der man den Clip ansieht und freigibt. Ein Schnitt, der
-                  eine Verneinung wegschneidet, gehört genau hierher. */}
-              {befunde.map((b, i) => (
-                <p key={i} className={cn("text-sm", b.schwere === "fehler" ? "text-attention" : "text-text-2")}>
-                  {b.schwere === "fehler" ? "Fehler: " : "Hinweis: "}
-                  {b.text}
-                </p>
-              ))}
-              {!offeneAenderungen && offeneUntertitel === 0 && befunde.length === 0 && !(markenFassung && markenFassung.stand === "aelter") && (
-                <p className="text-sm text-text-2">Nichts. Alles gespeichert, keine offenen Untertitel.</p>
-              )}
-              <ButtonLink href={`/projekte/${sourceId}/clips`} variant="ghost" size="sm" className="self-start">
-                Zur Clip-Übersicht mit dem Download
-              </ButtonLink>
-            </GlassCard>
-          </div>
         </div>
       </div>
 

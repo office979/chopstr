@@ -92,9 +92,12 @@ describe("die drei Achsen sind unabhängig", () => {
     expect(p.datei).toBe("keine");
   });
 
-  it("hält zügiges Sprechen für einen Hinweis, nicht für einen Fehler", () => {
+  it("schweigt zum Sprechtempo", () => {
+    /* „An mehreren Stellen wird zügig gesprochen" stand an fast jeder Karte und zeigte auf etwas,
+     * das weder der Schnitt noch eine Einstellung ändert. Der Befund ist ersatzlos weg. */
     const p = pruefstand(eingabe({ clip: clip({ cps_warnings: ["Zu schnell (38 Z/s): 'Der Betrieb mit'"] }) }));
-    expect(p.qualitaet).toBe("hinweis");
+    expect(p.qualitaet).toBe("ok");
+    expect(p.befunde).toHaveLength(0);
   });
 
   it("hält eine weggeschnittene Verneinung für einen Fehler", () => {
@@ -129,23 +132,19 @@ describe("Bereit zum Posten", () => {
   });
 
   it("stört sich nicht an einem blossen Hinweis", () => {
-    const c = clip({ review: "bereit", cps_warnings: ["Zu schnell (38 Z/s): 'Der Betrieb mit'"] });
-    expect(pruefstand(eingabe({ clip: c })).postbereit).toBe(true);
+    const c = clip({ review: "bereit", render_plan: { reframe: { detector: "none" } } as unknown as Clip["render_plan"] });
+    const p = pruefstand(eingabe({ clip: c, quellformatAbweichend: true }));
+    expect(p.qualitaet).toBe("hinweis");
+    expect(p.postbereit).toBe(true);
   });
 });
 
 describe("Befunde", () => {
-  it("fasst alle Tempowarnungen zu einem Befund zusammen", () => {
-    /* „82 Stellen laufen schnell durch“ ist eine Zahl, keine Arbeitsanweisung. */
+  it("macht aus Tempowarnungen gar keinen Befund", () => {
+    /* „82 Stellen laufen schnell durch“ war eine Zahl, keine Arbeitsanweisung - und auch der eine
+     * zusammengefasste Satz daraus half niemandem weiter. */
     const viele = Array.from({ length: 82 }, (_, i) => `Zu schnell (3${i % 9} Z/s): 'Stelle ${i}'`);
-    const p = pruefstand(eingabe({ clip: clip({ cps_warnings: viele }) }));
-    expect(p.befunde.filter((b) => b.art === "tempo")).toHaveLength(1);
-    expect(p.befunde[0].text).not.toMatch(/82/);
-  });
-
-  it("nennt den Wortlaut der schlimmsten Stelle", () => {
-    const p = pruefstand(eingabe({ clip: clip({ cps_warnings: ["Zu schnell (38 Z/s): 'Der Betrieb mit zwölf'"] }) }));
-    expect(p.befunde[0].stelle).toBe("Der Betrieb mit zwölf");
+    expect(pruefstand(eingabe({ clip: clip({ cps_warnings: viele }) })).befunde).toHaveLength(0);
   });
 
   it("sagt bei einer Treuewarnung, was los ist", () => {
@@ -158,8 +157,10 @@ describe("Befunde", () => {
 
   it("stellt den Fehler vor den Hinweis", () => {
     const c = clip({
-      cps_warnings: ["Zu schnell (38 Z/s): 'x'"],
-      fidelity_warnings: [{ type: "negation_removed", severity: "high", detail: [] }],
+      fidelity_warnings: [
+        { type: "ends_before_contrast", severity: "medium", detail: [] },
+        { type: "negation_removed", severity: "high", detail: [] },
+      ],
     });
     expect(pruefstand(eingabe({ clip: c })).befunde[0].schwere).toBe("fehler");
   });
@@ -174,8 +175,10 @@ describe("gesperrte Handlungen nennen den Grund", () => {
   });
 
   it("lässt Freigeben bei einem blossen Hinweis zu", () => {
-    const c = clip({ cps_warnings: ["Zu schnell (38 Z/s): 'x'"] });
-    expect(aktionStand("freigeben", pruefstand(eingabe({ clip: c }))).erlaubt).toBe(true);
+    const c = clip({ fidelity_warnings: [{ type: "ends_before_contrast", severity: "medium", detail: [] }] });
+    const p = pruefstand(eingabe({ clip: c }));
+    expect(p.qualitaet).toBe("hinweis");
+    expect(aktionStand("freigeben", p).erlaubt).toBe(true);
   });
 
   it("lässt Freigeben zu, bevor es überhaupt ein Video gibt", () => {

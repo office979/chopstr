@@ -39,9 +39,9 @@ export const REDAKTION_SATZ: Record<Redaktion, string> = {
 /* 2. Qualität: stimmt am Inhalt etwas nicht?
  *
  * „hinweis" und „fehler" sind nicht dasselbe, und der Unterschied entscheidet, ob freigegeben
- * werden darf. Zügiges Sprechen ist ein Hinweis: der Clip ist brauchbar, er liest sich nur
- * anstrengend. Ein weggeschnittenes „nicht" ist ein Fehler: dann sagt der Clip etwas anderes als
- * der Sprecher. */
+ * werden darf. Ein Bildausschnitt ohne Gesichtserkennung ist ein Hinweis: der Clip ist brauchbar,
+ * jemand sollte nur kurz hinsehen. Ein weggeschnittenes „nicht" ist ein Fehler: dann sagt der
+ * Clip etwas anderes als der Sprecher. */
 export type Qualitaet = "ok" | "hinweis" | "fehler";
 
 /* Eine Plakette „Mit Hinweis" gab es hier einmal. Sie ist weg: „Hinweis" an einer Karte sagt
@@ -78,7 +78,7 @@ export const DATEI_SATZ: Record<Datei, string> = {
  * Stelle, an der es am engsten ist. */
 export interface Befund {
   schwere: "hinweis" | "fehler";
-  art: "sinn" | "tempo" | "datei" | "render" | "technik" | "pruefen" | "bild";
+  art: "sinn" | "datei" | "render" | "technik" | "pruefen" | "bild";
   /* Was los ist und was hilft, in einem Satz. */
   text: string;
   /* Der Wortlaut der schlimmsten Stelle, falls bekannt. Damit findet man sie im Clip wieder. */
@@ -141,16 +141,6 @@ function treueSatz(typ: string, detail: unknown): string {
   }
 }
 
-/* Aus einer Tempowarnung die zitierte Stelle holen.
- *
- * Der Worker schreibt sie als "Zu schnell (38 Z/s): 'Der Handwerksbetrieb mit'". Der Wortlaut ist
- * das, was dem Nutzer hilft: damit findet er die Stelle im Text wieder, ohne eine Sekundenzahl
- * umrechnen zu müssen. */
-function tempoStelle(warnung: string): string | null {
-  const m = /'([^']+)'/.exec(warnung);
-  return m ? m[1] : null;
-}
-
 export function pruefstand({
   clip,
   freigabe,
@@ -192,20 +182,12 @@ export function pruefstand({
     });
   }
 
-  /* Alle Tempowarnungen zu EINEM Befund. Sie haben dieselbe Ursache (der Sprecher ist zügig) und
-   * dieselbe Abhilfe (straffen oder herausnehmen); als Liste wären sie zwanzigmal derselbe Satz. */
-  if (clip.cps_warnings.length > 0) {
-    const stelle = tempoStelle(clip.cps_warnings[0]);
-    befunde.push({
-      schwere: "hinweis",
-      art: "tempo",
-      text:
-        clip.cps_warnings.length === 1
-          ? "Eine Einblendung läuft schneller durch, als sich mitlesen lässt. Im Text straffen oder in der Timeline herausnehmen."
-          : "An mehreren Stellen wird zügig gesprochen, zum Mitlesen ohne Ton ist das knapp. Im Text straffen oder in der Timeline herausnehmen.",
-      stelle,
-    });
-  }
+  /* „An mehreren Stellen wird zügig gesprochen" stand hier einmal als Befund an jeder Karte.
+   * Er ist weg, und zwar ganz: die Ursache ist das Sprechtempo des Aufgenommenen, nicht der
+   * Schnitt und nicht eine Einstellung. Ein Warnhinweis, der an fast jedem Clip steht und auf
+   * etwas zeigt, das niemand ändern kann, ohne den Satz zu kürzen, ist kein Befund, sondern
+   * Grundrauschen - und er schob wichtige Befunde nach unten. Das mittlere Lesetempo steht
+   * weiterhin bei den Untertiteln, dort wo man etwas damit anfangen kann. */
 
   /* Wurde das Bild blind beschnitten?
    *
@@ -285,7 +267,7 @@ export function pruefstand({
 
   const qualitaet: Qualitaet = befunde.some((b) => b.schwere === "fehler" && (b.art === "sinn" || b.art === "render"))
     ? "fehler"
-    : befunde.some((b) => b.art === "sinn" || b.art === "tempo" || b.art === "technik" || b.art === "pruefen" || b.art === "bild")
+    : befunde.some((b) => b.art === "sinn" || b.art === "technik" || b.art === "pruefen" || b.art === "bild")
       ? "hinweis"
       : "ok";
 

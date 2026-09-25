@@ -4,13 +4,10 @@ import { getRepo } from "@/lib/repo";
 import { getPublishingRepo } from "@/lib/repo/publishing";
 import { stilAusPlan, stilPruefen } from "@/lib/clips/caption-style";
 import { vorhandeneSchriften } from "@/lib/clips/schriften-vorhanden";
-import { aspectForSource } from "@/lib/clips/presets";
 import { requireSession } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
 import { mediaUrl } from "@/lib/clips/labels";
 import { sentencesFromWords, sentenceRange } from "@/lib/transcript/sentences";
-import { fassung } from "@/lib/brand/fassung";
-import { pruefstand } from "@/lib/clips/pruefstand";
 import { ClipDetail } from "./ClipDetail";
 
 export const dynamic = "force-dynamic";
@@ -114,18 +111,6 @@ export default async function ClipPage({ params }: Props) {
         shots={clip.render_plan?.shots ?? []}
         quelleBreite={source.width ?? null}
         komposition={clip.composition}
-        /* Die Befunde zu diesem Clip: was der Schnitt am Sinn verändert, was die Analyse markiert
-           hat, was die technische Prüfung an der Datei gefunden hat. Sie standen bisher nur in der
-           Clip-Übersicht, nicht auf der Seite, auf der entschieden wird. Gerechnet auf dem Server,
-           weil hier alles beisammen liegt. */
-        befunde={
-          pruefstand({
-            clip,
-            freigabe: null,
-            kandidat: candidate,
-            quellformatAbweichend: aspectForSource(source.width, source.height) !== clip.aspect,
-          }).befunde.filter((b) => b.art === "sinn" || b.art === "pruefen" || b.art === "technik" || b.art === "bild")
-        }
         clipStatus={clip.status}
         renderFehler={clip.render_error}
         markeVorhanden={Boolean(source.brand_profile_id)}
@@ -134,12 +119,6 @@ export default async function ClipPage({ params }: Props) {
         quelleDauerS={source.duration_s ?? 0}
         wellenformSrc={mediaUrl(mediaBase, source.waveform_key)}
         quelleFertig={source.status === "ready"}
-        markenFassung={
-          marke
-            ? fassung((clip.render_plan?.brand?.profil_fassung) ?? null, marke.version)
-            : null
-        }
-        markenName={marke?.name ?? null}
         markenFarben={[marke?.ci?.colors?.primary, marke?.ci?.colors?.secondary, marke?.ci?.colors?.accent, marke?.caption_style?.highlight_color]
           .filter((c): c is string => typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c))
           .filter((c, i, alle) => alle.indexOf(c) === i)}

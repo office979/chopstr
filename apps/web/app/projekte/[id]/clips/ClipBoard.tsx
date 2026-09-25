@@ -31,7 +31,6 @@ import {
   rang,
   REDAKTION_LABEL,
   REDAKTION_SATZ,
-  type Befund,
   type FilterId,
   type Pruefstand,
 } from "@/lib/clips/pruefstand";
@@ -1082,10 +1081,10 @@ export function ClipBoard({
                     </div>
                   )}
 
-                  {/* Der wichtigste Befund, und nur der. Die übrigen stehen im Editor, wo man
-                      auch etwas gegen sie tun kann; hier würde eine Liste die Entscheidung
-                      erschweren statt sie zu stützen. */}
-                  {p.befunde[0] && <BefundZeile befund={p.befunde[0]} ziel={bearbeiten} rest={p.befunde.length - 1} />}
+                  {/* Hier stand ein Warnstreifen mit dem wichtigsten Befund - „Ohne KI gefunden",
+                      „An mehreren Stellen wird zügig gesprochen". Er ist weg. An fast jeder Karte
+                      stand einer, die Sätze sagten dem Kunden nichts, und was wirklich sperrt,
+                      steht ohnehin am gesperrten Knopf: dort, wo es gerade im Weg ist. */}
 
                   {/* Was rechtlich am Clip hängt, bleibt sichtbar. */}
                   {isDone(clip) && (clip.ad_label || clip.provenance.source_credit) && (
@@ -1095,10 +1094,10 @@ export function ClipBoard({
                     </div>
                   )}
 
-                  {/* Eine hervorgehobene Handlung, der Rest eine Ebene tiefer.
+                  {/* Eine Zeile, eine hervorgehobene Handlung, der Rest eine Ebene tiefer.
                       Vorher standen hier sechs gleichrangige Knöpfe. Sechs Möglichkeiten sind
                       keine Führung, sondern eine Auswahlaufgabe vor der eigentlichen Aufgabe. */}
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-2">
                     {naechste.id === "pruefen" && (
                       <Button size="sm" onClick={() => void openZoom(clip)}>
                         Clip prüfen
@@ -1139,27 +1138,6 @@ export function ClipBoard({
                       </span>
                     )}
 
-                    {/* Freigeben steht neben der Hauptaktion, solange es noch aussteht: das ist die
-                        Entscheidung, um die es auf dieser Seite geht. Gesperrt sagt es, warum. */}
-                    {p.redaktion !== "verworfen" && p.redaktion !== "freigegeben" && naechste.id !== "pruefen" && (
-                      darfFreigeben.erlaubt ? (
-                        <Button size="sm" variant="ghost" disabled={sammelLaeuft} onClick={() => void reviewSetzen([clip.id], "bereit")}>
-                          Freigeben
-                        </Button>
-                      ) : (
-                        <GesperrtKnopf grund={darfFreigeben.grund}>Freigeben</GesperrtKnopf>
-                      )
-                    )}
-                    {p.redaktion !== "verworfen" && naechste.id === "pruefen" && (
-                      darfFreigeben.erlaubt ? (
-                        <Button size="sm" variant="ghost" disabled={sammelLaeuft} onClick={() => void reviewSetzen([clip.id], "bereit")}>
-                          Freigeben
-                        </Button>
-                      ) : (
-                        <GesperrtKnopf grund={darfFreigeben.grund}>Freigeben</GesperrtKnopf>
-                      )
-                    )}
-
                     <Weitere
                       onOffen={(o) => setKlappeOffen(o ? clip.id : null)}
                       onFassung={() => setFassungFuer(clip)}
@@ -1170,17 +1148,11 @@ export function ClipBoard({
                       darfLaden={darfLaden}
                       canDelete={canDelete}
                       laeuft={sammelLaeuft}
-                      onAnsehen={() => void openZoom(clip)}
                       onReview={(r) => void reviewSetzen([clip.id], r)}
                       onLoeschen={() => setDeleteTarget(clip)}
                     />
-                  </div>
-
-
-                  {/* Gastfreigabe und Serie stehen unter dem Clip und nicht in einer eigenen
-                      Spalte: als Spalte waren sie genauso hoch wie die Karte und machten aus
-                      jedem Eintrag einen Block. */}
-                  <div className="mt-1 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-line pt-3">
+                    {/* Gastfreigabe, Posten und Serie standen darunter, durch eine Linie
+                        getrennt - zwei Zeilen fuer eine Handvoll Knoepfe. Jetzt eine Zeile. */}
                     <ClipApproval
                       sourceId={sourceId}
                       clipId={clip.id}
@@ -1196,9 +1168,6 @@ export function ClipBoard({
                     {/* Was aus dem Clip geworden ist. Ohne diese Zeile endete die Kette am
                         fertigen Clip: Posten und Kennzahlen gab es nur als Schnittstelle, und
                         „Tests" und „Berichte" konnten deshalb nie etwas zeigen. */}
-                    {freigabeAlt && (
-                      <p className="w-full text-xs text-attention">{FREIGABE_VERALTET_MESSAGE}</p>
-                    )}
                     {p.redaktion === "freigegeben" && (
                       <Gepostet sourceId={sourceId} clipId={clip.id} plattform={clip.platform} canPublish={canPublish} />
                     )}
@@ -1217,7 +1186,27 @@ export function ClipBoard({
                         onExtras={(next) => setExtras((prev) => ({ ...prev, [next.id]: next }))}
                       />
                     )}
+
+                    {/* Freigeben sitzt am rechten Rand und immer an derselben Stelle: das ist die
+                        eine Entscheidung, um die es auf dieser Seite geht, und sie soll nicht
+                        zwischen den anderen Knoepfen wandern, je nachdem wie viele davon gerade
+                        da sind. Gesperrt sagt sie, warum. */}
+                    {p.redaktion !== "verworfen" && p.redaktion !== "freigegeben" && (
+                      <span className="ml-auto">
+                        {darfFreigeben.erlaubt ? (
+                          <Button size="sm" disabled={sammelLaeuft} onClick={() => void reviewSetzen([clip.id], "bereit")}>
+                            Freigeben
+                          </Button>
+                        ) : (
+                          <GesperrtKnopf grund={darfFreigeben.grund}>Freigeben</GesperrtKnopf>
+                        )}
+                      </span>
+                    )}
                   </div>
+
+                  {/* Der Gast hat eine andere Fassung gesehen: ein ganzer Satz, der eine eigene
+                      Zeile braucht. */}
+                  {freigabeAlt && <p className="text-xs text-attention">{FREIGABE_VERALTET_MESSAGE}</p>}
                 </div>
               </GlassCard>
             </li>
@@ -1255,13 +1244,6 @@ const IconDownload = () => (
     <path d="M4 20h16" />
   </Svg>
 );
-const IconWarn = ({ className }: { className?: string }) => (
-  <Svg size={14} className={cn("shrink-0", className)}>
-    <path d="M10.3 3.9 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
-    <path d="M12 9v4" />
-    <path d="M12 17h.01" />
-  </Svg>
-);
 
 
 /* Eine Plakette. Farbe nur da, wo sie etwas bedeutet: ein Fehler ist dringend, eine Freigabe ist
@@ -1291,32 +1273,6 @@ function Pille({
   );
 }
 
-/* Der wichtigste Befund als anklickbare Zeile.
- *
- * Drei Dinge stehen darin, und alle drei werden gebraucht: was los ist, wo es ist, und der Weg
- * dorthin. Vorher stand hier „82 Stellen laufen schnell durch" ohne Ort und ohne Weg - eine Zahl,
- * mit der niemand etwas anfangen kann. */
-function BefundZeile({ befund, ziel, rest }: { befund: Befund; ziel: string; rest: number }) {
-  const schwer = befund.schwere === "fehler";
-  return (
-    <Link
-      href={ziel}
-      className={cn(
-        "transition-soft flex items-start gap-1.5 self-start rounded-[10px] border px-3 py-2 text-xs text-text",
-        schwer ? "border-danger/50 bg-danger/10 hover:border-danger" : "border-attention/50 bg-attention/10 hover:border-attention",
-      )}
-    >
-      <IconWarn className={cn("mt-0.5 shrink-0", schwer ? "text-danger" : "text-attention")} />
-      <span>
-        {befund.text}
-        {befund.stelle && <span className="text-text-2">{` Am engsten bei „${befund.stelle}“.`}</span>}
-        {rest > 0 && <span className="text-text-3">{` Und ${rest} weiterer Punkt${rest === 1 ? "" : "e"}.`}</span>}{" "}
-        <span className="underline underline-offset-4">{schwer ? "Beheben" : "Ansehen"}</span>
-      </span>
-    </Link>
-  );
-}
-
 /* Eine Handlung, die gerade nicht geht, mit dem Grund daneben.
  *
  * Der Grund steht sichtbar und nicht nur im Titelattribut. Ein Tooltip erreicht nur, wer eine Maus
@@ -1338,9 +1294,9 @@ function GesperrtKnopf({ grund, children }: { grund: string | null; children: Re
 
 /* Die zweite Ebene: alles, was es auch noch gibt, hinter einer benannten Klappe.
  *
- * „Vorschlag verwerfen" und „Datei löschen" stehen hier ausdrücklich getrennt und mit Erklärung.
- * Vorher stand Verwerfen als Knopf und Löschen als Mülleimer-Zeichen daneben - zwei sehr
- * verschiedene Dinge, die gleich aussahen und nebeneinander lagen. */
+ * Bewusst kurz. „Groß ansehen" stand hier einmal - überflüssig, ein Klick auf die Vorschau tut
+ * dasselbe. „Vorschlag verwerfen" auch; aussortiert wird über die Auswahl mehrerer Clips, und
+ * dort gehört es hin. */
 function Weitere({
   clip,
   stand,
@@ -1349,7 +1305,6 @@ function Weitere({
   darfLaden,
   canDelete,
   laeuft,
-  onAnsehen,
   onReview,
   onLoeschen,
   onFassung,
@@ -1362,7 +1317,6 @@ function Weitere({
   darfLaden: { erlaubt: boolean; grund: string | null };
   canDelete: boolean;
   laeuft: boolean;
-  onAnsehen: () => void;
   onReview: (r: Clip["review"]) => void;
   onLoeschen: () => void;
   onFassung: () => void;
@@ -1407,7 +1361,6 @@ function Weitere({
             className="fixed inset-0 z-30 cursor-default"
           />
           <div className="absolute right-0 z-40 mt-1 flex w-[260px] flex-col gap-1 rounded-inner border border-line-strong bg-[#0b0b14] p-1.5 shadow-xl">
-            <MenuKnopf onClick={() => { umschalten(false); onAnsehen(); }}>Groß ansehen</MenuKnopf>
             <MenuLink href={bearbeiten} onClick={() => umschalten(false)}>
               Bearbeiten
             </MenuLink>
@@ -1429,27 +1382,14 @@ function Weitere({
                 Freigabe zurücknehmen
               </MenuKnopf>
             )}
-            {stand.redaktion === "verworfen" ? (
+            {stand.redaktion === "verworfen" && (
               <MenuKnopf disabled={laeuft} onClick={() => { umschalten(false); onReview("offen"); }}>
                 Zurückholen
               </MenuKnopf>
-            ) : (
-              <MenuKnopf
-                disabled={laeuft}
-                onClick={() => { umschalten(false); onReview("verworfen"); }}
-                hinweis="Der Clip bleibt erhalten und lässt sich zurückholen."
-              >
-                Vorschlag verwerfen
-              </MenuKnopf>
             )}
             {canDelete && (
-              <MenuKnopf
-                ton="danger"
-                disabled={clip.status === "rendering"}
-                onClick={() => { umschalten(false); onLoeschen(); }}
-                hinweis="Video, Untertitel und Poster werden endgültig gelöscht."
-              >
-                Datei endgültig löschen
+              <MenuKnopf ton="danger" disabled={clip.status === "rendering"} onClick={() => { umschalten(false); onLoeschen(); }}>
+                Löschen
               </MenuKnopf>
             )}
           </div>

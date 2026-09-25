@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from chopstr_worker import config
 from chopstr_worker.activities import render as act
 from chopstr_worker.pipeline import captions_de as c
 
@@ -155,14 +156,19 @@ def test_ohne_wahl_entscheidet_weiter_das_format():
 
 
 # -- Schriftdatei fehlt ----------------------------------------------------------------------------
-def test_fehlende_schriftdatei_wird_gesagt_statt_stillschweigend_ersetzt():
-    """libass fällt sonst auf irgendetwas zurück, und der Render sieht aus wie ein Fehler."""
-    fehlend = next((s for s in c.schriften()["schriften"] if not (act.render.default_fonts_dir() / s["datei"]).is_file()), None)
-    if fehlend is None:
-        pytest.skip("alle Schriftdateien liegen vor")
-    font, hinweis = act.caption_schrift({"font": fehlend["id"]}, "Inter")
+def test_fehlende_schriftdatei_wird_gesagt_statt_stillschweigend_ersetzt(tmp_path, monkeypatch):
+    """libass fällt sonst auf irgendetwas zurück, und der Render sieht aus wie ein Fehler.
+
+    Seit die Schriften im Repository liegen, fehlt im Normalfall keine mehr - dieser Test hat sich
+    deshalb selbst übersprungen und prüfte gar nichts. Der Fall bleibt aber möglich: wer
+    ``RENDER_FONTS_DIR`` auf einen eigenen Ordner zeigen lässt, kann dort weniger liegen haben.
+    Also wird der leere Ordner hier hergestellt, statt auf ihn zu warten."""
+    monkeypatch.setenv("RENDER_FONTS_DIR", str(tmp_path))
+    config.reload()
+    schrift = c.schriften()["schriften"][1]
+    font, hinweis = act.caption_schrift({"font": schrift["id"]}, "Inter")
     assert font == "Inter"
-    assert hinweis and fehlend["datei"] in hinweis
+    assert hinweis and schrift["datei"] in hinweis
 
 
 def test_vorhandene_schrift_wird_genommen():

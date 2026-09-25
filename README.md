@@ -170,6 +170,23 @@ Wer ein Worker-Image baut: **ffmpeg braucht libass.** Ohne den `subtitles`-Filte
 keine Untertitel einbrennen. Er merkt das und lässt sie weg; seit der technischen Prüfung schlägt
 der Lauf fehl, statt still ein Video ohne Untertitel auszuliefern.
 
+## Schriften
+
+Alle neun Untertitel-Schriften liegen im Repository (`workers/fonts`, rund 1,9 MB). Wer chopstr
+auscheckt, kann jede davon sofort wählen; niemand muss etwas herunterladen oder installieren, und
+die Docker-Images bringen den Ordner mit.
+
+`packages/design/caption_fonts.json` ist die eine Liste, aus der Worker und Oberfläche lesen;
+`workers/tests/test_schriften.py` besteht darauf, dass zu jeder Zeile eine Datei und ein Lizenztext
+vorliegt. Vor `npm run dev` und `npm run build` spiegelt `scripts/sync-fonts.mjs` die Dateien nach
+`apps/web/public/fonts`, damit die Vorschau im Editor dieselbe Schrift zeigt, die der Renderer
+einbrennt.
+
+Alle Schriften stehen unter der SIL Open Font License 1.1; die Lizenztexte liegen in
+`workers/fonts/lizenzen`. Vier Familien gibt es bei Google nur noch als variable Schrift und werden
+auf feste Strichstärke 700 geschnitten - sonst stünde im Bild die Normalstärke, ohne dass es jemand
+merkt. Einzelheiten in [`workers/fonts/README.md`](workers/fonts/README.md).
+
 ## Mehrere Fassungen desselben Moments
 
 Die automatische Erstellung legt je gefundenem Moment eine Datei an, hochkant. Über „Mehr ·

@@ -623,3 +623,28 @@ img, svg { display: block; max-width: 100%; }
 .warteliste-unten .erfolg-titel { color: #fff; }
 .warteliste-unten .erfolg-titel svg { color: #bff5d6; }
 .warteliste-unten .erfolg p { color: rgba(255, 255, 255, 0.8); }
+
+/* --- Von den Gründern -------------------------------------------------------------------------- */
+
+.brief { display: grid; gap: 40px; align-items: start; }
+@media (min-width: 900px) { .brief { grid-template-columns: 1fr 320px; gap: 56px; } }
+
+.brief-titel { margin-top: 12px; font-size: 28px; }
+@media (min-width: 640px) { .brief-titel { font-size: 40px; } }
+.brief-titel + p { margin-top: 20px; }
+.brief-text p + p { margin-top: 18px; }
+.brief-text p:not(.augenbraue) { font-size: 17px; line-height: 1.7; color: var(--text-2); }
+.brief-text .brief-titel { color: var(--text); }
+.brief-text strong { color: var(--text); font-weight: 600; }
+
+.gruender { display: grid; gap: 12px; }
+@media (min-width: 520px) and (max-width: 899px) { .gruender { grid-template-columns: repeat(2, 1fr); } }
+.gruender-karte {
+  border-radius: var(--radius-inner);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 20px 22px;
+}
+.gruender-name { font-size: 16px; font-weight: 500; color: var(--text); }
+.gruender-rolle { margin-top: 2px; font-family: var(--font-mono); font-size: 12px; color: var(--ai-soft); }
+.gruender-text { margin-top: 10px; font-size: 14px; line-height: 1.6; color: var(--text-3); }

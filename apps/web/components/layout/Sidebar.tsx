@@ -21,6 +21,46 @@ export interface NavUser {
   canBilling: boolean;
 }
 
+/* Die Regeln für die Leiste stehen HIER und nicht im Stylesheet.
+ *
+ * Sie reisen mit der Seite mit. Ein Stylesheet wird unter einer eigenen Adresse geladen und kann
+ * im Browser alt bleiben, während das HTML schon neu ist - genau das ist zweimal passiert, und
+ * beim zweiten Mal war das Ergebnis schlimmer als der Fehler: ohne diese Regeln zeigt ein
+ * Browser jedes <aside> an, also volle Leiste UND Schiene UND Kopfzeile übereinander. Diese vier
+ * Regeln dürfen nicht fehlen können, also stehen sie im Dokument selbst.
+ *
+ * Klassische `min-width`-Abfragen, nicht die neue Bereichsschreibweise: das versteht jeder
+ * Browser, der irgendwo im Einsatz ist.
+ *
+ * Reihenfolge der Zustände:
+ *   unter  640  Kopfzeile mit Menüknopf, keine Leiste
+ *   ab     640  schmale Schiene, nur Zeichen        (64 Punkte)
+ *   ab    1024  volle Leiste mit Text              (264 Punkte)
+ *
+ * `.nav-platz` ist der Klotz IM FLUSS neben dem Inhalt. Er ist der Grund, warum sich nichts mehr
+ * überdecken kann: die Leiste schwebt, aber er schiebt. */
+const NAV_CSS = `
+.nav-kopf{display:none}
+.nav-schiene{display:none}
+.nav-voll{display:none}
+.nav-platz{display:none;flex:none}
+@media (max-width:639.98px){
+  .nav-kopf{display:flex}
+}
+@media (min-width:640px){
+  .nav-schiene{display:block}
+  .nav-platz{display:block;width:64px}
+}
+@media (min-width:1024px){
+  .nav-schiene{display:none}
+  .nav-voll{display:block}
+  .nav-platz{display:block;width:264px}
+}
+@media print{
+  .nav-kopf,.nav-schiene,.nav-voll,.nav-platz{display:none}
+}
+`;
+
 interface NavItem {
   href: string;
   label: string;
@@ -143,9 +183,11 @@ export function Sidebar({ user }: { user: NavUser | null }) {
 
   return (
     <>
+      {/* Die Regeln reisen mit der Seite: siehe NAV_CSS oben. */}
+      <style dangerouslySetInnerHTML={{ __html: NAV_CSS }} />
+
       {/* Der Platzhalter. Er steht IM FLUSS neben dem Inhalt und ist genau so breit wie die
-          Leiste, die gerade zu sehen ist - deshalb kann sich nichts mehr überdecken. Die Regeln
-          dazu stehen in globals.css, alle vier in einem Block (.nav-*). */}
+          Leiste, die gerade zu sehen ist - deshalb kann sich nichts mehr überdecken. */}
       <div aria-hidden="true" className="nav-platz" />
 
       {/* Breites Fenster: die ganze Leiste mit Text. */}

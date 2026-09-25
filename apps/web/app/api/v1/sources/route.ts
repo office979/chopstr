@@ -8,7 +8,6 @@ import { serializeSource } from "@/lib/api/serializers";
 import { getQuota } from "@/lib/billing/quota";
 import { noteUsageThresholds } from "@/lib/outbox";
 import { signUploadToken, UPLOAD_TOKEN_TTL_S } from "@/lib/auth/upload-token";
-import { startClipProjectWorkflow } from "@/lib/temporal";
 import type { Brief, RightsStatus, SourceInput } from "@/lib/repo/types";
 
 export const dynamic = "force-dynamic";
@@ -43,8 +42,24 @@ export const POST = apiRoute("write", async (request: NextRequest, { auth }) => 
   const rightsStatus: RightsStatus = body.rights_status ?? "own";
   const sourceOwner = body.source_owner?.trim() || null;
   const sourceUrl = body.source_url?.trim() || null;
-  if (body.upload === "url" && (!sourceOwner || !sourceUrl)) {
-    throw badRequest("Bei upload = url sind rights_confirmed, source_owner und source_url Pflicht.", "rights_required");
+  /* Der Import per Adresse ist noch nicht gebaut, und zwar vollständig nicht.
+   *
+   * Die Schnittstelle nimmt ``upload: "url"`` an, schreibt die Adresse nach ``brief.import_url``
+   * und startet den Ablauf. Danach passiert nichts Gutes: kein Schritt im Worker holt diese Datei
+   * je herunter (``activities/ingest.run`` lädt ausschliesslich aus dem Objektspeicher über
+   * ``storage_key``), also lief das Projekt in einen Fehler, nachdem die Antwort „201 angelegt"
+   * gesagt hatte. Ein Kontingent war da schon verbucht.
+   *
+   * Bis das Herunterladen wirklich existiert, sagt die Schnittstelle das vorher statt hinterher.
+   * Was dafür zuerst entschieden werden muss, steht in docs/RISIKEN-UND-RUECKFRAGEN.md: welche
+   * Quellen erlaubt sind (das Herunterladen fremder Videos ist im DACH-Raum nicht schon deshalb
+   * zulässig, weil jemand ein Häkchen bei „ich habe die Rechte" setzt) und wie der Abruf gegen
+   * Anfragen ins eigene Netz abgesichert wird. */
+  if (body.upload === "url") {
+    throw badRequest(
+      "Der Import per Adresse ist noch nicht verfügbar. Lade die Datei per tus hoch (upload = tus).",
+      "url_import_unavailable",
+    );
   }
   if (sourceUrl && !/^https?:\/\//i.test(sourceUrl)) throw badRequest("source_url muss mit http(s) beginnen.", "validation_failed");
 
@@ -61,8 +76,7 @@ export const POST = apiRoute("write", async (request: NextRequest, { auth }) => 
   void noteUsageThresholds(auth.workspaceId, quota);
   if (quota.exhausted) throw paymentRequired(quota.message ?? "Stundenkontingent ausgeschöpft.", "quota_exhausted");
 
-  const brief: Brief & { import_url?: string } = { ...(body.brief ?? {}) };
-  if (body.upload === "url" && sourceUrl) brief.import_url = sourceUrl;
+  const brief: Brief = { ...(body.brief ?? {}) };
 
   const input: SourceInput = {
     brand_profile_id: brandProfileId,
@@ -89,38 +103,24 @@ export const POST = apiRoute("write", async (request: NextRequest, { auth }) => 
   });
   await repo.audit({ action: "rights.confirmed", entity: "sources", entity_id: source.id, payload: { rights_status: rightsStatus, confirmed_by: auth.session.userId, via: "api" } });
 
-  if (body.upload === "tus") {
-    let uploadToken: string;
-    try {
-      uploadToken = signUploadToken({ workspace_id: auth.workspaceId, user_id: auth.session.userId, brand_profile_id: brandProfileId });
-    } catch (error) {
-      throw new (await import("@/lib/api/errors")).ApiError(500, "not_configured", error instanceof Error ? error.message : "Upload-Token konnte nicht erzeugt werden.");
-    }
-    const tusEndpoint = process.env.NEXT_PUBLIC_TUS_ENDPOINT ?? process.env.TUS_ENDPOINT ?? "http://localhost:1080/files/";
-    return apiJson(
-      {
-        source: serializeSource(source),
-        upload_token: uploadToken,
-        upload_token_expires_in_s: UPLOAD_TOKEN_TTL_S,
-        tus_endpoint: tusEndpoint,
-        tus_metadata: { upload_token: uploadToken, client_ref: source.id, title: source.title, rights_confirmed: "true", rights_status: rightsStatus },
-        workflow_id: null,
-        hint: "Datei per tus mit den Metadaten aus tus_metadata hochladen; der Hook ergänzt die Quelle und startet die Pipeline.",
-      },
-      201,
-    );
-  }
-
-  let workflowId: string | null = null;
-  let hint: string | null = null;
+  /* Es bleibt nur der Weg über tus: der Import per Adresse ist oben abgewiesen. */
+  let uploadToken: string;
   try {
-    workflowId = await startClipProjectWorkflow({ sourceId: source.id, workspaceId: auth.workspaceId });
-    if (workflowId) await repo.updateSource(source.id, { temporal_workflow_id: workflowId, status_message: "Import per URL angestoßen" });
-    else hint = "Kein Temporal erreichbar: Der Import per URL startet, sobald ein Worker läuft.";
+    uploadToken = signUploadToken({ workspace_id: auth.workspaceId, user_id: auth.session.userId, brand_profile_id: brandProfileId });
   } catch (error) {
-    hint = `Temporal nicht erreichbar: ${error instanceof Error ? error.message.slice(0, 120) : "Fehler"}. Der Import per URL startet, sobald ein Worker läuft.`;
-    console.warn("[api] ClipProjectWorkflow für URL-Import nicht gestartet:", hint);
+    throw new (await import("@/lib/api/errors")).ApiError(500, "not_configured", error instanceof Error ? error.message : "Upload-Token konnte nicht erzeugt werden.");
   }
-  const fresh = (await repo.getSource(source.id)) ?? source;
-  return apiJson({ source: serializeSource(fresh), upload_token: null, tus_endpoint: null, tus_metadata: null, workflow_id: workflowId, hint }, 201);
+  const tusEndpoint = process.env.NEXT_PUBLIC_TUS_ENDPOINT ?? process.env.TUS_ENDPOINT ?? "http://localhost:1080/files/";
+  return apiJson(
+    {
+      source: serializeSource(source),
+      upload_token: uploadToken,
+      upload_token_expires_in_s: UPLOAD_TOKEN_TTL_S,
+      tus_endpoint: tusEndpoint,
+      tus_metadata: { upload_token: uploadToken, client_ref: source.id, title: source.title, rights_confirmed: "true", rights_status: rightsStatus },
+      workflow_id: null,
+      hint: "Datei per tus mit den Metadaten aus tus_metadata hochladen; der Hook ergänzt die Quelle und startet die Pipeline.",
+    },
+    201,
+  );
 });

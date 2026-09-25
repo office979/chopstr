@@ -53,7 +53,7 @@ export const SCHEMAS: Record<string, JsonSchema> = {
       source_url: { type: ["string", "null"], format: "uri", description: "Öffentliche Video-URL; Pflicht bei upload = url" },
       expected_speakers: { type: ["integer", "null"], minimum: 1, maximum: 12 },
       brief: { $ref: "#/components/schemas/Brief" },
-      upload: { type: "string", enum: ["tus", "url"], description: "tus: Datei anschließend per tus hochladen (upload_token, tus_endpoint); url: Ingest per Download" },
+      upload: { type: "string", enum: ["tus", "url"], description: "tus: Datei anschließend per tus hochladen (upload_token, tus_endpoint). url ist noch nicht verfügbar und wird mit 400 url_import_unavailable abgewiesen." },
     },
     additionalProperties: false,
   },

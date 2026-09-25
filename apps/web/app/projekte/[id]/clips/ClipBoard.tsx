@@ -17,7 +17,6 @@ import {
   latestByClip,
 } from "@/lib/guest/approval";
 import { stilPruefen } from "@/lib/clips/caption-style";
-import { structureLabel } from "@/lib/candidates/labels";
 import {
   aktionStand,
   DATEI_LABEL,
@@ -1009,7 +1008,9 @@ export function ClipBoard({
                     <Badge className="h-6 px-2.5 text-[11px]">{PLATFORM_LABELS[clip.platform]}</Badge>
                     <span className="font-mono text-xs tabular-nums text-text-2">{formatClipDuration(duration)}</span>
                     <span className="text-xs text-text-3">{ASPECT_LABELS[clip.aspect]}</span>
-                    {kandidat && <span className="text-xs text-text-3">{structureLabel(kandidat.structure)}</span>}
+                    {/* „Aufbau zur Pointe", „Schritt für Schritt" stand hier einmal: die Form,
+                        die die Analyse im Clip erkannt hat. Das ist eine Einordnung für die
+                        Maschine und keine Auskunft, mit der jemand etwas entscheidet. */}
                   </div>
 
                   {clip.status === "rendering" && (

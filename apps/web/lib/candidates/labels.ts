@@ -11,10 +11,6 @@ export const STRUCTURE_LABELS: Record<CandidateStructure, string> = {
   loop: "Endet wie es anfängt",
 };
 
-export function structureLabel(s: CandidateStructure | null): string {
-  return s ? STRUCTURE_LABELS[s] : "Ohne klare Form";
-}
-
 export const RUBRIC_ORDER: RubricKey[] = ["hook", "payoff", "specificity", "tension", "audience_fit"];
 
 export const RUBRIC_LABELS: Record<RubricKey, string> = {

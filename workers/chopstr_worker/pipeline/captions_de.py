@@ -37,6 +37,18 @@ def check_text_field(text_field: str | None) -> str:
     return field_name
 
 
+def sichtbare_woerter(words: list[dict], text_field: str = "text") -> list[dict]:
+    """Woerter ohne Anzeigetext fallen aus den Untertiteln heraus.
+
+    Im Clip-Editor lassen sich einzelne Woerter aus dem Untertitel loeschen: gesagt bleibt gesagt,
+    geschrieben steht es nicht mehr. Gedacht fuer Fuellwoerter und Versprecher. Gespeichert wird das
+    als leerer Text am Wort - die Zeiten bleiben, damit das folgende Wort an seiner Stelle bleibt.
+
+    Ohne diesen Filter liefe ein leeres Wort durch den Kartenbau und erzeugte doppelte Leerzeichen
+    oder eine Karte ohne Inhalt. Beides sieht im Bild nach einem Fehler aus."""
+    return [w for w in words if word_text(w, text_field).strip()]
+
+
 def word_text(word: dict, text_field: str = "text") -> str:
     """Anzeigetext eines Wortes; ``text_norm`` fällt auf ``text`` zurück, wenn es fehlt oder leer ist."""
     if text_field != "text":
@@ -444,6 +456,7 @@ def build_cards(
     die sichere Fläche hinaus oder in einer Zeile mehr, als eingestellt war. Beides sieht im Bild
     falsch aus, und beides kann niemand von aussen reparieren."""
     limit = limit or PRESETS["tiktok_bold"].max_chars
+    words = sichtbare_woerter(words, text_field)
     if words_per_card and words_per_card > 0:
         roh = [words[i : i + words_per_card] for i in range(0, len(words), words_per_card)]
         aus: list[list[dict]] = []
@@ -700,6 +713,7 @@ __all__ = [
     "scaled_preset",
     "to_ass",
     "beiblatt_karten",
+    "sichtbare_woerter",
     "to_srt",
     "to_vtt",
     "word_text",

@@ -524,6 +524,36 @@ export function ClipDetail({
     .filter(Boolean)
     .join(", ") || "nichts";
 
+  /* Wörter aus dem Untertitel nehmen.
+   *
+   * Nicht dasselbe wie eine Korrektur: ``editWord`` weist leeren Text ausdrücklich ab, weil ein
+   * leeres Korrekturfeld ein Versehen ist. Hier ist die Leere die Absicht. Das Wort behält seine
+   * Zeiten - das folgende bleibt dadurch an seiner Stelle - und fällt im Renderer aus den Karten
+   * heraus (captions_de.sichtbare_woerter).
+   *
+   * Gesagt bleibt gesagt: am Ton ändert sich nichts. Wer ein Wort wirklich aus dem Video haben
+   * will, schneidet es unter „Schnitt" heraus. */
+  const deleteWords = useCallback(
+    (indices: number[]) => {
+      setWords((prev) => {
+        const next = [...prev];
+        for (const i of indices) if (next[i] && next[i].text !== "") next[i] = { ...next[i], text: "" };
+        return next;
+      });
+      setCorrections((prev) => {
+        const next = new Map(prev);
+        for (const i of indices) {
+          const before = original[i];
+          if (!before) continue;
+          if (before.text === "") next.delete(i);
+          else next.set(i, { old_text: before.text, new_text: "", add_to_vocab: false });
+        }
+        return next;
+      });
+    },
+    [original],
+  );
+
   const editWord = useCallback(
     (index: number, raw: string, merken = false) => {
       const text = raw.trim();
@@ -1025,6 +1055,7 @@ export function ClipDetail({
                 currentTime={currentTime}
                 canEdit={canEdit}
                 onEditWord={editWord}
+                onDeleteWords={deleteWords}
                 onChangeSpeaker={changeSpeaker}
                 onSeek={seek}
                 markeVorhanden={markeVorhanden}

@@ -196,3 +196,25 @@ def test_alter_aufruf_mit_zeichenbreite_bleibt_gleich():
     a, breite = cap.beiblatt_karten(woerter, 30)
     assert breite == 30
     assert a == cap.build_cards(woerter, 30, 2, text_field="text")
+
+
+def test_geloeschte_woerter_stehen_nicht_im_untertitel():
+    """Im Clip-Editor lassen sich einzelne Woerter aus dem Untertitel loeschen.
+
+    Gesagt bleibt gesagt, geschrieben steht es nicht mehr - gedacht fuer Fuellwoerter und
+    Versprecher. Ohne den Filter liefe das leere Wort durch und erzeugte doppelte Leerzeichen oder
+    eine Karte ohne Inhalt."""
+    woerter = [
+        {"text": "Das", "start": 0.0, "end": 0.3},
+        {"text": "", "start": 0.35, "end": 0.5},
+        {"text": "stimmt", "start": 0.55, "end": 0.9},
+    ]
+    karten = cap.build_cards(woerter, 40)
+    flach = [cap.word_text(w) for k in karten for w in k]
+    assert flach == ["Das", "stimmt"]
+    assert "  " not in cap.to_srt(woerter, 0.0, 40)
+
+
+def test_ein_wort_aus_nur_leerzeichen_zaehlt_als_geloescht():
+    woerter = [{"text": "   ", "start": 0.0, "end": 0.3}, {"text": "ja", "start": 0.4, "end": 0.6}]
+    assert [cap.word_text(w) for w in cap.sichtbare_woerter(woerter)] == ["ja"]

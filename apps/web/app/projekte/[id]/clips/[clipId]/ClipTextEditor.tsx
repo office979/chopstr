@@ -54,6 +54,8 @@ interface Props {
   /* ``merken`` heisst: die Schreibweise kommt ins Woerterbuch der Marke und gilt fuer die
    * naechsten Videos. Gedacht fuer Namen, nicht fuer jeden Tippfehler. */
   onEditWord: (index: number, text: string, merken: boolean) => void;
+  /* Wörter aus dem Untertitel nehmen. Gesagt bleibt gesagt: nur die Schrift verschwindet. */
+  onDeleteWords: (indices: number[]) => void;
   onChangeSpeaker: (indices: number[], speaker: string) => void;
   onSeek: (secondsInSource: number) => void;
   /* Ohne Markenprofil gibt es kein Woerterbuch, in das man etwas merken koennte. */
@@ -72,6 +74,7 @@ export function ClipTextEditor({
   currentTime,
   canEdit,
   onEditWord,
+  onDeleteWords,
   onChangeSpeaker,
   onSeek,
   markeVorhanden,
@@ -80,8 +83,13 @@ export function ClipTextEditor({
   /* Im Korrekturmodus oeffnet ein einfacher Klick die Korrektur statt zu springen. Der
    * Doppelklick bleibt, aber er ist nicht mehr der einzige Weg: eine Handlung, die man nur
    * findet, wenn man sie schon kennt, ist keine Handlung. */
-  const [korrigieren, setKorrigieren] = useState(false);
-  const [ganz, setGanz] = useState(false);
+  /* Die ausgewählten Wörter, als Menge von Wortnummern.
+   *
+   * Einzeln auswählbar und nicht als Bereich: ein Versprecher mitten im Satz ist ein Wort, kein
+   * Abschnitt, und wer „ähm" an vier Stellen loswerden will, will nicht viermal ziehen. */
+  const [gewaehlt, setGewaehlt] = useState<Set<number>>(new Set());
+  /* Der Text steht ganz da. Zusammengeklappt liess sich nichts auswählen, was weiter unten stand. */
+  const ganz = true;
   const blocks = blocksInRange(words, wordFrom, wordTo);
   const kasten = useRef<HTMLDivElement | null>(null);
   const aktivesWort = useRef<HTMLButtonElement | null>(null);
@@ -100,6 +108,21 @@ export function ClipTextEditor({
     box.scrollTo({ top: Math.max(0, ziel), behavior: "smooth" });
   }, [currentTime, ganz, editingIndex]);
 
+  const umschalten = (i: number) => {
+    setGewaehlt((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  };
+
+  const loeschen = () => {
+    if (gewaehlt.size === 0) return;
+    onDeleteWords([...gewaehlt].sort((a, b) => a - b));
+    setGewaehlt(new Set());
+  };
+
   if (blocks.length === 0) {
     return (
       <GlassCard padding="md">
@@ -110,40 +133,55 @@ export function ClipTextEditor({
 
   return (
     <GlassCard padding="md">
+      {/* Ein Papierkorb statt zweier Knöpfe.
+        *
+        * Hier standen „Text korrigieren" und „Nur die Stelle zeigen". Der erste schaltete einen
+        * Modus ein, den man nicht braucht: ein Doppelklick auf das Wort öffnet die Korrektur
+        * ohnehin. Der zweite klappte den Text auf drei Zeilen zusammen - praktisch beim Mitlesen,
+        * im Weg, sobald man Wörter auswählt.
+        *
+        * An ihrer Stelle das, was wirklich fehlte: Wörter aus dem Untertitel nehmen. Der Knopf
+        * zählt mit, wie viele ausgewählt sind, und ist ohne Auswahl aus - ein Papierkorb, der
+        * immer klickbar ist, lädt zum blinden Drücken ein. */}
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-lg font-semibold">Text</h2>
-        <div className="flex flex-wrap items-center gap-3">
-          {canEdit && (
-            <button
-              type="button"
-              onClick={() => {
-                setKorrigieren((v) => !v);
-                setEditingIndex(null);
-              }}
-              aria-pressed={korrigieren}
-              className={cn(
-                "transition-soft rounded-pill border px-3 py-1.5 text-sm",
-                korrigieren ? "border-white/60 bg-white/10 text-text" : "border-line text-text-2 hover:border-line-strong",
-              )}
-            >
-              {korrigieren ? "Fertig mit Korrigieren" : "Text korrigieren"}
-            </button>
-          )}
+        {canEdit && (
           <button
             type="button"
-            onClick={() => setGanz((v) => !v)}
-            className="transition-soft text-sm text-text-2 underline underline-offset-4 hover:text-text"
+            onClick={loeschen}
+            disabled={gewaehlt.size === 0}
+            aria-label={
+              gewaehlt.size === 0
+                ? "Erst Wörter auswählen, dann löschen"
+                : gewaehlt.size === 1
+                  ? "Ein Wort aus dem Untertitel nehmen"
+                  : `${gewaehlt.size} Wörter aus dem Untertitel nehmen`
+            }
+            className={cn(
+              "transition-soft inline-flex h-9 items-center gap-2 rounded-pill border px-3 text-sm",
+              gewaehlt.size > 0
+                ? "border-danger/50 text-danger hover:bg-danger/10"
+                : "cursor-not-allowed border-line text-text-3",
+            )}
           >
-            {ganz ? "Nur die Stelle zeigen" : "Ganzen Text zeigen"}
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M2.8 4.2h10.4M6.4 4.2V2.9h3.2v1.3M4.2 4.2l.6 8.2a1 1 0 0 0 1 .9h4.4a1 1 0 0 0 1-.9l.6-8.2"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path d="M6.7 6.6v4M9.3 6.6v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+            </svg>
+            {gewaehlt.size > 0 && <span className="tabular-nums">{gewaehlt.size}</span>}
           </button>
-        </div>
+        )}
       </div>
       <p className="mb-3 text-sm text-text-2">
         {!canEdit
           ? "Klick ein Wort an, um dorthin zu springen."
-          : korrigieren
-            ? "Klick das Wort an, dessen Schreibweise du ändern willst. Nur der Untertitel ändert sich, gesagt bleibt gesagt. Soll ein Wort ganz raus, geht das unter „Schnitt“ mit „Teil entfernen“."
-            : "Klick ein Wort an, um dorthin zu springen. Zum Ändern auf „Text korrigieren“."}
+          : "Klick Wörter an, um sie auszuwählen. Mit dem Papierkorb nimmst du sie aus dem Untertitel: gesagt bleibt gesagt, geschrieben steht es nicht mehr. Doppelklick ändert die Schreibweise. Soll ein Wort ganz aus dem Video, geht das unter „Schnitt“ mit „Teil entfernen“."}
       </p>
 
       {/* Zusammengeklappt nur rund drei Zeilen, die mit dem Ton mitlaufen. Der ganze Text stand
@@ -198,21 +236,32 @@ export function ClipTextEditor({
                   const w = words[i];
                   const changed = original[i] != null && original[i].text !== w.text;
                   const low = w.prob < LOW_CONFIDENCE;
+                  /* Aus dem Untertitel genommen: das Wort bleibt lesbar, damit man es
+                     zurückholen kann, aber durchgestrichen. */
+                  const leer = w.text.trim() === "";
                   const active = currentTime >= w.start && currentTime < w.end + 0.15;
                   return (
                     <button
                       key={i}
                       ref={active ? aktivesWort : undefined}
                       type="button"
-                      onClick={() => (korrigieren && canEdit ? setEditingIndex(i) : onSeek(w.start))}
+                      /* Ein Klick tut beides: auswählen und dorthin springen. Das ist kein
+                         Kompromiss, sondern hilfreich - wer ein Wort zum Löschen anfasst, will
+                         hören, ob es das richtige ist. */
+                      onClick={() => {
+                        onSeek(w.start);
+                        if (canEdit) umschalten(i);
+                      }}
                       onDoubleClick={() => canEdit && setEditingIndex(i)}
                       onKeyDown={(e) => {
-                        if (canEdit && e.key === "Enter") {
+                        if (!canEdit) return;
+                        if (e.key === "Enter") {
                           e.preventDefault();
                           setEditingIndex(i);
                         }
                       }}
-                      aria-label={korrigieren && canEdit ? `${w.text} korrigieren` : `Zu ${w.text} springen`}
+                      aria-pressed={canEdit ? gewaehlt.has(i) : undefined}
+                      aria-label={canEdit ? `${w.text} auswählen` : `Zu ${w.text} springen`}
                       title={changed ? `Im Video gesprochen: ${original[i].text}` : low ? "Der Computer war sich hier nicht sicher" : undefined}
                       className={cn(
                         "transition-soft mx-px inline rounded-md px-0.5 py-0.5 text-left align-baseline hover:bg-white/10",
@@ -220,10 +269,14 @@ export function ClipTextEditor({
                         changed && "text-ai-soft",
                         active && "word-active",
                         editingIndex === i && "bg-white/20",
-                        korrigieren && canEdit && "cursor-text underline decoration-dotted decoration-white/30 underline-offset-4",
+                        /* Ausgewählt mit Rahmen UND Hintergrund: nur über die Farbe zu gehen liesse
+                           die Auswahl für jemanden verschwinden, der sie nicht unterscheiden kann
+                           (WCAG 1.4.1). */
+                        gewaehlt.has(i) && "bg-danger/20 shadow-[inset_0_0_0_1.5px_var(--danger)]",
+                        leer && "text-text-3 line-through decoration-danger/70",
                       )}
                     >
-                      {w.text}
+                      {leer ? original[i]?.text || "leer" : w.text}
                     </button>
                   );
                 })}

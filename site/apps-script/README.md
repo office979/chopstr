@@ -3,11 +3,14 @@
 Fünf Schritte, etwa zehn Minuten. Alles davon musst du selbst machen: es läuft in deinem
 Google-Konto, und dort komme ich nicht hin.
 
-## 1. Tabelle anlegen
+## 1. Tabelle
 
-In Google Drive eine neue Tabelle anlegen, zum Beispiel **chopstr Warteliste**.
-Das Blatt unten links in **Warteliste** umbenennen (genau so, das Skript sucht diesen Namen).
-Die Kopfzeile legt das Skript beim ersten Eintrag selbst an.
+Die Tabelle **chopstr Warteliste** liegt bereits in Ferdis Google Drive (angelegt am 25.09.2026).
+Ihre Adresse steht bewusst nicht hier: dieses Repository ist öffentlich, und interne Dokumente
+gehören nicht in öffentlichen Quelltext.
+
+Blatt und Kopfzeile legt das Skript beim ersten Eintrag selbst an — das Blatt heisst dann
+**Warteliste**, mit den Spalten Zeitpunkt, E-Mail und Quelle. Von Hand ist dort nichts zu tun.
 
 ## 2. Skript einfügen
 

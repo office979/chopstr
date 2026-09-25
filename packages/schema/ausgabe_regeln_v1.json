@@ -1,12 +1,11 @@
 {
   "version": "ausgabe_regeln_v1",
-  "zweck": "Eine Clipfassung verlässt chopstr auf genau zwei Wegen: als Download oder als Veröffentlichung. Bis hierher entschied jeder Weg für sich, und der Download prüfte nur die Gastfreigabe. Damit konnte ein nie geprüftes oder technisch kaputtes Video hinausgehen. Diese Datei ist die eine Liste der Gründe, die das verhindern. Web-Oberfläche, Web-Routen und Worker lesen dieselbe Liste.",
+  "zweck": "Eine Clipfassung verlässt chopstr auf genau zwei Wegen: als Download oder als Veröffentlichung. Bis hierher entschied jeder Weg für sich, und der Download prüfte nur die Gastfreigabe. Damit konnte ein nie geprüftes oder technisch kaputtes Video hinausgehen. Diese Datei ist die eine Liste der Gründe, die das verhindern. Web-Oberfläche, Web-Routen und Worker lesen dieselbe Liste. HERUNTERLADEN und VERÖFFENTLICHEN sind dabei zwei verschiedene Dinge: heruntergeladen werden darf alles, was als Datei existiert - auch ein abgelehnter oder noch nicht freigegebener Clip, denn wer ihn überarbeiten soll, braucht ihn. Gesperrt ist der Download nur, wenn es physisch nichts zu laden gibt. Alles andere - Freigabe, Inhalt, Technik, Vertrag, Tarif - hängt am Veröffentlichen.",
   "hinweis_reihenfolge": "Die Reihenfolge ist die Reihenfolge der Anzeige: der erste zutreffende Grund ist der, der dem Nutzer genannt wird. Oben steht, was zuerst zu tun ist.",
   "regeln": [
     {
       "code": "verworfen",
       "sperrt": [
-        "herunterladen",
         "veroeffentlichen"
       ],
       "text": "Dieser Vorschlag ist verworfen.",
@@ -44,7 +43,6 @@
     {
       "code": "inhalt_fehler",
       "sperrt": [
-        "herunterladen",
         "veroeffentlichen"
       ],
       "text": "Der Schnitt verändert, was gesagt wurde.",
@@ -53,7 +51,6 @@
     {
       "code": "technik_fehler",
       "sperrt": [
-        "herunterladen",
         "veroeffentlichen"
       ],
       "text": "Die fertige Datei hat die technische Prüfung nicht bestanden.",
@@ -62,7 +59,6 @@
     {
       "code": "gast_offen",
       "sperrt": [
-        "herunterladen",
         "veroeffentlichen"
       ],
       "text": "Die Person, die du gefragt hast, hat noch nicht geantwortet.",
@@ -79,7 +75,6 @@
     {
       "code": "gast_veraltet",
       "sperrt": [
-        "herunterladen",
         "veroeffentlichen"
       ],
       "text": "Der Clip wurde nach der Freigabe geändert.",

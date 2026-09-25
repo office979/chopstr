@@ -10,8 +10,6 @@ import { SilentPreview, type PreviewFont } from "@/components/clips/SilentPrevie
 import { Modal } from "@/components/ui/Modal";
 import type { Aspect, Candidate, CaptionVersion, Clip, GuestApproval, HookVersion, PipelineEvent } from "@/lib/repo/types";
 import {
-  EXPORT_BLOCKED_MESSAGE,
-  exportBlocked,
   FREIGABE_VERALTET_MESSAGE,
   freigabeVeraltet,
   latestByClip,
@@ -712,33 +710,6 @@ export function ClipBoard({
           ))}
       </Modal>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-text-2">
-          {clips.length} {clips.length === 1 ? "Clip" : "Clips"}
-          {zaehler.get("fehler") ? `, ${zaehler.get("fehler")} mit einem Fehler` : ""}
-          {zaehler.get("postbereit") ? `, ${zaehler.get("postbereit")} bereit zum Posten` : ""}.
-        </p>
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          {live && (
-            <span className="flex items-center gap-2 text-ai-soft">
-              <span className="h-1.5 w-1.5 rounded-full bg-ai-soft" aria-hidden="true" />
-              {RENDER_STEP.label} live
-            </span>
-          )}
-          {connection === "error" && !allSettled && <span className="text-attention">Verbindung unterbrochen, versuche erneut</span>}
-          {demo && <Badge tone="ai">Testmodus</Badge>}
-          <FreigabeSenden
-            clips={zurFreigabe}
-            erlaubt={canRequestGuest}
-            tarifErlaubt={planAllowsGuest}
-            tarifName={planName}
-            ausgewaehlt={auswahl.size}
-            onFreigabe={onRequested}
-            onFertig={freigabeFertig}
-          />
-        </div>
-      </div>
-
       {/* Der Meldebereich steht immer da, auch leer.
        *
        * Vorher entstand er erst mit der Meldung. Ein Screenreader kündigt eine Live-Region aber
@@ -757,9 +728,12 @@ export function ClipBoard({
         {message?.text ?? ""}
       </p>
 
-      {/* Filter nach Zustand. Bei dreißig Clips ist „alle zeigen" keine Übersicht mehr, und die
-          Frage lautet ohnehin fast immer „was muss ich noch ansehen". */}
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Clips filtern">
+      {/* Filter links, Freigabe rechts - auf einer Höhe.
+       *
+       * Darüber stand eine eigene Zeile „3 Clips.", und die Zahl stand gleich daneben nochmal in
+       * „Alle (3)". Zwei Zeilen, dieselbe Auskunft zweimal. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Clips filtern">
         {([["alle", `Alle (${zaehler.get("alle") ?? 0})`]] as [FilterId, string][])
           .concat(
             FILTER_ORDNUNG.filter((f) => (zaehler.get(f) ?? 0) > 0).map(
@@ -780,6 +754,27 @@ export function ClipBoard({
               {label}
             </button>
           ))}
+      </div>
+
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          {live && (
+            <span className="flex items-center gap-2 text-ai-soft">
+              <span className="h-1.5 w-1.5 rounded-full bg-ai-soft" aria-hidden="true" />
+              {RENDER_STEP.label} live
+            </span>
+          )}
+          {connection === "error" && !allSettled && <span className="text-attention">Verbindung unterbrochen, versuche erneut</span>}
+          {demo && <Badge tone="ai">Testmodus</Badge>}
+          <FreigabeSenden
+            clips={zurFreigabe}
+            erlaubt={canRequestGuest}
+            tarifErlaubt={planAllowsGuest}
+            tarifName={planName}
+            ausgewaehlt={auswahl.size}
+            onFreigabe={onRequested}
+            onFertig={freigabeFertig}
+          />
+        </div>
       </div>
 
       {/* Plattform und Person. Nur da, wo es mehr als eine gibt: sonst wäre es eine Frage ohne
@@ -878,7 +873,6 @@ export function ClipBoard({
           const kandidat = candidates.find((k) => k.id === clip.candidate_id) ?? null;
           const progress = clip.status === "rendering" ? (ev?.progress ?? 0) : isDone(clip) ? 1 : 0;
           const approval = approvals.get(clip.id);
-          const blocked = exportBlocked(clip, approval);
           /* Wurde der Clip nach der Freigabe noch angefasst? Dann hat die Person eine andere
            * Fassung gesehen als die, die jetzt herauskäme. */
           const freigabeAlt = freigabeVeraltet(approval, clip.updated_at);
@@ -886,7 +880,9 @@ export function ClipBoard({
           /* Jede Handlung fragt denselben Rechner. Vorher entschied jeder Knopf für sich, ob er
            * anklickbar ist, und daher stand „Korrektur nötig" neben einem offenen „Freigeben". */
           const darfLaden = aktionStand("herunterladen", p, {
-            exportGesperrt: blocked ? EXPORT_BLOCKED_MESSAGE : demo ? "Im Testmodus gibt es keine Dateien" : null,
+            /* Die Freigabe sperrt hier nichts mehr: Herunterladen ist kein Veröffentlichen.
+               Übrig bleibt der Testmodus, in dem es wirklich keine Datei gibt. */
+            exportGesperrt: demo ? "Im Testmodus gibt es keine Dateien" : null,
             hatDatei: Boolean(mp4),
           });
           const naechste = hauptaktion(p);

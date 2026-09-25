@@ -52,16 +52,14 @@ export function guestStatus(clip: Pick<Clip, "guest_approval_required">, latest:
 }
 
 /* Export gesperrt, solange guest_approval_required und keine approved-Entscheidung vorliegt */
-/* Sperrt die Freigabe den Download?
+/* Hier stand `exportBlocked`: sperrt die Freigabe den Download?
  *
- * Nur, solange keine Antwort da ist. Vorher hiess die Regel „alles ausser Zustimmung", und damit
- * sperrte auch eine Absage die Datei. Das ging zu weit: nach einem „so nicht" will man den Clip
- * ansehen und überarbeiten, und dafür braucht man ihn. Herunterladen ist kein Veröffentlichen -
- * das bleibt gesperrt, siehe lib/clips/ausgabe (gast_nein). */
-export function exportBlocked(clip: Pick<Clip, "guest_approval_required">, latest: GuestApproval | undefined): boolean {
-  if (!clip.guest_approval_required) return false;
-  return latest?.decision == null;
-}
+ * Die Funktion ist weg, weil die Antwort immer „nein" ist. Zwei Anläufe hat es gebraucht - erst
+ * „alles ausser Zustimmung sperrt", dann „nur solange keine Antwort da ist" - und beide gingen zu
+ * weit. Herunterladen ist kein Veröffentlichen: wer einen Clip überarbeiten, jemandem zeigen oder
+ * auch nur ansehen soll, braucht die Datei, und zwar in JEDEM Zustand. Was die Freigabe schützt,
+ * ist das Posten; das entscheidet lib/clips/ausgabe. */
+
 
 /* Gilt die Freigabe noch für das, was jetzt herauskäme?
  *
@@ -81,6 +79,5 @@ export function freigabeVeraltet(
   return Date.parse(clipGeaendertAm) > Date.parse(latest.decided_at) + 1000;
 }
 
-export const EXPORT_BLOCKED_MESSAGE = "Noch gesperrt: Du wartest auf die Antwort der Person, die du gefragt hast.";
 export const FREIGABE_VERALTET_MESSAGE =
   "Der Clip wurde nach der Freigabe geändert. Die Person hat eine andere Fassung gesehen - bitte noch einmal fragen.";

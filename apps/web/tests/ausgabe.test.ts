@@ -87,11 +87,12 @@ describe("was den Download sperrt, den die alte Route durchgelassen hat", () => 
     expect(codes("herunterladen", eingabe({ stand: p }))).toContain("clippen_laeuft");
   });
 
-  it("sperrt einen Schnitt, der eine Verneinung wegschneidet", () => {
+  it("sperrt das Posten eines Schnitts, der eine Verneinung wegschneidet", () => {
     const c = clip({ fidelity_warnings: [{ type: "negation_removed", severity: "high", detail: ["nicht"] }] });
-    expect(codes("herunterladen", eingabe({ stand: stand({ fidelity_warnings: c.fidelity_warnings }) }))).toContain(
-      "inhalt_fehler",
-    );
+    const e = eingabe({ stand: stand({ fidelity_warnings: c.fidelity_warnings }), vertragUnterschrieben: true, tarifDarfPosten: true });
+    expect(codes("veroeffentlichen", e)).toContain("inhalt_fehler");
+    /* Herunterladen bleibt frei: wer den Schnitt reparieren soll, braucht die Datei. */
+    expect(ausgabe("herunterladen", e).erlaubt).toBe(true);
   });
 
   it("sperrt einen fehlgeschlagenen Lauf", () => {
@@ -102,15 +103,20 @@ describe("was den Download sperrt, den die alte Route durchgelassen hat", () => 
     expect(codes("herunterladen", eingabe({ stand: stand({ status: "rendering" }) }))).toContain("clippen_laeuft");
   });
 
-  it("sperrt einen verworfenen Vorschlag", () => {
-    expect(codes("herunterladen", eingabe({ stand: stand({ review: "verworfen" }) }))).toContain("verworfen");
+  it("sperrt das Posten eines verworfenen Vorschlags", () => {
+    const e = eingabe({ stand: stand({ review: "verworfen" }), vertragUnterschrieben: true, tarifDarfPosten: true });
+    expect(codes("veroeffentlichen", e)).toContain("verworfen");
+    expect(ausgabe("herunterladen", e).erlaubt).toBe(true);
   });
 
-  it("sperrt eine Datei, die die technische Prüfung nicht bestanden hat", () => {
+  it("sperrt das Posten einer Datei, die die technische Prüfung nicht bestanden hat", () => {
     const technik: TechnikBefund[] = [
       { pruefung: "ton", ergebnis: "fehler", text: "Die Datei hat keine Tonspur.", gemessen: "0 Spuren" },
     ];
-    expect(codes("herunterladen", eingabe({ technik }))).toContain("technik_fehler");
+    const e = eingabe({ technik, vertragUnterschrieben: true, tarifDarfPosten: true });
+    expect(codes("veroeffentlichen", e)).toContain("technik_fehler");
+    /* Herunterladen bleibt frei: wer eine kaputte Datei ansehen soll, braucht sie. */
+    expect(ausgabe("herunterladen", e).erlaubt).toBe(true);
   });
 });
 
@@ -128,27 +134,29 @@ describe("was nur das Veröffentlichen sperrt", () => {
   });
 });
 
-describe("die Gastfreigabe", () => {
-  it("sperrt, solange niemand geantwortet hat", () => {
-    expect(codes("herunterladen", eingabe({ gastOffen: true }))).toContain("gast_offen");
-  });
+describe("die Gastfreigabe sperrt das Posten, nie den Download", () => {
+  /* Herunterladen ist kein Veröffentlichen. Wer einen Clip überarbeiten, jemandem zeigen oder
+   * auch nur ansehen soll, braucht die Datei - in JEDEM Zustand. Was die Freigabe schützt, ist
+   * das Posten. */
+  const frei = { vertragUnterschrieben: true, tarifDarfPosten: true };
 
-  it("lässt den Download frei, sobald eine Antwort da ist - auch eine ablehnende", () => {
-    /* Nach einem „so nicht" will man den Clip ansehen und überarbeiten, und dafür braucht man die
-     * Datei. Herunterladen ist kein Veröffentlichen. */
-    const e = eingabe({ gastOffen: false, gastNein: true, vertragUnterschrieben: true, tarifDarfPosten: true });
+  it("sperrt das Posten, solange niemand geantwortet hat", () => {
+    const e = eingabe({ gastOffen: true, ...frei });
+    expect(codes("veroeffentlichen", e)).toContain("gast_offen");
     expect(ausgabe("herunterladen", e).erlaubt).toBe(true);
   });
 
-  it("sperrt das Veröffentlichen, wenn die Person nicht zugestimmt hat", () => {
-    const e = eingabe({ gastOffen: false, gastNein: true, vertragUnterschrieben: true, tarifDarfPosten: true });
-    expect(ausgabe("veroeffentlichen", e).erlaubt).toBe(false);
+  it("sperrt das Posten, wenn die Person nicht zugestimmt hat", () => {
+    const e = eingabe({ gastNein: true, ...frei });
     expect(codes("veroeffentlichen", e)).toContain("gast_nein");
+    expect(ausgabe("herunterladen", e).erlaubt).toBe(true);
   });
 
-  it("sperrt, wenn nach der Freigabe noch geändert wurde", () => {
+  it("sperrt das Posten, wenn nach der Freigabe noch geändert wurde", () => {
     /* Die Person hat einer Fassung zugestimmt, die es so nicht mehr gibt. */
-    expect(codes("herunterladen", eingabe({ gastVeraltet: true }))).toContain("gast_veraltet");
+    const e = eingabe({ gastVeraltet: true, ...frei });
+    expect(codes("veroeffentlichen", e)).toContain("gast_veraltet");
+    expect(ausgabe("herunterladen", e).erlaubt).toBe(true);
   });
 });
 
@@ -169,7 +177,7 @@ describe("die Reihenfolge der Gründe", () => {
   it("nennt zuerst, was zuerst zu tun ist", () => {
     /* Ein fehlgeschlagener Lauf UND eine offene Gastfreigabe: erst nochmal clippen. */
     const e = eingabe({ stand: stand({ status: "failed" }), gastOffen: true });
-    expect(ausgabe("herunterladen", e).gruende[0].code).toBe("clippen_gescheitert");
+    expect(ausgabe("veroeffentlichen", e).gruende[0].code).toBe("clippen_gescheitert");
   });
 
   it("gibt zu jedem Grund einen Satz mit Abhilfe", () => {
@@ -181,10 +189,15 @@ describe("die Reihenfolge der Gründe", () => {
 
 describe("der Regelkatalog", () => {
   it("trennt die beiden Wege", () => {
-    expect(regelGiltFuer("nicht_freigegeben", "herunterladen")).toBe(false);
-    expect(regelGiltFuer("nicht_freigegeben", "veroeffentlichen")).toBe(true);
-    expect(regelGiltFuer("technik_fehler", "herunterladen")).toBe(true);
-    expect(regelGiltFuer("technik_fehler", "veroeffentlichen")).toBe(true);
+    /* Herunterladen sperrt NUR, was physisch nicht da ist. Alles Redaktionelle, Technische und
+     * Rechtliche hängt am Veröffentlichen. */
+    for (const code of ["nicht_freigegeben", "technik_fehler", "inhalt_fehler", "gast_offen", "verworfen"] as const) {
+      expect(regelGiltFuer(code, "herunterladen"), code).toBe(false);
+      expect(regelGiltFuer(code, "veroeffentlichen"), code).toBe(true);
+    }
+    for (const code of ["datei_fehlt", "clippen_laeuft", "clippen_gescheitert"] as const) {
+      expect(regelGiltFuer(code, "herunterladen"), code).toBe(true);
+    }
   });
 });
 

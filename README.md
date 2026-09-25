@@ -168,10 +168,11 @@ zwar **Clips, nicht Videos**: freigegeben wird je Clip. Auf der Videokarte steht
 vorkommt („1 fehlerhaft · 1 ausstehend · 1 freigegeben“), in der Reihenfolge, in der es Arbeit
 macht.
 
-**Herunterladen geht ab der ersten Antwort — auch nach einer Absage.** Nach einem „so nicht" will
-man den Clip ansehen und überarbeiten, und dafür braucht man die Datei. **Veröffentlichen bleibt
-gesperrt**, solange keine Zusage da ist (`gast_nein` in den Ausgaberegeln): genau dafür ist die
-Frage gestellt worden.
+**Herunterladen ist nie gesperrt.** Wer einen Clip überarbeiten, jemandem zeigen oder auch nur
+ansehen soll, braucht die Datei — in jedem Zustand. Der Download hängt nur noch daran, ob es
+physisch etwas zu laden gibt (noch nicht geclippt, läuft gerade, Lauf gescheitert).
+**Veröffentlichen** dagegen verlangt alles: Zusage der gefragten Person, keinen inhaltlichen oder
+technischen Befund, Vertrag und passenden Tarif. Genau dafür ist die Frage gestellt worden.
 
 **„Fehlerhaft" ist das Urteil eines Menschen, nicht der Befund der Maschine.** Ein gescheiterter
 Renderlauf oder ein Schnitt, der eine Verneinung wegschneidet, sperrt den Download und steht als
@@ -211,10 +212,12 @@ entscheidet **eine** Stelle auf dem Server, `apps/web/lib/clips/ausgabe.ts`, nac
 zeigt diese Antwort an; sie entscheidet nicht. Ein gesperrter Knopf ist keine Sperre, sondern eine
 Bitte, und wer die Adresse kennt, kommt daran vorbei.
 
-Gesperrt wird unter anderem: verworfene Vorschläge, ein laufendes oder fehlgeschlagenes Clippen,
-ein fehlendes Video, ein Schnitt, der eine Verneinung wegschneidet, eine ausstehende Gastfreigabe
-oder eine, die eine andere Fassung gesehen hat, und eine Datei, die die technische Prüfung nicht
-bestanden hat. Das Veröffentlichen verlangt zusätzlich die Freigabe durch einen Menschen,
+Die beiden Wege sind verschieden streng. **Herunterladen** sperrt nur, was physisch nicht da ist:
+noch nicht geclippt, läuft gerade, Lauf gescheitert. **Veröffentlichen** sperrt zusätzlich alles
+Redaktionelle, Technische und Rechtliche: verworfene Vorschläge, ein Schnitt, der eine Verneinung
+wegschneidet, eine ausstehende oder abgelehnte Freigabe oder eine, die eine andere Fassung gesehen
+hat, eine Datei, die die technische Prüfung nicht bestanden hat, ein fehlender Vertrag, ein Tarif
+ohne Posten. Das Veröffentlichen verlangt zusätzlich die Freigabe durch einen Menschen,
 den Auftragsverarbeitungsvertrag und einen Tarif, der das direkte Posten enthält.
 
 **Die technische Prüfung** (Migration 0014) läuft im Worker nach dem Clippen und misst die fertige

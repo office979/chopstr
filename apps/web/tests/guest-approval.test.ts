@@ -1,30 +1,12 @@
-/* Die Gastfreigabe: wann ein Export gesperrt ist, und wann eine erteilte Freigabe nicht mehr
- * gilt. Reine Rechnung, deshalb hier. */
+/* Die Gastfreigabe: wann eine erteilte Freigabe nicht mehr gilt. Reine Rechnung, deshalb hier.
+ *
+ * Ob der Download gesperrt ist, stand auch einmal hier. Die Frage gibt es nicht mehr: die
+ * Freigabe sperrt ihn nie. Was sie sperrt, ist das Posten - siehe ausgabe.test. */
 
 import { describe, expect, it } from "vitest";
-import { exportBlocked, freigabeVeraltet } from "@/lib/guest/approval";
-import type { Clip, GuestApproval } from "@/lib/repo/types";
+import { freigabeVeraltet } from "@/lib/guest/approval";
+import type { GuestApproval } from "@/lib/repo/types";
 
-describe("exportBlocked", () => {
-  const clip = (noetig: boolean) => ({ guest_approval_required: noetig }) as Clip;
-
-  it("sperrt nicht, wenn keine Freigabe verlangt ist", () => {
-    expect(exportBlocked(clip(false), undefined)).toBe(false);
-  });
-
-  it("sperrt, solange niemand entschieden hat", () => {
-    expect(exportBlocked(clip(true), undefined)).toBe(true);
-  });
-
-  it("gibt mit JEDER Antwort frei, auch einer ablehnenden", () => {
-    /* Nach einem „so nicht" will man den Clip ansehen und überarbeiten, und dafür braucht man die
-     * Datei. Herunterladen ist kein Veröffentlichen - das bleibt gesperrt, siehe ausgabe.ts
-     * (gast_nein). */
-    expect(exportBlocked(clip(true), { decision: "approved" } as GuestApproval)).toBe(false);
-    expect(exportBlocked(clip(true), { decision: "changes" } as GuestApproval)).toBe(false);
-    expect(exportBlocked(clip(true), { decision: "rejected" } as GuestApproval)).toBe(false);
-  });
-});
 
 /* Eine Freigabe gilt der Fassung, die der Gast gesehen hat.
  *

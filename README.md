@@ -170,6 +170,18 @@ Wer ein Worker-Image baut: **ffmpeg braucht libass.** Ohne den `subtitles`-Filte
 keine Untertitel einbrennen. Er merkt das und lässt sie weg; seit der technischen Prüfung schlägt
 der Lauf fehl, statt still ein Video ohne Untertitel auszuliefern.
 
+## Mehrere Fassungen desselben Moments
+
+Die automatische Erstellung legt je gefundenem Moment eine Datei an, hochkant. Über „Mehr ·
+Weitere Fassung anlegen" in der Clip-Übersicht entsteht derselbe Moment in einem anderen Format:
+9:16, 4:5, 1:1 oder 16:9. Bildausschnitt, sicherer Bereich und Schriftgröße rechnen sich mit
+(`captions_de.scaled_preset`), hochkant kommen die Untertitel Wort für Wort, quadratisch und quer
+ruhig in zwei Zeilen.
+
+Gewählt wird das **Format**, nicht die Plattform: TikTok, Reels und Shorts haben bei chopstr
+dasselbe Format, und eine zweite Datei dafür wäre Bild für Bild dieselbe Datei. Je Moment ist
+deshalb höchstens eine Fassung pro Format möglich (Entscheidung P19).
+
 ## Definition of Done (Phase 0 + 1) und Status
 
 | Kriterium | Status |

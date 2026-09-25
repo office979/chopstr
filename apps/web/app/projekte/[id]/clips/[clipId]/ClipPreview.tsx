@@ -98,11 +98,13 @@ export function ClipPreview({
     );
   }
 
-  /* Das Overlay muss genau auf dem Bild liegen, nicht auf der Karte: das Video ist hochkant und
-   * schmaler als die Karte. Deshalb ein Behälter in Bildbreite (w-fit) statt inset-0 auf der Karte. */
+  /* Genau so breit wie die Karte, wie die Live-Vorschau daneben: beide liegen an derselben Stelle
+   * und werden mit einem Umschalter getauscht. Waeren sie verschieden breit, huepfte die halbe
+   * Seite bei jedem Umschalten. Das Overlay liegt deshalb auf diesem Behaelter, nicht auf der
+   * Karte - er hat jetzt dieselben Masse wie das Bild. */
   return (
     <GlassCard padding="none" className="overflow-hidden">
-      <div className="relative mx-auto w-fit">
+      <div className="relative w-full bg-black" style={{ aspectRatio: ASPECT_RATIO_CSS[aspect] }}>
         <video
           ref={videoRef}
           src={src}
@@ -113,8 +115,10 @@ export function ClipPreview({
           aria-label="Clip abspielen"
           onPlay={() => onLaeuft?.(true)}
           onPause={() => onLaeuft?.(false)}
-          className="block max-h-[62dvh] w-auto bg-black"
-          style={{ aspectRatio: trim ? undefined : ASPECT_RATIO_CSS[aspect] }}
+          /* object-contain und nicht cover: das ist der FERTIGE Clip, an dem nichts mehr
+             beschnitten werden darf. Hat er wider Erwarten ein anderes Seitenverhaeltnis, sieht
+             man schwarze Balken - und das ist die ehrliche Anzeige. */
+          className="absolute inset-0 block h-full w-full bg-black object-contain"
           onTimeUpdate={(e) => {
             const video = e.currentTarget;
             if (trim && trim.end != null && video.currentTime > trim.end) {

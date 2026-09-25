@@ -207,7 +207,10 @@ export function LiveVorschau({
 
   return (
     <GlassCard padding="none" className="overflow-hidden">
-      <div className="relative mx-auto w-full max-w-[340px] overflow-hidden bg-black" style={{ aspectRatio: ASPEKT[aspect] }}>
+      {/* Volle Breite der Karte. Vorher stand hier max-w-[340px] in einer Spalte, die breiter ist:
+          links und rechts blieb ein Streifen Kartenhintergrund neben dem Video stehen. Jetzt ist
+          die Karte so breit wie das Bild, und ihre runden Ecken schneiden es mit. */}
+      <div className="relative w-full overflow-hidden bg-black" style={{ aspectRatio: ASPEKT[aspect] }}>
         {/* Der Zoom greift NUR hier hinein, nicht am Rahmen.
           *
           * Vorher lag die Skalierung am Rahmen - dann wuchs der ganze Kasten auf der Seite, statt

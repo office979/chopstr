@@ -175,6 +175,17 @@ export function ClipDetail({
   }, [router, backHref, sourceId]);
 
   const [original, setOriginal] = useState<TranscriptWord[]>(initialWords);
+  /* Der Wortlaut, wie er beim Öffnen der Seite dastand - und der bleibt so.
+   *
+   * ``original`` ist nach dem Speichern der gespeicherte Stand; daran hängt, ob etwas offen ist.
+   * Für ein aus dem Untertitel genommenes Wort ist das aber genau das Falsche: dort steht danach
+   * ein leerer Text, und damit wäre weder anzuzeigen, welches Wort durchgestrichen dasteht, noch
+   * es zurückzuholen. Diese Liste wird nie überschrieben.
+   *
+   * Grenze, die bleibt: ein Wort, das in einer FRÜHEREN Sitzung genommen und gespeichert wurde,
+   * ist auch hier schon leer. Sein Wortlaut steht nur in der Korrekturliste auf dem Server und
+   * wird nicht mitgeladen. */
+  const [gesprochen] = useState<TranscriptWord[]>(initialWords);
   const [words, setWords] = useState<TranscriptWord[]>(initialWords);
   const [corrections, setCorrections] = useState<Map<number, Correction>>(new Map());
   const [currentTime, setCurrentTime] = useState(clipStart);
@@ -183,7 +194,13 @@ export function ClipDetail({
   /* Bei einem Fehler steht in ``nochmal``, was zu wiederholen ist. Eine Meldung ohne Weg zurueck
    * laesst den Nutzer mit seiner Arbeit im Browser sitzen und sonst nichts. */
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string; nochmal?: () => void } | null>(null);
-  const [leaveOpen, setLeaveOpen] = useState(false);
+  /* Wohin es gehen soll, sobald über die ungespeicherten Änderungen entschieden ist.
+   *
+   * Vorher war das ein blosses true/false und galt nur für den Weg zurück zur Liste. „Zurück",
+   * „Weiter" und der Wechsel zwischen Schnitt, Text und Untertiteln gingen daran vorbei - die
+   * Änderungen waren weg, ohne dass jemand gefragt wurde. Jetzt merkt sich die Seite den Weg und
+   * geht ihn erst nach der Antwort. */
+  const [verlassen, setVerlassen] = useState<{ was: string; gehen: () => void } | null>(null);
 
   /* Untertitel: eigener Stand, eigener Speicherknopf. Bewusst getrennt vom Text, denn es sind zwei
    * verschiedene Entscheidungen, und der Text schreibt das Transkript des ganzen Videos um. */
@@ -618,7 +635,26 @@ export function ClipDetail({
       if (!res.ok || !data.version) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
       setOriginal(words);
       setCorrections(new Map());
-      setMessage({ tone: "ok", text: "Gespeichert." });
+      /* Und gleich neu clippen, genau wie beim Schnitt. Ein geänderter Untertiteltext, der erst
+       * beim nächsten Lauf im Bild landet, ist eine Aufgabe, die das Programm dem Menschen gibt,
+       * obwohl es sie selbst erledigen kann. Schlägt das Anstossen fehl, ist das Speichern
+       * trotzdem sicher - die Änderung liegt in der Datenbank. */
+      try {
+        const lauf = await fetch(`/api/projects/${sourceId}/clips/${clipId}/render`, { method: "POST" });
+        /* 409 heisst: es läuft schon. Das ist kein Fehler, sondern genau das, was man wollte. */
+        if (!lauf.ok && lauf.status !== 409) {
+          const d = (await lauf.json()) as { error?: string };
+          throw new Error(d.error ?? "Das Clippen liess sich nicht anstossen");
+        }
+        setMessage({ tone: "ok", text: "Gespeichert. Das Video wird geclippt." });
+      } catch (err) {
+        setMessage({
+          tone: "error",
+          text: `Gespeichert. Das Clippen liess sich nicht anstossen: ${
+            err instanceof Error ? err.message : "unbekannter Fehler"
+          }`,
+        });
+      }
     } catch (err) {
       setMessage({
         tone: "error",
@@ -740,9 +776,20 @@ export function ClipDetail({
     }
   };
 
-  const goBack = () => {
-    if (dirty || stilGeaendert || schnittGeaendert) setLeaveOpen(true);
-    else zurueckZurListe();
+  /* Jeder Weg aus dieser Seite heraus geht hier durch. Ohne offene Änderungen sofort, sonst
+   * erst die Frage. */
+  const wechseln = (was: string, gehen: () => void) => {
+    if (offeneAenderungen) setVerlassen({ was, gehen });
+    else gehen();
+  };
+  const goBack = () => wechseln("zur Clip-Liste", zurueckZurListe);
+
+  /* Alles speichern, was offen ist - in der Reihenfolge, in der es gehört: erst Schnitt und
+   * Effekte (die stossen das Neuclippen an), dann Text und Untertitel. */
+  const allesSpeichern = async () => {
+    if (schnittGeaendert || effekteGeaendert) await schnittSichern();
+    if (stilGeaendert) await stilSpeichern();
+    if (dirty) await save();
   };
 
   /* Wo stehe ich in diesem Video, und wo geht es weiter? */
@@ -815,13 +862,16 @@ export function ClipDetail({
           {geschwister.length > 1 && (
             <div className="flex items-center gap-1 rounded-pill border border-line px-1 py-1">
               {vorher ? (
-                <Link
-                  href={`/projekte/${sourceId}/clips/${vorher}`}
+                /* Ein Knopf und kein Link: ein Link geht sofort, und die Frage nach den
+                   ungespeicherten Änderungen käme zu spät. */
+                <button
+                  type="button"
+                  onClick={() => wechseln("zum vorigen Clip", () => router.push(`/projekte/${sourceId}/clips/${vorher}`))}
                   aria-label="Voriger Clip"
                   className="transition-soft inline-flex h-7 items-center rounded-pill px-2.5 text-sm text-text-2 hover:bg-white/10 hover:text-text"
                 >
                   Zurück
-                </Link>
+                </button>
               ) : (
                 <span className="inline-flex h-7 items-center px-2.5 text-sm text-text-3">Zurück</span>
               )}
@@ -829,13 +879,14 @@ export function ClipDetail({
                 Clip {nr + 1} von {geschwister.length}
               </span>
               {nachher ? (
-                <Link
-                  href={`/projekte/${sourceId}/clips/${nachher}`}
+                <button
+                  type="button"
+                  onClick={() => wechseln("zum nächsten Clip", () => router.push(`/projekte/${sourceId}/clips/${nachher}`))}
                   aria-label="Nächster Clip"
                   className="transition-soft inline-flex h-7 items-center rounded-pill px-2.5 text-sm text-text-2 hover:bg-white/10 hover:text-text"
                 >
                   Weiter
-                </Link>
+                </button>
               ) : (
                 <span className="inline-flex h-7 items-center px-2.5 text-sm text-text-3">Weiter</span>
               )}
@@ -963,7 +1014,9 @@ export function ClipDetail({
                 role="tab"
                 aria-selected={bereich === b.id}
                 title={b.satz}
-                onClick={() => setBereich(b.id)}
+                /* Schnitt, Text und Untertitel werden getrennt gespeichert. Wer mit offenen
+                   Änderungen den Bereich wechselt, verlöre sie - also erst die Frage. */
+                onClick={() => wechseln(`zu „${b.name}“`, () => setBereich(b.id))}
                 className={cn(
                   "transition-soft flex-1 rounded-[10px] px-3 py-2 text-sm",
                   bereich === b.id ? "bg-white/10 font-medium text-text" : "text-text-2 hover:text-text",
@@ -1078,6 +1131,7 @@ export function ClipDetail({
               <ClipTextEditor
                 words={words}
                 original={original}
+                gesprochen={gesprochen}
                 wordFrom={wordFrom}
                 wordTo={wordTo}
                 speakers={speakers}
@@ -1097,35 +1151,37 @@ export function ClipDetail({
               </GlassCard>
             )}
 
+            {/* Nur der Knopf, unten rechts. Hier stand eine eigene Karte mit „Du hast etwas
+                geändert." und darunter „Gespeichert. Wirkt, sobald das Video neu geclippt wird." -
+                drei Zeilen für eine Handlung, und die letzte stimmte nicht mehr: Speichern clippt
+                jetzt sofort neu. Dass etwas offen ist, steht oben in der Kopfzeile, und der Knopf
+                ist grau, solange es nichts zu speichern gibt. */}
             {canEdit && hasText && (
-              <GlassCard padding="md" selected={dirty}>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-sm text-text-2">{dirty ? "Du hast etwas geändert." : "Nichts geändert."}</p>
-                  <Button variant={dirty ? "primary" : "ghost"} disabled={!dirty || saving} onClick={save}>
-                    {saving ? "Wird gespeichert" : "Text speichern"}
-                  </Button>
-                </div>
+              <div className="flex flex-wrap items-center justify-end gap-3">
                 {/* Immer im Baum, auch leer: ein Screenreader kündigt eine Live-Region nur an,
                     wenn sie schon dastand, bevor sich ihr Inhalt ändert (WCAG 2.2, 4.1.3). */}
-                <div role="status" aria-live="polite" className={cn("flex flex-wrap items-center gap-3", message && "mt-3")}>
+                <div role="status" aria-live="polite" className="mr-auto flex min-w-0 flex-wrap items-center gap-3">
                   {message && (
                     <p className={cn("text-sm", message.tone === "ok" ? "text-text" : "text-attention")}>{message.text}</p>
                   )}
                   {message?.nochmal && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          const wieder = message.nochmal;
-                          setMessage(null);
-                          wieder?.();
-                        }}
-                      >
-                        Nochmal versuchen
-                      </Button>
-                    )}
-                  </div>
-              </GlassCard>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        const wieder = message.nochmal;
+                        setMessage(null);
+                        wieder?.();
+                      }}
+                    >
+                      Nochmal versuchen
+                    </Button>
+                  )}
+                </div>
+                <Button variant={dirty ? "primary" : "ghost"} disabled={!dirty || saving} onClick={save}>
+                  {saving ? "Wird gespeichert" : "Speichern"}
+                </Button>
+              </div>
             )}
           </div>
 
@@ -1152,32 +1208,40 @@ export function ClipDetail({
         </div>
       </div>
 
+      {/* Eine Frage für jeden Weg hinaus: zurück zur Liste, zum nächsten Clip, in einen anderen
+          Bereich. Drei Antworten statt zwei - „hier bleiben" und „ohne Speichern gehen" liessen
+          den einzigen Ausgang aus, den man eigentlich will: speichern und dann gehen. Wer das
+          nicht angeboten bekommt, bleibt, sucht den Speicherknopf und versucht es noch einmal. */}
       <Modal
-        open={leaveOpen}
-        onClose={() => setLeaveOpen(false)}
-        title="Willst du die Seite wirklich verlassen?"
-        description={`Nicht gespeichert: ${offeneListe}. Wenn du jetzt gehst, ist das weg.`}
+        open={verlassen != null}
+        onClose={() => setVerlassen(null)}
+        title="Du hast etwas geändert"
+        description={`Nicht gespeichert: ${offeneListe}. Was soll damit passieren, bevor es ${verlassen?.was ?? "weitergeht"} geht?`}
       >
-        {/* Drei Wege statt zwei. „Hier bleiben" und „ohne Speichern gehen" liessen den einzigen
-            Ausgang aus, den man eigentlich will: speichern und dann gehen. Wer das nicht
-            angeboten bekommt, bleibt, sucht den Speicherknopf und versucht es noch einmal. */}
         <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="ghost" onClick={() => setLeaveOpen(false)}>
+          <Button variant="ghost" onClick={() => setVerlassen(null)}>
             Hier bleiben
           </Button>
-          <Button variant="danger" onClick={zurueckZurListe}>
-            Ohne Speichern gehen
+          <Button
+            variant="danger"
+            onClick={() => {
+              const weg = verlassen;
+              setVerlassen(null);
+              weg?.gehen();
+            }}
+          >
+            Ohne Speichern
           </Button>
           <Button
             disabled={saving || stilSaving || schnittSaving}
             onClick={async () => {
-              if (schnittGeaendert) await schnittSichern();
-              if (stilGeaendert) await stilSpeichern();
-              if (dirty) await save();
-              zurueckZurListe();
+              const weg = verlassen;
+              await allesSpeichern();
+              setVerlassen(null);
+              weg?.gehen();
             }}
           >
-            Speichern und gehen
+            Speichern
           </Button>
         </div>
       </Modal>

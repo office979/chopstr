@@ -648,7 +648,7 @@ export function CaptionStudio({
               Zurücksetzen
             </button>
             <Button variant={gespeichert ? "ghost" : "primary"} disabled={gespeichert || saving} onClick={speichern}>
-              {saving ? "Wird gespeichert" : gespeichert ? "Gespeichert" : "Nur für diesen Clip speichern"}
+              {saving ? "Wird gespeichert" : gespeichert ? "Gespeichert" : "Speichern"}
             </Button>
           </div>
         )}

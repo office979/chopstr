@@ -165,6 +165,14 @@ export function Timeline({
     [ausX],
   );
 
+  /* Welcher Block angeklickt ist. Ein schmaler Block hat keinen Platz für Knöpfe; ausgewählt
+   * bekommt er darunter eine Zeile mit dem, was möglich ist.
+   *
+   * Die Marke merkt sich ihre Sekunde und nicht ihren Platz in der Liste: Marken werden nach
+   * Zeit sortiert, ein Verschieben ändert also den Index. */
+  const [effektWahl, setEffektWahl] = useState<number | null>(null);
+  const [markeWahl, setMarkeWahl] = useState<number | null>(null);
+
   /* Einen Marker verschieben. Marker liegen in QUELLZEIT, genau wie alles andere in der Leiste:
    * ein Marker zeigt auf eine Stelle im Video und soll dort bleiben, auch wenn davor etwas
    * weggeschnitten wird. Gespeichert wird erst beim Loslassen, nicht bei jeder Mausbewegung. */
@@ -180,17 +188,25 @@ export function Timeline({
       const ende = () => {
         window.removeEventListener("pointermove", los);
         window.removeEventListener("pointerup", ende);
-        if (Math.abs(letzte - marke.ab_s) > 0.05) onMarkeVerschieben(marke.ab_s, letzte);
+        if (Math.abs(letzte - marke.ab_s) > 0.05) {
+          /* Hier gerundet und nicht erst beim Aufrufer: die Auswahl merkt sich die Sekunde, und
+           * sie muss auf die Stelle genau dieselbe Zahl sein wie die gespeicherte. Sonst findet
+           * die Zeile darunter ihre Marke nicht mehr und verschwindet beim ersten Ziehen. */
+          const neu = Math.round(letzte * 100) / 100;
+          onMarkeVerschieben(marke.ab_s, neu);
+          setMarkeWahl(neu);
+        } else {
+          /* Nicht gezogen, nur getippt: dann ist es eine Auswahl. Ein eigener onClick ginge
+           * nicht - der kommt nach dem Zeigerereignis und hätte die Marke schon verschoben. */
+          setMarkeWahl((v) => (v === marke.ab_s ? null : marke.ab_s));
+        }
+        setEffektWahl(null);
       };
       window.addEventListener("pointermove", los);
       window.addEventListener("pointerup", ende);
     },
     [ausX, onMarkeVerschieben],
   );
-
-  /* Welcher Block angeklickt ist. Ein schmaler Block hat keinen Platz für Knöpfe; ausgewählt
-   * bekommt er darunter eine Zeile mit dem, was möglich ist. */
-  const [effektWahl, setEffektWahl] = useState<number | null>(null);
 
   /* Was gerade gezogen wird. Nur für die Anzeige: gespeichert wird beim Loslassen. */
   const [ziehtEffekt, setZiehtEffekt] = useState<{ index: number; was: "verschieben" | "dauer"; wert: number } | null>(
@@ -256,6 +272,28 @@ export function Timeline({
           : { ...e, dauer_s: Math.min(MAX_DAUER_S, Math.max(MIN_DAUER_S, ziehtEffekt.wert), clipDauerS - e.ab_s) },
     );
   }, [effekte, ziehtEffekt, clipDauerS]);
+
+  /* Was gerade ausgewählt ist, in einem Satz - und was „Löschen" dann tut. Beides an einer
+   * Stelle, damit die Zeile darunter nicht zweimal fast dasselbe enthält. */
+  const gewaehlteMarke = markeWahl == null ? null : zeitmarken.find((m) => m.ab_s === markeWahl) ?? null;
+  const auswahlSatz =
+    gewaehlteMarke != null
+      ? `Bildausschnitt ab ${timecode(gewaehlteMarke.ab_s)}: ${markeBeschriftung(gewaehlteMarke)}`
+      : effektWahl != null && effekteSicht[effektWahl]
+        ? `${EFFEKT_LABEL[effekteSicht[effektWahl].art]} ab ${effekteSicht[effektWahl].ab_s.toFixed(1)} s, Fahrt ${effekteSicht[effektWahl].dauer_s.toFixed(1)} s · am rechten Rand ziehen macht die Fahrt länger`
+        : null;
+  const auswahlLoeschen = () => {
+    if (gewaehlteMarke != null) {
+      onMarkeWeg(gewaehlteMarke.ab_s);
+      setMarkeWahl(null);
+      return;
+    }
+    if (effektWahl != null) {
+      onEffektWeg(effektWahl);
+      setEffektWahl(null);
+    }
+  };
+
 
   const imClip = useMemo(() => {
     let vorher = 0;
@@ -508,58 +546,77 @@ export function Timeline({
             ))}
           </div>
 
-          {/* Bildausschnitt: eine eigene, beschriftete Spur */}
+          {/* Bildausschnitt: eine eigene, beschriftete Spur.
+              Aufgebaut wie die Effektspur darunter: der Balken ist nur Anzeige, gefasst wird über
+              eine eigene Fläche an der Kante der Marke.
+
+              Vorher lagen in jedem Block zwei Knöpfe - ein Griff links, ein X rechts - und beide
+              waren absolut positioniert in einem Block mit overflow-hidden. Stehen drei Marken
+              dicht beieinander, ist jeder Block wenige Bildpunkte breit: Griff und X überlagern
+              sich, werden abgeschnitten, und am Ende lässt sich weder ziehen noch löschen. Genau
+              das war zu sehen. Jetzt hat die Fassfläche eine Mindestbreite und liegt ausserhalb
+              des beschnittenen Blocks. */}
           <div className="relative mt-1 h-9 w-full rounded-[6px] bg-black/25">
-            {marken_abschnitte(zeitmarken, schnitt).map((m) => (
-              <div
-                key={`${m.vonQuelle}-${m.bisQuelle}`}
-                /* Der ganze Block laesst sich fassen, nicht nur der schmale Griff: ein Ziel von
-                 * zwoelf Bildpunkten trifft man nicht zuverlaessig. */
-                onPointerDown={m.marke && canEdit ? markeZiehen(m.marke) : undefined}
-                className={cn(
-                  "absolute top-0 flex h-full items-center overflow-hidden rounded-[6px] border px-2",
-                  m.marke ? "border-attention/70 bg-attention/15" : "border-dashed border-line",
-                  m.marke && canEdit && "cursor-ew-resize",
-                )}
-                style={{ left: `${anteil(m.vonQuelle) * 100}%`, width: `${((m.bisQuelle - m.vonQuelle) / sichtbar) * 100}%` }}
-                title={`${timecode(m.vonQuelle)}: ${markeBeschriftung(m.marke)}`}
-              >
-                <span className="truncate pl-3 text-xs text-text-2">{markeBeschriftung(m.marke)}</span>
-                {m.marke && canEdit && (
-                  <>
-                    <button
-                      type="button"
-                      onPointerDown={markeZiehen(m.marke)}
-                      onKeyDown={(e) => {
-                        /* Dasselbe mit der Tastatur, denn Ziehen ist nicht fuer jeden zu bedienen. */
-                        const schritt = e.shiftKey ? 1 : 0.2;
-                        const ziel = m.marke!.ab_s + (e.key === "ArrowLeft" ? -schritt : e.key === "ArrowRight" ? schritt : 0);
-                        if (ziel === m.marke!.ab_s) return;
+            {marken_abschnitte(zeitmarken, schnitt).map((m) => {
+              const gewaehlt = m.marke != null && markeWahl === m.marke.ab_s;
+              return (
+                <div
+                  key={`${m.vonQuelle}-${m.bisQuelle}`}
+                  className={cn(
+                    "pointer-events-none absolute top-0 flex h-full items-center overflow-hidden rounded-[6px] border px-2",
+                    m.marke ? "bg-attention/15" : "border-dashed border-line",
+                    m.marke && (gewaehlt ? "border-white" : "border-attention/70"),
+                  )}
+                  style={{ left: `${anteil(m.vonQuelle) * 100}%`, width: `${((m.bisQuelle - m.vonQuelle) / sichtbar) * 100}%` }}
+                  title={`${timecode(m.vonQuelle)}: ${markeBeschriftung(m.marke)}`}
+                >
+                  <span className="truncate pl-3 text-xs text-text-2">{markeBeschriftung(m.marke)}</span>
+                </div>
+              );
+            })}
+
+            {/* Die Griffe liegen über den Balken und nicht darin: so sind sie breit genug, auch
+                wenn zwei Marken eine Zehntelsekunde auseinanderliegen. */}
+            {canEdit &&
+              marken_abschnitte(zeitmarken, schnitt).map((m) =>
+                m.marke ? (
+                  <button
+                    key={`griff-${m.marke.ab_s}`}
+                    type="button"
+                    onPointerDown={markeZiehen(m.marke)}
+                    onKeyDown={(e) => {
+                      const marke = m.marke!;
+                      if (e.key === "Delete" || e.key === "Backspace") {
                         e.preventDefault();
-                        /* Sonst wanderte mit derselben Taste auch der Abspielkopf. */
                         e.stopPropagation();
-                        onMarkeVerschieben(m.marke!.ab_s, Math.max(0, Math.round(ziel * 100) / 100));
-                      }}
-                      aria-label={`Marker bei ${timecode(m.vonQuelle)} verschieben, mit Pfeiltasten oder Ziehen`}
-                      className="absolute left-0 top-0 h-full w-4 cursor-ew-resize focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
-                    >
-                      <span className="mx-auto block h-full w-[3px] bg-attention" />
-                    </button>
-                    <button
-                      type="button"
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={() => onMarkeWeg(m.marke!.ab_s)}
-                      aria-label={`Marker bei ${timecode(m.vonQuelle)} entfernen`}
-                      className="transition-soft absolute right-0.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-text-3 hover:bg-white/10 hover:text-text focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
-                    >
-                      <svg width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-                        <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                      </svg>
-                    </button>
-                  </>
-                )}
-              </div>
-            ))}
+                        onMarkeWeg(marke.ab_s);
+                        setMarkeWahl(null);
+                        return;
+                      }
+                      /* Dasselbe mit der Tastatur, denn Ziehen ist nicht für jeden zu bedienen. */
+                      const schritt = e.shiftKey ? 1 : 0.2;
+                      const ziel = marke.ab_s + (e.key === "ArrowLeft" ? -schritt : e.key === "ArrowRight" ? schritt : 0);
+                      if (ziel === marke.ab_s) return;
+                      e.preventDefault();
+                      /* Sonst wanderte mit derselben Taste auch der Abspielkopf. */
+                      e.stopPropagation();
+                      const neu = Math.max(0, Math.round(ziel * 100) / 100);
+                      onMarkeVerschieben(marke.ab_s, neu);
+                      setMarkeWahl(neu);
+                    }}
+                    aria-label={`Bildausschnitt bei ${timecode(m.vonQuelle)}: ${markeBeschriftung(m.marke)}. Ziehen verschiebt, Pfeiltasten auch, Entfernen löscht.`}
+                    className="absolute top-0 h-full w-[18px] cursor-ew-resize focus:outline-none focus-visible:ring-1 focus-visible:ring-white/70"
+                    style={{ left: `calc(${anteil(m.vonQuelle) * 100}% - 7px)` }}
+                  >
+                    <span
+                      className={cn(
+                        "mx-auto block h-full w-[3px]",
+                        markeWahl === m.marke.ab_s ? "bg-white" : "bg-attention",
+                      )}
+                    />
+                  </button>
+                ) : null,
+              )}
           </div>
 
           {/* Effekte: eine eigene Spur.
@@ -604,7 +661,12 @@ export function Timeline({
                       <button
                         type="button"
                         onPointerDown={effektZiehen(i, "verschieben")}
-                        onClick={() => setEffektWahl(gewaehlt ? null : i)}
+                        onClick={() => {
+                          /* Immer nur eines von beiden gewählt: zwei Auswahlzeilen untereinander
+                             wären zwei Wahrheiten. */
+                          setEffektWahl(gewaehlt ? null : i);
+                          setMarkeWahl(null);
+                        }}
                         onKeyDown={(ev) => {
                           if (ev.key === "Delete" || ev.key === "Backspace") {
                             ev.preventDefault();
@@ -659,25 +721,22 @@ export function Timeline({
             )}
           </div>
 
-          {/* Was mit dem gewählten Block los ist. Kein „länger" und „kürzer" mehr: das geht am
-              rechten Rand des Blocks, und zwei Wege für dieselbe Sache sind einer zu viel. */}
-          {canEdit && effektWahl != null && effekteSicht[effektWahl] && (
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-2">
-              <span>
-                {EFFEKT_LABEL[effekteSicht[effektWahl].art]} ab {effekteSicht[effektWahl].ab_s.toFixed(1)} s, Fahrt{" "}
-                {effekteSicht[effektWahl].dauer_s.toFixed(1)} s
-              </span>
+          {/* Was mit dem gewählten Block los ist, und der eine Weg, ihn loszuwerden.
+              EINE Zeile für beide Spuren: Effekte und Bildausschnitt verhalten sich gleich, also
+              soll auch die Antwort darauf gleich aussehen. Das Löschen steht rot und ganz rechts -
+              immer an derselben Stelle, statt zwischen wechselnd langen Sätzen zu wandern.
+              Kleine X-Knöpfe in den Blöcken gibt es nicht mehr: bei einem Block von wenigen
+              Bildpunkten lagen sie übereinander und trafen einander gegenseitig. */}
+          {canEdit && (auswahlSatz != null) && (
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-text-2">
+              <span className="min-w-0">{auswahlSatz}</span>
               <button
                 type="button"
-                onClick={() => {
-                  onEffektWeg(effektWahl);
-                  setEffektWahl(null);
-                }}
-                className="transition-soft rounded-pill border border-line px-2 py-0.5 hover:border-danger/50 hover:text-danger"
+                onClick={auswahlLoeschen}
+                className="transition-soft ml-auto shrink-0 rounded-pill border border-danger/60 px-2.5 py-0.5 font-medium text-danger hover:bg-danger/15"
               >
-                entfernen
+                Löschen
               </button>
-              <span className="text-text-3">Am rechten Rand ziehen macht die Fahrt länger.</span>
             </div>
           )}
 

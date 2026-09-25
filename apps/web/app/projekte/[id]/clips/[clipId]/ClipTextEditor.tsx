@@ -40,6 +40,10 @@ export function blocksInRange(words: TranscriptWord[], from: number, to: number)
 interface Props {
   words: TranscriptWord[];
   original: TranscriptWord[];
+  /* Der Wortlaut beim Öffnen der Seite, unveränderlich. Nur daraus lässt sich ein aus dem
+   * Untertitel genommenes Wort noch anzeigen und zurückholen - ``original`` ist nach dem
+   * Speichern selbst leer. Siehe ClipDetail. */
+  gesprochen: TranscriptWord[];
   wordFrom: number;
   wordTo: number;
   speakers: string[];
@@ -66,6 +70,7 @@ interface Props {
 export function ClipTextEditor({
   words,
   original,
+  gesprochen,
   wordFrom,
   wordTo,
   speakers,
@@ -83,11 +88,13 @@ export function ClipTextEditor({
   /* Im Korrekturmodus oeffnet ein einfacher Klick die Korrektur statt zu springen. Der
    * Doppelklick bleibt, aber er ist nicht mehr der einzige Weg: eine Handlung, die man nur
    * findet, wenn man sie schon kennt, ist keine Handlung. */
-  /* Die ausgewählten Wörter, als Menge von Wortnummern.
+  /* Das ausgewählte Wort, als Wortnummer. Genau eines, nicht mehrere.
    *
-   * Einzeln auswählbar und nicht als Bereich: ein Versprecher mitten im Satz ist ein Wort, kein
-   * Abschnitt, und wer „ähm" an vier Stellen loswerden will, will nicht viermal ziehen. */
-  const [gewaehlt, setGewaehlt] = useState<Set<number>>(new Set());
+   * Vorher war das eine Menge und jeder Klick legte ein Wort dazu. Wer zwei Wörter nacheinander
+   * anklickte, hatte zwei ausgewählt und löschte beim nächsten Druck beide - ohne dass irgendwo
+   * stand, dass das erste noch dabei ist. Ein Klick wählt jetzt genau das an, worauf er zeigt;
+   * derselbe Klick nochmal hebt die Auswahl wieder auf. */
+  const [gewaehlt, setGewaehlt] = useState<number | null>(null);
   /* Der Text steht ganz da. Zusammengeklappt liess sich nichts auswählen, was weiter unten stand. */
   const ganz = true;
   const blocks = blocksInRange(words, wordFrom, wordTo);
@@ -108,19 +115,34 @@ export function ClipTextEditor({
     box.scrollTo({ top: Math.max(0, ziel), behavior: "smooth" });
   }, [currentTime, ganz, editingIndex]);
 
-  const umschalten = (i: number) => {
-    setGewaehlt((prev) => {
-      const next = new Set(prev);
-      if (next.has(i)) next.delete(i);
-      else next.add(i);
-      return next;
-    });
+  const umschalten = (i: number) => setGewaehlt((prev) => (prev === i ? null : i));
+
+  /* Ist das gewählte Wort schon aus dem Untertitel genommen? Dann heisst derselbe Knopf oben
+   * „Wiederherstellen" - wer aus Versehen löscht, soll es an derselben Stelle zurückholen, an
+   * der er es weggenommen hat, und nicht erst lernen, dass ein Doppelklick eine Korrektur
+   * öffnet, in die man den alten Wortlaut von Hand einträgt. */
+  const geloescht = gewaehlt != null && words[gewaehlt] != null && words[gewaehlt].text.trim() === "";
+  /* Zurückholen geht nur, solange der gesprochene Wortlaut bekannt ist. Bei einem Wort, das in
+   * einer früheren Sitzung genommen und gespeichert wurde, steht er nicht mehr hier - dann ist
+   * der Knopf aus und sagt, warum. Ein Knopf, der sich drücken lässt und nichts tut, ist
+   * schlimmer als keiner. */
+  const alterWortlaut = gewaehlt == null ? "" : gesprochen[gewaehlt]?.text?.trim() || original[gewaehlt]?.text?.trim() || "";
+  const kannZurueckholen = geloescht && alterWortlaut !== "";
+  const zurueckHolen = () => {
+    if (gewaehlt == null) return;
+    if (!alterWortlaut) return;
+    onEditWord(gewaehlt, alterWortlaut, false);
+    setGewaehlt(null);
   };
 
   const loeschen = () => {
-    if (gewaehlt.size === 0) return;
-    onDeleteWords([...gewaehlt].sort((a, b) => a - b));
-    setGewaehlt(new Set());
+    if (gewaehlt == null) return;
+    if (geloescht) {
+      zurueckHolen();
+      return;
+    }
+    onDeleteWords([gewaehlt]);
+    setGewaehlt(null);
   };
 
   if (blocks.length === 0) {
@@ -149,39 +171,63 @@ export function ClipTextEditor({
           <button
             type="button"
             onClick={loeschen}
-            disabled={gewaehlt.size === 0}
+            disabled={gewaehlt == null || (geloescht && !kannZurueckholen)}
             aria-label={
-              gewaehlt.size === 0
-                ? "Erst Wörter auswählen, dann löschen"
-                : gewaehlt.size === 1
-                  ? "Ein Wort aus dem Untertitel nehmen"
-                  : `${gewaehlt.size} Wörter aus dem Untertitel nehmen`
+              gewaehlt == null
+                ? "Erst ein Wort auswählen"
+                : geloescht
+                  ? "Das Wort wieder in den Untertitel aufnehmen"
+                  : "Das Wort aus dem Untertitel nehmen"
+            }
+            title={
+              gewaehlt == null
+                ? undefined
+                : geloescht
+                  ? kannZurueckholen
+                    ? "Wiederherstellen"
+                    : "Dieses Wort wurde schon vor dem Öffnen der Seite aus dem Untertitel genommen. Der gesprochene Wortlaut steht hier nicht mehr; mit einem Doppelklick lässt er sich von Hand eintragen."
+                  : "Aus dem Untertitel nehmen"
             }
             className={cn(
               "transition-soft inline-flex h-9 items-center gap-2 rounded-pill border px-3 text-sm",
-              gewaehlt.size > 0
-                ? "border-danger/50 text-danger hover:bg-danger/10"
-                : "cursor-not-allowed border-line text-text-3",
+              gewaehlt == null || (geloescht && !kannZurueckholen)
+                ? "cursor-not-allowed border-line text-text-3"
+                : geloescht
+                  ? "border-brand/60 text-text hover:bg-brand/15"
+                  : "border-danger/50 text-danger hover:bg-danger/10",
             )}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M2.8 4.2h10.4M6.4 4.2V2.9h3.2v1.3M4.2 4.2l.6 8.2a1 1 0 0 0 1 .9h4.4a1 1 0 0 0 1-.9l.6-8.2"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <path d="M6.7 6.6v4M9.3 6.6v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-            </svg>
-            {gewaehlt.size > 0 && <span className="tabular-nums">{gewaehlt.size}</span>}
+            {geloescht ? (
+              /* Ein Pfeil, der zurückkommt. Er sagt ohne Wort, dass es rückgängig geht. */
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M3 8a5 5 0 1 0 1.6-3.7M3 2.8v2.9h2.9"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M2.8 4.2h10.4M6.4 4.2V2.9h3.2v1.3M4.2 4.2l.6 8.2a1 1 0 0 0 1 .9h4.4a1 1 0 0 0 1-.9l.6-8.2"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path d="M6.7 6.6v4M9.3 6.6v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+              </svg>
+            )}
+            {geloescht && <span>Wiederherstellen</span>}
           </button>
         )}
       </div>
       <p className="mb-3 text-sm text-text-2">
         {!canEdit
           ? "Klick ein Wort an, um dorthin zu springen."
-          : "Klick Wörter an, um sie auszuwählen. Mit dem Papierkorb nimmst du sie aus dem Untertitel: gesagt bleibt gesagt, geschrieben steht es nicht mehr. Doppelklick ändert die Schreibweise. Soll ein Wort ganz aus dem Video, geht das unter „Schnitt“ mit „Teil entfernen“."}
+          : "Klick ein Wort an. Mit dem Papierkorb oben nimmst du es aus dem Untertitel: gesagt bleibt gesagt, geschrieben steht es nicht mehr. Es bleibt durchgestrichen stehen - klickst du es wieder an, holt derselbe Knopf es zurück. Doppelklick ändert die Schreibweise. Soll ein Wort ganz aus dem Video, geht das unter „Schnitt“ mit „Teil entfernen“."}
       </p>
 
       {/* Zusammengeklappt nur rund drei Zeilen, die mit dem Ton mitlaufen. Der ganze Text stand
@@ -260,8 +306,14 @@ export function ClipTextEditor({
                           setEditingIndex(i);
                         }
                       }}
-                      aria-pressed={canEdit ? gewaehlt.has(i) : undefined}
-                      aria-label={canEdit ? `${w.text} auswählen` : `Zu ${w.text} springen`}
+                      aria-pressed={canEdit ? gewaehlt === i : undefined}
+                      aria-label={
+                        canEdit
+                          ? leer
+                            ? `${gesprochen[i]?.text || original[i]?.text || "Wort"} ist aus dem Untertitel genommen, auswählen zum Wiederherstellen`
+                            : `${w.text} auswählen`
+                          : `Zu ${w.text} springen`
+                      }
                       title={changed ? `Im Video gesprochen: ${original[i].text}` : low ? "Der Computer war sich hier nicht sicher" : undefined}
                       className={cn(
                         "transition-soft mx-px inline rounded-md px-0.5 py-0.5 text-left align-baseline hover:bg-white/10",
@@ -272,11 +324,14 @@ export function ClipTextEditor({
                         /* Ausgewählt mit Rahmen UND Hintergrund: nur über die Farbe zu gehen liesse
                            die Auswahl für jemanden verschwinden, der sie nicht unterscheiden kann
                            (WCAG 1.4.1). */
-                        gewaehlt.has(i) && "bg-danger/20 shadow-[inset_0_0_0_1.5px_var(--danger)]",
+                        gewaehlt === i &&
+                          (leer
+                            ? "bg-brand/20 shadow-[inset_0_0_0_1.5px_var(--brand)]"
+                            : "bg-danger/20 shadow-[inset_0_0_0_1.5px_var(--danger)]"),
                         leer && "text-text-3 line-through decoration-danger/70",
                       )}
                     >
-                      {leer ? original[i]?.text || "leer" : w.text}
+                      {leer ? gesprochen[i]?.text || original[i]?.text || "leer" : w.text}
                     </button>
                   );
                 })}

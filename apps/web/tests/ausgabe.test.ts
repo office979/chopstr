@@ -1,9 +1,8 @@
 /* Die eine Entscheidung: darf diese Fassung hinaus?
  *
  * Der Anlass ist nachlesbar im Code, den diese Tests ersetzen. Die Download-Route prüfte genau
- * eine Sache, nämlich ob eine Gastfreigabe noch aussteht. Ein veraltetes Video, ein Schnitt, der
- * eine Verneinung wegschneidet, ein fehlgeschlagener Lauf: alles ging hinaus, sobald man die
- * Adresse kannte. Und die Veröffentlichungsseite prüfte eine Bedingung, die nie fehlschlagen kann.
+ * eine Sache, nämlich ob eine Gastfreigabe noch aussteht. Ein Schnitt, der eine Verneinung
+ * wegschneidet, ein fehlgeschlagener Lauf: alles ging hinaus, sobald man die Adresse kannte. Und die Veröffentlichungsseite prüfte eine Bedingung, die nie fehlschlagen kann.
  *
  * Diese Tests halten fest, was jetzt gilt, und zwar für beide Wege aus derselben Rechnung.
  */
@@ -59,20 +58,7 @@ function clip(over: Partial<Clip> = {}): Clip {
 
 function stand(over: Partial<Clip> = {}) {
   const c = clip(over);
-  const e: PruefstandEingabe = {
-    clip: c,
-    freigabe: null,
-    stand: {
-      status: c.status,
-      hatDatei: Boolean(c.file_key),
-      plan: c.render_plan,
-      renderFehler: c.render_error,
-      transkriptVersion: 3,
-      stil: STIL,
-      schnitt: c.composition,
-      zeitmarken: c.zeitmarken,
-    },
-  };
+  const e: PruefstandEingabe = { clip: c, freigabe: null };
   return pruefstand(e);
 }
 
@@ -92,25 +78,13 @@ describe("ein freigegebener, aktueller Clip darf hinaus", () => {
 });
 
 describe("was den Download sperrt, den die alte Route durchgelassen hat", () => {
-  it("sperrt ein veraltetes Video", () => {
-    /* Der Text wurde geändert, das Video zeigt noch den alten Stand. */
-    const c = clip();
-    const p = pruefstand({
-      clip: c,
-      freigabe: null,
-      stand: {
-        status: c.status,
-        hatDatei: true,
-        plan: c.render_plan,
-        renderFehler: null,
-        transkriptVersion: 4,
-        stil: STIL,
-        schnitt: c.composition,
-        zeitmarken: [],
-      },
-    });
-    expect(p.datei).toBe("veraltet");
-    expect(codes("herunterladen", eingabe({ stand: p }))).toContain("datei_veraltet");
+  /* „Das geclippte Video zeigt nicht mehr, was eingestellt ist" stand hier einmal als eigener
+   * Sperrgrund. Den Zustand gibt es nicht mehr: Speichern clippt sofort neu und überschreibt das
+   * Alte. Zwischen Klick und fertigem Video greift „clippen_laeuft". */
+  it("sperrt den Download, solange noch geclippt wird", () => {
+    const p = stand({ status: "rendering", file_key: null });
+    expect(p.datei).toBe("wird_erstellt");
+    expect(codes("herunterladen", eingabe({ stand: p }))).toContain("clippen_laeuft");
   });
 
   it("sperrt einen Schnitt, der eine Verneinung wegschneidet", () => {
@@ -196,8 +170,8 @@ describe("der Regelkatalog", () => {
   it("trennt die beiden Wege", () => {
     expect(regelGiltFuer("nicht_freigegeben", "herunterladen")).toBe(false);
     expect(regelGiltFuer("nicht_freigegeben", "veroeffentlichen")).toBe(true);
-    expect(regelGiltFuer("datei_veraltet", "herunterladen")).toBe(true);
-    expect(regelGiltFuer("datei_veraltet", "veroeffentlichen")).toBe(true);
+    expect(regelGiltFuer("technik_fehler", "herunterladen")).toBe(true);
+    expect(regelGiltFuer("technik_fehler", "veroeffentlichen")).toBe(true);
   });
 });
 
@@ -215,7 +189,7 @@ describe("nachtragen, dass jemand selbst gepostet hat", () => {
     expect(ausgabe("eintragen", e).erlaubt).toBe(true);
   });
 
-  it("geht auch bei veralteter Datei: gepostet wurde, was damals heruntergeladen wurde", () => {
+  it("geht auch bei offener Gastfrage: gepostet wurde, was damals heruntergeladen wurde", () => {
     const e = eingabe({ gastOffen: true });
     expect(ausgabe("eintragen", e).erlaubt).toBe(true);
   });

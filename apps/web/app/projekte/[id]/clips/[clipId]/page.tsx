@@ -99,9 +99,9 @@ export default async function ClipPage({ params }: Props) {
         /* Durch dieselbe Prüfung wie an der Schnittstelle: eine alte Zeile kann Felder enthalten,
          * die es nicht mehr gibt, und die sollen nicht in die Oberfläche durchschlagen.
          *
-         * Ohne eigenen Stil gilt der, mit dem gebaut wurde. Die Vorgaben der Oberfläche sind nicht
-         * dieselben wie das Plattform-Preset des Renderers; ein nie angefasster Clip zeigte sonst
-         * Regler, die im Bild nicht vorkommen, und meldete sich als veraltet. */
+         * Ohne eigenen Stil gilt der, mit dem geclippt wurde. Die Vorgaben der Oberfläche sind
+         * nicht dieselben wie das Plattform-Preset des Renderers; ein nie angefasster Clip zeigte
+         * sonst Regler, die im Bild nicht vorkommen. */
         captionStyle={eigenerStil}
         captionPresets={captionPresets.map((p) => ({ id: p.id, name: p.name, style: p.style }))}
         /* Aus den Extras und nicht aus der Clip-Zeile: geschrieben wird ueber updateClipExtras,
@@ -122,28 +122,12 @@ export default async function ClipPage({ params }: Props) {
           pruefstand({
             clip,
             freigabe: null,
-            stand: {
-              status: clip.status,
-              hatDatei: Boolean(clip.file_key),
-              plan: clip.render_plan,
-              renderFehler: clip.render_error,
-              transkriptVersion: transcript?.version ?? null,
-              stil: Object.keys(eigenerStil).length
-                ? eigenerStil
-                : stilAusPlan((clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null, clip.render_plan?.output.height),
-              schnitt: clip.composition,
-              zeitmarken: extras[0]?.zeitmarken ?? clip.zeitmarken,
-            },
             kandidat: candidate,
             quellformatAbweichend: aspectForSource(source.width, source.height) !== clip.aspect,
           }).befunde.filter((b) => b.art === "sinn" || b.art === "pruefen" || b.art === "technik" || b.art === "bild")
         }
-        renderPlan={clip.render_plan}
         clipStatus={clip.status}
         renderFehler={clip.render_error}
-        /* Die Version des Transkripts, aus dem das gebaute Video seine Untertitel hat: daran
-         * hängt, ob eine Textkorrektur schon im Bild ist. */
-        transkriptVersion={transcript?.version ?? null}
         markeVorhanden={Boolean(source.brand_profile_id)}
         /* Vom Server, weil nur er den Schriftordner sieht. */
         schriftenVorhanden={vorhandeneSchriften()}

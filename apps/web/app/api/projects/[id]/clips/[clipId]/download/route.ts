@@ -14,7 +14,7 @@ const KINDS = { mp4: "file_key", srt: "srt_key", vtt: "vtt_key", poster: "poster
 /* GET ?kind=mp4|srt|vtt|poster: der Weg nach draussen.
  *
  * Hier stand bis zuletzt genau eine Prüfung: wartet noch eine Gastfreigabe? Alles andere fehlte.
- * Ein Video mit veralteter Datei, ein Clip mit einem Schnitt, der eine Verneinung wegschneidet,
+ * Ein Clip mit einem Schnitt, der eine Verneinung wegschneidet, ein noch laufender Lauf,
  * ein fehlgeschlagener Lauf: alles herunterladbar, sobald man die Adresse kannte. Die Oberfläche
  * sperrte den Knopf, aber ein gesperrter Knopf ist keine Sperre, sondern eine Bitte.
  *

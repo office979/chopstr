@@ -35,8 +35,8 @@ export function schnittPruefen(roh: unknown, quelleDauer: number | null): Schnit
 
 /* PATCH: den Schnitt des Clips setzen. Body: { composition: [{start, end, role}] }.
  *
- * Geändert wird ausschließlich diese Liste; die hochgeladene Datei bleibt unangetastet. Wirkt
- * beim nächsten Bauen, und ein bereits gebautes Ergebnis gilt ab jetzt als veraltet. */
+ * Geändert wird ausschließlich diese Liste; die hochgeladene Datei bleibt unangetastet. Wirksam
+ * wird sie beim nächsten Clippen - und das stößt die Oberfläche direkt nach dem Speichern an. */
 export async function PATCH(request: NextRequest, { params }: Params) {
   const auth = await requireApiRole("clip.render");
   if (auth instanceof Response) return auth;

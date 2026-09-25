@@ -9,7 +9,7 @@ import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/components/ui/cn";
 import { reclassify } from "@/lib/transcript/fillers";
 import { ASPECT_LABELS, formatClipDuration } from "@/lib/clips/labels";
-import type { Aspect, ClipStatus, RenderPlan, RenderShot, TranscriptVersion, TranscriptWord, Zeitmarke } from "@/lib/repo/types";
+import type { Aspect, ClipStatus, RenderShot, TranscriptVersion, TranscriptWord, Zeitmarke } from "@/lib/repo/types";
 import { VorschauStatus } from "./VorschauStatus";
 import { Bildausschnitt, beschreibung as markeBeschreibung } from "./Bildausschnitt";
 import { Timeline, luecken } from "./timeline/Timeline";
@@ -22,7 +22,6 @@ import {
   type Schnitt,
 } from "@/lib/clips/schnitt";
 import { pruefen } from "@/lib/clips/untertitel-pruefung";
-import { vorschauStand } from "@/lib/clips/vorschau-stand";
 import { dialogOffen, leertasteGehoertDemElement, tipptGerade } from "@/lib/tastatur";
 import { rueckwegMerken } from "@/lib/clips/rueckweg";
 import {
@@ -110,11 +109,8 @@ interface Props {
    * („muss als Werbung gekennzeichnet werden"), ein Befund der technischen Prüfung. Gerechnet auf
    * dem Server, siehe page.tsx. */
   befunde: Befund[];
-  /* Der Plan des letzten Laufs: daran hängt, ob das gebaute Video noch aktuell ist. */
-  renderPlan: RenderPlan | null;
   clipStatus: ClipStatus;
   renderFehler: string | null;
-  transkriptVersion: number | null;
   /* Ohne Markenprofil gibt es kein Wörterbuch, in das eine Schreibweise wandern könnte. */
   markeVorhanden: boolean;
   /* Die Schriften, für die in dieser Installation wirklich eine Datei vorliegt. */
@@ -173,10 +169,8 @@ export function ClipDetail({
   markenName,
   markenFarben,
   befunde,
-  renderPlan,
   clipStatus,
   renderFehler,
-  transkriptVersion,
   markeVorhanden,
   schriftenVorhanden,
 }: Props) {
@@ -453,23 +447,6 @@ export function ClipDetail({
    * gespeichert", und wer einen Effekt setzte, sah keinen Hinweis, dass sich etwas geändert hat -
    * und hielt es für verloren. Jetzt gehören Schnitt und Effekte demselben Knopf. */
   const effekteAendern = useCallback((naechste: Effekt[]) => setEffekte(naechste), []);
-
-  /* Zeigt das gebaute Video noch, was eingestellt ist? Dieselbe Rechnung wie im Renderstand, hier
-   * gebraucht, um es direkt am Umschalter zu sagen: wer auf „Zuletzt gebaut" klickt, soll dort
-   * erfahren, dass er eine alte Fassung sieht, und nicht erst weiter unten. */
-  const gebautesVeraltet =
-    Boolean(clipSrc) &&
-    vorschauStand({
-      status: clipStatus,
-      hatDatei: Boolean(clipSrc),
-      plan: renderPlan,
-      renderFehler,
-      transkriptVersion,
-      stil: stilGespeichert,
-      schnitt: gesichert,
-      zeitmarken: marken,
-      effekte: effekteGesichert,
-    }) === "veraltet";
 
   /* Der Zeitraum, den die Timeline zeigt: der geladene Schnitt plus zehn Sekunden Luft auf beiden
    * Seiten, damit sich der Anfang auch wieder verlaengern laesst. Bewusst fest ab dem Laden und
@@ -894,17 +871,13 @@ export function ClipDetail({
             eine schmale Leiste, die oben kleben bleibt: kleiner, aber sichtbar. Sie steht im
             Fluss und verdeckt nichts - unter ihr geht die Seite weiter. */}
         <div className="sticky top-0 z-20 -mx-4 border-b border-line bg-[#0a0a13]/95 px-4 py-2 backdrop-blur max-lg:flex max-lg:flex-wrap max-lg:items-start max-lg:gap-3 lg:top-4 lg:mx-0 lg:self-start lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:backdrop-blur-none">
-          {/* Welche der beiden Fassungen läuft gerade? Am veralteten gebauten Video steht es
-              direkt am Umschalter: dort stellt sich die Frage, ob das noch stimmt. */}
+          {/* Welche der beiden Fassungen läuft gerade: die Vorschau dessen, was eingestellt ist,
+              oder das zuletzt geclippte Video. */}
           {clipSrc && (
             <div className="mb-3 flex gap-1 rounded-pill border border-line p-1 max-lg:order-2 max-lg:mb-0 max-lg:min-w-[200px] max-lg:flex-1">
               {[
                 { an: false, name: "Mit deinen Änderungen", titel: "Zeigt, was jetzt eingestellt ist" },
-                {
-                  an: true,
-                  name: gebautesVeraltet ? "Zuletzt geclippt · alt" : "Zuletzt geclippt",
-                  titel: "Das Ergebnis des letzten Clippens",
-                },
+                { an: true, name: "Zuletzt geclippt", titel: "Das Ergebnis des letzten Clippens" },
               ].map((w) => (
                 <button
                   key={String(w.an)}
@@ -980,18 +953,11 @@ export function ClipDetail({
               sourceId={sourceId}
               clipId={clipId}
               canEdit={canEdit}
-              offeneAenderungen={offeneAenderungen}
               offeneUntertitel={offeneUntertitel}
               onNeuGebaut={() => router.refresh()}
               status={clipStatus}
               hatDatei={Boolean(clipSrc)}
-              plan={renderPlan}
               renderFehler={renderFehler}
-              transkriptVersion={transkriptVersion}
-              stil={stilGespeichert}
-              schnitt={gesichert}
-              zeitmarken={marken}
-              effekte={effekteGesichert}
             />
           </div>
 
@@ -1200,18 +1166,11 @@ export function ClipDetail({
               sourceId={sourceId}
               clipId={clipId}
               canEdit={canEdit}
-              offeneAenderungen={offeneAenderungen}
               offeneUntertitel={offeneUntertitel}
               onNeuGebaut={() => router.refresh()}
               status={clipStatus}
               hatDatei={Boolean(clipSrc)}
-              plan={renderPlan}
               renderFehler={renderFehler}
-              transkriptVersion={transkriptVersion}
-              stil={stilGespeichert}
-              schnitt={gesichert}
-              zeitmarken={marken}
-              effekte={effekteGesichert}
             />
 
             <GlassCard padding="md" className="flex flex-col gap-3">

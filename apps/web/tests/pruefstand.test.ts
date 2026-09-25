@@ -22,7 +22,7 @@ const STIL = LOOKS[0].stil;
 const SEGMENTE = [{ start: 10, end: 40, role: "body" as const }];
 
 /* Ein Plan, der genau zum eingestellten Stil passt. Nur dann ist die Datei „aktuell“; alles
- * andere wäre ein veraltetes Video, und das ist ein eigener Fall. */
+ * andere wäre ein Video, das noch gar nicht fertig ist, und das ist ein eigener Fall. */
 function plan(): RenderPlan {
   const s = mitVorgabe(STIL);
   return {
@@ -68,16 +68,6 @@ function eingabe(over: Partial<PruefstandEingabe> = {}): PruefstandEingabe {
   return {
     clip: c,
     freigabe: null,
-    stand: {
-      status: c.status,
-      hatDatei: Boolean(c.file_key),
-      plan: c.render_plan,
-      renderFehler: c.render_error,
-      transkriptVersion: 3,
-      stil: STIL,
-      schnitt: c.composition,
-      zeitmarken: c.zeitmarken,
-    },
     ...over,
   };
 }
@@ -94,12 +84,12 @@ describe("die drei Achsen sind unabhängig", () => {
     expect(pruefstand(eingabe({ bearbeitet: true })).redaktion).toBe("in_arbeit");
   });
 
-  it("lässt einen freigegebenen Clip trotzdem eine veraltete Datei haben", () => {
+  it("lässt einen freigegebenen Clip trotzdem ohne fertiges Video sein", () => {
     /* Genau das ging vorher nicht: ein Zustand musste sich für eines von beidem entscheiden. */
-    const c = clip({ review: "bereit", composition: [{ start: 10, end: 25, role: "body" }] });
+    const c = clip({ review: "bereit", status: "draft", file_key: null });
     const p = pruefstand(eingabe({ clip: c }));
     expect(p.redaktion).toBe("freigegeben");
-    expect(p.datei).toBe("veraltet");
+    expect(p.datei).toBe("keine");
   });
 
   it("hält zügiges Sprechen für einen Hinweis, nicht für einen Fehler", () => {
@@ -133,8 +123,8 @@ describe("Bereit zum Posten", () => {
     expect(pruefstand(eingabe({ clip: c })).postbereit).toBe(false);
   });
 
-  it("gilt nicht bei veralteter Datei", () => {
-    const c = clip({ review: "bereit", composition: [{ start: 10, end: 25, role: "body" }] });
+  it("gilt nicht, solange noch geclippt wird", () => {
+    const c = clip({ review: "bereit", status: "rendering", file_key: null });
     expect(pruefstand(eingabe({ clip: c })).postbereit).toBe(false);
   });
 
@@ -188,18 +178,18 @@ describe("gesperrte Handlungen nennen den Grund", () => {
     expect(aktionStand("freigeben", pruefstand(eingabe({ clip: c }))).erlaubt).toBe(true);
   });
 
-  it("lässt Freigeben trotz veralteter Datei zu", () => {
-    /* Die Freigabe ist eine Entscheidung über den Clip, nicht über die Datei. Die Datei wird
-     * danach neu gebaut, und „Bereit zum Posten“ kommt erst dann. */
-    const c = clip({ composition: [{ start: 10, end: 25, role: "body" }] });
+  it("lässt Freigeben zu, bevor es überhaupt ein Video gibt", () => {
+    /* Die Freigabe ist eine Entscheidung über den Clip, nicht über die Datei. Die Datei entsteht
+     * danach, und „Bereit zum Posten“ kommt erst dann. */
+    const c = clip({ status: "draft", file_key: null });
     expect(aktionStand("freigeben", pruefstand(eingabe({ clip: c }))).erlaubt).toBe(true);
   });
 
-  it("sperrt Herunterladen bei veralteter Datei und sagt, was zuerst kommt", () => {
-    const c = clip({ review: "bereit", composition: [{ start: 10, end: 25, role: "body" }] });
+  it("sperrt Herunterladen ohne Video und sagt, was zuerst kommt", () => {
+    const c = clip({ review: "bereit", status: "draft", file_key: null });
     const a = aktionStand("herunterladen", pruefstand(eingabe({ clip: c })));
     expect(a.erlaubt).toBe(false);
-    expect(a.grund).toMatch(/neu clippen/);
+    expect(a.grund).toMatch(/clippen/);
   });
 
   it("gibt für jede gesperrte Handlung einen Satz", () => {
@@ -209,7 +199,6 @@ describe("gesperrte Handlungen nennen den Grund", () => {
       clip({ status: "failed", render_error: "ffmpeg brach ab" }),
       clip({ file_key: null }),
       clip({ review: "verworfen" }),
-      clip({ composition: [{ start: 10, end: 25, role: "body" }] }),
     ];
     for (const c of faelle) {
       const p = pruefstand(eingabe({ clip: c }));
@@ -227,8 +216,8 @@ describe("hauptaktion", () => {
     expect(hauptaktion(pruefstand(eingabe({ clip: c }))).id).toBe("beheben");
   });
 
-  it("führt bei veralteter Datei zum Neubauen", () => {
-    const c = clip({ composition: [{ start: 10, end: 25, role: "body" }] });
+  it("führt ohne Video zum Clippen", () => {
+    const c = clip({ status: "draft", file_key: null });
     expect(hauptaktion(pruefstand(eingabe({ clip: c }))).id).toBe("neu_bauen");
   });
 
@@ -263,9 +252,9 @@ describe("Reihenfolge und Filter", () => {
 
   it("findet unter „Bereit zum Posten“ nur das, was wirklich raus kann", () => {
     const fertig = pruefstand(eingabe({ clip: clip({ review: "bereit" }) }));
-    const alt = pruefstand(eingabe({ clip: clip({ review: "bereit", composition: [{ start: 10, end: 25, role: "body" }] }) }));
+    const laeuft = pruefstand(eingabe({ clip: clip({ review: "bereit", status: "rendering", file_key: null }) }));
     expect(passtZuFilter(fertig, "postbereit")).toBe(true);
-    expect(passtZuFilter(alt, "postbereit")).toBe(false);
+    expect(passtZuFilter(laeuft, "postbereit")).toBe(false);
   });
 });
 
@@ -275,11 +264,11 @@ describe("Gastfreigabe", () => {
     expect(pruefstand(eingabe({ freigabe: f })).redaktion).toBe("freigegeben");
   });
 
-  it("wird an einem veralteten Video nicht angefragt", () => {
-    const c = clip({ composition: [{ start: 10, end: 25, role: "body" }] });
+  it("wird ohne fertiges Video nicht angefragt", () => {
+    const c = clip({ status: "draft", file_key: null });
     const a = aktionStand("gast_fragen", pruefstand(eingabe({ clip: c })));
     expect(a.erlaubt).toBe(false);
-    expect(a.grund).toMatch(/alten Stand/);
+    expect(a.grund).toMatch(/clippen/);
   });
 });
 

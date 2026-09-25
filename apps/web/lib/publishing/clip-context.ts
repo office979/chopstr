@@ -4,7 +4,7 @@ import { getQuota } from "@/lib/billing/quota";
 import { freigabeVeraltet, latestByClip } from "@/lib/guest/approval";
 import { getPublishingRepo } from "@/lib/repo/publishing";
 import { pruefstand, type Pruefstand } from "@/lib/clips/pruefstand";
-import { stilAusPlan, stilPruefen } from "@/lib/clips/caption-style";
+import { stilPruefen } from "@/lib/clips/caption-style";
 import { aspectForSource } from "@/lib/clips/presets";
 import { ausgabe, type Ausgabe } from "@/lib/clips/ausgabe";
 import type { Candidate, Clip, GuestApproval, HookVersion, Plan, Source, Workspace } from "@/lib/repo/types";
@@ -40,14 +40,13 @@ export async function loadClipContext(sourceId: string, clipId: string): Promise
   const repo = getRepo();
   const [source, clip] = await Promise.all([repo.getSource(sourceId), repo.getClip(clipId)]);
   if (!source || !clip || clip.source_id !== sourceId) return null;
-  const [candidate, approvals, hook, workspace, quota, extras, transcript] = await Promise.all([
+  const [candidate, approvals, hook, workspace, quota, extras] = await Promise.all([
     clip.candidate_id ? repo.getCandidate(clip.candidate_id) : Promise.resolve(null),
     repo.listGuestApprovals(sourceId),
     repo.getCurrentHook(clipId),
     repo.getWorkspace(),
     getQuota(repo),
     getPublishingRepo().getClipExtras([clipId]),
-    repo.getCurrentTranscript(sourceId),
   ]);
   const approval = latestByClip(approvals).get(clipId) ?? null;
   const extra: ClipExtras = extras[0] ?? {
@@ -61,25 +60,11 @@ export async function loadClipContext(sourceId: string, clipId: string): Promise
     zeitmarken: [],
   };
 
-  /* Derselbe Prüfstand wie in der Clip-Liste, mit denselben Eingaben. Wichtig ist die
-   * Transkriptversion aus dem Projekt und nicht die aus dem Renderplan: sonst vergleicht die Datei
-   * sich mit sich selbst und ist nie veraltet. */
+  /* Derselbe Prüfstand wie in der Clip-Liste, mit denselben Eingaben. */
   const gespeicherterStil = stilPruefen(extra.caption_style);
   const stand = pruefstand({
     clip,
     freigabe: approval,
-    stand: {
-      status: clip.status,
-      hatDatei: Boolean(clip.file_key),
-      plan: clip.render_plan,
-      renderFehler: clip.render_error,
-      transkriptVersion: transcript?.version ?? null,
-      stil: Object.keys(gespeicherterStil).length
-        ? gespeicherterStil
-        : stilAusPlan((clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null, clip.render_plan?.output.height),
-      schnitt: clip.composition,
-      zeitmarken: clip.zeitmarken,
-    },
     bearbeitet:
       Object.keys(gespeicherterStil).length > 0 || (clip.zeitmarken?.length ?? 0) > 0 || clip.composition.length > 1,
     kandidat: candidate,

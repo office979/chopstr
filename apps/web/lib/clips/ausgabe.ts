@@ -38,7 +38,6 @@ export type AusgabeCode =
   | "datei_fehlt"
   | "inhalt_fehler"
   | "technik_fehler"
-  | "datei_veraltet"
   | "gast_offen"
   | "gast_veraltet"
   | "nicht_freigegeben"
@@ -117,7 +116,6 @@ export function ausgabe(zweck: Zweck, e: AusgabeEingabe): Ausgabe {
    * inhaltliche Grund, der sperrt. Zügiges Sprechen sperrt nicht - das ist unangenehm, aber wahr. */
   if (s.befunde.some((b) => b.schwere === "fehler" && b.art === "sinn")) treffer.push("inhalt_fehler");
   if (e.technik?.some((t) => t.ergebnis === "fehler")) treffer.push("technik_fehler");
-  if (s.datei === "veraltet") treffer.push("datei_veraltet");
   if (e.gastOffen) treffer.push("gast_offen");
   if (e.gastVeraltet) treffer.push("gast_veraltet");
   if (s.redaktion !== "freigegeben" && s.redaktion !== "verworfen") treffer.push("nicht_freigegeben");

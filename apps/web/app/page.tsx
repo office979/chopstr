@@ -8,7 +8,6 @@ import { mediaUrl } from "@/lib/clips/labels";
 import { Bibliothek, type ProjektZeile } from "./Bibliothek";
 import { projektZustand } from "@/lib/projekte/projekt-zustand";
 import { naechsteAufgabe, standAusZeile, zaehlen, type Pruefstand } from "@/lib/clips/pruefstand";
-import { stilAusPlan, stilPruefen } from "@/lib/clips/caption-style";
 
 export const dynamic = "force-dynamic";
 
@@ -21,18 +20,14 @@ export default async function ProjectsPage() {
   const repo = getRepo();
   const sources = await repo.listSources();
   /* Der Stand aller Clips in einer Abfrage, gerechnet mit demselben Modell wie auf der
-   * Prüfseite. Vorher zählte diese Seite selbst, und zwar schwächer: „Clips zu prüfen" und
-   * „Fertige Clips, bereit zum Posten" standen beide auf vierzehn - über denselben vierzehn
-   * Clips, von denen keiner freigegeben war. */
+   * Prüfseite. Vorher zählte diese Seite selbst, und zwar schwächer: zwei verschiedene Namen
+   * standen beide auf vierzehn - über denselben vierzehn Clips, von denen keiner freigegeben
+   * war. */
   const zeilenStand = await repo.listClipStands();
   const staendeJeQuelle = new Map<string, Pruefstand[]>();
   for (const r of zeilenStand) {
-    const eigener = stilPruefen(r.caption_style);
-    const stil = Object.keys(eigener).length
-      ? eigener
-      : stilAusPlan(r.plan_captions, r.plan_output_height ?? undefined);
     const liste = staendeJeQuelle.get(r.source_id) ?? [];
-    liste.push(standAusZeile(r, stil));
+    liste.push(standAusZeile(r));
     staendeJeQuelle.set(r.source_id, liste);
   }
   const videoStaende = new Map(
@@ -90,21 +85,20 @@ export default async function ProjectsPage() {
   /* Die Zahlen über alle Videos, aus denselben Ständen. */
   const gesamt = [...videoStaende.values()].reduce(
     (a, z) => ({
-      zuPruefen: a.zuPruefen + z.zuPruefen,
       fehler: a.fehler + z.fehler,
-      veraltet: a.veraltet + z.veraltet,
+      wirdGebaut: a.wirdGebaut + z.wirdGebaut,
       postbereit: a.postbereit + z.postbereit,
     }),
-    { zuPruefen: 0, fehler: 0, veraltet: 0, postbereit: 0 },
+    { fehler: 0, wirdGebaut: 0, postbereit: 0 },
   );
   /* Das Video, bei dem die Arbeit anfängt: das dringendste zuerst. Ein Link auf „3 Clips prüfen"
    * ohne Ziel wäre eine Zahl zum Anschauen. */
   const dringend = [...videoStaende.entries()]
     .map(([id, z]) => ({ id, z, auf: naechsteAufgabe(z) }))
     .filter((x) => x.auf != null);
-  const zielFuer = (art: "fehler" | "veraltet" | "zu_pruefen" | "postbereit") => {
+  const zielFuer = (art: "fehler" | "wird_erstellt" | "postbereit") => {
     const treffer = dringend.find((x) =>
-      art === "fehler" ? x.z.fehler > 0 : art === "veraltet" ? x.z.veraltet > 0 : art === "postbereit" ? x.z.postbereit > 0 : x.z.zuPruefen > 0,
+      art === "fehler" ? x.z.fehler > 0 : art === "wird_erstellt" ? x.z.wirdGebaut > 0 : x.z.postbereit > 0,
     );
     return treffer ? `/projekte/${treffer.id}/clips#${art}` : null;
   };
@@ -133,11 +127,11 @@ export default async function ProjectsPage() {
         {/* Zahlen erst, wenn es etwas zu zählen gibt. Vier Nullen sind für jemanden, der gerade
          * anfängt, das größte Element der Seite und sagen nichts. */}
         {sources.length > 0 && (
-          <dl className="relative mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-            {/* Vier Zahlen, die verschiedene Dinge zählen und jede zu ihrer Arbeitsliste führt.
-              * Vorher standen hier „Clips zu prüfen: 14" und „Fertige Clips: 14, bereit zum
-              * Posten" über denselben vierzehn Clips. Beides stand da, beides konnte nicht
-              * stimmen, und anklickbar war keines von beidem. */}
+          <dl className="relative mt-6 grid grid-cols-2 gap-3 lg:grid-cols-3">
+            {/* Drei Zahlen, die verschiedene Dinge zählen und jede zu ihrer Arbeitsliste führt.
+              * „Clips prüfen" und „Videos neu clippen" standen hier einmal daneben. Die erste war
+              * nur die Zahl der noch nicht entschiedenen Clips, also am frischen Video gleich der
+              * Gesamtzahl; die zweite kann es nicht mehr geben, seit Speichern sofort neu clippt. */}
             <Stat
               label="Fehler beheben"
               value={gesamt.fehler}
@@ -145,21 +139,15 @@ export default async function ProjectsPage() {
               href={zielFuer("fehler")}
             />
             <Stat
-              label="Clips prüfen"
-              value={gesamt.zuPruefen}
-              hint={gesamt.zuPruefen > 0 ? "warten auf deine Entscheidung" : "alles entschieden"}
-              href={zielFuer("zu_pruefen")}
-            />
-            <Stat
-              label="Videos neu clippen"
-              value={gesamt.veraltet}
-              hint={gesamt.veraltet > 0 ? "zeigen nicht, was eingestellt ist" : activeCount > 0 ? "der Computer rechnet" : "alle auf dem neuesten Stand"}
-              href={zielFuer("veraltet")}
+              label="Wird geclippt"
+              value={gesamt.wirdGebaut}
+              hint={gesamt.wirdGebaut > 0 ? "der Computer rechnet" : activeCount > 0 ? "erst wird das Video verarbeitet" : "gerade läuft nichts"}
+              href={zielFuer("wird_erstellt")}
             />
             <Stat
               label="Bereit zum Posten"
               value={gesamt.postbereit}
-              hint={failedCount > 0 ? `bei ${failedCount} ${failedCount === 1 ? "Video" : "Videos"} ging etwas schief` : "freigegeben und aktuell"}
+              hint={failedCount > 0 ? `bei ${failedCount} ${failedCount === 1 ? "Video" : "Videos"} ging etwas schief` : "freigegeben und fertig geclippt"}
               href={zielFuer("postbereit")}
             />
           </dl>

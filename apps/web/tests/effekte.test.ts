@@ -129,7 +129,7 @@ describe("bearbeiten", () => {
   });
 });
 
-describe("der Vergleich für „Video veraltet“", () => {
+describe("der Vergleich zweier Effektlisten", () => {
   it("merkt eine verschobene Sekunde", () => {
     expect(gleich([e("zoom_in", 1, 1.4)], [e("zoom_in", 2, 1.4)])).toBe(false);
   });

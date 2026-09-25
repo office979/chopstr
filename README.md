@@ -154,9 +154,9 @@ zeigt diese Antwort an; sie entscheidet nicht. Ein gesperrter Knopf ist keine Sp
 Bitte, und wer die Adresse kennt, kommt daran vorbei.
 
 Gesperrt wird unter anderem: verworfene Vorschläge, ein laufendes oder fehlgeschlagenes Clippen,
-ein Schnitt, der eine Verneinung wegschneidet, ein Video, das nicht mehr zeigt, was eingestellt
-ist, eine ausstehende oder veraltete Gastfreigabe, und eine Datei, die die technische Prüfung
-nicht bestanden hat. Das Veröffentlichen verlangt zusätzlich die Freigabe durch einen Menschen,
+ein fehlendes Video, ein Schnitt, der eine Verneinung wegschneidet, eine ausstehende Gastfreigabe
+oder eine, die eine andere Fassung gesehen hat, und eine Datei, die die technische Prüfung nicht
+bestanden hat. Das Veröffentlichen verlangt zusätzlich die Freigabe durch einen Menschen,
 den Auftragsverarbeitungsvertrag und einen Tarif, der das direkte Posten enthält.
 
 **Die technische Prüfung** (Migration 0014) läuft im Worker nach dem Clippen und misst die fertige

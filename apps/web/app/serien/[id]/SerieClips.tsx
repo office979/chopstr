@@ -162,8 +162,8 @@ export function SerieClips({ serieId, serieName, zugeordnet, zurWahl, canEdit }:
                     "inline-flex h-6 items-center rounded-pill border px-2.5 text-[12px] font-medium",
                     c.stand.postbereit && "border-brand/60 bg-brand/15 text-text",
                     !c.stand.postbereit && c.stand.qualitaet === "fehler" && "border-danger/60 bg-danger/15 text-text",
-                    !c.stand.postbereit && c.stand.qualitaet !== "fehler" && c.stand.datei === "veraltet" && "border-attention/60 bg-attention/15 text-text",
-                    !c.stand.postbereit && c.stand.qualitaet !== "fehler" && c.stand.datei !== "veraltet" && "border-line text-text-2",
+                    !c.stand.postbereit && c.stand.qualitaet !== "fehler" && c.stand.datei === "fehlgeschlagen" && "border-attention/60 bg-attention/15 text-text",
+                    !c.stand.postbereit && c.stand.qualitaet !== "fehler" && c.stand.datei !== "fehlgeschlagen" && "border-line text-text-2",
                   )}
                 >
                   {c.stand.postbereit ? "Bereit zum Posten" : REDAKTION_LABEL[c.stand.redaktion]}

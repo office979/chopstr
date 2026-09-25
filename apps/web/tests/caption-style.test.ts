@@ -184,7 +184,7 @@ describe("passtZumRender", () => {
     baseline_y: 1920 - 310 - VORGABE.bottom_margin_px,
   };
 
-  it("ohne Render gibt es nichts, was veraltet sein könnte", () => {
+  it("ohne Render gibt es nichts, wovon der Stil abweichen könnte", () => {
     expect(passtZumRender({ font_px: 150 }, null)).toBe(true);
   });
 

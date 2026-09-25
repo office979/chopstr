@@ -226,14 +226,6 @@ export function Bibliothek({ zeilen, canDelete, canUpload }: Props) {
                             {stand.fehler} mit Fehler
                           </ClipZahl>
                         )}
-                        {stand.veraltet > 0 && (
-                          <ClipZahl href={`/projekte/${s.id}/clips#veraltet`} ton="achtung">
-                            {stand.veraltet} veraltet
-                          </ClipZahl>
-                        )}
-                        {stand.zuPruefen > 0 && (
-                          <ClipZahl href={`/projekte/${s.id}/clips#zu_pruefen`}>{stand.zuPruefen} zu prüfen</ClipZahl>
-                        )}
                         {stand.postbereit > 0 && (
                           <ClipZahl href={`/projekte/${s.id}/clips#postbereit`} ton="gut">
                             {stand.postbereit} bereit zum Posten
@@ -330,10 +322,10 @@ function aufgabeKnopf(text: string): string {
 
 /* Was auf dem Knopf steht, und wohin er führt.
  *
- * Bei veralteten Videos stand hier „Videos neu clippen" und der Weg ging in die gefilterte Liste.
- * Beides war zu eng: der Knopf auf der Videokarte ist der Weg zu diesem Video, nicht zu einer
- * Teilmenge davon, und wer ankommt, will erst sehen, was da ist. Die Zahlen mit ihren Filtern
- * stehen weiter oben auf der Seite und führen weiterhin gezielt hin. */
+ * Hier stand einmal die Aufgabe selbst und der Weg ging in die gefilterte Liste. Beides war zu
+ * eng: der Knopf auf der Videokarte ist der Weg zu diesem Video, nicht zu einer Teilmenge davon,
+ * und wer ankommt, will erst sehen, was da ist. Die Zahlen mit ihren Filtern stehen weiter oben
+ * auf der Seite und führen weiterhin gezielt hin. */
 function knopfText(aufgabe: Aufgabe | null, aktion: Hauptaktion): string {
   if (!aufgabe) return aktion.label;
   if (aufgabe.pfad.startsWith("/clips")) return "Alle Clips anzeigen";

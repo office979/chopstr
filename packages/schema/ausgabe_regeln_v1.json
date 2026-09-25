@@ -1,6 +1,6 @@
 {
   "version": "ausgabe_regeln_v1",
-  "zweck": "Eine Clipfassung verlässt chopstr auf genau zwei Wegen: als Download oder als Veröffentlichung. Bis hierher entschied jeder Weg für sich, und der Download prüfte nur die Gastfreigabe. Damit konnte ein veraltetes, nie geprüftes oder technisch kaputtes Video hinausgehen. Diese Datei ist die eine Liste der Gründe, die das verhindern. Web-Oberfläche, Web-Routen und Worker lesen dieselbe Liste.",
+  "zweck": "Eine Clipfassung verlässt chopstr auf genau zwei Wegen: als Download oder als Veröffentlichung. Bis hierher entschied jeder Weg für sich, und der Download prüfte nur die Gastfreigabe. Damit konnte ein nie geprüftes oder technisch kaputtes Video hinausgehen. Diese Datei ist die eine Liste der Gründe, die das verhindern. Web-Oberfläche, Web-Routen und Worker lesen dieselbe Liste.",
   "hinweis_reihenfolge": "Die Reihenfolge ist die Reihenfolge der Anzeige: der erste zutreffende Grund ist der, der dem Nutzer genannt wird. Oben steht, was zuerst zu tun ist.",
   "regeln": [
     {
@@ -58,15 +58,6 @@
       ],
       "text": "Die fertige Datei hat die technische Prüfung nicht bestanden.",
       "hilfe": "Einmal neu clippen. Bleibt es dabei, bitte melden."
-    },
-    {
-      "code": "datei_veraltet",
-      "sperrt": [
-        "herunterladen",
-        "veroeffentlichen"
-      ],
-      "text": "Das geclippte Video zeigt nicht mehr, was eingestellt ist.",
-      "hilfe": "Einmal neu clippen, sonst geht ein alter Stand hinaus."
     },
     {
       "code": "gast_offen",

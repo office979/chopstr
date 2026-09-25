@@ -9,15 +9,13 @@
  *
  *   redaktion  Hat ein Mensch entschieden?      Hängt an clip.review und der Gastfreigabe.
  *   qualitaet  Stimmt inhaltlich etwas nicht?   Hängt an den Befunden aus dem Renderlauf.
- *   datei      Gibt es ein aktuelles Video?     Hängt am Renderstand und an vorschau-stand.
+ *   datei      Gibt es ein fertiges Video?      Hängt am Renderstand.
  *
- * Ein Clip kann freigegeben sein UND eine veraltete Datei haben. Das ist kein Widerspruch,
+ * Ein Clip kann freigegeben sein UND noch kein fertiges Video haben. Das ist kein Widerspruch,
  * sondern zwei Tatsachen, und der Nutzer braucht beide. Erst zusammen ergeben sie die Antwort auf
  * die einzige Frage, die beim Posten zählt: kann das raus?
  */
 
-import { vorschauStand, type StandEingabe } from "@/lib/clips/vorschau-stand";
-import type { CaptionStyle } from "@/lib/clips/caption-style";
 import { warningsOf } from "@/lib/candidates/labels";
 import type { Candidate, Clip, ClipStand, GuestApproval } from "@/lib/repo/types";
 
@@ -46,20 +44,22 @@ export const REDAKTION_SATZ: Record<Redaktion, string> = {
  * der Sprecher. */
 export type Qualitaet = "ok" | "hinweis" | "fehler";
 
-export const QUALITAET_LABEL: Record<Qualitaet, string> = {
-  ok: "Kein Problem",
-  hinweis: "Hinweis",
-  fehler: "Fehler",
-};
+/* Eine Plakette „Mit Hinweis" gab es hier einmal. Sie ist weg: „Hinweis" an einer Karte sagt
+ * nicht, was los ist, und stand an fast jedem Clip. Die Hinweise selbst bleiben - aber als der
+ * Satz, um den es geht („Bitte kurz ansehen, ob die sprechende Person im Bild ist"), und dort,
+ * wo man etwas damit anfangen kann: im geöffneten Clip. */
 
 /* 3. Datei: gibt es ein Video, und zeigt es, was eingestellt ist? */
-export type Datei = "keine" | "wird_erstellt" | "aktuell" | "veraltet" | "fehlgeschlagen";
+/* „veraltet" gab es hier einmal: eine Datei, die nicht mehr zeigt, was eingestellt ist. Diesen
+ * Zustand kann es nicht mehr geben - Speichern clippt sofort neu, das Alte wird überschrieben.
+ * Zwischen Speichern und fertigem Video steht „wird_erstellt", und das sagt dasselbe, nur ohne
+ * Vorwurf. */
+export type Datei = "keine" | "wird_erstellt" | "aktuell" | "fehlgeschlagen";
 
 export const DATEI_LABEL: Record<Datei, string> = {
   keine: "Noch kein Video",
   wird_erstellt: "Wird geclippt",
   aktuell: "Video aktuell",
-  veraltet: "Video veraltet",
   fehlgeschlagen: "Clippen fehlgeschlagen",
 };
 
@@ -67,7 +67,6 @@ export const DATEI_SATZ: Record<Datei, string> = {
   keine: "Für diesen Clip gibt es noch keine Videodatei.",
   wird_erstellt: "Das Video wird gerade geclippt.",
   aktuell: "Das geclippte Video zeigt genau, was eingestellt ist.",
-  veraltet: "Das geclippte Video zeigt nicht mehr, was eingestellt ist.",
   fehlgeschlagen: "Beim Clippen ist etwas schiefgegangen.",
 };
 
@@ -100,8 +99,6 @@ export interface PruefstandEingabe {
   clip: Clip;
   /* Die letzte Gastfreigabe zu diesem Clip, falls es eine gibt. */
   freigabe: GuestApproval | null;
-  /* Zeigt die gebaute Datei noch, was eingestellt ist? Aus lib/clips/vorschau-stand. */
-  stand: StandEingabe;
   /* Hat jemand an diesem Clip schon gearbeitet? Der Aufrufer weiss das: eigener Untertitelstil,
    * gesetzte Bildausschnitte oder ein geänderter Schnitt. Hier hereingereicht, damit dieses Modul
    * eine reine Rechnung bleibt. */
@@ -157,7 +154,6 @@ function tempoStelle(warnung: string): string | null {
 export function pruefstand({
   clip,
   freigabe,
-  stand,
   bearbeitet = false,
   kandidat = null,
   quellformatAbweichend = false,
@@ -180,9 +176,7 @@ export function pruefstand({
          * dasselbe wie „wird gerade gebaut" - da läuft nichts, und wer wartet, wartet vergeblich. */
         : !clip.file_key
           ? "keine"
-          : vorschauStand(stand) === "veraltet"
-            ? "veraltet"
-            : "aktuell";
+          : "aktuell";
 
   const befunde: Befund[] = [];
 
@@ -278,15 +272,6 @@ export function pruefstand({
     });
   }
 
-  if (datei === "veraltet") {
-    befunde.push({
-      schwere: "fehler",
-      art: "datei",
-      text: "Das geclippte Video zeigt nicht mehr, was eingestellt ist. Einmal neu clippen, dann stimmt der Download wieder.",
-      stelle: null,
-    });
-  }
-
   if (datei === "fehlgeschlagen") {
     befunde.push({
       schwere: "fehler",
@@ -334,9 +319,7 @@ export function hauptaktion(p: Pruefstand): Hauptaktion {
   if (p.qualitaet === "fehler" && p.befunde.some((b) => b.art === "sinn")) {
     return { id: "beheben", label: "Fehler beheben" };
   }
-  if (p.datei === "veraltet" || p.datei === "keine") {
-    return { id: "neu_bauen", label: p.datei === "keine" ? "Video clippen" : "Video neu clippen" };
-  }
+  if (p.datei === "keine") return { id: "neu_bauen", label: "Video clippen" };
   if (p.redaktion === "freigegeben") return { id: "herunterladen", label: "Herunterladen" };
   return { id: "pruefen", label: "Clip prüfen" };
 }
@@ -365,8 +348,8 @@ export function aktionStand(
     if (p.redaktion === "verworfen") return { erlaubt: false, grund: "Erst zurückholen." };
     if (p.redaktion === "freigegeben") return { erlaubt: false, grund: "Ist schon freigegeben." };
     if (p.datei === "wird_erstellt") return { erlaubt: false, grund: "Warte, bis das Video fertig geclippt ist." };
-    /* Ein schwerer Befund am Inhalt sperrt die Freigabe. Ein veraltetes Video nicht: das ist eine
-     * Aussage über die Datei, nicht über den Clip, und wird nach der Freigabe neu gebaut. */
+    /* Ein schwerer Befund am Inhalt sperrt die Freigabe: sonst gibt man etwas frei, das anders
+     * klingt als gesagt. */
     if (p.qualitaet === "fehler" && p.befunde.some((b) => b.art === "sinn")) {
       return { erlaubt: false, grund: "Erst den Fehler am Inhalt beheben, sonst gibst du etwas anderes frei, als gesagt wurde." };
     }
@@ -379,7 +362,6 @@ export function aktionStand(
     if (p.datei === "wird_erstellt") return { erlaubt: false, grund: "Das Video entsteht noch." };
     if (p.datei === "fehlgeschlagen") return { erlaubt: false, grund: "Das Clippen ist fehlgeschlagen. Erst nochmal versuchen." };
     if (p.datei === "keine") return { erlaubt: false, grund: "Erst das Video clippen." };
-    if (p.datei === "veraltet") return { erlaubt: false, grund: "Erst das Video neu clippen, sonst lädst du einen alten Stand herunter." };
     if (opts.hatDatei === false) return { erlaubt: false, grund: "Die Datei ist gerade nicht verfügbar." };
     return ERLAUBT;
   }
@@ -389,20 +371,18 @@ export function aktionStand(
     return ERLAUBT;
   }
 
-  /* Gastfreigabe: jemanden von aussen um eine Entscheidung bitten. An einem veralteten Video wäre
-   * das eine Frage zu etwas, das so nicht herauskommt. */
-  if (p.datei === "veraltet") return { erlaubt: false, grund: "Erst neu clippen, sonst sieht die Person einen alten Stand." };
+  /* Gastfreigabe: jemanden von aussen um eine Entscheidung bitten. Ohne fertiges Video wäre das
+   * eine Frage zu etwas, das es noch gar nicht gibt. */
   if (p.datei !== "aktuell") return { erlaubt: false, grund: "Erst das Video clippen." };
   return ERLAUBT;
 }
 
 /* Die Reihenfolge in der Liste: was Arbeit macht, steht oben. Gerechnet aus den drei Achsen statt
- * aus einem Zustandsnamen, damit ein freigegebener Clip mit veralteter Datei nicht zwischen den
- * erledigten verschwindet. */
+ * aus einem Zustandsnamen, damit ein freigegebener Clip mit fehlgeschlagenem Lauf nicht zwischen
+ * den erledigten verschwindet. */
 export function rang(p: Pruefstand): number {
   if (p.qualitaet === "fehler") return 0;
   if (p.datei === "fehlgeschlagen") return 1;
-  if (p.datei === "veraltet") return 2;
   if (p.redaktion === "vorgeschlagen" || p.redaktion === "in_arbeit") return p.qualitaet === "hinweis" ? 3 : 4;
   if (p.datei === "wird_erstellt" || p.datei === "keine") return 5;
   if (p.postbereit) return 6;
@@ -412,23 +392,11 @@ export function rang(p: Pruefstand): number {
 
 /* Womit lässt sich filtern? Die Frage vor der Liste lautet fast nie „zeig mir alles", sondern
  * „was muss ich noch anfassen". */
-export type FilterId =
-  | "alle"
-  | "zu_pruefen"
-  | "fehler"
-  | "hinweis"
-  | "veraltet"
-  | "wird_erstellt"
-  | "postbereit"
-  | "freigegeben"
-  | "verworfen";
+export type FilterId = "alle" | "fehler" | "wird_erstellt" | "postbereit" | "freigegeben" | "verworfen";
 
 export const FILTER_LABEL: Record<FilterId, string> = {
   alle: "Alle",
-  zu_pruefen: "Zu prüfen",
   fehler: "Fehler beheben",
-  hinweis: "Mit Hinweis",
-  veraltet: "Video veraltet",
   wird_erstellt: "Wird geclippt",
   postbereit: "Bereit zum Posten",
   freigegeben: "Freigegeben",
@@ -439,14 +407,8 @@ export function passtZuFilter(p: Pruefstand, f: FilterId): boolean {
   switch (f) {
     case "alle":
       return p.redaktion !== "verworfen";
-    case "zu_pruefen":
-      return p.redaktion === "vorgeschlagen" || p.redaktion === "in_arbeit";
     case "fehler":
       return p.qualitaet === "fehler";
-    case "hinweis":
-      return p.qualitaet === "hinweis";
-    case "veraltet":
-      return p.datei === "veraltet";
     case "wird_erstellt":
       return p.datei === "wird_erstellt";
     case "postbereit":
@@ -460,10 +422,7 @@ export function passtZuFilter(p: Pruefstand, f: FilterId): boolean {
 
 /* Die Reihenfolge der Filterknöpfe: erst die Arbeit, dann das Erledigte. */
 export const FILTER_ORDNUNG: FilterId[] = [
-  "zu_pruefen",
   "fehler",
-  "hinweis",
-  "veraltet",
   "wird_erstellt",
   "postbereit",
   "freigegeben",
@@ -472,11 +431,10 @@ export const FILTER_ORDNUNG: FilterId[] = [
 
 /* Eine Clip-Zeile aus der Übersichtsabfrage in einen Prüfstand rechnen.
  *
- * Damit rechnet die Startseite mit demselben Modell wie die Prüfseite. Vorher zählte sie selbst:
- * „Clips zu prüfen" waren gebaute Clips ohne Entscheidung, „Fertige Clips" waren gebaute Clips -
- * zwei Namen für dieselben vierzehn Clips, und der zweite trug den Zusatz „bereit zum Posten",
+ * Damit rechnet die Startseite mit demselben Modell wie die Prüfseite. Vorher zählte sie selbst,
+ * mit eigenen Namen für dieselben Clips - und der eine Name trug den Zusatz „bereit zum Posten",
  * obwohl niemand sie freigegeben hatte. */
-export function standAusZeile(r: ClipStand, stil: CaptionStyle): Pruefstand {
+export function standAusZeile(r: ClipStand): Pruefstand {
   const clip = {
     status: r.status,
     review: r.review,
@@ -494,28 +452,6 @@ export function standAusZeile(r: ClipStand, stil: CaptionStyle): Pruefstand {
   return pruefstand({
     clip,
     freigabe: null,
-    stand: {
-      status: r.status,
-      hatDatei: r.hat_datei,
-      /* Nur die vier Teile, die verglichen werden. Der Rest des Plans wird für diese Frage nicht
-       * gebraucht und deshalb gar nicht erst geladen. */
-      plan: r.plan_captions
-        ? ({
-            captions: r.plan_captions,
-            segments: r.plan_segments ?? [],
-            zeitmarken: r.plan_zeitmarken ?? [],
-            effekte: r.plan_effekte ?? [],
-            sources: { transcript_version: r.plan_transcript_version },
-            output: { height: r.plan_output_height },
-          } as unknown as Clip["render_plan"])
-        : null,
-      renderFehler: r.render_error,
-      transkriptVersion: r.transkript_version,
-      stil,
-      schnitt: r.composition,
-      zeitmarken: r.zeitmarken,
-      effekte: r.effekte ?? [],
-    },
     bearbeitet: (r.caption_style != null && Object.keys(r.caption_style).length > 0) || r.zeitmarken.length > 0 || r.composition.length > 1,
     quellformatAbweichend: r.quell_aspekt != null && r.quell_aspekt !== r.aspect,
   });
@@ -523,13 +459,17 @@ export function standAusZeile(r: ClipStand, stil: CaptionStyle): Pruefstand {
 
 /* Was an einem Video noch Arbeit macht, in den Worten der Prüfseite.
  *
- * Ein Clip kann in mehreren Zahlen stehen: ein freigegebener mit veraltetem Video ist freigegeben
- * UND veraltet. Das ist kein Zählfehler, sondern die Folge davon, dass es drei Fragen sind. */
+ * Ein Clip kann in mehreren Zahlen stehen: ein freigegebener ohne technischen Fehler ist
+ * freigegeben UND postbereit. Das ist kein Zählfehler, sondern die Folge davon, dass es drei
+ * Fragen sind.
+ *
+ * „zu prüfen" und „veraltet" standen hier einmal. Beide sind weggefallen: „veraltet" kann es
+ * nicht mehr geben, seit Speichern sofort neu clippt, und „zu prüfen" war nur die Umkehrung von
+ * „noch nicht entschieden" - eine Zahl, die an jedem frischen Video gleich hoch war wie die Zahl
+ * der Clips und deshalb nichts sagte. */
 export interface VideoStand {
   gesamt: number;
-  zuPruefen: number;
   fehler: number;
-  veraltet: number;
   wirdGebaut: number;
   postbereit: number;
   freigegeben: number;
@@ -537,23 +477,15 @@ export interface VideoStand {
 }
 
 export function zaehlen(staende: Pruefstand[]): VideoStand {
-  const z: VideoStand = { gesamt: 0, zuPruefen: 0, fehler: 0, veraltet: 0, wirdGebaut: 0, postbereit: 0, freigegeben: 0, verworfen: 0 };
+  const z: VideoStand = { gesamt: 0, fehler: 0, wirdGebaut: 0, postbereit: 0, freigegeben: 0, verworfen: 0 };
   for (const p of staende) {
     if (p.redaktion === "verworfen") {
       z.verworfen += 1;
       continue;
     }
     z.gesamt += 1;
-    /* Solange gebaut wird, wartet der Clip nicht auf eine Entscheidung, sondern auf die
-     * Maschine. Ihn in beide Zahlen zu zählen ergäbe „12 zu prüfen, 12 werden gebaut" über
-     * denselben zwölf Clips - und genau solche Doppelaussagen sollen hier verschwinden.
-     * Dieselbe Grenze zieht aktionStand: bei „wird gebaut" ist Freigeben gesperrt. */
-    if ((p.redaktion === "vorgeschlagen" || p.redaktion === "in_arbeit") && p.datei !== "wird_erstellt") {
-      z.zuPruefen += 1;
-    }
     if (p.redaktion === "freigegeben") z.freigegeben += 1;
     if (p.qualitaet === "fehler") z.fehler += 1;
-    if (p.datei === "veraltet") z.veraltet += 1;
     if (p.datei === "wird_erstellt") z.wirdGebaut += 1;
     if (p.postbereit) z.postbereit += 1;
   }
@@ -573,15 +505,6 @@ export interface Aufgabe {
 export function naechsteAufgabe(z: VideoStand): Aufgabe | null {
   if (z.fehler > 0) {
     return { text: z.fehler === 1 ? "1 Fehler beheben" : `${z.fehler} Fehler beheben`, pfad: "/clips#fehler" };
-  }
-  if (z.veraltet > 0) {
-    return {
-      text: z.veraltet === 1 ? "1 Video neu clippen" : `${z.veraltet} Videos neu clippen`,
-      pfad: "/clips#veraltet",
-    };
-  }
-  if (z.zuPruefen > 0) {
-    return { text: z.zuPruefen === 1 ? "1 Clip prüfen" : `${z.zuPruefen} Clips prüfen`, pfad: "/clips#zu_pruefen" };
   }
   if (z.wirdGebaut > 0) {
     return { text: z.wirdGebaut === 1 ? "1 Clip wird geclippt" : `${z.wirdGebaut} Clips werden geclippt`, pfad: "/clips" };

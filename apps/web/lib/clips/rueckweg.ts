@@ -5,8 +5,8 @@
  * wiedersuchen.
  *
  * Es ist falsch, wenn jemand frisch auf die Seite kommt. Dann sieht er die Auswahl von vorhin -
- * „Video veraltet (2)" - und damit zwei von drei Clips, ohne zu wissen warum. Die Seite heisst
- * „Clips prüfen" und soll mit allen anfangen.
+ * etwa „Fehler beheben (2)" - und damit zwei von drei Clips, ohne zu wissen warum. Die Seite
+ * heisst „Clips prüfen" und soll mit allen anfangen.
  *
  * Deshalb hinterlässt die Clip-Seite beim Zurückgehen diese Notiz, und die Liste liest sie genau
  * einmal. Kein Zeitstempel, keine Herkunftsprüfung: eine Notiz, die verbraucht wird. */

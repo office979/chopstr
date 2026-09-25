@@ -12,7 +12,6 @@ import { PLATFORM_LABELS, patternLabel } from "@/lib/clips/labels";
 import { STRUCTURE_LABELS } from "@/lib/candidates/labels";
 import { formatDate } from "@/lib/format";
 import { pruefstand } from "@/lib/clips/pruefstand";
-import { stilPruefen } from "@/lib/clips/caption-style";
 import { SerieClips, type SerienClip } from "./SerieClips";
 
 export const dynamic = "force-dynamic";
@@ -39,24 +38,8 @@ export default async function SeriesDetailPage({ params }: Props) {
   const slots = calendarSlots(series, clips);
   const gaps = slots.filter((s) => s.gap).length;
 
-  /* Der Zustand je Clip wie in der Clip-Übersicht, damit dieselbe Sache überall gleich heisst.
-   * Ohne den Renderplan-Vergleich (der braucht die Transkriptversion je Projekt) bleibt es bei
-   * dem, was ohne Projektkontext sicher zu sagen ist. */
-  const zustandVon = (c: (typeof clips)[number]) =>
-    pruefstand({
-      clip: c,
-      freigabe: null,
-      stand: {
-        status: c.status,
-        hatDatei: Boolean(c.file_key),
-        plan: c.render_plan,
-        renderFehler: c.render_error,
-        transkriptVersion: c.render_plan?.sources?.transcript_version ?? null,
-        stil: stilPruefen(c.caption_style),
-        schnitt: c.composition,
-        zeitmarken: c.zeitmarken,
-      },
-    });
+  /* Der Zustand je Clip wie in der Clip-Übersicht, damit dieselbe Sache überall gleich heisst. */
+  const zustandVon = (c: (typeof clips)[number]) => pruefstand({ clip: c, freigabe: null });
 
   const zeile = (c: (typeof clips)[number]): SerienClip => ({
     id: c.id,

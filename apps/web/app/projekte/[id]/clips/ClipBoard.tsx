@@ -17,7 +17,7 @@ import {
   freigabeVeraltet,
   latestByClip,
 } from "@/lib/guest/approval";
-import { stilAusPlan, stilPruefen } from "@/lib/clips/caption-style";
+import { stilPruefen } from "@/lib/clips/caption-style";
 import { structureLabel } from "@/lib/candidates/labels";
 import {
   aktionStand,
@@ -46,7 +46,6 @@ import { RENDER_STEP } from "@/lib/pipeline";
 import { compositionDuration } from "@/lib/clips/render-demo";
 import { ASPECT_SIZE, PLATFORM_DEFAULT_PRESET } from "@/lib/clips/presets";
 import { FASSUNG_FORMATE, FORMAT_HILFT_BEI, fassungMoeglich } from "@/lib/clips/fassungen";
-import { lesen as effekteLesen } from "@/lib/clips/effekte";
 import { kommtVomClip } from "@/lib/clips/rueckweg";
 import type { ClipExtras, Series } from "@/lib/repo/types-publishing";
 import { ClipSeries } from "./ClipSeries";
@@ -81,9 +80,6 @@ interface Props {
   canPublish: boolean;
   previewFont: PreviewFont | null;
   publishing?: ClipBoardPublishing;
-  /* Die neueste Transkriptversion des Projekts. Daran hängt, ob eine Textkorrektur schon im
-   * gebauten Video steckt. */
-  transkriptVersion: number | null;
   /* Das Format der Quelle. Weicht das Zielformat davon ab, wurde das Bild beschnitten - und dann
    * ist die Frage, ob die richtige Person im Ausschnitt steht, eine echte Frage. */
   quellAspekt: Aspect | null;
@@ -156,7 +152,6 @@ export function ClipBoard({
   canPublish,
   previewFont,
   publishing,
-  transkriptVersion,
   quellAspekt,
 }: Props) {
   const [clips, setClips] = useState<Clip[]>(initialClips);
@@ -264,8 +259,8 @@ export function ClipBoard({
      *   zurück aus einem Clip          -> der gemerkte Stand, dort wurde gerade gearbeitet
      *   frisch, etwa über die Brotkrume -> „Alle"
      *
-     * Der dritte Fall lief vorher in den zweiten: man kam an und sah die Auswahl von vorhin, etwa
-     * „Video veraltet", also zwei von drei Clips - ohne zu wissen warum. */
+     * Der dritte Fall lief vorher in den zweiten: man kam an und sah die Auswahl von vorhin,
+     * also vielleicht zwei von drei Clips - ohne zu wissen warum. */
     const t = window.setTimeout(
       ausAdresse && (FILTER_ORDNUNG as string[]).includes(ausAdresse)
         ? () => {
@@ -388,22 +383,6 @@ export function ClipBoard({
     const aus = new Map<string, Pruefstand>();
     for (const clip of clips) {
       const gespeicherterStil = stilPruefen(extras[clip.id]?.caption_style);
-      const stand = {
-        status: clip.status,
-        hatDatei: Boolean(clip.file_key),
-        plan: clip.render_plan,
-        renderFehler: clip.render_error,
-        transkriptVersion,
-        stil: Object.keys(gespeicherterStil).length
-          ? gespeicherterStil
-          : stilAusPlan((clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null, clip.render_plan?.output.height),
-        schnitt: clip.composition,
-        zeitmarken: clip.zeitmarken,
-        /* Ohne die Effekte meldet die Liste ein geändertes Video als aktuell: der Renderplan
-         * trägt sie, die Karte verglich sie nicht. Wer einen Effekt setzte und zurückging, sah
-         * „Video aktuell" an einem Video, das den Effekt nicht hat. */
-        effekte: effekteLesen(extras[clip.id]?.effekte ?? [], compositionDuration(clip)),
-      };
       /* „In Arbeit" heisst: jemand hat hier schon etwas eingestellt. Das ist etwas anderes als ein
        * roher Vorschlag, den noch niemand angesehen hat, und für die Frage „was muss ich noch
        * anfassen" der wichtigere Unterschied. */
@@ -416,7 +395,6 @@ export function ClipBoard({
         pruefstand({
           clip,
           freigabe: approvals.get(clip.id) ?? null,
-          stand,
           bearbeitet,
           kandidat: candidates.find((k) => k.id === clip.candidate_id) ?? null,
           quellformatAbweichend: quellAspekt != null && quellAspekt !== clip.aspect,
@@ -424,11 +402,11 @@ export function ClipBoard({
       );
     }
     return aus;
-  }, [clips, extras, approvals, transkriptVersion, candidates, quellAspekt]);
+  }, [clips, extras, approvals, candidates, quellAspekt]);
 
   /* Wie viele Clips passen zu welchem Filter? Ein Clip kann in mehreren stehen: ein freigegebener
-   * mit veraltetem Video ist beides. Das ist kein Fehler der Zählung, sondern der Punkt der drei
-   * Achsen. */
+   * ohne Fehler ist freigegeben UND postbereit. Das ist kein Fehler der Zählung, sondern der Punkt
+   * der drei Achsen. */
   const zaehler = useMemo(() => {
     const aus = new Map<FilterId, number>();
     for (const f of [...FILTER_ORDNUNG, "alle" as FilterId]) {
@@ -728,7 +706,6 @@ export function ClipBoard({
         <p className="text-sm text-text-2">
           {clips.length} {clips.length === 1 ? "Clip" : "Clips"}
           {zaehler.get("fehler") ? `, ${zaehler.get("fehler")} mit einem Fehler` : ""}
-          {zaehler.get("zu_pruefen") ? `, ${zaehler.get("zu_pruefen")} warten auf deine Entscheidung` : ""}
           {zaehler.get("postbereit") ? `, ${zaehler.get("postbereit")} bereit zum Posten` : ""}.
         </p>
         <div className="flex items-center gap-2 text-xs">
@@ -1079,13 +1056,8 @@ export function ClipBoard({
                         Fehler
                       </Pille>
                     )}
-                    {p.qualitaet === "hinweis" && (
-                      <Pille ton="ruhig" titel="Brauchbar, aber einer Ansicht wert.">
-                        Hinweis
-                      </Pille>
-                    )}
                     {p.datei !== "aktuell" && (
-                      <Pille ton={p.datei === "veraltet" || p.datei === "fehlgeschlagen" ? "achtung" : "ruhig"} titel={DATEI_SATZ[p.datei]}>
+                      <Pille ton={p.datei === "fehlgeschlagen" ? "achtung" : "ruhig"} titel={DATEI_SATZ[p.datei]}>
                         {DATEI_LABEL[p.datei]}
                       </Pille>
                     )}

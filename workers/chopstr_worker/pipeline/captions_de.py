@@ -585,12 +585,50 @@ def to_ass(
     return head + "\n".join(events) + "\n"
 
 
-def to_srt(words: list[dict], clip_start: float = 0.0, limit: int | None = None, text_field: str = "text") -> str:
+def beiblatt_karten(
+    words: list[dict], preset: str | CaptionPreset | int | None = None, text_field: str = "text"
+) -> tuple[list[list[dict]], int]:
+    """Die Karten für die Beiblätter SRT und VTT, und die Zeilenbreite dazu.
+
+    WARUM DAS EINE EIGENE FUNKTION IST: die eingebrannten Untertitel (ASS) und die Beiblätter
+    wurden bisher verschieden gebaut. ``to_ass`` übergab dem Kartenbau das ganze Preset, ``to_srt``
+    und ``to_vtt`` nur die Zeichenbreite. Bei ``tiktok_words`` - dem Stil, den jeder hochkante Clip
+    bekommt - heisst das: im Bild steht ein Wort je Einblendung, in der SRT stehen ganze Sätze über
+    zwei Zeilen. Zwei verschiedene Untertitel zu demselben Video, und niemand hat es gesehen, weil
+    niemand beides gleichzeitig ansieht.
+
+    Angeglichen werden Zeilenbreite und Zeilenzahl: davon hängt ab, wo umgebrochen wird, und das
+    ist der sichtbare Unterschied.
+
+    Nicht angeglichen wird ``words_per_card``. Eine Untertiteldatei mit einem Wort je Eintrag ist
+    im Video richtig und als Datei unbrauchbar: YouTube, Vimeo und jeder Player zeigen sie so an,
+    wie sie dasteht, und ein Wort im Sekundentakt liest niemand. Ebenso ``all_caps``: Grossschrift
+    ist eine Gestaltung fürs Bild, Vorleseprogramme buchstabieren sie. Beides ist eine bewusste
+    Entscheidung und keine Auslassung."""
     text_field = check_text_field(text_field)
+    if isinstance(preset, int):
+        # Alter Aufruf mit blosser Zeichenbreite. Bleibt lesbar und tut genau das, was er bisher
+        # tat, damit ein vorhandener Aufruf nicht stillschweigend etwas anderes liefert.
+        return build_cards(words, preset, PRESETS["tiktok_bold"].max_lines, text_field=text_field), preset
+    p = (
+        PRESETS["tiktok_bold"]
+        if preset is None
+        else preset
+        if isinstance(preset, CaptionPreset)
+        else preset_for(preset)
+    )
+    return build_cards(words, p.max_chars, p.max_lines, text_field=text_field), p.max_chars
+
+
+def to_srt(
+    words: list[dict], clip_start: float = 0.0, preset: str | CaptionPreset | int | None = None, text_field: str = "text"
+) -> str:
+    text_field = check_text_field(text_field)
+    karten, breite = beiblatt_karten(words, preset, text_field)
     out = []
-    for i, card in enumerate(build_cards(words, limit, text_field=text_field), start=1):
+    for i, card in enumerate(karten, start=1):
         s, e = float(card[0]["start"]) - clip_start, float(card[-1]["end"]) - clip_start
-        text = "\n".join(wrap_lines([word_text(w, text_field) for w in card], limit or PRESETS["tiktok_bold"].max_chars))
+        text = "\n".join(wrap_lines([word_text(w, text_field) for w in card], breite))
         out.append(f"{i}\n{_srt_t(s)} --> {_srt_t(e)}\n{text}\n")
     return "\n".join(out)
 
@@ -607,13 +645,16 @@ def _vtt_t(t: float) -> str:
     return _srt_t(t).replace(",", ".")
 
 
-def to_vtt(words: list[dict], clip_start: float = 0.0, limit: int | None = None, text_field: str = "text") -> str:
+def to_vtt(
+    words: list[dict], clip_start: float = 0.0, preset: str | CaptionPreset | int | None = None, text_field: str = "text"
+) -> str:
     """WebVTT mit denselben Karten wie ``to_srt`` (Punkt statt Komma in den Zeiten, Kopfzeile WEBVTT)."""
     text_field = check_text_field(text_field)
+    karten, breite = beiblatt_karten(words, preset, text_field)
     out = ["WEBVTT", ""]
-    for i, card in enumerate(build_cards(words, limit, text_field=text_field), start=1):
+    for i, card in enumerate(karten, start=1):
         s, e = float(card[0]["start"]) - clip_start, float(card[-1]["end"]) - clip_start
-        text = "\n".join(wrap_lines([word_text(w, text_field) for w in card], limit or PRESETS["tiktok_bold"].max_chars))
+        text = "\n".join(wrap_lines([word_text(w, text_field) for w in card], breite))
         out.append(f"{i}\n{_vtt_t(s)} --> {_vtt_t(e)}\n{text}\n")
     return "\n".join(out)
 
@@ -658,6 +699,7 @@ __all__ = [
     "safe_zone_margins",
     "scaled_preset",
     "to_ass",
+    "beiblatt_karten",
     "to_srt",
     "to_vtt",
     "word_text",

@@ -37,8 +37,23 @@ export async function POST(request: NextRequest) {
   const idx = typeof body.variant_index === "number" ? body.variant_index : Number(body.variant_index);
   const variant = Number.isInteger(idx) ? variants[idx] : undefined;
   if (!variant) return Response.json({ error: "Bitte eine Hook-Variante für B wählen." }, { status: 400 });
-  if (variant.spoken === hook.spoken_hook && variant.onscreen === hook.onscreen_hook) {
-    return Response.json({ error: "Variante B braucht einen anderen Hook als Variante A." }, { status: 400 });
+  /* Ein Test vergleicht zwei Videos. Wenn sich die beiden Videos nicht unterscheiden, vergleicht
+   * er nichts, und das Ergebnis ist eine Zahl ohne Bedeutung.
+   *
+   * Genau das konnte hier passieren. Geprüft wurde nur, ob sich IRGENDEIN Feld unterscheidet.
+   * Unterschied sich aber nur der gesprochene Satz, kamen zwei Dateien heraus, die Bild für Bild
+   * gleich sind: der gesprochene Satz ist ein Vorschlag für die Aufnahme, chopstr spricht ihn
+   * nicht und legt ihn nirgends ins Video. Sichtbar wird allein der On-Screen-Hook. */
+  if (variant.onscreen.trim() === (hook.onscreen_hook ?? "").trim()) {
+    return Response.json(
+      {
+        error:
+          variant.spoken === hook.spoken_hook
+            ? "Variante B braucht einen anderen Hook als Variante A."
+            : "Die beiden Fassungen sähen gleich aus. Der gesprochene Satz ist ein Vorschlag für deine Aufnahme, chopstr baut ihn nicht ins Video ein. Für einen Test muss sich der eingeblendete Text unterscheiden.",
+      },
+      { status: 400 },
+    );
   }
   const hypothesis = typeof body.hypothesis === "string" && body.hypothesis.trim()
     ? body.hypothesis.trim().slice(0, 500)

@@ -338,9 +338,17 @@ export function HookStudio({
           <GlassCard padding="lg" className="flex flex-col gap-6">
             <div className="grid gap-6 md:grid-cols-3">
               <div className="flex flex-col gap-2">
+                {/* „Gesprochener Hook" stand hier und war eine Zusage, die das Produkt nicht
+                    einlöst: chopstr spricht diesen Satz nicht, baut ihn nirgends ein und legt ihn
+                    nicht über den Ton. Er ist ein Vorschlag für die Aufnahme, und das muss dabei
+                    stehen, sonst wartet jemand darauf, ihn im fertigen Video zu hören. */}
                 <label htmlFor={spokenId} className="text-sm font-medium">
-                  Gesprochener Hook
+                  Satz zum Sagen
                 </label>
+                <p className="text-xs text-text-3">
+                  Ein Vorschlag für deine nächste Aufnahme. chopstr spricht ihn nicht und baut ihn
+                  nicht ins Video ein.
+                </p>
                 <Textarea id={spokenId} value={spoken} onChange={(e) => setSpoken(e.target.value)} className="min-h-28" aria-invalid={spokenClaims.length > 0 || undefined} />
                 <WordCount text={spoken} max={SPOKEN_HOOK_MAX_WORDS} />
                 <Notes notes={spokenLint.notes.filter((n) => !n.includes("Wörter, erlaubt"))} issues={spokenClaims} />

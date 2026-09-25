@@ -114,7 +114,7 @@ def word_count(text: str) -> int:
 def limit_notes(spoken: str, onscreen: str) -> list[str]:
     notes = []
     if word_count(spoken) > SPOKEN_MAX_WORDS:
-        notes.append(f"Gesprochener Hook zu lang ({word_count(spoken)} Wörter, maximal {SPOKEN_MAX_WORDS})")
+        notes.append(f"Satz zum Sagen zu lang ({word_count(spoken)} Wörter, maximal {SPOKEN_MAX_WORDS})")
     if word_count(onscreen) > ONSCREEN_MAX_WORDS:
         notes.append(f"On-Screen-Hook zu lang ({word_count(onscreen)} Wörter, maximal {ONSCREEN_MAX_WORDS})")
     return notes

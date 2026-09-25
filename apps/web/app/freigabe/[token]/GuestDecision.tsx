@@ -144,7 +144,7 @@ export function GuestDecision({ token, view }: { token: string; view: GuestView 
               <dd className="mt-1 text-[15px] text-text">{view.onscreen_hook ?? <span className="text-text-3">noch keiner</span>}</dd>
             </div>
             <div>
-              <dt className="text-xs uppercase tracking-wide text-text-2">Gesprochener Hook</dt>
+              <dt className="text-xs uppercase tracking-wide text-text-2">Satz zum Sagen</dt>
               <dd className="mt-1 text-[15px] text-text">{view.spoken_hook ?? <span className="text-text-3">noch keiner</span>}</dd>
             </div>
             <div className="sm:col-span-2">

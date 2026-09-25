@@ -712,8 +712,11 @@ def write_captions(
     paths["ass"].write_text(
         captions_de.to_ass(out_words, 0.0, preset, play_res, font_family=font_family, text_field=text_field), encoding="utf-8"
     )
-    paths["srt"].write_text(captions_de.to_srt(out_words, 0.0, preset.max_chars, text_field=text_field), encoding="utf-8")
-    paths["vtt"].write_text(captions_de.to_vtt(out_words, 0.0, preset.max_chars, text_field=text_field), encoding="utf-8")
+    # Dasselbe Preset wie die eingebrannten Untertitel, damit die Beiblaetter an denselben Stellen
+    # umbrechen. Vorher bekamen sie nur die Zeichenbreite; bei den hochkanten Stilen stand im Bild
+    # ein Wort je Einblendung und in der SRT ein ganzer Satz.
+    paths["srt"].write_text(captions_de.to_srt(out_words, 0.0, preset, text_field=text_field), encoding="utf-8")
+    paths["vtt"].write_text(captions_de.to_vtt(out_words, 0.0, preset, text_field=text_field), encoding="utf-8")
     return {k: str(v) for k, v in paths.items()}
 
 

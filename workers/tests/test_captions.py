@@ -156,3 +156,43 @@ def test_karten_passen_immer_in_die_zeilen():
         assert len(zeilen) <= preset.max_lines
         for z in zeilen:
             assert len(" ".join(t for _, t in z)) <= preset.max_chars or len(z) == 1
+
+
+def test_beiblaetter_brechen_wie_die_eingebrannten_untertitel():
+    """SRT und VTT bekommen dasselbe Preset wie das Bild.
+
+    Vorher bekamen sie nur die Zeichenbreite, und ``max_lines`` blieb bei zwei. Bei den hochkanten
+    Stilen steht im Bild eine Zeile; die Beiblaetter brachen an anderen Stellen um."""
+    woerter = [
+        {"text": w, "start": i * 0.4, "end": i * 0.4 + 0.35}
+        for i, w in enumerate("Der Betrieb mit zwoelf Leuten hat im letzten Jahr mehr verdient".split())
+    ]
+    p = cap.preset_for("tiktok_words")
+    assert p.max_lines == 1
+    karten_mit_preset, _ = cap.beiblatt_karten(woerter, p)
+    karten_nur_breite, _ = cap.beiblatt_karten(woerter, p.max_chars)
+    # Eine Zeile je Karte statt zwei: mehr Karten, dafuer dieselben Umbruchstellen wie im Bild.
+    assert len(karten_mit_preset) > len(karten_nur_breite)
+    assert all(len(cap.wrap_lines([cap.word_text(w, "text") for w in k], p.max_chars)) <= 2 for k in karten_mit_preset)
+
+
+def test_beiblaetter_bleiben_lesbar_und_uebernehmen_kein_wort_je_karte():
+    """Ein Wort je Eintrag ist im Video richtig und als Datei unbrauchbar.
+
+    YouTube und jeder Player zeigen eine SRT so an, wie sie dasteht. Ein Wort im Sekundentakt liest
+    niemand mit. Deshalb wird ``words_per_card`` bewusst nicht uebernommen."""
+    woerter = [
+        {"text": w, "start": i * 0.4, "end": i * 0.4 + 0.35}
+        for i, w in enumerate("Der Betrieb mit zwoelf Leuten hat im letzten Jahr mehr verdient".split())
+    ]
+    p = cap.preset_for("tiktok_words")
+    assert p.words_per_card == 1
+    karten, _ = cap.beiblatt_karten(woerter, p)
+    assert max(len(k) for k in karten) > 1
+
+
+def test_alter_aufruf_mit_zeichenbreite_bleibt_gleich():
+    woerter = [{"text": w, "start": i * 0.4, "end": i * 0.4 + 0.35} for i, w in enumerate("eins zwei drei vier".split())]
+    a, breite = cap.beiblatt_karten(woerter, 30)
+    assert breite == 30
+    assert a == cap.build_cards(woerter, 30, 2, text_field="text")

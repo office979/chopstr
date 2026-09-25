@@ -48,6 +48,9 @@ from ..pipeline import (
 from ..pipeline import (
     effekte as effekte_mod,
 )
+from ..pipeline import (
+    musik as musik_mod,
+)
 from ..providers_llm import LLM
 from ..residency import Tenant
 from . import common
@@ -83,6 +86,7 @@ NOTE_OVERRIDE_UNREADABLE = "Reframe-Override konnte nicht gelesen werden (Migrat
 SQL_CAPTION_STYLE = "select caption_style from clips where id = %s"
 SQL_ZEITMARKEN = "select zeitmarken from clips where id = %s"
 SQL_EFFEKTE = "select effekte from clips where id = %s"
+SQL_MUSIK = "select musik from clips where id = %s"
 NOTE_MARKEN_UNREADABLE = "Zeitmarken konnten nicht gelesen werden (Migration 0009 eingespielt?), Automatik verwendet"
 NOTE_EFFEKTE_UNREADABLE = "Effekte konnten nicht gelesen werden (Migration 0015 eingespielt?), es wird ohne geclippt"
 NOTE_STYLE_UNREADABLE = "Untertitel-Stil des Clips konnte nicht gelesen werden (Migration 0008 eingespielt?), Markenprofil verwendet"
@@ -362,6 +366,41 @@ def _load_effekte(
         return effekte_mod.als_liste(neu), True, None
     wert = _json(roh, [])
     return effekte_mod.als_liste(effekte_mod.lesen(wert, dauer_s)), False, None
+
+
+NOTE_MUSIK_FEHLT = "Die Musikdatei war nicht zu finden, der Clip wurde ohne Musik geclippt"
+NOTE_MUSIK_KATALOG = "Musik aus der Bibliothek ist noch nicht angebunden, der Clip wurde ohne Musik geclippt"
+
+
+def _load_musik(ctx: common.Context, clip_id: str) -> tuple[dict | None, Path | None, str | None]:
+    """``clips.musik`` lesen und die Datei lokal bereitstellen.
+
+    Gibt (Musik als Dict, lokaler Pfad, Hinweis) zurueck. Fehlt die Datei in der Ablage, wird OHNE
+    Musik gerendert und der Hinweis wandert in die Notizen des Laufs: ein Clip ohne Musik ist
+    besser als kein Clip, aber stillschweigend darf es nicht passieren.
+
+    Eine eigene Datei liegt unter ``musik/<clip>/<zufall>.<endung>`` im Bereich der abgeleiteten
+    Dateien. Ein Katalogstueck wird hier noch nicht aufgeloest - dafuer braucht es den Zugang zur
+    Bibliothek, und den gibt es noch nicht."""
+    try:
+        row = db.fetch_one(ctx.conn, SQL_MUSIK, (clip_id,))
+    except Exception as exc:
+        log.warning("musik not readable clip=%s error=%s", clip_id, exc.__class__.__name__)
+        return None, None, None
+    roh = _json(row[0], None) if row and row[0] is not None else None
+    m = musik_mod.lesen(roh)
+    if m is None:
+        return None, None, None
+    if m.quelle != "eigen":
+        return None, None, NOTE_MUSIK_KATALOG
+    ziel = ctx.work_dir / "musik" / Path(m.datei).name
+    try:
+        if not ziel.is_file():
+            ctx.store.download_to("derived", m.datei, ziel)
+    except Exception as exc:
+        log.warning("musik download failed clip=%s error=%s", clip_id, exc.__class__.__name__)
+        return None, None, NOTE_MUSIK_FEHLT
+    return m.als_dict(), ziel, None
 
 
 def caption_schrift(style: dict | None, marken_font: str | None) -> tuple[str | None, str | None]:
@@ -655,6 +694,9 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     effekte_liste, effekte_neu, effekte_note = _load_effekte(ctx, clip_id, out_words, clip_dauer)
     if effekte_note:
         rf.notes.append(effekte_note)
+    musik_dict, musik_datei, musik_note = _load_musik(ctx, clip_id)
+    if musik_note:
+        rf.notes.append(musik_note)
 
     plan = render_plan.build_plan(
         platform=destination,
@@ -684,6 +726,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         caption_text_field=text_field,
         zeitmarken=zeitmarken,
         effekte=effekte_liste,
+        musik=musik_dict,
     )
     try:
         decision_log.record_reframe_strategy(
@@ -718,6 +761,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
             plan, local_src, paths["ass"], mp4,
             fonts_dir=fonts_dir, x264_preset=s.render_x264_preset,
             font_path=brand_assets["font_path"], logo_path=brand_assets["logo_path"],
+            musik_path=musik_datei,
         )  # fmt: skip
 
     result = einmal_rendern()

@@ -259,6 +259,39 @@ passiert – und in `apps/web/lib/clips/effekte.ts` für die Oberfläche. Tests 
 sie auf denselben Zahlen, und `workers/tests/test_effekt_render.py` misst die Bildpunkte eines
 statischen Quadrats durch die echte Filterkette.
 
+## Musik
+
+Ein Lied unter dem Clip. `clips.musik` (Migration 0017) hält je Clip ein Objekt aus `quelle`,
+`datei`, `name`, `ab_s`, `lautstaerke_db` und `ducking` – oder `NULL` für „keine Musik“. Im Editor
+steht es unter „Musik“ und als eigene Spur in der Zeitleiste.
+
+`ab_s` ist der Startpunkt **im Lied**, nicht im Clip: die Musik läuft über den ganzen Clip, und das
+Ziehen der Spur sucht die Stelle des Liedes, die darunter passen soll. Ein Stück beginnt selten
+dort, wo es unter einen Clip passt. Die Spur lässt sich nur so weit schieben, wie das Lied noch
+reicht (`0 … Liedlänge − Cliplänge`).
+
+Gemischt wird in `workers/chopstr_worker/pipeline/musik.py`, und zwar **vor** der
+Lautheitsangleichung: `atrim` schneidet den Ausschnitt, `apad` füllt auf, wenn das Lied kürzer ist
+als der Clip, `volume` setzt den Pegel (Standard −18 dB), `afade` blendet ein (0,8 s) und aus
+(1,2 s). Ist „Unter der Stimme leiser“ eingeschaltet, senkt `sidechaincompress` die Musik, sobald
+jemand spricht – dafür wird die Sprachspur mit `asplit` verdoppelt, weil ffmpeg jede Kennung nur
+einmal hergibt. `amix … normalize=0` mischt zusammen, ohne selbst am Pegel zu drehen.
+
+**Eigene Datei** hochladen geht immer: MP3, WAV, M4A, OGG oder FLAC bis 40 MB, abgelegt unter
+`musik/<clip-id>/`. Die **Bibliothek** (Epidemic Sound) ist vorbereitet – `EPIDEMIC_API_KEY` und
+`EPIDEMIC_BASE_URL` in `.env.example` – aber leer: die Partner Content API beantwortet beide
+geprüften Schlüssel mit `401`, der Zugang zum Katalog wird laut Epidemic-Dokumentation im
+Partnervertrag ausgehandelt und nicht über einen Schlüssel allein. Ohne diesen Vertrag gibt es
+keine Bibliothek, und eine Auswahl zu zeigen, deren Stücke niemand rechtssicher verwenden darf,
+wäre schlimmer als keine.
+
+Eine **automatische Auswahl nach Stimmung** gibt es noch nicht; sie braucht ein Sprachmodell über
+dem Transkript (siehe `LLM_PROVIDER` in `.env.example`).
+
+`workers/tests/test_musik_render.py` rendert denselben Clip zweimal, mit und ohne Musik, und misst
+den Unterschied durch einen Bandpass – ein einzelner Lauf könnte nicht zeigen, ob überhaupt etwas
+angekommen ist.
+
 ## Schriften
 
 Alle neun Untertitel-Schriften liegen im Repository (`workers/fonts`, rund 1,9 MB). Wer chopstr

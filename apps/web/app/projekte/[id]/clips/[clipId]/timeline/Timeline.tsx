@@ -18,6 +18,7 @@ import {
   type Schnitt,
 } from "@/lib/clips/schnitt";
 import { EFFEKT_LABEL, MAX_DAUER_S, MIN_DAUER_S, type Effekt } from "@/lib/clips/effekte";
+import type { Musik } from "@/lib/clips/musik";
 import type { RenderShot, Zeitmarke } from "@/lib/repo/types";
 import { Lineal, timecode } from "./Lineal";
 import { Wellenform, type WellenformDaten, type WellenformStand } from "./Wellenform";
@@ -54,6 +55,13 @@ interface Props {
   onEffektVerschieben: (index: number, abS: number) => void;
   onEffektDauer: (index: number, dauerS: number) => void;
   onEffektWeg: (index: number) => void;
+  /* Musik unter dem Clip. Null heisst: keine, dann fehlt die Spur ganz - eine leere Spur, die an
+   * fast jedem Clip dasteht, ist eine Zeile Lärm. */
+  musik: Musik | null;
+  /* Wie lang das Stück ist, in Sekunden. Null heisst „noch nicht gemessen": dann lässt sich nicht
+   * sagen, wie weit man schieben darf, und die Spur bleibt fest. */
+  musikDauerS: number | null;
+  onMusikVerschieben: (abS: number) => void;
   markeBeschriftung: (m: Zeitmarke | null) => string;
   canEdit: boolean;
   kannZurueck: boolean;
@@ -94,6 +102,9 @@ export function Timeline({
   onEffektVerschieben,
   onEffektDauer,
   onEffektWeg,
+  musik,
+  musikDauerS,
+  onMusikVerschieben,
   markeBeschriftung,
   canEdit,
   kannZurueck,
@@ -306,6 +317,46 @@ export function Timeline({
   }, [schnitt, zeit]);
 
   const dauerGesamt = schnittDauer(schnitt);
+
+  /* Die Musikstelle beim Ziehen. Wie beim Effekt: gespeichert wird erst beim Loslassen, gezeigt
+   * wird sofort - sonst fühlt sich das Schieben an wie ein Formular. */
+  const [ziehtMusik, setZiehtMusik] = useState<number | null>(null);
+  const musikSicht = ziehtMusik ?? musik?.ab_s ?? 0;
+
+  /* Die Stelle im Stück verschieben.
+   *
+   * Gerechnet wird in SEKUNDEN DES STÜCKS, nicht des Clips: eine Bewegung um die halbe Clipbreite
+   * verschiebt um eine halbe Clipdauer im Stück. Nach links heisst „später anfangen" - wie ein
+   * Filmstreifen, den man unter einem Fenster durchzieht.
+   *
+   * Begrenzt auf [0, Stückdauer - Clipdauer]: weiter rechts liefe die Musik vor dem Clipende aus,
+   * weiter links gibt es nichts. */
+  const musikZiehen = useCallback(
+    (e: React.PointerEvent) => {
+      if (!musik || musikDauerS == null || !canEdit) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startAb = musik.ab_s;
+      const maxAb = Math.max(0, musikDauerS - dauerGesamt);
+      const proPixel = breite > 0 ? dauerGesamt / breite : 0;
+      let letzte = startAb;
+      const los = (ev: PointerEvent) => {
+        letzte = Math.max(0, Math.min(maxAb, startAb - (ev.clientX - startX) * proPixel));
+        setZiehtMusik(Math.round(letzte * 100) / 100);
+      };
+      const ende = () => {
+        window.removeEventListener("pointermove", los);
+        window.removeEventListener("pointerup", ende);
+        setZiehtMusik(null);
+        if (Math.abs(letzte - startAb) > 0.05) onMusikVerschieben(Math.round(letzte * 100) / 100);
+      };
+      window.addEventListener("pointermove", los);
+      window.addEventListener("pointerup", ende);
+    },
+    [musik, musikDauerS, canEdit, dauerGesamt, breite, onMusikVerschieben],
+  );
+
   const iHier = abschnittBei(schnitt, zeit);
   const kannTeilen = canEdit && iHier >= 0 && teilen(schnitt, zeit) !== schnitt;
   const kannEntfernen = canEdit && gewaehlt != null && schnitt.length > 1;
@@ -449,6 +500,7 @@ export function Timeline({
           <Name hoehe={36} oben>Schnitt</Name>
           <Name hoehe={36} oben>Bildausschnitt</Name>
           <Name hoehe={30} oben>Effekte</Name>
+          {musik && <Name hoehe={28} oben>Musik</Name>}
         </div>
 
         <div className="min-w-0 flex-1">
@@ -720,6 +772,55 @@ export function Timeline({
               </span>
             )}
           </div>
+
+          {/* Musik: eine Spur, die über den Clip hinausragt.
+              Ein Stück ist zwei bis drei Minuten lang, der Clip dreissig Sekunden. Die Spur zeigt
+              deshalb nicht das Stück, sondern den AUSSCHNITT daraus, der gerade unter dem Clip
+              liegt - über die ganze Breite, denn die Musik läuft von Anfang bis Ende.
+
+              Geschoben wird die Stelle IM STÜCK: nach links heisst „später im Stück anfangen".
+              Das ist herum wie ein Filmstreifen unter einem Fenster, und genau so fühlt es sich
+              auch an. */}
+          {musik && (
+            <div className="relative mt-1 h-7 w-full overflow-hidden rounded-[6px] bg-black/25">
+              <button
+                type="button"
+                disabled={!canEdit || musikDauerS == null}
+                onPointerDown={musikZiehen}
+                onKeyDown={(e) => {
+                  if (musikDauerS == null) return;
+                  const schritt = e.shiftKey ? 5 : 1;
+                  const ziel =
+                    musik.ab_s + (e.key === "ArrowLeft" ? -schritt : e.key === "ArrowRight" ? schritt : 0);
+                  if (ziel === musik.ab_s) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onMusikVerschieben(Math.max(0, Math.min(ziel, Math.max(0, musikDauerS - dauerGesamt))));
+                }}
+                aria-label={`${musik.name}, ab Sekunde ${musikSicht.toFixed(0)} im Stück. Ziehen verschiebt die Stelle, Pfeiltasten auch.`}
+                className={cn(
+                  "absolute inset-0 flex items-center gap-2 px-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-white/70",
+                  canEdit && musikDauerS != null ? "cursor-grab active:cursor-grabbing" : "cursor-default",
+                )}
+              >
+                <span className="shrink-0 text-[10px] text-text-3">♪</span>
+                <span className="truncate text-[11px] text-text-2">
+                  {musik.name}
+                  {musikDauerS != null && (
+                    <span className="ml-2 font-mono tabular-nums text-text-3">
+                      ab {timecode(musikSicht)}
+                    </span>
+                  )}
+                </span>
+              </button>
+              {/* Ein Streifen als Griff über die ganze Breite: die Musik hat keine Kanten im Clip,
+                  sie läuft durch. Zu greifen ist deshalb alles. */}
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-y-1 left-0 right-0 rounded-[4px] border border-ai/40 bg-ai/10"
+              />
+            </div>
+          )}
 
           {/* Was mit dem gewählten Block los ist, und der eine Weg, ihn loszuwerden.
               EINE Zeile für beide Spuren: Effekte und Bildausschnitt verhalten sich gleich, also

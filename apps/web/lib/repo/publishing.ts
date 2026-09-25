@@ -196,6 +196,7 @@ function toExtras(r: Row): ClipExtras {
     zeitmarken: (r.zeitmarken as ClipExtras["zeitmarken"] | null) ?? [],
     /* Hier bleibt null stehen: der Unterschied zu einer leeren Liste ist der Punkt. */
     effekte: (r.effekte as ClipExtras["effekte"]) ?? null,
+    musik: (r.musik as ClipExtras["musik"]) ?? null,
   };
 }
 
@@ -436,7 +437,7 @@ const postgresPublishingRepo: PublishingRepo = {
     const session = await currentSession();
     return withContext(session, async (tx) => {
       const rows = await tx`
-        select c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override, c.caption_style, c.zeitmarken, c.effekte
+        select c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override, c.caption_style, c.zeitmarken, c.effekte, c.musik
         from clips c join sources s on s.id = c.source_id where c.id in ${tx(clipIds)} and s.workspace_id = ${session.workspaceId}`;
       return rows.map((r) => toExtras(r as Row));
     });
@@ -456,10 +457,13 @@ const postgresPublishingRepo: PublishingRepo = {
        * sonst legt der naechste Renderlauf wieder automatische an. */
       if ("effekte" in patch) data.effekte = tx.json((patch.effekte ?? []) as never);
       if ("zeitmarken" in patch) data.zeitmarken = tx.json((patch.zeitmarken ?? []) as never);
+      /* null heisst hier wirklich „keine Musik" und wird auch so geschrieben - anders als bei den
+       * Effekten, wo null „noch nie gesetzt" bedeutet. */
+      if ("musik" in patch) data.musik = patch.musik == null ? null : tx.json(patch.musik as never);
       if (Object.keys(data).length === 0) return (await this.getClipExtras([clipId]))[0] ?? null;
       const rows = await tx`
         update clips c set ${tx(data)} from sources s where c.id = ${clipId} and s.id = c.source_id and s.workspace_id = ${session.workspaceId}
-        returning c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override, c.caption_style, c.zeitmarken, c.effekte`;
+        returning c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override, c.caption_style, c.zeitmarken, c.effekte, c.musik`;
       return rows.length ? toExtras(rows[0] as Row) : null;
     });
   },

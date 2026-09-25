@@ -249,6 +249,18 @@ export interface ClipExtras {
   /* Effekte auf der Clip-Zeitachse (Migration 0015). NULL heisst „noch nie gesetzt", dann betont
    * die Automatik beim naechsten Clippen; eine leere Liste heisst „ausdruecklich keine". */
   effekte: { art: "zoom_in" | "zoom_out"; ab_s: number; dauer_s: number }[] | null;
+  /* Musik unter dem Clip (Migration 0017). NULL heisst „keine".
+   *
+   * Anders als bei den Effekten braucht es hier keinen Unterschied zwischen NULL und leer: Musik
+   * setzt niemand von selbst. Dafuer braeuchte es ein Sprachmodell, das den Text liest. */
+  musik: {
+    quelle: "katalog" | "eigen";
+    datei: string;
+    name: string;
+    ab_s: number;
+    lautstaerke_db: number;
+    ducking: boolean;
+  } | null;
 }
 
 /* Gespeicherte Untertitel-Vorlage. Gehoert dem Workspace, nicht der Person: in einer Agentur stellt

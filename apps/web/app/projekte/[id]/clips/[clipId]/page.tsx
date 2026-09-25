@@ -108,6 +108,7 @@ export default async function ClipPage({ params }: Props) {
         /* null heisst „noch nie gesetzt": dann betont die Automatik beim nächsten Clippen. Eine
            leere Liste ist eine Entscheidung und wird nicht überschrieben. */
         effekte={extras[0]?.effekte ?? null}
+        musik={extras[0]?.musik ?? null}
         shots={clip.render_plan?.shots ?? []}
         quelleBreite={source.width ?? null}
         komposition={clip.composition}

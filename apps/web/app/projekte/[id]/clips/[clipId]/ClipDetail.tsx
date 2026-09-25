@@ -33,6 +33,8 @@ import {
   type Effekt,
 } from "@/lib/clips/effekte";
 import { EffektListe } from "./EffektListe";
+import { MusikListe } from "./MusikListe";
+import { gleich as musikGleich, lesen as musikLesen, type Musik } from "@/lib/clips/musik";
 import { ClipPreview } from "./ClipPreview";
 import { LiveVorschau } from "./LiveVorschau";
 import { ClipTextEditor } from "./ClipTextEditor";
@@ -85,6 +87,8 @@ interface Props {
   zeitmarken: Zeitmarke[];
   /* Effekte auf der Clip-Zeitachse (Migration 0015). */
   effekte: Effekt[] | null;
+  /* Musik unter dem Clip. Null heisst: keine. */
+  musik: Musik | null;
   shots: RenderShot[];
   quelleBreite: number | null;
   /* Der gespeicherte Schnitt: welche Abschnitte der Quelle dieser Clip zeigt. */
@@ -153,6 +157,7 @@ export function ClipDetail({
   outH,
   zeitmarken: markenAnfang,
   effekte: effekteAnfang,
+  musik: musikAnfang,
   shots,
   quelleBreite,
   komposition,
@@ -445,9 +450,70 @@ export function ClipDetail({
   const effekteGeaendert = !effekteGleich(effekte, effekteGesichert);
   /* Ein Knopf für beides: Schnitt und Effekte hängen an derselben Zeitleiste, und zwei
    * Speicherknöpfe nebeneinander sind eine Auswahlaufgabe. */
-  const etwasGeaendert = schnittGeaendert || effekteGeaendert;
   /* Die Länge des Clips in Clipzeit: daran hängt, wie weit ein Effekt geschoben werden darf. */
   const clipDauer = useMemo(() => schnittDauer(schnitt), [schnitt]);
+
+  /* Die Musik dieses Clips, und wie lang das Stück ist.
+   *
+   * Die Länge kommt nicht vom Server: sie steht in der Datei, und die kennt der Browser, sobald
+   * er sie geladen hat. Ohne sie lässt sich nicht sagen, wie weit sich die Spur schieben darf -
+   * deshalb bleibt sie bis dahin fest statt zu raten. */
+  const [musik, setMusik] = useState<Musik | null>(() => musikLesen(musikAnfang));
+  const [musikGesichert, setMusikGesichert] = useState<Musik | null>(musik);
+  const [musikDauer, setMusikDauer] = useState<number | null>(null);
+  const [musikLaeuft, setMusikLaeuft] = useState(false);
+  const [musikFehler, setMusikFehler] = useState<string | null>(null);
+  const musikGeaendert = !musikGleich(musik, musikGesichert);
+  /* Ein Knopf für alles: Schnitt, Effekte und Musik hängen an derselben Zeitleiste, und drei
+   * Speicherknöpfe nebeneinander sind eine Auswahlaufgabe. */
+  const etwasGeaendert = schnittGeaendert || effekteGeaendert || musikGeaendert;
+
+  /* Die Länge des Stücks messen, sobald eine Datei da ist. Ein Audio-Element im Speicher, kein
+   * Abspielen: das geht in jedem Browser und kostet nichts. */
+  useEffect(() => {
+    if (!musik) {
+      setMusikDauer(null);
+      return undefined;
+    }
+    const url = `/api/projects/${sourceId}/clips/${clipId}/musik/datei`;
+    const a = new Audio();
+    let weg = false;
+    const fertig = () => {
+      if (!weg && Number.isFinite(a.duration)) setMusikDauer(a.duration);
+    };
+    a.addEventListener("loadedmetadata", fertig);
+    a.preload = "metadata";
+    a.src = url;
+    return () => {
+      weg = true;
+      a.removeEventListener("loadedmetadata", fertig);
+      a.src = "";
+    };
+  }, [musik, sourceId, clipId]);
+
+  /* Musik hochladen. Sie wird SOFORT gespeichert und nicht erst mit dem Speichern-Knopf: eine
+   * Datei liegt danach ohnehin auf dem Server, und ein „ungespeichertes Hochladen" gibt es nicht. */
+  const musikHochladen = useCallback(
+    async (datei: File) => {
+      setMusikLaeuft(true);
+      setMusikFehler(null);
+      try {
+        const form = new FormData();
+        form.append("datei", datei);
+        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/musik`, { method: "POST", body: form });
+        const d = (await res.json()) as { musik?: unknown; error?: string };
+        if (!res.ok) throw new Error(d.error ?? "Das Hochladen hat nicht geklappt");
+        const neu = musikLesen(d.musik);
+        setMusik(neu);
+        setMusikGesichert(neu);
+      } catch (err) {
+        setMusikFehler(err instanceof Error ? err.message : "Das Hochladen hat nicht geklappt");
+      } finally {
+        setMusikLaeuft(false);
+      }
+    },
+    [sourceId, clipId],
+  );
 
   /* Eine Änderung an den Effekten wird NICHT sofort gespeichert.
    *
@@ -525,10 +591,12 @@ export function ClipDetail({
 
   /* Ein Wort für die ganze Seite: gibt es irgendwo etwas Ungespeichertes? Steht in der Kopfzeile
    * und entscheidet, ob das Bauen gesperrt ist. */
-  const offeneAenderungen = dirty || stilGeaendert || schnittGeaendert;
+  const offeneAenderungen = dirty || stilGeaendert || schnittGeaendert || effekteGeaendert || musikGeaendert;
   /* Was genau offen ist. „Du hast etwas geändert" lässt den Nutzer raten, was er verliert. */
   const offeneListe = [
     schnittGeaendert ? "der Schnitt" : null,
+    effekteGeaendert ? "die Effekte" : null,
+    musikGeaendert ? "die Musik" : null,
     dirty ? "der Text" : null,
     stilGeaendert ? "die Untertitel" : null,
   ]
@@ -738,6 +806,16 @@ export function ClipDetail({
         if (!res.ok || !data.effekte) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
         setEffekte(data.effekte);
         setEffekteGesichert(data.effekte);
+      }
+      if (musikGeaendert) {
+        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/musik`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ musik }),
+        });
+        const data = (await res.json()) as { error?: string; musik?: unknown };
+        if (!res.ok) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
+        setMusikGesichert(musikLesen(data.musik));
       }
       /* Und gleich neu clippen.
        *
@@ -1032,6 +1110,9 @@ export function ClipDetail({
             onEffektVerschieben={(i, abS) => effekteAendern(effektVerschieben(effekte, i, abS, clipDauer))}
             onEffektDauer={(i, d) => effekteAendern(effektDauer(effekte, i, d, clipDauer))}
             onEffektWeg={(i) => effekteAendern(effektEntfernen(effekte, i))}
+            musik={musik}
+            musikDauerS={musikDauer}
+            onMusikVerschieben={(abS) => setMusik((m) => (m ? { ...m, ab_s: abS } : m))}
             bereichVonS={bereichVon}
             bereichBisS={bereichBis}
             schnitt={schnitt}
@@ -1094,6 +1175,15 @@ export function ClipDetail({
           {/* Effekte. Unter dem Bildausschnitt, weil beides dasselbe beantwortet: wie das Bild
               sich bewegt. Die Liste ist bewusst eine Liste - es werden mehr Effekte dazukommen,
               und dann steht hier jeder für sich mit seiner eigenen Auswahl. */}
+          <MusikListe
+            musik={musik}
+            canEdit={canEdit}
+            laeuft={musikLaeuft}
+            fehler={musikFehler}
+            onAendern={setMusik}
+            onHochladen={(d) => void musikHochladen(d)}
+          />
+
           <EffektListe
             effekte={effekte}
             zeitImClip={inClipzeit(schnitt, currentTime)}

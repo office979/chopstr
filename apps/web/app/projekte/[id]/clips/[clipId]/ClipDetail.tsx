@@ -17,6 +17,7 @@ import { useFilmstreifen } from "./useFilmstreifen";
 import type { WellenformDaten, WellenformStand } from "./timeline/Wellenform";
 import {
   dauer as schnittDauer,
+  inClipzeit,
   gleich as schnittGleich,
   zusammenziehen,
   type Schnitt,
@@ -25,6 +26,14 @@ import { pruefen } from "@/lib/clips/untertitel-pruefung";
 import { vorschauStand } from "@/lib/clips/vorschau-stand";
 import { dialogOffen, leertasteGehoertDemElement, tipptGerade } from "@/lib/tastatur";
 import { rueckwegMerken } from "@/lib/clips/rueckweg";
+import {
+  dauerAendern as effektDauer,
+  entfernen as effektEntfernen,
+  lesen as effekteLesen,
+  verschieben as effektVerschieben,
+  type Effekt,
+} from "@/lib/clips/effekte";
+import { EffektListe } from "./EffektListe";
 import type { Befund } from "@/lib/clips/pruefstand";
 import { fassungSatz, type Fassung } from "@/lib/brand/fassung";
 import { ClipPreview } from "./ClipPreview";
@@ -77,6 +86,8 @@ interface Props {
   outW: number;
   outH: number;
   zeitmarken: Zeitmarke[];
+  /* Effekte auf der Clip-Zeitachse (Migration 0015). */
+  effekte: Effekt[] | null;
   shots: RenderShot[];
   quelleBreite: number | null;
   /* Der gespeicherte Schnitt: welche Abschnitte der Quelle dieser Clip zeigt. */
@@ -152,6 +163,7 @@ export function ClipDetail({
   outW,
   outH,
   zeitmarken: markenAnfang,
+  effekte: effekteAnfang,
   shots,
   quelleBreite,
   komposition,
@@ -429,6 +441,41 @@ export function ClipDetail({
     !schnittGleich(zusammenziehen(gesichert), zusammenziehen(gerenderteSegmente));
   const neueDauer = schnittDauer(schnitt);
 
+  /* Die Effekte dieses Clips.
+   *
+   * Sie kommen entweder vom Menschen oder von der Automatik des letzten Renderlaufs - in beiden
+   * Fällen stehen sie am Clip und lassen sich hier verschieben, verlängern und entfernen. Eine
+   * leere Liste wird ausdrücklich gespeichert: sie heisst „ich will keine", und der nächste
+   * Renderlauf legt dann auch keine automatischen mehr an. */
+  const [effekte, setEffekte] = useState<Effekt[]>(() => effekteLesen(effekteAnfang ?? [], schnittDauer(komposition)));
+  const [effekteGesichert, setEffekteGesichert] = useState<Effekt[]>(effekte);
+  /* Die Länge des Clips in Clipzeit: daran hängt, wie weit ein Effekt geschoben werden darf. */
+  const clipDauer = useMemo(() => schnittDauer(schnitt), [schnitt]);
+
+  const effekteSpeichern = useCallback(
+    async (naechste: Effekt[]) => {
+      setEffekte(naechste);
+      try {
+        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/effekte`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ effekte: naechste }),
+        });
+        const data = (await res.json()) as { error?: string; effekte?: Effekt[] };
+        if (!res.ok || !data.effekte) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
+        setEffekte(data.effekte);
+        setEffekteGesichert(data.effekte);
+      } catch (err) {
+        setMessage({
+          tone: "error",
+          text: err instanceof Error ? err.message : "Die Effekte konnten nicht gespeichert werden",
+          nochmal: () => void effekteSpeichern(naechste),
+        });
+      }
+    },
+    [sourceId, clipId],
+  );
+
   /* Zeigt das gebaute Video noch, was eingestellt ist? Dieselbe Rechnung wie im Renderstand, hier
    * gebraucht, um es direkt am Umschalter zu sagen: wer auf „Zuletzt gebaut" klickt, soll dort
    * erfahren, dass er eine alte Fassung sieht, und nicht erst weiter unten. */
@@ -443,6 +490,7 @@ export function ClipDetail({
       stil: stilGespeichert,
       schnitt: gesichert,
       zeitmarken: marken,
+      effekte: effekteGesichert,
     }) === "veraltet";
 
   /* Der Zeitraum, den die Timeline zeigt: der geladene Schnitt plus zehn Sekunden Luft auf beiden
@@ -923,6 +971,7 @@ export function ClipDetail({
               stil={stilGespeichert}
               schnitt={gesichert}
               zeitmarken={marken}
+              effekte={effekteGesichert}
             />
           </div>
 
@@ -956,6 +1005,10 @@ export function ClipDetail({
 
           <div hidden={bereich !== "schnitt"} className="flex min-w-0 flex-col gap-4">
           <Timeline
+            effekte={effekte}
+            onEffektVerschieben={(i, abS) => void effekteSpeichern(effektVerschieben(effekte, i, abS, clipDauer))}
+            onEffektDauer={(i, d) => void effekteSpeichern(effektDauer(effekte, i, d, clipDauer))}
+            onEffektWeg={(i) => void effekteSpeichern(effektEntfernen(effekte, i))}
             bereichVonS={bereichVon}
             bereichBisS={bereichBis}
             schnitt={schnitt}
@@ -1039,6 +1092,17 @@ export function ClipDetail({
             }
             quelleBreite={quelleBreite}
             canEdit={canEdit}
+          />
+
+          {/* Effekte. Unter dem Bildausschnitt, weil beides dasselbe beantwortet: wie das Bild
+              sich bewegt. Die Liste ist bewusst eine Liste - es werden mehr Effekte dazukommen,
+              und dann steht hier jeder für sich mit seiner eigenen Auswahl. */}
+          <EffektListe
+            effekte={effekte}
+            zeitImClip={inClipzeit(schnitt, currentTime)}
+            clipDauer={clipDauer}
+            canEdit={canEdit}
+            onAendern={(naechste) => void effekteSpeichern(naechste)}
           />
           </div>
 
@@ -1134,6 +1198,7 @@ export function ClipDetail({
               stil={stilGespeichert}
               schnitt={gesichert}
               zeitmarken={marken}
+              effekte={effekteGesichert}
             />
 
             <GlassCard padding="md" className="flex flex-col gap-3">

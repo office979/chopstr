@@ -10,11 +10,14 @@ import {
   dauer as schnittDauer,
   endeKuerzen,
   entfernen,
+  inClipzeit,
+  inQuellzeit,
   istSichtbar,
   randSetzen,
   teilen,
   type Schnitt,
 } from "@/lib/clips/schnitt";
+import { EFFEKT_LABEL, MIN_DAUER_S, type Effekt } from "@/lib/clips/effekte";
 import type { RenderShot, Zeitmarke } from "@/lib/repo/types";
 import { Lineal, timecode } from "./Lineal";
 import { Wellenform, type WellenformDaten, type WellenformStand } from "./Wellenform";
@@ -43,6 +46,12 @@ interface Props {
   zeitmarken: Zeitmarke[];
   onMarkeWeg: (abS: number) => void;
   onMarkeVerschieben: (vonS: number, nachS: number) => void;
+  /* Effekte liegen in CLIPZEIT, anders als die Zeitmarken: eine Betonung hängt an dem, was gesagt
+   * wird, und soll mitwandern, wenn davor etwas herausgeschnitten wird. */
+  effekte: Effekt[];
+  onEffektVerschieben: (index: number, abS: number) => void;
+  onEffektDauer: (index: number, dauerS: number) => void;
+  onEffektWeg: (index: number) => void;
   markeBeschriftung: (m: Zeitmarke | null) => string;
   canEdit: boolean;
   kannZurueck: boolean;
@@ -78,6 +87,10 @@ export function Timeline({
   zeitmarken,
   onMarkeWeg,
   onMarkeVerschieben,
+  effekte,
+  onEffektVerschieben,
+  onEffektDauer,
+  onEffektWeg,
   markeBeschriftung,
   canEdit,
   kannZurueck,
@@ -170,6 +183,40 @@ export function Timeline({
       window.addEventListener("pointerup", ende);
     },
     [ausX, onMarkeVerschieben],
+  );
+
+  /* Einen Effekt verschieben oder an seinem rechten Rand verlängern.
+   *
+   * Der Zeiger liefert Quellzeit, gespeichert wird Clipzeit - deshalb die Umrechnung bei jedem
+   * Schritt. Übernommen wird erst beim Loslassen: ein Speichern je Mausbewegung wäre ein Dutzend
+   * Schreibvorgänge für eine Geste. */
+  const effektZiehen = useCallback(
+    (index: number, was: "verschieben" | "dauer") => (e: React.PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const effekt = effekte[index];
+      if (!effekt) return;
+      let letzte: number | null = null;
+      const los = (ev: PointerEvent) => {
+        const quelle = ausX(ev.clientX);
+        if (quelle == null) return;
+        const clipzeit = inClipzeit(schnitt, quelle);
+        letzte = was === "verschieben" ? Math.max(0, clipzeit) : Math.max(MIN_DAUER_S, clipzeit - effekt.ab_s);
+      };
+      const ende = () => {
+        window.removeEventListener("pointermove", los);
+        window.removeEventListener("pointerup", ende);
+        if (letzte == null) return;
+        if (was === "verschieben") {
+          if (Math.abs(letzte - effekt.ab_s) > 0.05) onEffektVerschieben(index, Math.round(letzte * 100) / 100);
+        } else if (Math.abs(letzte - effekt.dauer_s) > 0.05) {
+          onEffektDauer(index, Math.round(letzte * 100) / 100);
+        }
+      };
+      window.addEventListener("pointermove", los);
+      window.addEventListener("pointerup", ende);
+    },
+    [ausX, effekte, schnitt, onEffektVerschieben, onEffektDauer],
   );
 
   const imClip = useMemo(() => {
@@ -322,6 +369,7 @@ export function Timeline({
           <Name hoehe={44} oben>Ton</Name>
           <Name hoehe={36} oben>Schnitt</Name>
           <Name hoehe={36} oben>Bildausschnitt</Name>
+          <Name hoehe={30} oben>Effekte</Name>
         </div>
 
         <div className="min-w-0 flex-1">
@@ -462,6 +510,69 @@ export function Timeline({
                 )}
               </div>
             ))}
+          </div>
+
+          {/* Effekte: eine eigene Spur.
+              Die Blöcke liegen in Clipzeit und werden für die Anzeige in Quellzeit umgerechnet -
+              deshalb wandert ein Effekt mit, wenn davor etwas herausgeschnitten wird. */}
+          <div className="relative mt-1 h-7 w-full rounded-[6px] bg-black/25">
+            {effekte.map((e, i) => {
+              const vonQ = inQuellzeit(schnitt, e.ab_s);
+              const bisQ = inQuellzeit(schnitt, e.ab_s + e.dauer_s);
+              if (!(bisQ > vonQ)) return null;
+              return (
+                <div
+                  key={`${e.art}-${e.ab_s}`}
+                  onPointerDown={canEdit ? effektZiehen(i, "verschieben") : undefined}
+                  className={cn(
+                    "absolute top-0 flex h-full items-center overflow-hidden rounded-[6px] border border-ai/60 bg-ai/20 px-2",
+                    canEdit && "cursor-grab",
+                  )}
+                  style={{ left: `${anteil(vonQ) * 100}%`, width: `${((bisQ - vonQ) / sichtbar) * 100}%` }}
+                  title={`${EFFEKT_LABEL[e.art]} ab ${e.ab_s.toFixed(1)} s, ${e.dauer_s.toFixed(1)} s lang`}
+                >
+                  <span className="truncate text-[11px] text-text-2">{EFFEKT_LABEL[e.art]}</span>
+                  {canEdit && (
+                    <>
+                      {/* Rechter Rand: länger oder kürzer ziehen. */}
+                      <button
+                        type="button"
+                        onPointerDown={effektZiehen(i, "dauer")}
+                        onKeyDown={(ev) => {
+                          const schritt = ev.shiftKey ? 0.5 : 0.1;
+                          const ziel =
+                            e.dauer_s + (ev.key === "ArrowLeft" ? -schritt : ev.key === "ArrowRight" ? schritt : 0);
+                          if (ziel === e.dauer_s) return;
+                          ev.preventDefault();
+                          ev.stopPropagation();
+                          onEffektDauer(i, Math.round(ziel * 100) / 100);
+                        }}
+                        aria-label={`${EFFEKT_LABEL[e.art]} länger oder kürzer machen, mit Pfeiltasten oder Ziehen`}
+                        className="absolute right-5 top-0 h-full w-3 cursor-ew-resize focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
+                      >
+                        <span className="mx-auto block h-full w-[3px] bg-ai" />
+                      </button>
+                      <button
+                        type="button"
+                        onPointerDown={(ev) => ev.stopPropagation()}
+                        onClick={() => onEffektWeg(i)}
+                        aria-label={`${EFFEKT_LABEL[e.art]} bei ${e.ab_s.toFixed(1)} Sekunden entfernen`}
+                        className="transition-soft absolute right-0.5 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full text-text-3 hover:bg-white/10 hover:text-text focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
+                      >
+                        <svg width="8" height="8" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                          <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+            {effekte.length === 0 && (
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-text-3">
+                Keine Effekte
+              </span>
+            )}
           </div>
 
           {/* Der Abspielkopf über allem */}

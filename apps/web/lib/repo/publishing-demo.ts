@@ -67,7 +67,7 @@ function extrasOf(id: string): ClipExtras {
   const s = state();
   const found = s.extras.get(id);
   if (found) return found;
-  const fresh: ClipExtras = { id, experiment_id: null, variant: null, series_id: null, series_index: null, reframe_override: null, caption_style: {}, zeitmarken: [] };
+  const fresh: ClipExtras = { id, experiment_id: null, variant: null, series_id: null, series_index: null, reframe_override: null, caption_style: {}, zeitmarken: [], effekte: null };
   s.extras.set(id, fresh);
   return fresh;
 }

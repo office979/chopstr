@@ -33,7 +33,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
-from . import captions_de
+from . import captions_de, render_plan
+from . import effekte as effekte_mod
 
 log = logging.getLogger("chopstr.render")
 
@@ -357,6 +358,25 @@ def video_chain(
     filters: list[str] = []
     notes: list[str] = []
     burned = False
+
+    # Effekte liegen auf der Zeitachse des FERTIGEN Clips, also hinter dem Zusammenfuegen. Der
+    # Push-in weiter oben gehoert zur einzelnen Einstellung; hier geht es um eine Betonung an einer
+    # bestimmten Sekunde, und die kann ueber eine Schnittgrenze hinweg laufen.
+    #
+    # Vor dem Zoom wird auf die doppelte Groesse skaliert: zoompan quantisiert den Faktor je Bild,
+    # ohne den Zwischenschritt springt die Bewegung sichtbar in Stufen.
+    quelle = "[vc]"
+    effekte = effekte_mod.lesen(plan.get("effekte"), render_plan.plan_duration(plan))
+    if effekte and not caps.get("zoompan", True):
+        notes.append("ffmpeg ohne zoompan-Filter, Effekte wurden weggelassen")
+    elif effekte:
+        ausdruck = effekte_mod.ffmpeg_ausdruck(effekte, fps)
+        chain += (
+            f"[vc]scale={out_w * 2}:{out_h * 2}:flags=lanczos,"
+            f"zoompan=z='{ausdruck}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={out_w}x{out_h}:fps={fps:g},"
+            f"setsar=1[ve];"
+        )
+        quelle = "[ve]"
     if ass_path:
         if caps.get("subtitles"):
             sub = f"subtitles={_path(ass_path)}"
@@ -374,10 +394,10 @@ def video_chain(
         notes.append("Wasserzeichen nicht gezeichnet: ffmpeg ohne overlay-Filter")
         logo_index = None
     if logo_index is not None:
-        chain += "[vc]" + (",".join(filters) if filters else "null") + "[vt];" + watermark_filter(plan, logo_index)
+        chain += quelle + (",".join(filters) if filters else "null") + "[vt];" + watermark_filter(plan, logo_index)
         watermark = True
     else:
-        chain += "[vc]" + (",".join(filters) if filters else "null") + "[vout]"
+        chain += quelle + (",".join(filters) if filters else "null") + "[vout]"
     return chain, notes, burned, title_drawn, hook_drawn, watermark
 
 

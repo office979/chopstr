@@ -246,6 +246,9 @@ export interface ClipExtras {
   caption_style: Record<string, unknown>;
   /* Entscheidungen aus der Zeitleiste (Migration 0009). */
   zeitmarken: { ab_s: number; x?: number; zoom?: number; layout?: "einzel" | "geteilt" }[];
+  /* Effekte auf der Clip-Zeitachse (Migration 0015). NULL heisst „noch nie gesetzt", dann betont
+   * die Automatik beim naechsten Clippen; eine leere Liste heisst „ausdruecklich keine". */
+  effekte: { art: "zoom_in" | "zoom_out"; ab_s: number; dauer_s: number }[] | null;
 }
 
 /* Gespeicherte Untertitel-Vorlage. Gehoert dem Workspace, nicht der Person: in einer Agentur stellt

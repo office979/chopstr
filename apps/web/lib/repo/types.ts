@@ -455,6 +455,8 @@ export interface RenderPlan {
    * schon im Plan, aber nicht rückrechenbar; nur hiermit kann die Oberfläche sagen, ob das
    * gebaute Video noch zu den gesetzten Marken passt. Ältere Pläne haben das Feld nicht. */
   zeitmarken?: Zeitmarke[];
+  /* Effekte auf der Clip-Zeitachse (Migration 0015), wie sie beim Bauen galten. */
+  effekte?: { art: "zoom_in" | "zoom_out"; ab_s: number; dauer_s: number }[];
   /* Die Marke, mit der geclippt wurde. ``profil_fassung`` ist die Versionsnummer des
    * Markenprofils zu diesem Zeitpunkt; daran lässt sich am fertigen Video ablesen, welche Farben,
    * Schriften und Regeln galten. Ältere Pläne haben den Block nicht oder nur ohne Fassung. */

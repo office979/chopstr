@@ -45,6 +45,9 @@ from ..pipeline import (
     render,
     render_plan,
 )
+from ..pipeline import (
+    effekte as effekte_mod,
+)
 from ..providers_llm import LLM
 from ..residency import Tenant
 from . import common
@@ -79,7 +82,9 @@ SQL_REFRAME_OVERRIDE = "select reframe_override from clips where id = %s"
 NOTE_OVERRIDE_UNREADABLE = "Reframe-Override konnte nicht gelesen werden (Migration 0005 eingespielt?), Automatik verwendet"
 SQL_CAPTION_STYLE = "select caption_style from clips where id = %s"
 SQL_ZEITMARKEN = "select zeitmarken from clips where id = %s"
+SQL_EFFEKTE = "select effekte from clips where id = %s"
 NOTE_MARKEN_UNREADABLE = "Zeitmarken konnten nicht gelesen werden (Migration 0009 eingespielt?), Automatik verwendet"
+NOTE_EFFEKTE_UNREADABLE = "Effekte konnten nicht gelesen werden (Migration 0015 eingespielt?), es wird ohne geclippt"
 NOTE_STYLE_UNREADABLE = "Untertitel-Stil des Clips konnte nicht gelesen werden (Migration 0008 eingespielt?), Markenprofil verwendet"
 
 
@@ -333,6 +338,30 @@ def _load_zeitmarken(ctx: common.Context, clip_id: str) -> tuple[list[dict], str
         return [], NOTE_MARKEN_UNREADABLE
     wert = _json(row[0], []) if row else []
     return [m for m in (wert or []) if isinstance(m, dict)], None
+
+
+def _load_effekte(
+    ctx: common.Context, clip_id: str, out_words: list[dict], dauer_s: float
+) -> tuple[list[dict], bool, str | None]:
+    """``clips.effekte`` lesen, und beim ersten Mal welche setzen.
+
+    Der Unterschied zwischen NULL und [] ist der ganze Punkt dieser Spalte: NULL heisst „noch nie
+    gesetzt", dann darf die Automatik betonen. Eine leere Liste heisst „der Mensch hat alle
+    entfernt", und das zu ueberschreiben waere, seine Entscheidung zu ignorieren.
+
+    Gibt (Effekte, ob sie neu entstanden sind, Hinweis) zurueck. Neu entstandene schreibt der
+    Aufrufer an den Clip, damit sie in der Zeitleiste auftauchen und aenderbar sind."""
+    try:
+        row = db.fetch_one(ctx.conn, SQL_EFFEKTE, (clip_id,))
+    except Exception as exc:
+        log.warning("effekte not readable clip=%s error=%s", clip_id, exc.__class__.__name__)
+        return [], False, NOTE_EFFEKTE_UNREADABLE
+    roh = row[0] if row else None
+    if roh is None:
+        neu = effekte_mod.automatisch(out_words, dauer_s)
+        return effekte_mod.als_liste(neu), True, None
+    wert = _json(roh, [])
+    return effekte_mod.als_liste(effekte_mod.lesen(wert, dauer_s)), False, None
 
 
 def caption_schrift(style: dict | None, marken_font: str | None) -> tuple[str | None, str | None]:
@@ -620,6 +649,13 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     caption_font, schrift_note = caption_schrift(style, brand_assets["font_family"])
     if schrift_note:
         rf.notes.append(schrift_note)
+    # Effekte auf der Clip-Zeitachse. Beim ersten Clippen setzt die Automatik welche; danach gilt,
+    # was am Clip steht - auch eine leere Liste, denn die heisst „ich will keine".
+    clip_dauer = sum(float(seg["end"]) - float(seg["start"]) for seg in segments)
+    effekte_liste, effekte_neu, effekte_note = _load_effekte(ctx, clip_id, out_words, clip_dauer)
+    if effekte_note:
+        rf.notes.append(effekte_note)
+
     plan = render_plan.build_plan(
         platform=destination,
         aspect=aspect,
@@ -647,6 +683,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         },
         caption_text_field=text_field,
         zeitmarken=zeitmarken,
+        effekte=effekte_liste,
     )
     try:
         decision_log.record_reframe_strategy(
@@ -782,6 +819,10 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         cps_warnings=db.jsonb(cps),
         fidelity_warnings=db.jsonb(fid),
         speaker_positions=db.jsonb(speaker_positions) if speaker_positions else None,
+        # Automatisch gesetzte Effekte gehoeren an den Clip, nicht nur in den Plan: sonst taeuchten
+        # sie in der Zeitleiste nicht auf, und der Nutzer koennte sie weder verschieben noch
+        # loeschen. Was er selbst gesetzt hat, wird hier nicht angefasst.
+        **({"effekte": db.jsonb(effekte_liste)} if effekte_neu else {}),
         destination=destination,
         # Ein technischer Fehler an der fertigen Datei fuehrt NICHT zu ``rendered``. Die Datei
         # liegt zwar im Speicher (sie hilft beim Nachsehen, was schiefging), aber sie gilt nicht

@@ -194,6 +194,8 @@ function toExtras(r: Row): ClipExtras {
     reframe_override: (r.reframe_override as ClipExtras["reframe_override"]) ?? null,
     caption_style: (r.caption_style as Record<string, unknown> | null) ?? {},
     zeitmarken: (r.zeitmarken as ClipExtras["zeitmarken"] | null) ?? [],
+    /* Hier bleibt null stehen: der Unterschied zu einer leeren Liste ist der Punkt. */
+    effekte: (r.effekte as ClipExtras["effekte"]) ?? null,
   };
 }
 
@@ -434,7 +436,7 @@ const postgresPublishingRepo: PublishingRepo = {
     const session = await currentSession();
     return withContext(session, async (tx) => {
       const rows = await tx`
-        select c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override, c.caption_style, c.zeitmarken
+        select c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override, c.caption_style, c.zeitmarken, c.effekte
         from clips c join sources s on s.id = c.source_id where c.id in ${tx(clipIds)} and s.workspace_id = ${session.workspaceId}`;
       return rows.map((r) => toExtras(r as Row));
     });
@@ -450,11 +452,14 @@ const postgresPublishingRepo: PublishingRepo = {
       /* jsonb braucht die ausdrueckliche Umwandlung, und null ist hier das leere Objekt: die Spalte
        * ist not null, und „nichts eingestellt" heisst {}, nicht fehlend. */
       if ("caption_style" in patch) data.caption_style = tx.json((patch.caption_style ?? {}) as never);
+      /* Eine leere Liste ist eine Aussage: „ich will keine Effekte". Sie muss geschrieben werden,
+       * sonst legt der naechste Renderlauf wieder automatische an. */
+      if ("effekte" in patch) data.effekte = tx.json((patch.effekte ?? []) as never);
       if ("zeitmarken" in patch) data.zeitmarken = tx.json((patch.zeitmarken ?? []) as never);
       if (Object.keys(data).length === 0) return (await this.getClipExtras([clipId]))[0] ?? null;
       const rows = await tx`
         update clips c set ${tx(data)} from sources s where c.id = ${clipId} and s.id = c.source_id and s.workspace_id = ${session.workspaceId}
-        returning c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override, c.caption_style, c.zeitmarken`;
+        returning c.id, c.experiment_id, c.variant, c.series_id, c.series_index, c.reframe_override, c.caption_style, c.zeitmarken, c.effekte`;
       return rows.length ? toExtras(rows[0] as Row) : null;
     });
   },

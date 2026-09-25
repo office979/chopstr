@@ -200,6 +200,7 @@ def build_plan(
     brand: dict[str, Any] | None = None,
     caption_text_field: str | None = None,
     zeitmarken: list[dict] | None = None,
+    effekte: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Baut den Plan. ``caption_preset`` ist das Basis-Preset (Name oder 1080x1920-Objekt), die Skalierung passiert hier.
     ``sources`` erwartet ``storage_key``, ``transcript_version``, ``hook_version``, ``candidate_id``.
@@ -230,6 +231,9 @@ def build_plan(
         "reframe": reframe_result.plan_block(),
         "shots": reframe_result.shots_json(),
         "motion": motion_block(reframe_result, out_w, out_h),
+        # Effekte auf der Clip-Zeitachse (Migration 0015). Sie stehen im Plan, weil der Vergleich
+        # „zeigt das gebaute Video noch, was eingestellt ist" sie sonst nicht sehen wuerde.
+        "effekte": list(effekte or []),
         "captions": caption_block(
             caption_preset, out_w, out_h, caption_cards, caption_font, caption_top, caption_text_field, caption_preset_skaliert
         ),

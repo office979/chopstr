@@ -108,6 +108,9 @@ export default async function ClipPage({ params }: Props) {
          * und gelesen werden muss dieselbe Stelle. Im Testmodus sind das zwei getrennte Ablagen,
          * dort waren gesetzte Marken nach dem Neuladen sonst weg. */
         zeitmarken={extras[0]?.zeitmarken ?? clip.zeitmarken}
+        /* null heisst „noch nie gesetzt": dann betont die Automatik beim nächsten Clippen. Eine
+           leere Liste ist eine Entscheidung und wird nicht überschrieben. */
+        effekte={extras[0]?.effekte ?? null}
         shots={clip.render_plan?.shots ?? []}
         quelleBreite={source.width ?? null}
         komposition={clip.composition}

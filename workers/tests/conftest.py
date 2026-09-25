@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -45,7 +46,58 @@ def ffmpeg_present() -> bool:
     return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
 
+def _kann_untertitel(exe: str) -> bool:
+    """Hat dieser ffmpeg-Build den ``subtitles``-Filter (libass)?"""
+    try:
+        r = subprocess.run([exe, "-hide_banner", "-filters"], capture_output=True, text=True, check=False, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return any(line.split()[1:2] == ["subtitles"] for line in r.stdout.splitlines() if line.strip())
+
+
+def _ffmpeg_mit_untertiteln() -> None:
+    """Sorgt dafuer, dass die Tests mit einem ffmpeg laufen, das Untertitel einbrennen kann.
+
+    Das Homebrew-ffmpeg auf macOS ist ohne libass gebaut. Der Renderer merkt das, laesst die
+    Untertitel weg und schreibt eine Notiz - und genau so liefen diese Tests bisher: sie pruefen
+    einen Renderlauf, in dem das wichtigste Merkmal des Produkts fehlt, und keiner hat es gemerkt,
+    weil niemand danach gefragt hat. Seit der technischen Ausgabepruefung faellt es auf.
+
+    imageio-ffmpeg bringt einen statischen Build mit libass mit. Er wird hier vorgehaengt, genau
+    wie es workers/scripts/local_env.sh fuer den lokalen Stapel tut. ffprobe kommt weiter aus dem
+    PATH, imageio liefert keines mit.
+    """
+    vorhanden = shutil.which("ffmpeg")
+    if vorhanden and _kann_untertitel(vorhanden):
+        return
+    try:
+        import imageio_ffmpeg
+    except ImportError:
+        return
+    exe = imageio_ffmpeg.get_ffmpeg_exe()
+    if not exe or not os.access(exe, os.X_OK) or not _kann_untertitel(exe):
+        return
+    binordner = WORKERS_ROOT / ".pytest-bin"
+    binordner.mkdir(exist_ok=True)
+    ziel = binordner / "ffmpeg"
+    if ziel.is_symlink() or ziel.exists():
+        ziel.unlink()
+    ziel.symlink_to(exe)
+    os.environ["PATH"] = f"{binordner}{os.pathsep}{os.environ.get('PATH', '')}"
+
+
+_ffmpeg_mit_untertiteln()
+
+
+def untertitel_moeglich() -> bool:
+    exe = shutil.which("ffmpeg")
+    return bool(exe) and _kann_untertitel(exe)
+
+
 requires_ffmpeg = pytest.mark.skipif(not ffmpeg_present(), reason="ffmpeg/ffprobe nicht installiert")
+requires_libass = pytest.mark.skipif(
+    not untertitel_moeglich(), reason="ffmpeg ohne subtitles-Filter (libass); Untertitel koennen nicht eingebrannt werden"
+)
 
 
 class FakeCursor:

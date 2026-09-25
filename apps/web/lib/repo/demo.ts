@@ -799,6 +799,7 @@ export const demoRepo: Repo = {
         cps_warnings: c.cps_warnings ?? [],
         fidelity_warnings: c.fidelity_warnings ?? [],
         render_error: c.render_error,
+        export_checks: c.export_checks,
         plan_captions: (c.render_plan?.captions as unknown as Record<string, unknown>) ?? null,
         plan_segments: (c.render_plan?.segments as Clip["composition"]) ?? null,
         plan_zeitmarken: (c.render_plan?.zeitmarken as Zeitmarke[]) ?? null,

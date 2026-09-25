@@ -619,6 +619,9 @@ export interface ClipStand {
   plan_segments: Clip["composition"] | null;
   plan_zeitmarken: Zeitmarke[] | null;
   plan_transcript_version: number | null;
+  /* Die technische Pruefung der fertigen Datei (Migration 0014), fuer die Zaehler auf der
+   * Startseite. */
+  export_checks: TechnikBefund[] | null;
   plan_output_height: number | null;
   /* Der eigene Untertitelstil dieses Clips, falls einer gespeichert ist. */
   caption_style: Record<string, unknown> | null;

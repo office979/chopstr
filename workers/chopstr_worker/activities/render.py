@@ -34,6 +34,7 @@ from temporalio import activity
 
 from .. import costlog, db, decision_log, events, ingest, usage
 from ..pipeline import (
+    ausgabe_pruefung,
     captions_de,
     compliance,
     compose,
@@ -705,10 +706,39 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         notes.append("Der Bildstrom war beschaedigt, der Render wurde einmal wiederholt")
     loud = render.measure_loudness(mp4)
     loudness = {"integrated_lufs": loud["integrated_lufs"], "true_peak_dbtp": loud["true_peak_dbtp"], "preset": plan["audio"]["preset"]}
+    probe = ingest.probe(mp4)
     # Der Bildstrom ist oben schon geprueft worden; ihn hier noch einmal zu dekodieren waere
     # dieselbe Arbeit zweimal.
-    checks = render.regression_checks(mp4, duration, out_w, out_h, bitstrom=False)
-    notes.extend(f"Regressionstest: {c}" for c in checks)
+    # Die technische Pruefung der fertigen Datei. Bis hierher lief sie als
+    # ``render.regression_checks`` und schrieb freie Saetze in ``notes`` - gemessen wurde also
+    # schon, nur ohne Folge: darunter stand ``status = "rendered"``, egal was herauskam. Jetzt
+    # bekommt jeder Befund eine Schwere, und ein Fehler verhindert, dass die Fassung hinausgeht.
+    # Dazu zwei Pruefungen, die es vorher nicht gab: Lautstaerke gegen den Plan und Untertitel im
+    # Bild.
+    schwarz = render.black_intervals(mp4) if probe.has_video else []
+    befunde = ausgabe_pruefung.pruefen(
+        datei_vorhanden=Path(mp4).is_file() and Path(mp4).stat().st_size > 0,
+        hat_bild=probe.has_video,
+        hat_ton=probe.has_audio,
+        dauer_s=probe.duration_s,
+        geplante_dauer_s=duration,
+        breite=probe.width,
+        hoehe=probe.height,
+        geplante_breite=out_w,
+        geplante_hoehe=out_h,
+        schwarzbilder=schwarz,
+        lufs=loud["integrated_lufs"],
+        ziel_lufs=float(plan["audio"]["lufs"]),
+        spitze_dbtp=loud["true_peak_dbtp"],
+        ziel_spitze_dbtp=float(plan["audio"]["true_peak"]),
+        woerter=len(out_words),
+        untertitelkarten=len(cards),
+        untertitel_eingebrannt=result.captions_burned,
+    )
+    checks = [f"{b.pruefung}: {b.text}" for b in befunde if b.ergebnis != "ok"]
+    notes.extend(f"Pruefung {c}" for c in checks)
+    technik = ausgabe_pruefung.schlimmstes(befunde)
+    technik_fehler = ausgabe_pruefung.fehlertext(befunde)
     poster = work / f"{h}.jpg"
     render.make_poster(mp4, poster, 1.0)
     # Einzelbilder fuer die Zeitleiste. Faellt das aus, fehlt nur der Filmstreifen; der Clip ist
@@ -717,8 +747,6 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     streifen_meta = render.make_filmstreifen(mp4, streifen)
     if streifen_meta is None:
         notes.append("Filmstreifen konnte nicht erzeugt werden, die Zeitleiste zeigt keine Einzelbilder")
-
-    probe = ingest.probe(mp4)
 
     # 5) Provenienz
     st.progress(0.85, "Provenienz und Upload", clip_id=clip_id, phase="provenance")
@@ -754,9 +782,13 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         fidelity_warnings=db.jsonb(fid),
         speaker_positions=db.jsonb(speaker_positions) if speaker_positions else None,
         destination=destination,
-        status="rendered",
+        # Ein technischer Fehler an der fertigen Datei fuehrt NICHT zu ``rendered``. Die Datei
+        # liegt zwar im Speicher (sie hilft beim Nachsehen, was schiefging), aber sie gilt nicht
+        # als fertig, und die gemeinsame Ausgabeentscheidung laesst sie nicht hinaus.
+        status="failed" if technik == "fehler" else "rendered",
         rendered_at=datetime.now(UTC),
-        render_error=None,
+        render_error=technik_fehler,
+        export_checks=db.jsonb(ausgabe_pruefung.als_liste(befunde)),
     )
     row = db.fetch_one(conn, SQL_CAPTION_MAX, (clip_id,))
     next_version = int(row[0] if row else 0) + 1

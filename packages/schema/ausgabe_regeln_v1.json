@@ -110,5 +110,67 @@
       "hilfe": "Herunterladen und selbst posten geht. Für das direkte Posten den Tarif wechseln.",
       "href": "/einstellungen/abrechnung"
     }
-  ]
+  ],
+  "technische_pruefungen": {
+    "zweck": "Was an der fertigen Datei gemessen wird, und ab wann es ein Fehler ist. Der Worker misst und schreibt das Ergebnis nach clips.export_checks (Migration 0014). Ein Ergebnis „fehler“ löst die Regel „technik_fehler“ aus und verhindert damit Download und Veröffentlichung; „hinweis“ steht nur an der Karte.",
+    "pruefungen": [
+      {
+        "code": "datei",
+        "name": "Datei vorhanden",
+        "fehler_wenn": "Die Datei fehlt oder ist leer."
+      },
+      {
+        "code": "bild",
+        "name": "Bildspur",
+        "fehler_wenn": "Es ist keine Bildspur in der Datei."
+      },
+      {
+        "code": "ton",
+        "name": "Tonspur",
+        "fehler_wenn": "Es ist keine Tonspur in der Datei."
+      },
+      {
+        "code": "dauer",
+        "name": "Länge",
+        "einheit": "s",
+        "hinweis_ab": 0.3,
+        "fehler_ab": 1.0,
+        "beschreibung": "Abweichung der gemessenen Länge von der geplanten."
+      },
+      {
+        "code": "aufloesung",
+        "name": "Bildgröße",
+        "fehler_wenn": "Breite oder Höhe weichen vom Plan ab."
+      },
+      {
+        "code": "schwarzbild",
+        "name": "Schwarzbild",
+        "einheit": "s",
+        "hinweis_ab": 0.5,
+        "fehler_ab": 1.0,
+        "beschreibung": "Längstes zusammenhängendes schwarzes Bild."
+      },
+      {
+        "code": "pegel",
+        "name": "Lautstärke",
+        "einheit": "LU",
+        "hinweis_ab": 2.0,
+        "fehler_ab": 4.0,
+        "beschreibung": "Abweichung der gemessenen Lautheit vom Ziel des Audio-Presets."
+      },
+      {
+        "code": "spitze",
+        "name": "Spitzenpegel",
+        "einheit": "dB",
+        "hinweis_ab": 0.5,
+        "fehler_ab": 2.0,
+        "beschreibung": "Überschreitung des erlaubten Spitzenpegels."
+      },
+      {
+        "code": "untertitel",
+        "name": "Untertitel im Bild",
+        "fehler_wenn": "Es gibt gesprochene Wörter, aber keine eingebrannten Untertitelkarten."
+      }
+    ]
+  }
 }

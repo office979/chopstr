@@ -78,7 +78,7 @@ export const DATEI_SATZ: Record<Datei, string> = {
  * Stelle, an der es am engsten ist. */
 export interface Befund {
   schwere: "hinweis" | "fehler";
-  art: "sinn" | "tempo" | "datei" | "render";
+  art: "sinn" | "tempo" | "datei" | "render" | "technik";
   /* Was los ist und was hilft, in einem Satz. */
   text: string;
   /* Der Wortlaut der schlimmsten Stelle, falls bekannt. Damit findet man sie im Clip wieder. */
@@ -197,6 +197,24 @@ export function pruefstand({ clip, freigabe, stand, bearbeitet = false }: Pruefs
     });
   }
 
+  /* Was die technische Prüfung an der fertigen Datei gefunden hat (Migration 0014). Sie läuft im
+   * Worker nach dem Clippen und misst Dinge, die man dem Video nicht ansieht, solange niemand
+   * hinsieht: ob überhaupt Ton drauf ist, ob die Lautstärke zu den anderen Videos der Plattform
+   * passt, ob die Untertitel im Bild gelandet sind.
+   *
+   * Sie ändert die Qualitätsachse nicht: „Qualität" beantwortet die Frage, ob der Clip inhaltlich
+   * etwas anderes sagt als der Sprecher, und ein leiser Ton sagt nichts anderes. Gesperrt wird
+   * trotzdem, das entscheidet lib/clips/ausgabe.ts. */
+  for (const t of clip.export_checks ?? []) {
+    if (t.ergebnis === "ok") continue;
+    befunde.push({
+      schwere: t.ergebnis === "fehler" ? "fehler" : "hinweis",
+      art: "technik",
+      text: t.text,
+      stelle: null,
+    });
+  }
+
   if (datei === "veraltet") {
     befunde.push({
       schwere: "fehler",
@@ -219,7 +237,7 @@ export function pruefstand({ clip, freigabe, stand, bearbeitet = false }: Pruefs
 
   const qualitaet: Qualitaet = befunde.some((b) => b.schwere === "fehler" && (b.art === "sinn" || b.art === "render"))
     ? "fehler"
-    : befunde.some((b) => b.art === "sinn" || b.art === "tempo")
+    : befunde.some((b) => b.art === "sinn" || b.art === "tempo" || b.art === "technik")
       ? "hinweis"
       : "ok";
 
@@ -405,6 +423,7 @@ export function standAusZeile(r: ClipStand, stil: CaptionStyle): Pruefstand {
     cps_warnings: r.cps_warnings,
     fidelity_warnings: r.fidelity_warnings,
     render_error: r.render_error,
+    export_checks: r.export_checks,
   } as unknown as Clip;
   return pruefstand({
     clip,

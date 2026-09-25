@@ -580,3 +580,46 @@ img, svg { display: block; max-width: 100%; }
 .kopf-links a { text-decoration: none; transition: color var(--dur-fast) var(--ease); }
 .kopf-links a:hover { color: var(--text); }
 @media (min-width: 768px) { .kopf-aktion { margin-left: 0; } }
+
+/* --- Erwartung beim Eintragen ---------------------------------------------------------------- */
+
+.warte-hinweis {
+  margin: 14px auto 0;
+  max-width: 480px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+/* --- Für welche Videos ------------------------------------------------------------------------ */
+
+.abschnitt-text { margin: 18px auto 0; max-width: 620px; font-size: 17px; line-height: 1.6; color: var(--text-2); }
+
+.arten {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+.art {
+  border-radius: var(--radius-inner);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 18px 20px;
+}
+.art-name { font-size: 15px; font-weight: 500; color: var(--text); }
+.art-text { margin-top: 5px; font-size: 14px; line-height: 1.55; color: var(--text-3); }
+
+/* --- Das zweite Formular, auf dem blauen Abschluss -------------------------------------------- */
+
+.warteliste-unten { margin-top: 32px; }
+/* Auf der hellen Fläche reicht das gedämpfte Grau nicht mehr - dort ist Weiss der Grund. */
+.einwilligung-hell { color: rgba(255, 255, 255, 0.72); }
+.einwilligung-hell a { color: #fff; }
+.warteliste-unten .feld { background: rgba(0, 0, 0, 0.35); border-color: rgba(255, 255, 255, 0.22); }
+.warteliste-unten .feld:hover { border-color: rgba(255, 255, 255, 0.4); }
+.warteliste-unten .meldung-fehler { color: #ffc9c9; }
+.warteliste-unten .meldung-warte { color: rgba(255, 255, 255, 0.8); }
+.warteliste-unten .erfolg { border-color: rgba(255, 255, 255, 0.4); background: rgba(255, 255, 255, 0.12); }
+.warteliste-unten .erfolg-titel { color: #fff; }
+.warteliste-unten .erfolg-titel svg { color: #bff5d6; }
+.warteliste-unten .erfolg p { color: rgba(255, 255, 255, 0.8); }

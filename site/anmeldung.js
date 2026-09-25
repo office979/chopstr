@@ -37,13 +37,22 @@ function adresseSiehtEchtAus(wert) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(wert);
 }
 
+/* Es gibt mehr als ein Formular auf der Seite: eines im Hero und eines ganz unten. Wer bis zum
+ * Ende liest, ist überzeugt - und soll dann nicht erst wieder nach oben scrollen müssen.
+ *
+ * Deshalb sucht diese Datei nicht eine feste Kennung, sondern jedes Formular mit dem Merkmal
+ * ``data-warteliste``. Jedes bekommt seine eigene Bedienung; was im einen passiert, lässt das
+ * andere unberührt. */
 function start() {
-  const form = document.getElementById("anmeldung");
-  const feld = document.getElementById("email");
-  const haken = document.getElementById("einwilligung");
-  const knopf = document.getElementById("absenden");
-  const meldung = document.getElementById("anmeldung-meldung");
-  if (!form || !feld || !haken || !knopf || !meldung) return;
+  document.querySelectorAll("form[data-warteliste]").forEach(einrichten);
+}
+
+function einrichten(form) {
+  const feld = form.querySelector('input[type="email"]');
+  const haken = form.querySelector('input[type="checkbox"]');
+  const knopf = form.querySelector('button[type="submit"]');
+  const meldung = form.querySelector("[data-meldung]");
+  if (!feld || !haken || !knopf || !meldung) return;
 
   function sagen(text, art) {
     meldung.textContent = text;
@@ -109,7 +118,7 @@ function start() {
       const daten = await antwort.json();
       if (!antwort.ok || !daten || daten.ok !== true) throw new Error("abgelehnt");
       zeigeDanke(form, email);
-    } catch (err) {
+    } catch {
       knopf.disabled = false;
       feld.disabled = false;
       sagen(MELDUNGEN.fehler, "fehler");

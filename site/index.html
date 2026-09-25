@@ -60,29 +60,29 @@
       </p>
 
       <div class="warteliste" id="warteliste">
-        <form id="anmeldung" novalidate>
+        <form data-warteliste novalidate>
           <div class="feldreihe">
             <label class="falle" aria-hidden="true">
               Bitte dieses Feld frei lassen
               <input type="text" name="website" tabindex="-1" autocomplete="off">
             </label>
-            <label for="email" class="nur-vorlesen">E-Mail-Adresse</label>
+            <label for="email-oben" class="nur-vorlesen">E-Mail-Adresse</label>
             <input
               class="feld"
-              id="email"
+              id="email-oben"
               name="email"
               type="email"
               inputmode="email"
               autocomplete="email"
               required
               placeholder="deine@adresse.at"
-              aria-describedby="anmeldung-meldung"
+              aria-describedby="meldung-oben"
             >
-            <button class="knopf" type="submit" id="absenden">Sag mir Bescheid</button>
+            <button class="knopf" type="submit">Sag mir Bescheid</button>
           </div>
 
           <label class="einwilligung">
-            <input type="checkbox" id="einwilligung" name="einwilligung" required>
+            <input type="checkbox" id="einwilligung-oben" name="einwilligung" required>
             <span>
               Ja, schickt mir eine E-Mail, sobald chopstr startet. Ich kann das jederzeit
               widerrufen. Was mit meiner Adresse passiert, steht in der
@@ -90,8 +90,12 @@
             </span>
           </label>
 
-          <p class="meldung" id="anmeldung-meldung" role="status" aria-live="polite"></p>
+          <p class="meldung" id="meldung-oben" data-meldung role="status" aria-live="polite"></p>
         </form>
+        <p class="warte-hinweis">
+          Wir schalten in kleinen Gruppen frei und arbeiten die Liste der Reihe nach ab. Wer früher
+          drinsteht, ist früher dran.
+        </p>
       </div>
 
       <ul class="haken-liste">
@@ -361,6 +365,69 @@
       </div>
     </section>
 
+    <!-- Für welche Videos. Die erste Frage jedes Besuchers: „passt das zu dem, was ich habe?"
+         Stand bisher nur in einer FAQ-Antwort, also nach dem Moment, in dem man sie stellt. -->
+    <section class="mitte abschnitt" id="videos">
+      <div class="abschnitt-kopf">
+        <p class="augenbraue">Passt das zu dir?</p>
+        <h2 class="abschnitt-titel">Überall, wo Menschen reden</h2>
+        <p class="abschnitt-text">
+          chopstr braucht keine Schnittvorlage und kein bestimmtes Format. Es braucht jemanden, der
+          etwas zu sagen hat, und eine Aufnahme davon. Video oder nur Ton, bis 5 GB je Datei.
+        </p>
+      </div>
+      <div class="arten">
+        <div class="art">
+          <p class="art-name">Podcast-Folge</p>
+          <p class="art-text">Zwei Leute, neunzig Minuten, drei gute Stellen.</p>
+        </div>
+        <div class="art">
+          <p class="art-name">Interview</p>
+          <p class="art-text">Die eine Antwort, die hängen bleibt.</p>
+        </div>
+        <div class="art">
+          <p class="art-name">Vortrag</p>
+          <p class="art-text">Der Teil, für den die Leute gekommen sind.</p>
+        </div>
+        <div class="art">
+          <p class="art-name">Webinar</p>
+          <p class="art-text">Die Erklärung, die du sonst jede Woche wiederholst.</p>
+        </div>
+        <div class="art">
+          <p class="art-name">Panel-Diskussion</p>
+          <p class="art-text">Der Moment, in dem jemand widerspricht.</p>
+        </div>
+        <div class="art">
+          <p class="art-name">Online-Kurs</p>
+          <p class="art-text">Eine Lektion als Kostprobe.</p>
+        </div>
+        <div class="art">
+          <p class="art-name">Schulung</p>
+          <p class="art-text">Der Handgriff, den alle falsch machen.</p>
+        </div>
+        <div class="art">
+          <p class="art-name">Kundengespräch</p>
+          <p class="art-text">Mit Einverständnis: der beste Beleg, den du hast.</p>
+        </div>
+        <div class="art">
+          <p class="art-name">Livestream</p>
+          <p class="art-text">Vier Stunden Aufzeichnung, die niemand nochmal ansieht.</p>
+        </div>
+        <div class="art">
+          <p class="art-name">Messeauftritt</p>
+          <p class="art-text">Das Gespräch am Stand, das den Ton trifft.</p>
+        </div>
+        <div class="art">
+          <p class="art-name">Fachvortrag</p>
+          <p class="art-text">Die Zahl, die dein Publikum überrascht hat.</p>
+        </div>
+        <div class="art">
+          <p class="art-name">Predigt oder Andacht</p>
+          <p class="art-text">Der Gedanke, der über die Woche trägt.</p>
+        </div>
+      </div>
+    </section>
+
     <!-- Fragen -->
     <section class="mitte abschnitt" id="fragen">
       <div class="abschnitt-kopf">
@@ -404,8 +471,39 @@
       <div class="abschluss">
         <h2>Wie viele gute Clips stecken in deinem letzten Video?</h2>
         <p>Bald kannst du es hochladen und nachsehen.</p>
-        <div style="margin-top:32px;display:flex;justify-content:center">
-          <a class="knopf" href="#warteliste" style="text-decoration:none">Sag mir Bescheid, wenn es losgeht</a>
+        <div class="warteliste warteliste-unten">
+          <form data-warteliste novalidate>
+            <div class="feldreihe">
+              <label class="falle" aria-hidden="true">
+                Bitte dieses Feld frei lassen
+                <input type="text" name="website" tabindex="-1" autocomplete="off">
+              </label>
+              <label for="email-unten" class="nur-vorlesen">E-Mail-Adresse</label>
+              <input
+                class="feld"
+                id="email-unten"
+                name="email"
+                type="email"
+                inputmode="email"
+                autocomplete="email"
+                required
+                placeholder="deine@adresse.at"
+                aria-describedby="meldung-unten"
+              >
+              <button class="knopf" type="submit">Sag mir Bescheid</button>
+            </div>
+
+            <label class="einwilligung einwilligung-hell">
+              <input type="checkbox" id="einwilligung-unten" name="einwilligung" required>
+              <span>
+                Ja, schickt mir eine E-Mail, sobald chopstr startet. Ich kann das jederzeit
+                widerrufen. Was mit meiner Adresse passiert, steht in der
+                <a href="datenschutz.html">Datenschutzerklärung</a>.
+              </span>
+            </label>
+
+            <p class="meldung" id="meldung-unten" data-meldung role="status" aria-live="polite"></p>
+          </form>
         </div>
         <p style="margin-top:16px;font-size:14px;color:rgba(255,255,255,0.6)">Keine Werbung · Daten bleiben in der EU</p>
       </div>

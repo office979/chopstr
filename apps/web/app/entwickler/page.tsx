@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { PageShell } from "@/components/layout/PageShell";
-import { PageHeader } from "@/components/ui/PageHeader";
+import { SettingsShell } from "@/app/einstellungen/SettingsShell";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Badge } from "@/components/ui/Badge";
 import { ButtonLink } from "@/components/ui/Button";
@@ -43,10 +42,12 @@ curl -s -X POST ${api}/candidates/<candidate_id>/verdict \\
 curl -s ${api}/clips/<clip_id> -H "Authorization: Bearer ${key}"
 curl -sI ${api}/clips/<clip_id>/download -H "Authorization: Bearer ${key}"
 
-# Quelle per URL anlegen (Rechte bestätigt, Urheber und URL sind Pflicht)
+# Quelle anlegen; die Antwort enthält upload_token und tus_endpoint für den Upload
 curl -s -X POST ${api}/sources \\
   -H "Authorization: Bearer ${key}" -H "Content-Type: application/json" \\
-  -d '{"title":"Keynote","rights_confirmed":true,"rights_status":"licensed","source_owner":"Anna Beispiel","source_url":"https://example.com/keynote.mp4","upload":"url"}'`;
+  -d '{"title":"Keynote","rights_confirmed":true,"rights_status":"own","upload":"tus"}'
+
+# upload = url gibt es noch nicht: die Antwort ist 400 url_import_unavailable.`;
 
   const python = `import requests
 
@@ -104,22 +105,30 @@ def verify(secret: str, body: bytes, header: str, tolerance_s: int = 300) -> boo
   for (const e of ENDPOINTS) grouped.set(e.tag, [...(grouped.get(e.tag) ?? []), e]);
 
   return (
-    <PageShell backgroundWord="API" lightTone="ai">
-      <PageHeader
-        eyebrow={`Team · ${session.workspaceName}`}
-        title="Entwickler"
-        description="Öffentliche API, Webhooks und MCP-Server. Jede schreibende Aktion braucht einen Schlüssel mit passendem Scope."
-        actions={
-          <>
-            <ButtonLink href="/einstellungen/api" variant="primary" size="sm">
-              Schlüssel verwalten
-            </ButtonLink>
-            <ButtonLink href="/einstellungen/webhooks" variant="ghost" size="sm">
-              Webhooks
-            </ButtonLink>
-          </>
-        }
-      />
+    /* Im Rahmen der Einstellungen und nicht in einem eigenen.
+     *
+     * „Für Entwickler" ist ein Reiter dieser Leiste und führt hierher - nur zeigte diese Seite die
+     * Leiste dann nicht mehr an. Wer hier ankam, sass in einer Sackgasse: zurück ging es nur über
+     * die Seitenleiste links, und welcher Reiter man gerade war, stand nirgends. Der Rahmen ist
+     * derselbe wie bei allen anderen Einstellungsseiten, das Hintergrundwort bleibt „API". */
+    <SettingsShell
+      session={session}
+      tab="entwickler"
+      backgroundWord="API"
+      lightTone="ai"
+      title="Entwickler"
+      description="Öffentliche API, Webhooks und MCP-Server. Jede schreibende Aktion braucht einen Schlüssel mit passendem Scope."
+      actions={
+        <>
+          <ButtonLink href="/einstellungen/api" variant="primary" size="sm">
+            Schlüssel verwalten
+          </ButtonLink>
+          <ButtonLink href="/einstellungen/webhooks" variant="ghost" size="sm">
+            Webhooks
+          </ButtonLink>
+        </>
+      }
+    >
 
       <div className="flex flex-col gap-5">
         <GlassCard padding="lg" className="flex flex-col gap-4">
@@ -228,6 +237,6 @@ def verify(secret: str, body: bytes, header: str, tolerance_s: int = 300) -> boo
           <Code>{webhookVerify}</Code>
         </GlassCard>
       </div>
-    </PageShell>
+    </SettingsShell>
   );
 }

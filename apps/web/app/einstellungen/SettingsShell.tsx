@@ -30,6 +30,10 @@ interface Props {
   title: string;
   description?: ReactNode;
   actions?: ReactNode;
+  /* Das Wort im Hintergrund. Standard ist „EU"; die Entwicklerseite behält ihr eigenes, damit die
+   * Seite beim Wechsel in den Rahmen nicht anders aussieht als vorher. */
+  backgroundWord?: string;
+  lightTone?: "ai";
   children: ReactNode;
 }
 
@@ -37,10 +41,10 @@ interface Props {
  *
  * Alle Reiter teilen dieselbe Breite. Vorher setzten Abrechnung, Audit-Log, Löschung, Webhooks und
  * Verbindungen "default", der Rest blieb auf "narrow"; beim Reiterwechsel sprang das Layout. */
-export function SettingsShell({ session, tab, title, description, actions, children }: Props) {
+export function SettingsShell({ session, tab, title, description, actions, backgroundWord = "EU", lightTone, children }: Props) {
   const tabs = TABS.filter((t) => !t.action || can(session.role, t.action));
   return (
-    <PageShell width="default" backgroundWord="EU">
+    <PageShell width="default" backgroundWord={backgroundWord} lightTone={lightTone}>
       <PageHeader eyebrow={`Team · ${session.workspaceName}`} title={title} description={description} actions={actions} />
       <nav aria-label="Einstellungen" className="mb-6 flex flex-wrap gap-1">
         {tabs.map((t) => (

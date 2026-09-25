@@ -341,3 +341,50 @@ describe("die technische Prüfung der Datei", () => {
     expect(pruefstand(mitPruefung("ok", "Die Datei hat Ton.")).befunde).toHaveLength(0);
   });
 });
+
+describe("blind beschnittenes Bild", () => {
+  /* Aus einem Querformat einen hochkanten Clip zu machen heisst, zwei Drittel des Bildes
+   * wegzuschneiden. Welches Drittel bleibt, entscheidet die Gesichtserkennung. Läuft sie nicht,
+   * nimmt der Renderer die Mitte - und der Sprecher kann halb abgeschnitten sein. Im
+   * Entscheidungsregister stand seit Phase 3, die Oberfläche zeige das an. Sie tat es nicht. */
+  const mitReframe = (reframe: Record<string, unknown>, abweichend = true) => {
+    const c = clip();
+    return eingabe({
+      clip: { ...c, render_plan: { ...(c.render_plan as object), reframe } } as unknown as Clip,
+      quellformatAbweichend: abweichend,
+    });
+  };
+
+  it("meldet einen Ausschnitt ohne Gesichtserkennung", () => {
+    const p = pruefstand(mitReframe({ strategy: "neutral", detector: "none", faces_detected: false }));
+    expect(p.befunde.some((b) => b.art === "bild" && b.text.includes("ohne Gesichtserkennung"))).toBe(true);
+    expect(p.qualitaet).toBe("hinweis");
+  });
+
+  it("meldet, wenn die Erkennung lief und niemanden fand", () => {
+    const p = pruefstand(mitReframe({ strategy: "neutral", detector: "yunet", faces_detected: false }));
+    expect(p.befunde.some((b) => b.art === "bild" && b.text.includes("niemand erkannt"))).toBe(true);
+  });
+
+  it("schweigt, wenn die Erkennung jemanden gefunden hat", () => {
+    const p = pruefstand(mitReframe({ strategy: "talking_head", detector: "yunet", faces_detected: true }));
+    expect(p.befunde.some((b) => b.art === "bild")).toBe(false);
+  });
+
+  it("schweigt, wenn gar nicht beschnitten wurde", () => {
+    /* Behält der Clip das Format der Quelle, gibt es keinen Ausschnitt und nichts zu prüfen. */
+    const p = pruefstand(mitReframe({ strategy: "neutral", detector: "none", faces_detected: false }, false));
+    expect(p.befunde.some((b) => b.art === "bild")).toBe(false);
+  });
+
+  it("sperrt nichts: der Ausschnitt kann richtig sein, jemand muss nur hinsehen", () => {
+    const c = clip({ review: "bereit" });
+    const p = pruefstand(
+      eingabe({
+        clip: { ...c, render_plan: { ...(c.render_plan as object), reframe: { detector: "none", faces_detected: false } } } as unknown as Clip,
+        quellformatAbweichend: true,
+      }),
+    );
+    expect(p.postbereit).toBe(true);
+  });
+});

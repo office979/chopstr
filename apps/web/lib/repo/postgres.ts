@@ -1,6 +1,8 @@
 import { withAuthContext, withContext, type Tx } from "@/lib/db";
 import { currentSession } from "@/lib/session";
+import { aspectForSource } from "@/lib/clips/presets";
 import type {
+  Aspect,
   AuditRow,
   BrandAsset,
   BrandProfile,
@@ -8,6 +10,7 @@ import type {
   Candidate,
   CaptionVersion,
   Clip,
+  ClipStand,
   ClipStatus,
   DeletionJob,
   DpaAcceptance,
@@ -964,6 +967,7 @@ export const postgresRepo: Repo = {
                (c.file_key is not null) as hat_datei,
                c.composition, c.zeitmarken, c.cps_warnings, c.fidelity_warnings, c.render_error,
                c.export_checks,
+               c.aspect, c.render_plan->'reframe' as plan_reframe, s2.width as quell_w, s2.height as quell_h,
                c.render_plan->'captions'                 as plan_captions,
                c.render_plan->'segments'                 as plan_segments,
                c.render_plan->'zeitmarken'               as plan_zeitmarken,
@@ -972,7 +976,7 @@ export const postgresRepo: Repo = {
                c.render_plan->'brand'->>'profil_fassung' as marken_fassung,
                c.caption_style,
                (select max(t.version) from transcript_versions t where t.source_id = c.source_id) as tv
-        from clips c
+        from clips c join sources s2 on s2.id = c.source_id
         where c.status <> 'deleted' and c.deleted_at is null`;
       return (rows as Row[]).map((r) => ({
         id: r.id as string,
@@ -989,6 +993,9 @@ export const postgresRepo: Repo = {
         plan_segments: jsonValue<Clip["composition"] | null>(r.plan_segments, null),
         plan_zeitmarken: jsonValue<Zeitmarke[] | null>(r.plan_zeitmarken, null),
         export_checks: jsonValue<Clip["export_checks"]>(r.export_checks, null),
+        plan_reframe: jsonValue<ClipStand["plan_reframe"]>(r.plan_reframe, null),
+        aspect: r.aspect as Aspect,
+        quell_aspekt: aspectForSource(num(r.quell_w), num(r.quell_h)),
         plan_transcript_version: num(r.plan_tv),
         plan_output_height: num(r.plan_h),
         caption_style: jsonValue<Record<string, unknown> | null>(r.caption_style, null),

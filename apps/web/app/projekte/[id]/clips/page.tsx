@@ -4,6 +4,7 @@ import { PageShell } from "@/components/layout/PageShell";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { ButtonLink } from "@/components/ui/Button";
 import { getRepo } from "@/lib/repo";
+import { aspectForSource } from "@/lib/clips/presets";
 import { requireSession } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
 import { getQuota } from "@/lib/billing/quota";
@@ -102,6 +103,7 @@ export default async function ClipsPage({ params }: Props) {
         sourceId={source.id}
         initialClips={clips}
         transkriptVersion={transcript?.version ?? null}
+        quellAspekt={aspectForSource(source.width, source.height)}
         candidates={candidates.filter((c) => candidateIds.has(c.id))}
         initialEvents={events.filter((e) => e.step === "render")}
         mediaBase={process.env.NEXT_PUBLIC_MEDIA_BASE_URL ?? null}

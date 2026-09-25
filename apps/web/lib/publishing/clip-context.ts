@@ -5,6 +5,7 @@ import { freigabeVeraltet, latestByClip } from "@/lib/guest/approval";
 import { getPublishingRepo } from "@/lib/repo/publishing";
 import { pruefstand, type Pruefstand } from "@/lib/clips/pruefstand";
 import { stilAusPlan, stilPruefen } from "@/lib/clips/caption-style";
+import { aspectForSource } from "@/lib/clips/presets";
 import { ausgabe, type Ausgabe } from "@/lib/clips/ausgabe";
 import type { Candidate, Clip, GuestApproval, HookVersion, Plan, Source, Workspace } from "@/lib/repo/types";
 import type { ClipExtras } from "@/lib/repo/types-publishing";
@@ -81,6 +82,8 @@ export async function loadClipContext(sourceId: string, clipId: string): Promise
     },
     bearbeitet:
       Object.keys(gespeicherterStil).length > 0 || (clip.zeitmarken?.length ?? 0) > 0 || clip.composition.length > 1,
+    kandidat: candidate,
+    quellformatAbweichend: aspectForSource(source.width, source.height) !== clip.aspect,
   });
 
   const eingabe = {

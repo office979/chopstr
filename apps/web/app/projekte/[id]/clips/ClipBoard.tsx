@@ -81,6 +81,9 @@ interface Props {
   /* Die neueste Transkriptversion des Projekts. Daran hängt, ob eine Textkorrektur schon im
    * gebauten Video steckt. */
   transkriptVersion: number | null;
+  /* Das Format der Quelle. Weicht das Zielformat davon ab, wurde das Bild beschnitten - und dann
+   * ist die Frage, ob die richtige Person im Ausschnitt steht, eine echte Frage. */
+  quellAspekt: Aspect | null;
 }
 
 interface ApiError {
@@ -151,6 +154,7 @@ export function ClipBoard({
   previewFont,
   publishing,
   transkriptVersion,
+  quellAspekt,
 }: Props) {
   const [clips, setClips] = useState<Clip[]>(initialClips);
   const [extras, setExtras] = useState<Record<string, ClipExtras>>(publishing?.extras ?? {});
@@ -387,11 +391,12 @@ export function ClipBoard({
           stand,
           bearbeitet,
           kandidat: candidates.find((k) => k.id === clip.candidate_id) ?? null,
+          quellformatAbweichend: quellAspekt != null && quellAspekt !== clip.aspect,
         }),
       );
     }
     return aus;
-  }, [clips, extras, approvals, transkriptVersion, candidates]);
+  }, [clips, extras, approvals, transkriptVersion, candidates, quellAspekt]);
 
   /* Wie viele Clips passen zu welchem Filter? Ein Clip kann in mehreren stehen: ein freigegebener
    * mit veraltetem Video ist beides. Das ist kein Fehler der Zählung, sondern der Punkt der drei

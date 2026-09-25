@@ -4,6 +4,7 @@ import { getRepo } from "@/lib/repo";
 import { getPublishingRepo } from "@/lib/repo/publishing";
 import { stilAusPlan, stilPruefen } from "@/lib/clips/caption-style";
 import { vorhandeneSchriften } from "@/lib/clips/schriften-vorhanden";
+import { aspectForSource } from "@/lib/clips/presets";
 import { requireSession } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
 import { mediaUrl } from "@/lib/clips/labels";
@@ -134,7 +135,8 @@ export default async function ClipPage({ params }: Props) {
               zeitmarken: extras[0]?.zeitmarken ?? clip.zeitmarken,
             },
             kandidat: candidate,
-          }).befunde.filter((b) => b.art === "sinn" || b.art === "pruefen" || b.art === "technik")
+            quellformatAbweichend: aspectForSource(source.width, source.height) !== clip.aspect,
+          }).befunde.filter((b) => b.art === "sinn" || b.art === "pruefen" || b.art === "technik" || b.art === "bild")
         }
         renderPlan={clip.render_plan}
         clipStatus={clip.status}

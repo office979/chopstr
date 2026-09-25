@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { ausgabe, ausgabeSatz, regelGiltFuer, type AusgabeEingabe } from "@/lib/clips/ausgabe";
+import { ausgabe, ausgabeSatz, regelGiltFuer, type AusgabeEingabe, type Zweck } from "@/lib/clips/ausgabe";
 import { pruefstand, type PruefstandEingabe } from "@/lib/clips/pruefstand";
 import type { Clip, RenderPlan, TechnikBefund } from "@/lib/repo/types";
 import { assFarbe, LOOKS, mitVorgabe } from "@/lib/clips/caption-style";
@@ -80,7 +80,7 @@ function eingabe(over: Partial<AusgabeEingabe> = {}): AusgabeEingabe {
   return { stand: stand(), technik: null, gastOffen: false, gastVeraltet: false, ...over };
 }
 
-const codes = (zweck: "herunterladen" | "veroeffentlichen", e: AusgabeEingabe) =>
+const codes = (zweck: Zweck, e: AusgabeEingabe) =>
   ausgabe(zweck, e).gruende.map((g) => g.code);
 
 describe("ein freigegebener, aktueller Clip darf hinaus", () => {

@@ -627,6 +627,11 @@ export interface ClipStand {
   /* Die technische Pruefung der fertigen Datei (Migration 0014), fuer die Zaehler auf der
    * Startseite. */
   export_checks: TechnikBefund[] | null;
+  /* Wurde das Bild ohne Gesichtserkennung beschnitten? Aus dem Renderplan, zusammen mit dem
+   * Format der Quelle: nur wenn beschnitten wurde, gibt es etwas zu pruefen. */
+  plan_reframe: { strategy?: string; detector?: string; faces_detected?: boolean } | null;
+  aspect: Aspect;
+  quell_aspekt: Aspect | null;
   plan_output_height: number | null;
   /* Der eigene Untertitelstil dieses Clips, falls einer gespeichert ist. */
   caption_style: Record<string, unknown> | null;

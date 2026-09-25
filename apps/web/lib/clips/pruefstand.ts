@@ -79,7 +79,7 @@ export const DATEI_SATZ: Record<Datei, string> = {
  * Stelle, an der es am engsten ist. */
 export interface Befund {
   schwere: "hinweis" | "fehler";
-  art: "sinn" | "tempo" | "datei" | "render" | "technik" | "pruefen";
+  art: "sinn" | "tempo" | "datei" | "render" | "technik" | "pruefen" | "bild";
   /* Was los ist und was hilft, in einem Satz. */
   text: string;
   /* Der Wortlaut der schlimmsten Stelle, falls bekannt. Damit findet man sie im Clip wieder. */
@@ -110,6 +110,10 @@ export interface PruefstandEingabe {
    * Werbung, heikles Thema, eine Behauptung, eine spätere Relativierung, und ob die Stelle ohne
    * KI gefunden wurde. Sie standen bisher nur in der Datenbank. */
   kandidat?: Pick<Candidate, "risk_flags" | "story_graph_flags"> | null;
+  /* Weicht das Zielformat vom Format der Quelle ab? Nur dann wird beschnitten, und nur dann ist
+   * die Frage „ist die richtige Person im Bild" überhaupt eine Frage. Der Aufrufer weiss die
+   * Masse der Quelle; hier hereingereicht, damit dieses Modul eine reine Rechnung bleibt. */
+  quellformatAbweichend?: boolean;
 }
 
 /* Die Treuewarnungen aus dem Renderlauf, in Sätze übersetzt.
@@ -150,7 +154,14 @@ function tempoStelle(warnung: string): string | null {
   return m ? m[1] : null;
 }
 
-export function pruefstand({ clip, freigabe, stand, bearbeitet = false, kandidat = null }: PruefstandEingabe): Pruefstand {
+export function pruefstand({
+  clip,
+  freigabe,
+  stand,
+  bearbeitet = false,
+  kandidat = null,
+  quellformatAbweichend = false,
+}: PruefstandEingabe): Pruefstand {
   const redaktion: Redaktion =
     clip.review === "verworfen"
       ? "verworfen"
@@ -200,6 +211,39 @@ export function pruefstand({ clip, freigabe, stand, bearbeitet = false, kandidat
           : "An mehreren Stellen wird zügig gesprochen, zum Mitlesen ohne Ton ist das knapp. Im Text straffen oder in der Timeline herausnehmen.",
       stelle,
     });
+  }
+
+  /* Wurde das Bild blind beschnitten?
+   *
+   * Aus einem Video im Querformat einen hochkanten Clip zu machen heisst, zwei Drittel des Bildes
+   * wegzuschneiden. Welches Drittel bleibt, entscheidet die Gesichtserkennung. Läuft sie nicht -
+   * weil das Modell fehlt oder niemand erkannt wurde - nimmt der Renderer die Mitte. Das kann
+   * passen und kann den Sprecher halb abschneiden, und man sieht es erst im fertigen Video.
+   *
+   * Im Entscheidungsregister steht seit Phase 3, die Oberfläche zeige diesen Fall in Orange. Sie
+   * tat es nicht: `reframe.strategy` und `reframe.detector` standen im Renderplan und wurden
+   * nirgends gelesen. An den 14 Clips dieses Arbeitsbereichs traf es neun.
+   *
+   * Kein Fehler, sondern ein Hinweis: der Ausschnitt ist vielleicht richtig. Aber jemand muss
+   * hinsehen, und dafür muss er es wissen. Behält der Clip das Format der Quelle, wird nichts
+   * beschnitten und es gibt nichts zu prüfen. */
+  const reframe = clip.render_plan?.reframe;
+  if (reframe && datei !== "keine" && quellformatAbweichend) {
+    if (reframe.detector === "none") {
+      befunde.push({
+        schwere: "hinweis",
+        art: "bild",
+        text: "Der Bildausschnitt wurde ohne Gesichtserkennung gewählt: der Clip zeigt die Mitte des Originals. Bitte kurz ansehen, ob die sprechende Person im Bild ist.",
+        stelle: null,
+      });
+    } else if (reframe.faces_detected === false) {
+      befunde.push({
+        schwere: "hinweis",
+        art: "bild",
+        text: "Im Original wurde niemand erkannt, deshalb zeigt der Clip die Bildmitte. Bitte kurz ansehen, ob das passt.",
+        stelle: null,
+      });
+    }
   }
 
   /* Die Marker aus der Analyse. Sie sagen nichts über die Technik und nichts über den Schnitt,
@@ -256,7 +300,7 @@ export function pruefstand({ clip, freigabe, stand, bearbeitet = false, kandidat
 
   const qualitaet: Qualitaet = befunde.some((b) => b.schwere === "fehler" && (b.art === "sinn" || b.art === "render"))
     ? "fehler"
-    : befunde.some((b) => b.art === "sinn" || b.art === "tempo" || b.art === "technik" || b.art === "pruefen")
+    : befunde.some((b) => b.art === "sinn" || b.art === "tempo" || b.art === "technik" || b.art === "pruefen" || b.art === "bild")
       ? "hinweis"
       : "ok";
 
@@ -443,6 +487,9 @@ export function standAusZeile(r: ClipStand, stil: CaptionStyle): Pruefstand {
     fidelity_warnings: r.fidelity_warnings,
     render_error: r.render_error,
     export_checks: r.export_checks,
+    render_plan: r.plan_captions
+      ? ({ captions: r.plan_captions, reframe: r.plan_reframe } as unknown as Clip["render_plan"])
+      : null,
   } as unknown as Clip;
   return pruefstand({
     clip,
@@ -468,6 +515,7 @@ export function standAusZeile(r: ClipStand, stil: CaptionStyle): Pruefstand {
       zeitmarken: r.zeitmarken,
     },
     bearbeitet: (r.caption_style != null && Object.keys(r.caption_style).length > 0) || r.zeitmarken.length > 0 || r.composition.length > 1,
+    quellformatAbweichend: r.quell_aspekt != null && r.quell_aspekt !== r.aspect,
   });
 }
 

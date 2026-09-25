@@ -63,7 +63,9 @@ export function ersetzungFuer(vorhanden: string, neuerKern: string): string {
 export function nachfrageSatz(anzahl: number, alt: string, neu: string): string {
   const a = kern(alt);
   const n = kern(neu);
+  /* Deutsche Anführungszeichen unten und oben. Ein gerades " am Ende sieht nach Programmcode aus,
+   * und an einer Stelle, die eine Entscheidung verlangt, zählt jedes Zeichen. */
   return anzahl === 1
-    ? `„${a}" steht noch an einer weiteren Stelle. Auch dort zu „${n}" ändern?`
-    : `„${a}" steht noch an ${anzahl} weiteren Stellen. Auch dort zu „${n}" ändern?`;
+    ? `„${a}“ steht noch an einer weiteren Stelle. Auch dort zu „${n}“ ändern?`
+    : `„${a}“ steht noch an ${anzahl} weiteren Stellen. Auch dort zu „${n}“ ändern?`;
 }

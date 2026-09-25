@@ -60,4 +60,11 @@ describe("die Nachfrage", () => {
     expect(nachfrageSatz(12, "Hannes", "Johannes")).toContain("12 weiteren Stellen");
     expect(nachfrageSatz(1, "Hannes", "Johannes")).toContain("einer weiteren Stelle");
   });
+
+  it("setzt deutsche Anführungszeichen", () => {
+    /* Ein gerades Zeichen am Ende sieht nach Programmcode aus. */
+    expect(nachfrageSatz(3, "Hannes", "Johannes")).toBe(
+      "„Hannes“ steht noch an 3 weiteren Stellen. Auch dort zu „Johannes“ ändern?",
+    );
+  });
 });

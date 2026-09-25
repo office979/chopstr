@@ -170,6 +170,25 @@ Wer ein Worker-Image baut: **ffmpeg braucht libass.** Ohne den `subtitles`-Filte
 keine Untertitel einbrennen. Er merkt das und lässt sie weg; seit der technischen Prüfung schlägt
 der Lauf fehl, statt still ein Video ohne Untertitel auszuliefern.
 
+## Effekte
+
+Ein Zoom betont. `clips.effekte` (Migration 0015) hält je Clip eine Liste aus `{art, ab_s, dauer_s}`
+in **Clipzeit**; beim ersten Clippen setzt `workers/chopstr_worker/pipeline/effekte.py` automatisch
+welche, dort wo eine Zahl oder eine Ankündigung fällt. Im Editor stehen sie unter „Effekte“ und als
+eigene Spur in der Zeitleiste: verschieben, länger ziehen, entfernen.
+
+„Näher heran“ geht schnell hinein und lässt langsam los, „Weiter weg“ beginnt nah und zieht sich
+gleichmässig zurück. Beide enden wieder bei 1,0 – sonst addieren sich zwei Effekte, und nach dem
+dritten ist das Bild eine Briefmarke.
+
+`NULL` in der Spalte heisst „noch nie gesetzt“, eine leere Liste „ausdrücklich keine“. Nur dieser
+Unterschied verhindert, dass der nächste Renderlauf die Entscheidung des Menschen überschreibt.
+
+Die Kurve steht zweimal da: im Worker als Wahrheit – der Renderer entscheidet, was im Bild
+passiert – und in `apps/web/lib/clips/effekte.ts` für die Oberfläche. Tests auf beiden Seiten halten
+sie auf denselben Zahlen, und `workers/tests/test_effekt_render.py` misst die Bildpunkte eines
+statischen Quadrats durch die echte Filterkette.
+
 ## Schriften
 
 Alle neun Untertitel-Schriften liegen im Repository (`workers/fonts`, rund 1,9 MB). Wer chopstr

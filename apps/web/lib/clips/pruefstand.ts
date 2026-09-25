@@ -278,22 +278,23 @@ export function pruefstand({
   return { redaktion, qualitaet, datei, befunde, postbereit };
 }
 
-/* Der eine Zustand, der an der Karte steht.
+/* Der eine Zustand, der an der Karte steht: wie weit ist die Freigabe durch die dritte Person?
  *
- * Die drei Achsen oben sind die Rechnung; das hier ist die Antwort in einem Wort. Vorher standen
- * an einer Karte bis zu drei Plaketten nebeneinander („Vorgeschlagen", „Fehler", „Wird geclippt"),
- * und der Kunde musste sie selbst zusammenzählen.
+ * WORUM ES GEHT. Wer Clips für jemand anderen macht, lässt sie von dieser Person abzeichnen,
+ * bevor sie auf deren Konto gehen. chopstr verschickt dafür einen Link; die Person sieht nur die
+ * Clips und antwortet mit einem von drei Urteilen: freigegeben, abgelehnt, fehlerhaft.
  *
- * Worum es dabei geht, ist die Freigabe durch die dritte Person - die, auf deren Konto gepostet
- * wird. Deshalb heisst der Ruhezustand „Bestätigung ausstehend" und nicht „Vorgeschlagen": es
- * fehlt keine Idee, es fehlt eine Zusage.
+ * „Fehlerhaft" ist also NICHT der technische Befund der Maschine, sondern ein Urteil eines
+ * Menschen: „daran stimmt etwas nicht, so nicht". Dass der Renderlauf gescheitert ist oder ein
+ * Schnitt eine Verneinung wegschneidet, steht weiterhin an anderer Stelle - das sperrt den
+ * Download, hat aber mit der Zusage nichts zu tun.
  *
- * Die Reihenfolge ist Absicht. Eine Absage beendet die Sache, auch wenn technisch etwas offen
- * ist. Ein technischer Fehler kommt vor die Freigabe: ein kaputtes Video ist nicht freigegeben,
- * egal was jemand angeklickt hat. */
-export type FreigabeStand = "ausstehend" | "abgelehnt" | "fehlerhaft" | "freigegeben";
+ * Vor dem Verschicken gibt es keinen dieser Zustände. Dann steht dort „Nicht freigegeben": noch
+ * niemand wurde gefragt. Erst das Verschicken macht daraus „Bestätigung ausstehend". */
+export type FreigabeStand = "nicht_gesendet" | "ausstehend" | "abgelehnt" | "fehlerhaft" | "freigegeben";
 
 export const FREIGABE_LABEL: Record<FreigabeStand, string> = {
+  nicht_gesendet: "Nicht freigegeben",
   ausstehend: "Bestätigung ausstehend",
   abgelehnt: "Abgelehnt",
   fehlerhaft: "Fehlerhaft",
@@ -301,17 +302,27 @@ export const FREIGABE_LABEL: Record<FreigabeStand, string> = {
 };
 
 export const FREIGABE_SATZ: Record<FreigabeStand, string> = {
-  ausstehend: "Noch niemand hat bestätigt, dass dieser Clip so gepostet werden darf.",
-  abgelehnt: "Dieser Clip soll so nicht hinaus.",
-  fehlerhaft: "Am Clip oder an der Datei stimmt etwas nicht. Das gehört zuerst behoben.",
+  nicht_gesendet: "Dieser Clip wurde noch niemandem zur Freigabe geschickt.",
+  ausstehend: "Geschickt. Die Person hat noch nicht geantwortet.",
+  abgelehnt: "Die Person hat abgelehnt: so soll der Clip nicht hinaus.",
+  fehlerhaft: "Die Person hat den Clip als fehlerhaft gemeldet.",
   freigegeben: "Bestätigt. Der Clip darf so gepostet werden.",
 };
 
 export function freigabeStand(p: Pruefstand, freigabe?: GuestApproval | null): FreigabeStand {
-  if (p.redaktion === "verworfen" || freigabe?.decision === "rejected") return "abgelehnt";
-  if (p.qualitaet === "fehler" || p.datei === "fehlgeschlagen") return "fehlerhaft";
+  /* Gibt es eine Anfrage, zählt ausschliesslich deren Antwort - das ist die Sache, um die es hier
+   * geht. Keine Antwort heisst: sie steht noch aus. */
+  if (freigabe) {
+    if (freigabe.decision === "approved") return "freigegeben";
+    if (freigabe.decision === "rejected") return "abgelehnt";
+    if (freigabe.decision === "changes") return "fehlerhaft";
+    return "ausstehend";
+  }
+  /* Ohne Anfrage: Clips aus der Zeit, in der das Team selbst freigab oder verwarf, behalten ihre
+   * Aussage. Neue bekommen sie nicht mehr - freigegeben wird über die dritte Person. */
+  if (p.redaktion === "verworfen") return "abgelehnt";
   if (p.redaktion === "freigegeben") return "freigegeben";
-  return "ausstehend";
+  return "nicht_gesendet";
 }
 
 /* Was als Nächstes zu tun ist, in der Reihenfolge, in der es weh tut. Genau eine Handlung je

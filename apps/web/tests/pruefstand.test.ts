@@ -262,50 +262,53 @@ describe("Reihenfolge und Filter", () => {
   });
 });
 
-describe("die vier Zustände an der Karte", () => {
-  /* Vorher standen bis zu drei Plaketten nebeneinander und der Kunde musste sie selbst
-   * zusammenzählen. Jetzt ein Wort, und die Reihenfolge entscheidet, welches. */
-  it("nennt einen unangetasteten Vorschlag „Bestätigung ausstehend“", () => {
-    expect(freigabeStand(pruefstand(eingabe()))).toBe("ausstehend");
+describe("der Freigabestand an der Karte", () => {
+  /* Die Freigabe ist die Zusage der Person, für die die Clips gemacht werden. Sie bekommt einen
+   * Link und antwortet mit einem von drei Urteilen. Alles davor heisst „Nicht freigegeben". */
+  const mit = (d: GuestApproval["decision"]) => ({ decision: d } as GuestApproval);
+
+  it("nennt einen Clip, den noch niemand bekommen hat, „Nicht freigegeben“", () => {
+    expect(freigabeStand(pruefstand(eingabe()))).toBe("nicht_gesendet");
   });
 
-  it("nennt einen freigegebenen Clip freigegeben", () => {
-    expect(freigabeStand(pruefstand(eingabe({ clip: clip({ review: "bereit" }) })))).toBe("freigegeben");
+  it("macht daraus erst durch das Verschicken „Bestätigung ausstehend“", () => {
+    expect(freigabeStand(pruefstand(eingabe()), mit(null))).toBe("ausstehend");
   });
 
-  it("nennt einen verworfenen Clip abgelehnt", () => {
-    expect(freigabeStand(pruefstand(eingabe({ clip: clip({ review: "verworfen" }) })))).toBe("abgelehnt");
+  it("nennt ein Ja freigegeben", () => {
+    expect(freigabeStand(pruefstand(eingabe()), mit("approved"))).toBe("freigegeben");
   });
 
-  it("nennt ihn auch abgelehnt, wenn die gefragte Person Nein gesagt hat", () => {
-    const f = { decision: "rejected" } as GuestApproval;
-    expect(freigabeStand(pruefstand(eingabe()), f)).toBe("abgelehnt");
+  it("nennt ein Nein abgelehnt", () => {
+    expect(freigabeStand(pruefstand(eingabe()), mit("rejected"))).toBe("abgelehnt");
   });
 
-  it("nennt einen sinnverändernden Schnitt fehlerhaft", () => {
+  it("nennt „daran stimmt etwas nicht“ fehlerhaft", () => {
+    expect(freigabeStand(pruefstand(eingabe()), mit("changes"))).toBe("fehlerhaft");
+  });
+
+  it("hält einen technischen Fehler davon getrennt", () => {
+    /* „Fehlerhaft" ist das Urteil eines Menschen, nicht der Befund der Maschine. Ein
+     * fehlgeschlagener Renderlauf sperrt den Download - über die Zusage sagt er nichts. */
+    const c = clip({ status: "failed" });
+    expect(freigabeStand(pruefstand(eingabe({ clip: c })))).toBe("nicht_gesendet");
+    expect(freigabeStand(pruefstand(eingabe({ clip: c })), mit(null))).toBe("ausstehend");
+  });
+
+  it("hält auch einen sinnverändernden Schnitt davon getrennt", () => {
     const c = clip({ fidelity_warnings: [{ type: "negation_removed", severity: "high", detail: [] }] });
-    expect(freigabeStand(pruefstand(eingabe({ clip: c })))).toBe("fehlerhaft");
+    expect(freigabeStand(pruefstand(eingabe({ clip: c })))).toBe("nicht_gesendet");
   });
 
-  it("nennt einen fehlgeschlagenen Lauf fehlerhaft", () => {
-    expect(freigabeStand(pruefstand(eingabe({ clip: clip({ status: "failed" }) })))).toBe("fehlerhaft");
+  it("lässt die Antwort gewinnen, auch wenn das Team etwas anderes eingetragen hatte", () => {
+    const c = clip({ review: "bereit" });
+    expect(freigabeStand(pruefstand(eingabe({ clip: c })), mit("rejected"))).toBe("abgelehnt");
   });
 
-  it("stellt den Fehler vor die Freigabe: ein kaputtes Video ist nicht freigegeben", () => {
-    const c = clip({ review: "bereit", status: "failed" });
-    expect(freigabeStand(pruefstand(eingabe({ clip: c })))).toBe("fehlerhaft");
-  });
-
-  it("stellt die Absage vor alles andere: dann ist die Sache beendet", () => {
-    const c = clip({ review: "verworfen", status: "failed" });
-    expect(freigabeStand(pruefstand(eingabe({ clip: c })))).toBe("abgelehnt");
-  });
-
-  it("stört sich nicht daran, dass das Video noch geclippt wird", () => {
-    /* „wird geclippt" ist keine Antwort auf „darf das raus", sondern eine laufende Maschine.
-     * Die steht als eigene Plakette daneben. */
-    const c = clip({ status: "rendering", file_key: null });
-    expect(freigabeStand(pruefstand(eingabe({ clip: c })))).toBe("ausstehend");
+  it("behält die Aussage alter Clips ohne Anfrage", () => {
+    /* Aus der Zeit, in der das Team selbst freigab. Neue bekommen das nicht mehr. */
+    expect(freigabeStand(pruefstand(eingabe({ clip: clip({ review: "bereit" }) })))).toBe("freigegeben");
+    expect(freigabeStand(pruefstand(eingabe({ clip: clip({ review: "verworfen" }) })))).toBe("abgelehnt");
   });
 });
 

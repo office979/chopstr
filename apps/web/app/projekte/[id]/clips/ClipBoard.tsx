@@ -435,30 +435,6 @@ export function ClipBoard({
     });
   }, [clips, staende, filter, plattform, person, approvals]);
 
-  /* Was aus der Auswahl wirklich freigegeben werden darf.
-   *
-   * Gerechnet wird über denselben aktionStand, den auch die einzelne Karte benutzt. Zwei
-   * Rechnungen für dieselbe Frage wären genau der Fehler, der vorher zu „Korrektur nötig" neben
-   * einem anklickbaren „Freigeben" geführt hat. */
-  const sammel = useMemo(() => {
-    const freigebbar: string[] = [];
-    const gesperrt: string[] = [];
-    let schonFrei = 0;
-    let grund = "";
-    for (const id of auswahl) {
-      const p = staende.get(id);
-      if (!p) continue;
-      const a = aktionStand("freigeben", p);
-      if (a.erlaubt) freigebbar.push(id);
-      else if (p.redaktion === "freigegeben") schonFrei += 1;
-      else {
-        gesperrt.push(id);
-        if (!grund) grund = a.grund ?? "";
-      }
-    }
-    return { freigebbar, gesperrt, grund, schonFrei };
-  }, [auswahl, staende]);
-
   /* Welche Clips gehen zur Bestätigung hinaus?
    *
    * Die ausgewählten, wenn welche ausgewählt sind - sonst alle sichtbaren, über die noch nicht
@@ -472,7 +448,9 @@ export function ClipBoard({
         const p = staende.get(c.id);
         if (!p) return false;
         if (auswahl.size > 0) return Boolean(c.file_key);
-        return Boolean(c.file_key) && freigabeStand(p, approvals.get(c.id) ?? null) === "ausstehend";
+        /* Ohne Auswahl nur die, die noch nie hinausgingen. „Bestätigung ausstehend" heisst: die
+         * Frage läuft schon - sie ein zweites Mal zu stellen wäre die gleiche Frage zweimal. */
+        return Boolean(c.file_key) && freigabeStand(p, approvals.get(c.id) ?? null) === "nicht_gesendet";
       })
       .map((c) => ({ id: c.id, label: `${PLATFORM_LABELS[c.platform]} ${ASPECT_LABELS[c.aspect]}` }));
   }, [auswahl, sichtbar, staende, approvals]);
@@ -555,6 +533,11 @@ export function ClipBoard({
     setApprovals((prev) => new Map(prev).set(approval.clip_id, approval));
     applyClips(clipsRef.current.map((c) => (c.id === approval.clip_id ? { ...c, guest_approval_required: true } : c)));
   }, [applyClips]);
+
+  /* Nach dem Verschicken sind die Kreuze erledigt. Einen Knopf „Auswahl aufheben" gibt es nicht
+   * mehr, also hebt sie sich selbst auf - sonst bliebe sie stehen und die nächste Anfrage ginge
+   * versehentlich an dieselben Clips. */
+  const freigabeFertig = useCallback(() => setAuswahl(new Set()), []);
 
   const refreshApproval = useCallback(
     async (clip: Clip) => {
@@ -743,7 +726,9 @@ export function ClipBoard({
             erlaubt={canRequestGuest}
             tarifErlaubt={planAllowsGuest}
             tarifName={planName}
+            ausgewaehlt={auswahl.size}
             onFreigabe={onRequested}
+            onFertig={freigabeFertig}
           />
         </div>
       </div>
@@ -845,66 +830,11 @@ export function ClipBoard({
         </div>
       )}
 
-      {/* Sammelaktionen. Erscheinen erst mit einer Auswahl: eine Leiste, die immer dasteht und
-          meistens nichts tun kann, nimmt nur Platz weg. */}
-      {auswahl.size > 0 && (
-        <GlassCard padding="md" selected className="sticky top-4 z-20">
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-text">
-                {auswahl.size === 1 ? "Ein Clip ausgewählt" : `${auswahl.size} Clips ausgewählt`}
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  size="sm"
-                  disabled={sammelLaeuft || sammel.freigebbar.length === 0}
-                  onClick={() => void reviewSetzen(sammel.freigebbar, "bereit")}
-                >
-                  {sammel.freigebbar.length === auswahl.size
-                    ? "Freigeben"
-                    : `${sammel.freigebbar.length} freigeben`}
-                </Button>
-                <Button size="sm" variant="ghost" disabled={sammelLaeuft} onClick={() => void reviewSetzen([...auswahl], "verworfen")}>
-                  Verwerfen
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setAuswahl(new Set())}>
-                  Auswahl aufheben
-                </Button>
-              </div>
-            </div>
-            {/* Eine Sammelfreigabe darf die Qualitätsprüfung nicht umgehen. Wer zwanzig Clips
-                auswählt und freigibt, will nicht stillschweigend auch den freigeben, in dem eine
-                Verneinung weggeschnitten wurde. Die betroffenen bleiben stehen und werden genannt. */}
-            {/* Warum der Knopf eine kleinere Zahl nennt als die Auswahl. Ohne diese Zeile sieht
-                „3 ausgewählt" neben „1 freigeben" nach einem Fehler aus. */}
-            {sammel.schonFrei > 0 && (
-              <p className="text-sm text-text-2">
-                {sammel.schonFrei === 1
-                  ? "Einer davon ist schon freigegeben."
-                  : `${sammel.schonFrei} davon sind schon freigegeben.`}
-              </p>
-            )}
-            {sammel.gesperrt.length > 0 && (
-              <p className="text-sm text-attention">
-                {sammel.gesperrt.length === 1
-                  ? "Ein ausgewählter Clip bleibt stehen: "
-                  : `${sammel.gesperrt.length} ausgewählte Clips bleiben stehen: `}
-                {sammel.grund}{" "}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuswahl(new Set(sammel.gesperrt));
-                    setFilter("fehler");
-                  }}
-                  className="underline underline-offset-4 hover:text-text"
-                >
-                  Diese ansehen
-                </button>
-              </p>
-            )}
-          </div>
-        </GlassCard>
-      )}
+      {/* Hier stand eine Sammelleiste: „2 Clips ausgewählt", „0 freigeben", „Verwerfen",
+          „Auswahl aufheben". Sie ist weg. Freigegeben wird nicht mehr vom Team selbst, sondern von
+          der Person, für die die Clips gemacht werden - und der Weg dorthin ist der Knopf oben:
+          Clips ankreuzen, „Zur Freigabe senden", Mailadresse, fertig. Ein zweiter Knopf mit
+          demselben Wort und einer anderen Bedeutung war genau die Verwirrung, die hier weg soll. */}
 
       {/* Zurückholen nach einem Verwerfen. Solange der Hinweis steht, ist die Entscheidung
           umkehrbar, ohne dass man den Filter kennen muss. */}
@@ -1066,8 +996,11 @@ export function ClipBoard({
                     <Pille ton={FREIGABE_TON[freigabe_stand]} titel={FREIGABE_SATZ[freigabe_stand]}>
                       {FREIGABE_LABEL[freigabe_stand]}
                     </Pille>
-                    {(p.datei === "wird_erstellt" || p.datei === "keine") && (
-                      <Pille ton="ruhig" titel={DATEI_SATZ[p.datei]}>
+                    {/* Die Maschine daneben, getrennt von der Zusage: „wird geclippt" und „das
+                        Clippen ist gescheitert" sind keine Antwort auf „darf das raus", aber man
+                        muss sie sehen. */}
+                    {p.datei !== "aktuell" && (
+                      <Pille ton={p.datei === "fehlgeschlagen" ? "achtung" : "ruhig"} titel={DATEI_SATZ[p.datei]}>
                         {DATEI_LABEL[p.datei]}
                       </Pille>
                     )}
@@ -1278,16 +1211,22 @@ function FreigabeSenden({
   erlaubt,
   tarifErlaubt,
   tarifName,
+  ausgewaehlt,
   onFreigabe,
+  onFertig,
 }: {
   sourceId: string;
   /* Die Clips, um die es geht, mit ihrer Beschriftung für die Liste im Fenster. */
   clips: { id: string; label: string }[];
+  /* Wie viele Clips angekreuzt sind. Null heisst: es gilt die ganze sichtbare Liste. */
+  ausgewaehlt: number;
   erlaubt: boolean;
   tarifErlaubt: boolean;
   tarifName: string;
   /* Je angefragtem Clip: die Antwort der Route, damit die Karte sofort stimmt. */
   onFreigabe: (approval: GuestApproval) => void;
+  /* Wenn das Fenster geschlossen wird und etwas hinausging. */
+  onFertig: () => void;
 }) {
   const [offen, setOffen] = useState(false);
   const [email, setEmail] = useState("");
@@ -1345,7 +1284,9 @@ function FreigabeSenden({
         title="Die Person fragen, auf deren Konto gepostet wird"
       >
         <IconFreigabe />
-        Zur Freigabe senden
+        {/* Die Zahl steht am Knopf und nicht mehr in einer eigenen Leiste: sie ist die einzige
+            Auskunft, die man beim Ankreuzen braucht. */}
+        Zur Freigabe senden{ausgewaehlt > 0 ? ` (${ausgewaehlt})` : ""}
       </Button>
 
       <Modal
@@ -1378,7 +1319,14 @@ function FreigabeSenden({
               </p>
             )}
             <div className="flex justify-end">
-              <Button onClick={() => setOffen(false)}>Fertig</Button>
+              <Button
+                onClick={() => {
+                  setOffen(false);
+                  if (fertig.anzahl > 0) onFertig();
+                }}
+              >
+                Fertig
+              </Button>
             </div>
           </div>
         ) : clips.length === 0 ? (
@@ -1449,9 +1397,10 @@ function FreigabeSenden({
   );
 }
 
-/* Die vier Zustände in Farbe. Grau ist der Ruhezustand: solange niemand geantwortet hat, ist
- * nichts los - eine bunte Karte für „es fehlt noch eine Antwort" wäre Lärm. */
+/* Die Zustände in Farbe. Grau, solange niemand geantwortet hat: eine bunte Karte für „es fehlt
+ * noch eine Antwort" wäre Lärm. Farbe erst, wenn jemand etwas gesagt hat. */
 const FREIGABE_TON: Record<FreigabeStand, "gut" | "achtung" | "fehler" | "ruhig"> = {
+  nicht_gesendet: "ruhig",
   ausstehend: "ruhig",
   abgelehnt: "fehler",
   fehlerhaft: "achtung",

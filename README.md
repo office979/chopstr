@@ -145,26 +145,31 @@ Alle Variablen mit Erklärung stehen in [`.env.example`](.env.example). Die wich
 | `EGRESS_ALLOWLIST` | zusätzliche erlaubte Hosts für ausgehende Worker-Aufrufe. |
 | `CHOPSTR_AUSGABE_REGELN` | Pfad zum Regelkatalog `packages/schema/ausgabe_regeln_v1.json`, falls ein Image ihn woanders ablegt. Web-App und Worker lesen dieselbe Datei. |
 
-## Die vier Zustände eines Clips
+## Freigabe: die Zusage der Person, für die die Clips gemacht werden
 
-An der Karte steht EIN Wort, nicht drei Plaketten nebeneinander. Es beantwortet die Frage, um die
-es auf dieser Seite geht: darf das so gepostet werden? Gerechnet in
-`apps/web/lib/clips/pruefstand.ts` (`freigabeStand`), aus denselben drei Achsen wie alles andere.
+Wer Clips für jemand anderen schneidet, lässt sie abzeichnen, bevor sie auf dessen Konto gehen.
+chopstr verschickt dafür einen Link; die Person sieht nur die Clips und antwortet mit einem von
+drei Urteilen. Angefragt wird einmal für eine Menge Clips — Häkchen setzen, Knopf **„Zur Freigabe
+senden"** oben rechts in der Clip-Liste, Mailadresse eintragen.
+
+An der Karte steht EIN Wort dazu, gerechnet in `apps/web/lib/clips/pruefstand.ts`
+(`freigabeStand`):
 
 | Zustand | Farbe | wann |
 | --- | --- | --- |
-| Bestätigung ausstehend | grau | Ruhezustand: niemand hat geantwortet |
-| Abgelehnt | rot | verworfen, oder die gefragte Person hat Nein gesagt |
-| Fehlerhaft | orange | sinnverändernder Schnitt, technischer Befund, fehlgeschlagener Lauf |
+| Nicht freigegeben | grau | noch niemandem geschickt |
+| Bestätigung ausstehend | grau | geschickt, keine Antwort |
+| Abgelehnt | rot | die Person sagt Nein |
+| Fehlerhaft | orange | die Person meldet: daran stimmt etwas nicht |
 | Freigegeben | grün | bestätigt |
 
-Die Reihenfolge ist Absicht: eine Absage beendet die Sache, auch wenn technisch etwas offen ist,
-und ein Fehler kommt vor die Freigabe — ein kaputtes Video ist nicht freigegeben, egal was jemand
-angeklickt hat.
+**„Fehlerhaft" ist das Urteil eines Menschen, nicht der Befund der Maschine.** Ein gescheiterter
+Renderlauf oder ein Schnitt, der eine Verneinung wegschneidet, sperrt den Download und steht als
+eigene Plakette daneben — mit der Zusage hat er nichts zu tun.
 
-**Freigabe heisst: die Zusage der dritten Person**, auf deren Konto gepostet wird. Sie wird einmal
-für eine Menge Clips angefordert (Knopf oben rechts in der Clip-Liste), nicht je Karte: bei
-vierzehn Clips war das vierzehnmal derselbe Knopf und vierzehnmal dieselbe Mailadresse.
+Die Seite, auf der die gefragte Person antwortet, ist noch nicht gebaut. Die Daten dafür stehen
+(`guest_approvals`, `GuestDecision` = `approved | rejected | changes`), der Link wird schon
+erzeugt.
 
 ## Wann eine Clipfassung hinausgehen darf
 

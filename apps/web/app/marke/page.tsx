@@ -11,7 +11,7 @@ import { BrandList } from "./BrandList";
 import { HistoryCard } from "./HistoryCard";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Marken" };
+export const metadata = { title: "Branding" };
 
 type Props = { searchParams: Promise<{ p?: string }> };
 
@@ -61,7 +61,7 @@ export default async function BrandPage({ searchParams }: Props) {
           für dasselbe. */}
       <PageHeader
         eyebrow="Ein Profil je Kunde"
-        title="Marken"
+        title="Branding"
         description="Farben, Logo, Schrift und Schreibweisen. Sie bestimmen, wie die Clips einer Marke aussehen und klingen. Alles bleibt in deinem Team."
       />
       <BrandList profiles={profiles} activeId={profile?.id ?? null} isNew={isNew} />

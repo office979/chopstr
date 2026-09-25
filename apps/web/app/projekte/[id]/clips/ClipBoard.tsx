@@ -18,7 +18,7 @@ import {
   latestByClip,
 } from "@/lib/guest/approval";
 import { stilAusPlan, stilPruefen } from "@/lib/clips/caption-style";
-import { RUBRIC_LABELS, RUBRIC_ORDER, structureLabel } from "@/lib/candidates/labels";
+import { structureLabel } from "@/lib/candidates/labels";
 import {
   aktionStand,
   DATEI_LABEL,
@@ -46,6 +46,7 @@ import { RENDER_STEP } from "@/lib/pipeline";
 import { compositionDuration } from "@/lib/clips/render-demo";
 import { ASPECT_SIZE, PLATFORM_DEFAULT_PRESET } from "@/lib/clips/presets";
 import { FASSUNG_FORMATE, FORMAT_HILFT_BEI, fassungMoeglich } from "@/lib/clips/fassungen";
+import { kommtVomClip } from "@/lib/clips/rueckweg";
 import type { ClipExtras, Series } from "@/lib/repo/types-publishing";
 import { ClipSeries } from "./ClipSeries";
 import { Gepostet } from "./Gepostet";
@@ -164,6 +165,13 @@ export function ClipBoard({
   /* Clip, der gerade groß in einem Fenster läuft. Nicht Vollbild: das Fenster bleibt Teil der Seite. */
   const [zoomClip, setZoomClip] = useState<Clip | null>(null);
   const [deleting, setDeleting] = useState(false);
+  /* Welche Karte hat ihre Klappe offen?
+   *
+   * Die Klappe wurde von der naechsten Karte ueberdeckt und war halb abgeschnitten. Grund ist
+   * `backdrop-filter` in der Glaskarte: das erzeugt einen eigenen Stapelkontext, und ein z-index
+   * innerhalb der Karte kommt darueber nicht hinaus. Also hebt sich die ganze Karte, solange ihre
+   * Klappe offen ist - dort konkurriert sie mit den Geschwistern und gewinnt. */
+  const [klappeOffen, setKlappeOffen] = useState<string | null>(null);
   const [fassungFuer, setFassungFuer] = useState<Clip | null>(null);
   const [fassungLaeuft, setFassungLaeuft] = useState(false);
   const [events, setEvents] = useState<PipelineEvent[]>(initialEvents);
@@ -249,13 +257,25 @@ export function ClipBoard({
      * „3 Clips prüfen" anzuklicken und dann die Liste von letzter Woche zu sehen, wäre eine
      * Antwort auf eine andere Frage. */
     const ausAdresse = window.location.hash.replace("#", "");
+    /* Drei Wege auf diese Seite, drei Antworten:
+     *
+     *   über eine Zahl der Übersicht  -> deren Filter, sonst wäre der Klick folgenlos
+     *   zurück aus einem Clip          -> der gemerkte Stand, dort wurde gerade gearbeitet
+     *   frisch, etwa über die Brotkrume -> „Alle"
+     *
+     * Der dritte Fall lief vorher in den zweiten: man kam an und sah die Auswahl von vorhin, etwa
+     * „Video veraltet", also zwei von drei Clips - ohne zu wissen warum. */
     const t = window.setTimeout(
       ausAdresse && (FILTER_ORDNUNG as string[]).includes(ausAdresse)
         ? () => {
             setFilter(ausAdresse as FilterId);
             gelesen.current = true;
           }
-        : holen,
+        : kommtVomClip(sourceId)
+          ? holen
+          : () => {
+              gelesen.current = true;
+            },
       0,
     );
     window.addEventListener("pagehide", merken);
@@ -264,7 +284,7 @@ export function ClipBoard({
       window.removeEventListener("pagehide", merken);
       merken();
     };
-  }, [merkschluessel, merken]);
+  }, [merkschluessel, merken, sourceId]);
 
   /* Den Scrollstand wiederherstellen, sobald die Seite hoch genug dafür ist.
    *
@@ -951,7 +971,11 @@ export function ClipBoard({
               <GlassCard
                 padding="md"
                 selected={gewaehlt}
-                className={cn("flex min-w-0 gap-4", glitchGroups.has(clip.candidate_id ?? "ohne") && "spectrum-glitch")}
+                className={cn(
+                  "flex min-w-0 gap-4",
+                  klappeOffen === clip.id && "z-50",
+                  glitchGroups.has(clip.candidate_id ?? "ohne") && "spectrum-glitch",
+                )}
               >
                 {/* Auswahlkästchen ganz links: Sammelaktionen brauchen einen Griff, der nicht mit
                     „ansehen" verwechselt wird. */}
@@ -1160,6 +1184,7 @@ export function ClipBoard({
                     )}
 
                     <Weitere
+                      onOffen={(o) => setKlappeOffen(o ? clip.id : null)}
                       onFassung={() => setFassungFuer(clip)}
                       clip={clip}
                       stand={p}
@@ -1174,39 +1199,6 @@ export function ClipBoard({
                     />
                   </div>
 
-                  {/* Die Bewertung im Einzelnen. Der Grund steht schon oben; hier geht es um die
-                      Frage „woran hat der Computer das festgemacht", und die stellt sich nur, wenn
-                      man zweifelt. */}
-                  {kandidat?.rubric.proposal_why && (
-                    <details className="mt-1">
-                      <summary className="cursor-pointer text-sm text-text-2 underline-offset-4 hover:text-text hover:underline">
-                        Bewertung im Einzelnen
-                      </summary>
-                      <div className="mt-2 flex flex-col gap-2 rounded-inner border border-line p-3">
-                        {/* Zur Note das Zitat, an dem sie hängt. „Aussage 7 von 10" ist für sich
-                            keine Begründung, sondern eine Zahl; wer zweifelt, will die Stelle
-                            lesen. Die Zitate stehen seit Phase 2 in der Rubrik und wurden
-                            nirgends angezeigt. */}
-                        <ul className="flex flex-col gap-1.5">
-                          {RUBRIC_ORDER.filter((k) => kandidat.rubric.scores[k]).map((k) => (
-                            <li key={k} className="text-xs text-text-2">
-                              <span>{RUBRIC_LABELS[k]}</span>{" "}
-                              <span className="tabular-nums text-text">{kandidat.rubric.scores[k].value.toFixed(0)}</span>
-                              <span className="text-text-3"> von 10</span>
-                              {kandidat.rubric.scores[k].evidence && (
-                                <span className="block text-text-3">{`„${kandidat.rubric.scores[k].evidence}“`}</span>
-                              )}
-                            </li>
-                          ))}
-                        </ul>
-                        {kandidat.rubric.scores_stale && (
-                          <p className="text-xs text-text-3">
-                            Die Bewertung stammt vom ursprünglichen Ausschnitt, der Clip wurde seitdem geändert.
-                          </p>
-                        )}
-                      </div>
-                    </details>
-                  )}
 
                   {/* Gastfreigabe und Serie stehen unter dem Clip und nicht in einer eigenen
                       Spalte: als Spalte waren sie genauso hoch wie die Karte und machten aus
@@ -1384,6 +1376,7 @@ function Weitere({
   onReview,
   onLoeschen,
   onFassung,
+  onOffen,
 }: {
   clip: Clip;
   stand: Pruefstand;
@@ -1396,17 +1389,35 @@ function Weitere({
   onReview: (r: Clip["review"]) => void;
   onLoeschen: () => void;
   onFassung: () => void;
+  onOffen: (offen: boolean) => void;
 }) {
   const [offen, setOffen] = useState(false);
+  const umschalten = (o: boolean) => {
+    setOffen(o);
+    onOffen(o);
+  };
   return (
     <div className="relative">
+      {/* Ein Stift statt des Wortes „Mehr": die Karte hat schon einen Knopf mit Text daneben, und
+          zwei gleich aussehende Knoepfe nebeneinander sind eine Auswahlaufgabe. Der Name bleibt
+          fuer Vorleseprogramme erhalten. */}
       <button
         type="button"
-        onClick={() => setOffen((o) => !o)}
+        onClick={() => umschalten(!offen)}
         aria-expanded={offen}
-        className="transition-soft inline-flex h-9 items-center rounded-pill border border-line px-3.5 text-sm text-text-2 hover:border-line-strong hover:text-text"
+        aria-label="Mehr zu diesem Clip"
+        title="Mehr"
+        className="transition-soft inline-flex h-9 w-9 items-center justify-center rounded-pill border border-line text-text-2 hover:border-line-strong hover:text-text"
       >
-        Mehr
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path
+            d="M11.2 1.9a1.6 1.6 0 0 1 2.3 2.3l-7.4 7.4-3 .7.7-3 7.4-7.4Z"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinejoin="round"
+          />
+          <path d="M10 3.1 12.3 5.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
       </button>
       {offen && (
         <>
@@ -1415,40 +1426,40 @@ function Weitere({
             type="button"
             aria-hidden="true"
             tabIndex={-1}
-            onClick={() => setOffen(false)}
+            onClick={() => umschalten(false)}
             className="fixed inset-0 z-30 cursor-default"
           />
           <div className="absolute right-0 z-40 mt-1 flex w-[260px] flex-col gap-1 rounded-inner border border-line-strong bg-[#0b0b14] p-1.5 shadow-xl">
-            <MenuKnopf onClick={() => { setOffen(false); onAnsehen(); }}>Groß ansehen</MenuKnopf>
-            <MenuLink href={bearbeiten} onClick={() => setOffen(false)}>
+            <MenuKnopf onClick={() => { umschalten(false); onAnsehen(); }}>Groß ansehen</MenuKnopf>
+            <MenuLink href={bearbeiten} onClick={() => umschalten(false)}>
               Bearbeiten
             </MenuLink>
             {mp4 && darfLaden.erlaubt && (
-              <MenuLink href={mp4} download onClick={() => setOffen(false)}>
+              <MenuLink href={mp4} download onClick={() => umschalten(false)}>
                 Herunterladen
               </MenuLink>
             )}
             {clip.candidate_id && (
               <MenuKnopf
-                onClick={() => { setOffen(false); onFassung(); }}
+                onClick={() => { umschalten(false); onFassung(); }}
                 hinweis="Denselben Moment in einem anderen Format, etwa quadratisch."
               >
                 Weitere Fassung anlegen
               </MenuKnopf>
             )}
             {stand.redaktion === "freigegeben" && (
-              <MenuKnopf disabled={laeuft} onClick={() => { setOffen(false); onReview("offen"); }}>
+              <MenuKnopf disabled={laeuft} onClick={() => { umschalten(false); onReview("offen"); }}>
                 Freigabe zurücknehmen
               </MenuKnopf>
             )}
             {stand.redaktion === "verworfen" ? (
-              <MenuKnopf disabled={laeuft} onClick={() => { setOffen(false); onReview("offen"); }}>
+              <MenuKnopf disabled={laeuft} onClick={() => { umschalten(false); onReview("offen"); }}>
                 Zurückholen
               </MenuKnopf>
             ) : (
               <MenuKnopf
                 disabled={laeuft}
-                onClick={() => { setOffen(false); onReview("verworfen"); }}
+                onClick={() => { umschalten(false); onReview("verworfen"); }}
                 hinweis="Der Clip bleibt erhalten und lässt sich zurückholen."
               >
                 Vorschlag verwerfen
@@ -1458,7 +1469,7 @@ function Weitere({
               <MenuKnopf
                 ton="danger"
                 disabled={clip.status === "rendering"}
-                onClick={() => { setOffen(false); onLoeschen(); }}
+                onClick={() => { umschalten(false); onLoeschen(); }}
                 hinweis="Video, Untertitel und Poster werden endgültig gelöscht."
               >
                 Datei endgültig löschen

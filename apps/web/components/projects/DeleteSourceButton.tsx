@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/Button";
 interface Props {
   sourceId: string;
   title: string;
-  size?: "sm" | "md";
   /* nach Erfolg: Umleitung zur Projektliste (Projektseite) oder nur Neuladen (Liste) */
   redirectTo?: string;
 }
@@ -25,7 +24,7 @@ interface ApiResponse {
  * Die Schnittstelle verlangt weiterhin den Titel als Bestätigung, damit ein Programm nicht aus
  * Versehen löscht. In der Oberfläche ist die Rückfrage der Dialog selbst, darum schickt der Knopf
  * den Titel direkt mit. Die öffentliche API macht es in app/api/v1/sources/[id] genauso. */
-export function DeleteSourceButton({ sourceId, title, size = "sm", redirectTo }: Props) {
+export function DeleteSourceButton({ sourceId, title, redirectTo }: Props) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,9 +56,30 @@ export function DeleteSourceButton({ sourceId, title, size = "sm", redirectTo }:
 
   return (
     <>
-      <Button variant="danger" size={size} onClick={() => setOpen(true)}>
-        Löschen
-      </Button>
+      {/* Ein Mistkübel statt des Wortes.
+        *
+        * „Löschen" stand als zweiter Knopf unter dem ersten und zog dadurch Aufmerksamkeit auf
+        * sich, die es nicht verdient: es ist die seltenste und die einzige unumkehrbare Handlung
+        * auf der Karte. Als Zeichen neben dem Hauptknopf steht es da, wo man es sucht, ohne sich
+        * vorzudrängen. Der Name bleibt für Vorleseprogramme und als Kurzhinweis erhalten. */}
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label={`„${title}“ löschen`}
+        title="Löschen"
+        className="transition-soft inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-pill border border-line text-text-3 hover:border-danger/50 hover:text-danger focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path
+            d="M2.8 4.2h10.4M6.4 4.2V2.9h3.2v1.3M4.2 4.2l.6 8.2a1 1 0 0 0 1 .9h4.4a1 1 0 0 0 1-.9l.6-8.2"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path d="M6.7 6.6v4M9.3 6.6v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        </svg>
+      </button>
       <Modal
         open={open}
         onClose={() => !busy && setOpen(false)}

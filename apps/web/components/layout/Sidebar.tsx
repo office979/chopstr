@@ -49,7 +49,7 @@ export function Sidebar({ user }: { user: NavUser | null }) {
   /* „Marken" und nicht „Aussehen": die Seite verwaltet Kundenprofile, die Adresse heisst
    * /marke, der Pfad auf den Clipseiten sagt „Marke", und drei Namen für eine Sache zwingen zum
    * Raten. */
-  if (user?.canBrand) main.push({ href: "/marke", label: "Marken", icon: <IconBrand />, match: (p) => p.startsWith("/marke") });
+  if (user?.canBrand) main.push({ href: "/marke", label: "Branding", icon: <IconBrand />, match: (p) => p.startsWith("/marke") });
 
   const publishing: NavItem[] = [];
   if (canExt(user?.role, "series.manage")) publishing.push({ href: "/serien", label: "Serien", icon: <IconStack />, match: (p) => p.startsWith("/serien") });
@@ -262,12 +262,18 @@ const IconGrid = () => (
     <rect x="14" y="14" width="7" height="7" rx="1.5" />
   </Svg>
 );
+/* Die Farbtupfer sind gefüllt und klein statt gestrichelt und gross.
+ *
+ * Vorher waren es Kreise mit Radius 1,5 bei Strichstärke 1,75: der Strich war breiter als der
+ * Radius, jeder Tupfer also ein dicker Ring von fast 5 Einheiten Durchmesser - bei vier Einheiten
+ * Abstand berührten sie sich. Das Zeichen wirkte fett und verschmiert. Gefüllte Punkte tragen
+ * dieselbe Bedeutung und lassen dem Zeichen Luft. */
 const IconBrand = () => (
   <Svg>
-    <circle cx="13.5" cy="6.5" r="1.5" />
-    <circle cx="17.5" cy="10.5" r="1.5" />
-    <circle cx="8.5" cy="7.5" r="1.5" />
-    <circle cx="6.5" cy="12.5" r="1.5" />
+    <circle cx="13.4" cy="6.6" r="1.05" fill="currentColor" stroke="none" />
+    <circle cx="17.3" cy="10.6" r="1.05" fill="currentColor" stroke="none" />
+    <circle cx="8.6" cy="7.4" r="1.05" fill="currentColor" stroke="none" />
+    <circle cx="6.7" cy="12.4" r="1.05" fill="currentColor" stroke="none" />
     <path d="M12 2a10 10 0 0 0 0 20c.9 0 1.6-.7 1.6-1.6 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.6 1.6-1.6H16a6 6 0 0 0 6-6C22 6 17.5 2 12 2Z" />
   </Svg>
 );

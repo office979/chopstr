@@ -372,3 +372,31 @@ input[type="range"].timeline::-moz-range-thumb {
     opacity: 0;
   }
 }
+
+/* Farbfelder: die eigene Umrandung statt zweier ineinander.
+ *
+ * `input[type="color"]` bringt eine eingebaute Darstellung mit: ein Feld mit eigenem Rand, darin
+ * eingerückt das Farbplättchen mit noch einem Rand. Unsere Umrandung legte sich darum, und
+ * sichtbar waren zwei Rahmen mit einem Spalt dazwischen - ein weisses Kästchen in einem runden
+ * Rahmen. Auf Safari fiel es am stärksten auf, weil WebKit am meisten einrückt.
+ *
+ * Deshalb wird die eingebaute Darstellung abgeschaltet und das Plättchen auf die volle Fläche
+ * gezogen. `border-radius: inherit` sorgt dafür, dass ein rundes Feld auch rund gefüllt wird.
+ * Die drei Schreibweisen sind nötig: WebKit hat zwei Teile, Firefox eines. */
+.farbfeld {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0;
+  overflow: hidden;
+}
+.farbfeld::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.farbfeld::-webkit-color-swatch {
+  border: none;
+  border-radius: inherit;
+}
+.farbfeld::-moz-color-swatch {
+  border: none;
+  border-radius: inherit;
+}

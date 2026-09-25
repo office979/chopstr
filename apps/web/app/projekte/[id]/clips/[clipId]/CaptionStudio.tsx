@@ -511,7 +511,7 @@ export function CaptionStudio({
                   value={s.highlight_color}
                   disabled={!canEdit}
                   onChange={(e) => setzen({ highlight_color: e.target.value })}
-                  className="h-9 w-9 cursor-pointer rounded-full border-2 border-white/20 bg-transparent disabled:cursor-not-allowed disabled:opacity-60"
+                  className="farbfeld h-9 w-9 cursor-pointer rounded-full border-2 border-white/20 disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </label>
               <HexFeld
@@ -1010,7 +1010,7 @@ function Farbwahl({
           value={wert}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
-          className="h-10 w-14 cursor-pointer rounded-inner border border-line bg-transparent disabled:cursor-not-allowed disabled:opacity-60"
+          className="farbfeld h-10 w-14 cursor-pointer rounded-inner border border-line disabled:cursor-not-allowed disabled:opacity-60"
         />
         <HexFeld wert={wert} onChange={onChange} disabled={disabled} label={`${label} als Hex-Wert`} />
       </div>

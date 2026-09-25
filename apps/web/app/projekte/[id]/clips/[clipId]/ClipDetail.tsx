@@ -23,6 +23,8 @@ import {
 } from "@/lib/clips/schnitt";
 import { pruefen } from "@/lib/clips/untertitel-pruefung";
 import { vorschauStand } from "@/lib/clips/vorschau-stand";
+import { dialogOffen, leertasteGehoertDemElement, tipptGerade } from "@/lib/tastatur";
+import { rueckwegMerken } from "@/lib/clips/rueckweg";
 import type { Befund } from "@/lib/clips/pruefstand";
 import { fassungSatz, type Fassung } from "@/lib/brand/fassung";
 import { ClipPreview } from "./ClipPreview";
@@ -170,6 +172,12 @@ export function ClipDetail({
 }: Props) {
   const router = useRouter();
   const backHref = `/projekte/${sourceId}/clips`;
+  /* Beim Zurückgehen eine Notiz hinterlassen: nur dann holt die Liste Filter und Scrollstand
+   * wieder hervor. Wer frisch auf die Liste kommt, soll bei „Alle" anfangen. */
+  const zurueckZurListe = useCallback(() => {
+    rueckwegMerken(sourceId);
+    router.push(backHref);
+  }, [router, backHref, sourceId]);
 
   const [original, setOriginal] = useState<TranscriptWord[]>(initialWords);
   const [words, setWords] = useState<TranscriptWord[]>(initialWords);
@@ -224,6 +232,28 @@ export function ClipDetail({
   );
   const [laeuft, setLaeuft] = useState(false);
   const [spielen, setSpielen] = useState(0);
+  const abspielen = useCallback(() => setSpielen((n) => n + 1), []);
+
+  /* Leertaste spielt ab und hält an - im ganzen Fenster, nicht nur auf der Timeline.
+   *
+   * Bisher lag das Kürzel am Timeline-Element: es wirkte erst, wenn man die Timeline vorher
+   * angeklickt hatte. Wer den Text prüft oder an den Untertiteln stellt, drückt die Leertaste und
+   * es passiert nichts, obwohl direkt daneben ein Video steht. Beim Transkript ist es längst so,
+   * und dort erwartet es jeder auch hier.
+   *
+   * Drei Fälle bleiben ausgenommen: ein Textfeld (dort ist die Leertaste ein Leerzeichen), ein
+   * Knopf oder Reiter unter dem Fokus (dort löst sie ihn aus) und ein offener Dialog. */
+  useEffect(() => {
+    const beiTaste = (e: KeyboardEvent) => {
+      if (e.code !== "Space" && e.key !== " ") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (tipptGerade(e.target) || leertasteGehoertDemElement(e.target) || dialogOffen()) return;
+      e.preventDefault();
+      abspielen();
+    };
+    document.addEventListener("keydown", beiTaste);
+    return () => document.removeEventListener("keydown", beiTaste);
+  }, [abspielen]);
 
   useEffect(() => {
     if (!wellenformSrc) {
@@ -648,7 +678,7 @@ export function ClipDetail({
 
   const goBack = () => {
     if (dirty || stilGeaendert || schnittGeaendert) setLeaveOpen(true);
-    else router.push(backHref);
+    else zurueckZurListe();
   };
 
   /* Wo stehe ich in diesem Video, und wo geht es weiter? */
@@ -906,7 +936,7 @@ export function ClipDetail({
             zeit={currentTime}
             onSeek={seek}
             laeuft={laeuft}
-            onPlayPause={() => setSpielen((n) => n + 1)}
+            onPlayPause={abspielen}
             wellenform={wellenform}
             wellenformStand={wellenformStand}
             filmstreifen={streifenBilder}
@@ -1135,7 +1165,7 @@ export function ClipDetail({
           <Button variant="ghost" onClick={() => setLeaveOpen(false)}>
             Hier bleiben
           </Button>
-          <Button variant="danger" onClick={() => router.push(backHref)}>
+          <Button variant="danger" onClick={zurueckZurListe}>
             Ohne Speichern gehen
           </Button>
           <Button
@@ -1144,7 +1174,7 @@ export function ClipDetail({
               if (schnittGeaendert) await schnittSichern();
               if (stilGeaendert) await stilSpeichern();
               if (dirty) await save();
-              router.push(backHref);
+              zurueckZurListe();
             }}
           >
             Speichern und gehen

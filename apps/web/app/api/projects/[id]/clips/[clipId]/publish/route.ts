@@ -7,6 +7,7 @@ import { clipFeatures, recordDecision } from "@/lib/decision-log";
 import { startPublishWorkflow } from "@/lib/temporal";
 import type { PublicationInput } from "@/lib/repo/types-publishing";
 import { connectionPlatformFor } from "@/lib/publishing/platforms";
+import { gateReasons } from "@/lib/publishing/gates";
 
 export const dynamic = "force-dynamic";
 
@@ -48,12 +49,23 @@ export async function POST(request: NextRequest, { params }: Params) {
     return Response.json({ error: "Ungültiger JSON-Body" }, { status: 400 });
   }
   if (body.confirm !== true) return Response.json({ error: "Bitte die Veröffentlichung bestätigen." }, { status: 400 });
-  if (ctx.gates.length) return Response.json({ error: ctx.gates[0].message, gates: ctx.gates }, { status: 409 });
 
   const pub = getPublishingRepo();
   const connectionId = typeof body.connection_id === "string" ? body.connection_id : "";
   const connection = connectionId ? await pub.getConnection(connectionId) : null;
   if (!connection || connection.status !== "connected") return Response.json({ error: "Bitte eine aktive Verbindung wählen." }, { status: 400 });
+
+  /* Erst die Verbindung, dann die Sperre: davon hängt ab, WELCHE Sperre gilt.
+   *
+   * Eine Verbindung „manual" heisst nicht „chopstr postet", sondern „ich habe selbst gepostet und
+   * trage das nach". Das ist Buchhaltung. Die Datei hat chopstr als Download verlassen, und dort
+   * galten die Regeln; hier noch einmal Freigabe, Vertrag und Tarif zu verlangen, würde eine
+   * Tatsache verbieten, die schon eingetreten ist. Vorher wurde genau das getan, und zwar mit
+   * einer messbaren Folge: wer einen Tarif ohne direktes Posten hat, konnte nie eintragen, dass er
+   * gepostet hat - und die Seiten „Tests" und „Berichte", die von diesen Eintragungen leben,
+   * blieben für ihn dauerhaft leer. */
+  const sperre = connection.platform === "manual" ? gateReasons(ctx.eintragen) : ctx.gates;
+  if (sperre.length) return Response.json({ error: sperre[0].message, gates: sperre }, { status: 409 });
   if (connection.platform !== "manual" && connection.platform !== connectionPlatformFor(ctx.clip.platform)) {
     return Response.json({ error: `Die Verbindung ist für ${connection.platform}, der Clip für ${ctx.clip.platform}.` }, { status: 400 });
   }

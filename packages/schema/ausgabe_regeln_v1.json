@@ -25,7 +25,8 @@
       "code": "clippen_gescheitert",
       "sperrt": [
         "herunterladen",
-        "veroeffentlichen"
+        "veroeffentlichen",
+        "eintragen"
       ],
       "text": "Das Clippen hat nicht geklappt.",
       "hilfe": "Nochmal versuchen."
@@ -34,7 +35,8 @@
       "code": "datei_fehlt",
       "sperrt": [
         "herunterladen",
-        "veroeffentlichen"
+        "veroeffentlichen",
+        "eintragen"
       ],
       "text": "Für diesen Clip gibt es noch keine Videodatei.",
       "hilfe": "Einmal Video clippen."
@@ -172,5 +174,10 @@
         "fehler_wenn": "Es gibt gesprochene Wörter, aber keine eingebrannten Untertitelkarten."
       }
     ]
+  },
+  "zwecke": {
+    "herunterladen": "Jemand lädt die Datei herunter und macht damit, was er will.",
+    "veroeffentlichen": "chopstr postet die Datei auf einer Plattform.",
+    "eintragen": "Jemand trägt nach, dass er den Clip selbst gepostet hat. Das ist Buchhaltung und kein Weg nach draussen: die Datei hat chopstr längst als Download verlassen, und dort galten die Regeln. Hier zu sperren hiesse, eine Tatsache zu verbieten, die schon eingetreten ist - und die zwei Seiten, die auf diese Eintragungen warten (Tests und Berichte), blieben weiter leer."
   }
 }

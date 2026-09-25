@@ -29,6 +29,8 @@ export interface ClipContext {
   stand: Pruefstand;
   herunterladen: Ausgabe;
   veroeffentlichen: Ausgabe;
+  /* Nachtragen, dass jemand selbst gepostet hat. Siehe lib/clips/ausgabe.ts, Zweck „eintragen". */
+  eintragen: Ausgabe;
   /* Dieselbe Antwort in der Form, die die Schnittstelle seit Phase 5 liefert. */
   gates: GateReason[];
 }
@@ -88,6 +90,7 @@ export async function loadClipContext(sourceId: string, clipId: string): Promise
     gastVeraltet: freigabeVeraltet(approval ?? undefined, clip.updated_at),
   };
   const herunterladen = ausgabe("herunterladen", eingabe);
+  const eintragen = ausgabe("eintragen", eingabe);
   const veroeffentlichen = ausgabe("veroeffentlichen", {
     ...eingabe,
     vertragUnterschrieben: Boolean(workspace.dpa_signed_at),
@@ -106,6 +109,7 @@ export async function loadClipContext(sourceId: string, clipId: string): Promise
     stand,
     herunterladen,
     veroeffentlichen,
+    eintragen,
     gates: gateReasons(veroeffentlichen),
   };
 }

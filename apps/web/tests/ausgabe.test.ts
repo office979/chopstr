@@ -200,3 +200,32 @@ describe("der Regelkatalog", () => {
     expect(regelGiltFuer("datei_veraltet", "veroeffentlichen")).toBe(true);
   });
 });
+
+describe("nachtragen, dass jemand selbst gepostet hat", () => {
+  /* Das ist Buchhaltung und kein Weg nach draussen: die Datei hat chopstr als Download verlassen,
+   * und dort galten die Regeln. Hier zu sperren hiesse, eine Tatsache zu verbieten, die schon
+   * eingetreten ist - und zwei Seiten, die von diesen Eintragungen leben, blieben leer. */
+  it("geht auch ohne Freigabe, ohne Vertrag und ohne passenden Tarif", () => {
+    const e = eingabe({
+      stand: stand({ review: "offen" }),
+      vertragUnterschrieben: false,
+      tarifDarfPosten: false,
+    });
+    expect(ausgabe("veroeffentlichen", e).erlaubt).toBe(false);
+    expect(ausgabe("eintragen", e).erlaubt).toBe(true);
+  });
+
+  it("geht auch bei veralteter Datei: gepostet wurde, was damals heruntergeladen wurde", () => {
+    const e = eingabe({ gastOffen: true });
+    expect(ausgabe("eintragen", e).erlaubt).toBe(true);
+  });
+
+  it("geht nicht, wenn es gar kein Video gibt", () => {
+    const e = eingabe({ stand: stand({ file_key: null, status: "draft" } as never) });
+    expect(codes("eintragen", e)).toContain("datei_fehlt");
+  });
+
+  it("geht nicht nach einem fehlgeschlagenen Lauf", () => {
+    expect(codes("eintragen", eingabe({ stand: stand({ status: "failed" }) }))).toContain("clippen_gescheitert");
+  });
+});

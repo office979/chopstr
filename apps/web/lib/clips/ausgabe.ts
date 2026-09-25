@@ -22,7 +22,14 @@ import regelnJson from "../../../../packages/schema/ausgabe_regeln_v1.json";
 import type { Pruefstand } from "@/lib/clips/pruefstand";
 import type { TechnikBefund } from "@/lib/repo/types";
 
-export type Zweck = "herunterladen" | "veroeffentlichen";
+/* Drei Anlässe, dieselbe Rechnung.
+ *
+ * „eintragen" ist der wichtige Sonderfall: jemand hat den Clip selbst gepostet und trägt das nach.
+ * Das ist Buchhaltung und kein Weg nach draussen - die Datei hat chopstr längst als Download
+ * verlassen, und dort galten die Regeln. Hier zu sperren hiesse, eine Tatsache zu verbieten, die
+ * schon eingetreten ist. Und es hätte eine bekannte Folge: die Seiten „Tests" und „Berichte"
+ * leben von diesen Eintragungen und blieben leer. */
+export type Zweck = "herunterladen" | "veroeffentlichen" | "eintragen";
 
 export type AusgabeCode =
   | "verworfen"

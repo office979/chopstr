@@ -1,0 +1,148 @@
+{
+  "version": "referenzsatz_v1",
+  "erfasst_am": "2026-09-25",
+  "anzahl": {
+    "positiv": 4,
+    "negativ": 12
+  },
+  "belastbar": false,
+  "mindestgroesse_je_gruppe": 20,
+  "dateien": [
+    {
+      "datei": "Download (2) Kopie.mp4",
+      "label": "positiv",
+      "bytes": 3176727,
+      "sha256": "afa977b875312454b5ed7fd9f2027e1738f4e48bcad4d6b18a2ff4cb7c67a6b1"
+    },
+    {
+      "datei": "Download (2).mp4",
+      "label": "positiv",
+      "bytes": 2470075,
+      "sha256": "a645aec5aeec0fe60ea4d5f5e83927b91cdd40a81a9761c63cece56f7c56df14"
+    },
+    {
+      "datei": "Download (3).mp4",
+      "label": "positiv",
+      "bytes": 3326156,
+      "sha256": "17cbd2a9c78b683d54b4b0f003a49079109b71f7ee4293f03543389439b3fc65"
+    },
+    {
+      "datei": "Download.mp4",
+      "label": "positiv",
+      "bytes": 3731076,
+      "sha256": "2497bbc9e7024e3bf18ddcb1a24c1487fb9f80b7b2e06bd6ef4f37cd55389263"
+    },
+    {
+      "datei": "Download (1) Kopie 2.mp4",
+      "label": "negativ",
+      "bytes": 4349968,
+      "sha256": "4ce904d9f63c2a3e1c5ff3b6ee36266603081902f26a4e201070e5428de91b7b"
+    },
+    {
+      "datei": "Download (1) Kopie 3.mp4",
+      "label": "negativ",
+      "bytes": 4245462,
+      "sha256": "a1320bf58e2a69e7dfb98f5bfa28756ec8c0fe4194b44dc9497d58ff6258fb2c"
+    },
+    {
+      "datei": "Download (1) Kopie.mp4",
+      "label": "negativ",
+      "bytes": 4823931,
+      "sha256": "340c0d87f5f62465efedbb50e0c29b0eec6cc8db66606ba909a73b05ffffa6d4"
+    },
+    {
+      "datei": "Download (1).mp4",
+      "label": "negativ",
+      "bytes": 16058945,
+      "sha256": "e35c097f65aa1ad753d224f3d7e40b93767574aa9f2f3fbdc04897125a7a285f"
+    },
+    {
+      "datei": "Download (2) Kopie.mp4",
+      "label": "negativ",
+      "bytes": 3986460,
+      "sha256": "22836e2aaddab8eb0bc569ba2cdb0cca816ab7cedeec9c6f425d935213965d4f"
+    },
+    {
+      "datei": "Download (2).mp4",
+      "label": "negativ",
+      "bytes": 3873194,
+      "sha256": "2796c24ef553a772a3f31d2362cfd5cdcc066e37bd055389df1fa62b32c01d8d"
+    },
+    {
+      "datei": "Download (3).mp4",
+      "label": "negativ",
+      "bytes": 2450295,
+      "sha256": "b9d18e30e2dcfb36d0f5a37e50cb2398a7c9b788077a79d0b4ae5b2cb4353cbc"
+    },
+    {
+      "datei": "Download (4).mp4",
+      "label": "negativ",
+      "bytes": 3062618,
+      "sha256": "2803fc715184df7babab5fbd783e1a98eb85d79fd59245c48cbafb45337dfe1d"
+    },
+    {
+      "datei": "Download (5).mp4",
+      "label": "negativ",
+      "bytes": 3085843,
+      "sha256": "56573d174f70c12a903a92f084779223b308efef86c9d2d709072e3bd28c4bcc"
+    },
+    {
+      "datei": "Download Kopie 2.mp4",
+      "label": "negativ",
+      "bytes": 5312615,
+      "sha256": "451285c9b090eb88494333115ff13ecf0cfbd514a9cf1920079f0b48649ed72a"
+    },
+    {
+      "datei": "Download Kopie.mp4",
+      "label": "negativ",
+      "bytes": 3003081,
+      "sha256": "c08fd68d94d1e2dd1d2abc99fa9b339c4ec5dbd745cf81d1a4b2efbde1654ac1"
+    },
+    {
+      "datei": "Download.mp4",
+      "label": "negativ",
+      "bytes": 2486379,
+      "sha256": "c8e0fb26aa9bc7abf786d21e4098e301f8d6147a24b5f83b37dff2e276320603"
+    }
+  ],
+  "kennzahlen": {
+    "positiv": {
+      "clips": 4,
+      "auswertbar": 4,
+      "dauer_median_s": 43.5,
+      "dauer_min_s": 36.5,
+      "dauer_max_s": 69.6,
+      "saetze_median": 8.5,
+      "woerter_pro_minute_median": 178.9,
+      "weichmacher_je_100w_median": 2.5,
+      "fragen_median": 0.5,
+      "beginnt_mit_frage_anteil": 0.25,
+      "endet_offen_anteil": 0.0,
+      "vorlauf_median_s": 0.0,
+      "nachlauf_median_s": 0.63,
+      "satzanfang_anteil": 1.0,
+      "satzende_anteil": 1.0,
+      "rueckverweis_anteil": 0.25,
+      "verneinung_am_rand_anteil": 0.0
+    },
+    "negativ": {
+      "clips": 12,
+      "auswertbar": 12,
+      "dauer_median_s": 57.45,
+      "dauer_min_s": 40.1,
+      "dauer_max_s": 277.3,
+      "saetze_median": 9.5,
+      "woerter_pro_minute_median": 183.7,
+      "weichmacher_je_100w_median": 2.2,
+      "fragen_median": 1.0,
+      "beginnt_mit_frage_anteil": 0.167,
+      "endet_offen_anteil": 0.0,
+      "vorlauf_median_s": 0.0,
+      "nachlauf_median_s": 0.19,
+      "satzanfang_anteil": 0.917,
+      "satzende_anteil": 1.0,
+      "rueckverweis_anteil": 0.333,
+      "verneinung_am_rand_anteil": 0.083
+    }
+  }
+}

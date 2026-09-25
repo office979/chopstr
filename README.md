@@ -143,6 +143,32 @@ Alle Variablen mit Erklärung stehen in [`.env.example`](.env.example). Die wich
 | `LLM_PROVIDER`, `BEDROCK_MODEL_ID`, `MISTRAL_*` | LLM-Provider hinter dem Residency-Guard. Keine Modell-IDs im Code. |
 | `ASR_MODEL_DE`, `ASR_MODEL_CH`, `HF_TOKEN` | ASR-Modelle (faster-whisper) und pyannote-Zugang. |
 | `EGRESS_ALLOWLIST` | zusätzliche erlaubte Hosts für ausgehende Worker-Aufrufe. |
+| `CHOPSTR_AUSGABE_REGELN` | Pfad zum Regelkatalog `packages/schema/ausgabe_regeln_v1.json`, falls ein Image ihn woanders ablegt. Web-App und Worker lesen dieselbe Datei. |
+
+## Wann eine Clipfassung hinausgehen darf
+
+Ein Clip verlässt chopstr auf zwei Wegen: als Download oder als Veröffentlichung. Über beide
+entscheidet **eine** Stelle auf dem Server, `apps/web/lib/clips/ausgabe.ts`, nach den Regeln in
+[`packages/schema/ausgabe_regeln_v1.json`](packages/schema/ausgabe_regeln_v1.json). Die Oberfläche
+zeigt diese Antwort an; sie entscheidet nicht. Ein gesperrter Knopf ist keine Sperre, sondern eine
+Bitte, und wer die Adresse kennt, kommt daran vorbei.
+
+Gesperrt wird unter anderem: verworfene Vorschläge, ein laufendes oder fehlgeschlagenes Clippen,
+ein Schnitt, der eine Verneinung wegschneidet, ein Video, das nicht mehr zeigt, was eingestellt
+ist, eine ausstehende oder veraltete Gastfreigabe, und eine Datei, die die technische Prüfung
+nicht bestanden hat. Das Veröffentlichen verlangt zusätzlich die Freigabe durch einen Menschen,
+den Auftragsverarbeitungsvertrag und einen Tarif, der das direkte Posten enthält.
+
+**Die technische Prüfung** (Migration 0014) läuft im Worker nach dem Clippen und misst die fertige
+Datei: Ton- und Bildspur vorhanden, Länge gegen den Schnitt, Bildgrösse gegen den Plan,
+Schwarzbilder, Lautstärke gegen das Audio-Preset, Spitzenpegel, und ob die Untertitel im Bild
+gelandet sind. Ein Fehler verhindert `status = "rendered"`; die Befunde stehen in
+`clips.export_checks`. `NULL` heisst „nicht geprüft" und sperrt nichts - Videos von vor dieser
+Prüfung nachträglich zu sperren wäre eine Behauptung über etwas, das niemand gemessen hat.
+
+Wer ein Worker-Image baut: **ffmpeg braucht libass.** Ohne den `subtitles`-Filter kann der Renderer
+keine Untertitel einbrennen. Er merkt das und lässt sie weg; seit der technischen Prüfung schlägt
+der Lauf fehl, statt still ein Video ohne Untertitel auszuliefern.
 
 ## Definition of Done (Phase 0 + 1) und Status
 
@@ -151,6 +177,7 @@ Alle Variablen mit Erklärung stehen in [`.env.example`](.env.example). Die wich
 | `docker compose up` startet alles; Upload erscheint als Workflow in der Temporal-UI | Compose-Datei vorhanden. Auf dieser Entwicklungsmaschine ist kein Docker installiert, deshalb noch nicht als Ganzes gestartet. |
 | 60-Min-Podcast wird transkribiert und diarisiert, Ergebnis im Editor korrigierbar | Pipeline und Editor gebaut. Echtlauf braucht GPU-Worker und Modelle (siehe `workers/README.md`). |
 | WER auf Referenz-Set (Ziel Studio-Audio < 5 %) | `workers/eval/wer_eval.py` vorhanden; Referenzdaten fehlen noch. |
+| Messbarer Referenzsatz für die Clip-Qualität | `workers/eval/referenzsatz.py` pinnt den Satz per SHA-256, `eval/clips/referenzsatz_v1.json` hält die Zahlen fest. Stand 25.09.2026: 4 gute und 12 schlechte Beispielclips, `"belastbar": false`. Für eine Aussage fehlen mehr Beispiele und lange Quellvideos mit markierten Stellen (siehe `workers/eval/README.md`). |
 | Unit-Tests für Phase-0/1-Module grün | 264 Worker-Tests grün (Phase 0 bis 5, Medien-Regression mit ffmpeg), 53 MCP-Tests grün, `ruff` sauber (22.09.2026). |
 | Kein Aufruf außerhalb der EU (Test grün) | `workers/tests/test_residency.py` grün: Sovereign blockt Bedrock, Nicht-EU-Hosts werden vor dem Verbindungsaufbau abgewiesen. |
 | UI erfüllt WCAG AA, Fallback ohne `backdrop-filter` | Umgesetzt in `apps/web/app/globals.css` und Komponenten. |

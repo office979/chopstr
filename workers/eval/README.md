@@ -6,6 +6,7 @@ Zwei Werkzeuge, beide ohne GPU lauffähig:
 |---|---|---|
 | `wer_eval.py` | Wie gut hört der Worker Deutsch (DE/AT/CH)? | `python -m eval.wer_eval gold/ hyp/ --lexicon names.txt --json wer.json` |
 | `eval_harness.py` | Wie nah kommen die Kandidaten an die Redaktion? | `python -m eval.eval_harness gold_clips/ preds/ --k 10 --json clips.json` |
+| `referenzsatz.py` | Mit welchen Dateien wurde gemessen, und sind es noch dieselben? | `python -m eval.referenzsatz pruefen --positiv "…" --negativ "…"` |
 
 Beide laufen aus `workers/` mit aktivierter venv (`.venv/bin/python -m eval.wer_eval ...`).
 
@@ -67,3 +68,45 @@ als Rauchtest; belastbare Werte brauchen einen echten Provider.
 
 Jede Prompt- oder Modelländerung läuft gegen denselben Testdatensatz, getrennt nach Dialekt.
 Testdaten liegen nicht im Repo (Persönlichkeitsrechte, Rechte am Material).
+
+## Der Referenzsatz (`referenzsatz.py`)
+
+Zwei Läufe gegeneinander zu halten geht nur, wenn dieselben Dateien drin waren. Sonst kann eine
+geänderte Zahl alles heissen: die Pipeline ist besser geworden, oder es lagen drei Dateien mehr im
+Ordner.
+
+`eval/clips/referenzsatz_v1.json` hält deshalb je Beispieldatei ihren SHA-256 und ihre Grösse fest,
+dazu die zusammengefassten Zahlen des Laufs. Die Videos selbst und ihr Text bleiben draussen: es
+sind Aufnahmen von Kunden, sie gehören nicht in ein Repository. Wer die Messung nachvollziehen
+will, braucht die Dateien und bekommt sie von dem, dem sie gehören.
+
+Erfassen (nach einem Lauf von `learn_from_examples`):
+
+```
+.venv/bin/python -m eval.referenzsatz erfassen \
+    --positiv "/pfad/Positive Beispiele" --negativ "/pfad/Negative Beispiele" \
+    --messung messung.json --out eval/clips/referenzsatz_v1.json
+```
+
+Prüfen, bevor man Zahlen vergleicht:
+
+```
+.venv/bin/python -m eval.referenzsatz pruefen \
+    --positiv "/pfad/Positive Beispiele" --negativ "/pfad/Negative Beispiele"
+```
+
+### Was der heutige Satz trägt, und was nicht
+
+Der erfasste Satz hat vier gute und zwölf schlechte Beispiele. Das Manifest schreibt
+`"belastbar": false`, und das ist keine Formalie: bei dieser Grösse liegen die gemessenen
+Merkmale bis auf die Länge (Median 43,5 s gegen 57,5 s) ineinander. Wer daraus eine Regel für die
+Clip-Auswahl ableitet, leitet sie aus Rauschen ab.
+
+Für eine belastbare Aussage fehlen zwei Dinge, und beide kann nur die Redaktion liefern:
+
+1. **Mehr Beispiele.** Zwanzig je Gruppe ist die Untergrenze, ab der ein Unterschied im Median
+   überhaupt etwas heissen kann (`MINDESTGROESSE_JE_GRUPPE`).
+2. **Lange Quellvideos mit markierten Stellen.** Die vorliegenden Beispiele sind fertige Clips.
+   Damit lässt sich messen, wie ein guter Clip aussieht, aber nicht, ob die Pipeline die richtige
+   Stelle in einem einstündigen Video findet. Dafür braucht es Dateien im Format von
+   `eval/clips/*.json`: ein langes Video und die Zeitmarken, die ein Mensch genommen hätte.

@@ -551,14 +551,18 @@ export const FREIGABE_KURZ: Record<FreigabeStand, string> = {
   freigegeben: "freigegeben",
 };
 
-/* Ein kurzer Satz unter der Zahl auf der Startseite. Er sagt, was zu tun ist - nicht, was der
- * Zustand nochmal bedeutet; das steht schon als Überschrift daneben. */
+/* Die Zeile unter der Zahl auf der Startseite, in den Worten der Freigabe.
+ *
+ * Hier standen einmal Umschreibungen („noch niemandem geschickt", „da stimmt etwas nicht", „so
+ * nicht gewollt"). Sie klangen nach Alltag und waren gerade deshalb ungenau: „da stimmt etwas
+ * nicht" kann alles heissen, von einem kaputten Ton bis zu einem falschen Satz. Gemeint ist immer
+ * dasselbe - was die gefragte Person geantwortet hat. Also steht das jetzt auch da. */
 export const FREIGABE_HINWEIS: Record<FreigabeStand, string> = {
-  nicht_gesendet: "noch niemandem geschickt",
-  ausstehend: "warten auf Antwort",
-  abgelehnt: "so nicht gewollt",
-  fehlerhaft: "da stimmt etwas nicht",
-  freigegeben: "dürfen gepostet werden",
+  nicht_gesendet: "Keine Freigabe erstellt",
+  ausstehend: "Warten auf Antwort",
+  abgelehnt: "Freigabe abgelehnt",
+  fehlerhaft: "Änderungen erforderlich",
+  freigegeben: "Freigabe erteilt",
 };
 
 /* Die Zustände eines Videos in der Reihenfolge, in der sie an der Karte stehen sollen: was Arbeit

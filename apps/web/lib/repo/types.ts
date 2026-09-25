@@ -690,6 +690,15 @@ export interface Repo extends AuthRepo, WorkspaceAdminRepo, BlockBRepo {
   /* Clips (Phase 3): eine Zeile je Zielplattform; bestehende Zeilen (candidate_id, platform) werden wiederverwendet.
    * opts.keepSourceAspect: Hochformat-Schalter aus, der Clip behält das Format der Quelle. */
   createClips(candidateId: string, platforms: Platform[], opts?: { keepSourceAspect?: boolean }): Promise<Clip[]>;
+  /* Eine weitere Fassung desselben Moments in einem anderen Zielformat.
+   *
+   * Nicht dasselbe wie ``createClips``: das legt je PLATTFORM eine Zeile an und liefert die
+   * vorhandene zurück, wenn es sie schon gibt. Hier geht es um das FORMAT, denn das Format ist
+   * das, was die Datei verändert. TikTok, Reels und Shorts sind bei chopstr alle hochkant; eine
+   * zweite Datei dafür wäre dieselbe Datei mit einem anderen Namen im Feld daneben.
+   *
+   * Gibt null zurück, wenn es für diesen Moment schon eine Fassung in diesem Format gibt. */
+  createClipFassung(clipId: string, aspect: Aspect, destination: Platform): Promise<Clip | null>;
   listClips(sourceId: string): Promise<Clip[]>;
   getClip(id: string): Promise<Clip | null>;
   updateClip(id: string, patch: Partial<Clip>): Promise<Clip | null>;

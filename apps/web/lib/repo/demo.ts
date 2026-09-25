@@ -674,6 +674,49 @@ export const demoRepo: Repo = {
   },
 
 
+  async createClipFassung(clipId, aspect, destination) {
+    const s = state();
+    const vorlage = s.clips.find((c) => c.id === clipId && c.status !== "deleted");
+    if (!vorlage?.candidate_id) return null;
+    if (s.clips.some((c) => c.candidate_id === vorlage.candidate_id && c.aspect === aspect && c.status !== "deleted")) {
+      return null;
+    }
+    const now = nowIso();
+    const clip: Clip = {
+      ...vorlage,
+      id: uuid(),
+      platform: destination,
+      destination,
+      aspect,
+      composition: vorlage.composition.map((seg) => ({ ...seg })),
+      render_plan: null,
+      status: "draft",
+      review: "offen",
+      file_key: null,
+      srt_key: null,
+      vtt_key: null,
+      poster_key: null,
+      filmstrip_key: null,
+      filmstrip_meta: null,
+      zeitmarken: [],
+      cps_warnings: [],
+      fidelity_warnings: [],
+      export_checks: null,
+      duration_s: null,
+      width: null,
+      height: null,
+      fps: null,
+      loudness: null,
+      render_error: null,
+      rendered_at: null,
+      created_at: now,
+      updated_at: now,
+    };
+    s.clips.push(clip);
+    startRenderSimulation(clip, 900);
+    return { ...clip };
+  },
+
   async createClips(candidateId, platforms, opts) {
     const s = state();
     const candidate = s.candidates.find((c) => c.id === candidateId);

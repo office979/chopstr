@@ -44,7 +44,8 @@ import {
 } from "@/lib/clips/labels";
 import { RENDER_STEP } from "@/lib/pipeline";
 import { compositionDuration } from "@/lib/clips/render-demo";
-import { PLATFORM_DEFAULT_PRESET } from "@/lib/clips/presets";
+import { ASPECT_SIZE, PLATFORM_DEFAULT_PRESET } from "@/lib/clips/presets";
+import { FASSUNG_FORMATE, FORMAT_HILFT_BEI, fassungMoeglich } from "@/lib/clips/fassungen";
 import type { ClipExtras, Series } from "@/lib/repo/types-publishing";
 import { ClipSeries } from "./ClipSeries";
 import { Gepostet } from "./Gepostet";
@@ -163,6 +164,8 @@ export function ClipBoard({
   /* Clip, der gerade groß in einem Fenster läuft. Nicht Vollbild: das Fenster bleibt Teil der Seite. */
   const [zoomClip, setZoomClip] = useState<Clip | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [fassungFuer, setFassungFuer] = useState<Clip | null>(null);
+  const [fassungLaeuft, setFassungLaeuft] = useState(false);
   const [events, setEvents] = useState<PipelineEvent[]>(initialEvents);
   const [connection, setConnection] = useState<"idle" | "live" | "closed" | "error">("idle");
   const [glitchGroups, setGlitchGroups] = useState<Set<string>>(new Set());
@@ -548,6 +551,37 @@ export function ClipBoard({
     [sourceId],
   );
 
+  /* Eine weitere Fassung desselben Moments in einem anderen Format.
+   *
+   * Gewählt wird das FORMAT und nicht die Plattform. TikTok, Reels und Shorts sind bei chopstr
+   * alle hochkant: eine zweite Datei dafür wäre Bild für Bild dieselbe Datei mit einem anderen
+   * Wort daneben. Was das Video wirklich verändert, ist das Format - anderer Bildausschnitt,
+   * anderer sicherer Bereich für die Untertitel, andere Schriftgrösse. */
+  const fassungAnlegen = useCallback(
+    async (aspect: Aspect) => {
+      if (!fassungFuer) return;
+      setFassungLaeuft(true);
+      setMessage(null);
+      try {
+        const res = await fetch(`/api/projects/${sourceId}/clips/${fassungFuer.id}/fassungen`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ aspect }),
+        });
+        const data = (await res.json()) as ApiError & { message?: string; clip?: Clip };
+        if (!res.ok || !data.clip) throw new Error(data.error ?? "Die Fassung konnte nicht angelegt werden");
+        applyClips([...clips, data.clip]);
+        setMessage({ tone: "ok", text: data.message ?? "Die Fassung wird geclippt." });
+        setFassungFuer(null);
+      } catch (err) {
+        setMessage({ tone: "error", text: err instanceof Error ? err.message : "Die Fassung konnte nicht angelegt werden" });
+      } finally {
+        setFassungLaeuft(false);
+      }
+    },
+    [fassungFuer, sourceId, applyClips, clips],
+  );
+
   const deleteClip = useCallback(async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -576,6 +610,45 @@ export function ClipBoard({
           <Button variant="danger" className="border border-danger/50" onClick={() => void deleteClip()} disabled={deleting}>
             {deleting ? "Wird gelöscht" : `${deleteTarget ? PLATFORM_LABELS[deleteTarget.platform] : "Clip"} löschen`}
           </Button>
+        </div>
+      </Modal>
+
+      {/* Eine weitere Fassung desselben Moments.
+          Gewählt wird das Format, nicht die Plattform: TikTok, Reels und Shorts sind bei chopstr
+          alle hochkant, und eine zweite Datei dafür wäre dieselbe Datei. Das steht auch so da,
+          statt vier Plattformen anzubieten und drei davon dasselbe liefern zu lassen. */}
+      <Modal
+        open={fassungFuer != null}
+        onClose={() => !fassungLaeuft && setFassungFuer(null)}
+        title="Weitere Fassung anlegen"
+        description="Denselben Moment noch einmal clippen, in einem anderen Format. Bildausschnitt, Untertitelbereich und Schriftgröße passen sich an."
+      >
+        <div className="flex flex-col gap-3">
+          {fassungFuer && (
+            <FassungWahl
+              vorhanden={clips
+                .filter((c) => c.candidate_id === fassungFuer.candidate_id && c.status !== "deleted")
+                .map((c) => c.aspect)}
+              busy={fassungLaeuft}
+              onWaehlen={fassungAnlegen}
+            />
+          )}
+          <p className="text-xs text-text-3">
+            TikTok, Reels und Shorts bekommen bei dir dasselbe Hochformat. Dafür brauchst du keine
+            zweite Datei, nur einen anderen Text zum Posten.
+          </p>
+          {/* Der Untertitelstil hängt am Format, nicht am Geschmack: hochkant Wort für Wort,
+              quadratisch und quer ruhig in zwei Zeilen. Das ist so gewollt, aber wer es nicht
+              weiss, hält die zweite Fassung für falsch gebaut. */}
+          <p className="text-xs text-text-3">
+            Hochkant kommen die Untertitel Wort für Wort, quadratisch und quer ruhig in zwei Zeilen.
+            Im Clip lässt sich das danach ändern.
+          </p>
+          <div className="flex justify-end">
+            <Button variant="ghost" onClick={() => setFassungFuer(null)} disabled={fassungLaeuft}>
+              Abbrechen
+            </Button>
+          </div>
         </div>
       </Modal>
 
@@ -1087,6 +1160,7 @@ export function ClipBoard({
                     )}
 
                     <Weitere
+                      onFassung={() => setFassungFuer(clip)}
                       clip={clip}
                       stand={p}
                       bearbeiten={bearbeiten}
@@ -1302,6 +1376,7 @@ function Weitere({
   onAnsehen,
   onReview,
   onLoeschen,
+  onFassung,
 }: {
   clip: Clip;
   stand: Pruefstand;
@@ -1313,6 +1388,7 @@ function Weitere({
   onAnsehen: () => void;
   onReview: (r: Clip["review"]) => void;
   onLoeschen: () => void;
+  onFassung: () => void;
 }) {
   const [offen, setOffen] = useState(false);
   return (
@@ -1344,6 +1420,14 @@ function Weitere({
               <MenuLink href={mp4} download onClick={() => setOffen(false)}>
                 Herunterladen
               </MenuLink>
+            )}
+            {clip.candidate_id && (
+              <MenuKnopf
+                onClick={() => { setOffen(false); onFassung(); }}
+                hinweis="Denselben Moment in einem anderen Format, etwa quadratisch."
+              >
+                Weitere Fassung anlegen
+              </MenuKnopf>
             )}
             {stand.redaktion === "freigegeben" && (
               <MenuKnopf disabled={laeuft} onClick={() => { setOffen(false); onReview("offen"); }}>
@@ -1432,3 +1516,43 @@ function MenuLink({
   );
 }
 
+
+/* Die Formatauswahl für eine weitere Fassung.
+ *
+ * Eine eigene Komponente, damit die Liste nicht im Rumpf des Dialogs über die Clips läuft: die
+ * Auswahl ist eine Anzeige, das Anlegen eine Handlung, und die beiden gehören getrennt. */
+function FassungWahl({
+  vorhanden,
+  busy,
+  onWaehlen,
+}: {
+  vorhanden: Aspect[];
+  busy: boolean;
+  onWaehlen: (a: Aspect) => void;
+}) {
+  return (
+    <>
+      {FASSUNG_FORMATE.map((a) => {
+        const schon = !fassungMoeglich(vorhanden, a);
+        const groesse = ASPECT_SIZE[a];
+        return (
+          <button
+            key={a}
+            type="button"
+            disabled={schon || busy}
+            onClick={() => onWaehlen(a)}
+            className="transition-soft flex items-center justify-between gap-3 rounded-inner border border-line px-4 py-3 text-left hover:border-line-strong disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <span className="min-w-0">
+              <span className="block text-sm text-text">{ASPECT_LABELS[a]}</span>
+              <span className="block text-xs text-text-3">
+                {groesse.width} mal {groesse.height} · gut für {FORMAT_HILFT_BEI[a]}
+              </span>
+            </span>
+            <span className="shrink-0 text-xs text-text-3">{schon ? "gibt es schon" : "anlegen"}</span>
+          </button>
+        );
+      })}
+    </>
+  );
+}

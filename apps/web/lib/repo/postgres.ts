@@ -885,6 +885,29 @@ export const postgresRepo: Repo = {
     });
   },
 
+  async createClipFassung(clipId, aspect, destination) {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`select * from clips where id = ${clipId} and status <> 'deleted'`;
+      if (!rows.length) return null;
+      const vorlage = toClip(rows[0] as Row);
+      if (!vorlage.candidate_id) return null;
+      /* Schon eine Fassung in diesem Format? Dann waere die zweite Datei dieselbe Datei. */
+      const gleich = await tx`
+        select 1 from clips
+        where candidate_id = ${vorlage.candidate_id} and aspect = ${aspect} and status <> 'deleted' limit 1`;
+      if (gleich.length) return null;
+      const neu = await tx`
+        insert into clips (
+          source_id, candidate_id, platform, destination, aspect, composition, title_card, ad_label, status, created_by
+        ) values (
+          ${vorlage.source_id}, ${vorlage.candidate_id}, ${destination}, ${destination}, ${aspect},
+          ${tx.json(vorlage.composition as never)}, ${vorlage.title_card}, ${vorlage.ad_label}, 'draft', ${session.userId}
+        ) returning *`;
+      return toClip(neu[0] as Row);
+    });
+  },
+
   async listClips(sourceId) {
     return withContext(await currentSession(), async (tx) => {
       const rows = await tx`select * from clips where source_id = ${sourceId} and status <> 'deleted' order by created_at asc`;

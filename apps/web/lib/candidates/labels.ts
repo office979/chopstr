@@ -49,7 +49,7 @@ export function formatSeconds(s: number): string {
 }
 
 /* Orange Chips: alles, was ein Mensch prüfen muss */
-export function warningsOf(c: Candidate): Warning[] {
+export function warningsOf(c: Pick<Candidate, "risk_flags" | "story_graph_flags">): Warning[] {
   const out: Warning[] = [];
   c.story_graph_flags.forEach((f, i) => {
     out.push({

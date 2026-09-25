@@ -282,3 +282,62 @@ describe("Gastfreigabe", () => {
     expect(a.grund).toMatch(/alten Stand/);
   });
 });
+
+describe("die Marker aus der Analyse", () => {
+  /* Es gab eine fertige Funktion mit ausformulierten Sätzen dafür, warningsOf. Sie hatte keinen
+   * einzigen Aufrufer: „Muss als Werbung gekennzeichnet werden" stand in der Datenbank und wurde
+   * nirgends angezeigt. */
+  const kandidat = (over: Record<string, unknown> = {}) =>
+    ({ risk_flags: [], story_graph_flags: [], ...over }) as never;
+
+  it("nennt eine Stelle, die als Werbung gekennzeichnet werden muss", () => {
+    const p = pruefstand(eingabe({ kandidat: kandidat({ risk_flags: ["ad"] }) }));
+    expect(p.befunde.some((b) => b.art === "pruefen" && b.text.includes("Werbung"))).toBe(true);
+    expect(p.qualitaet).toBe("hinweis");
+  });
+
+  it("sagt, wenn eine Stelle ohne KI gefunden wurde", () => {
+    const p = pruefstand(eingabe({ kandidat: kandidat({ risk_flags: ["heuristic_only"] }) }));
+    expect(p.befunde.some((b) => b.text === "Ohne KI gefunden")).toBe(true);
+  });
+
+  it("nennt eine spätere Relativierung mit Abstand", () => {
+    const p = pruefstand(
+      eingabe({ kandidat: kandidat({ story_graph_flags: [{ seconds_after: 12, confirmed: true }] }) }),
+    );
+    expect(p.befunde.some((b) => b.text.startsWith("Relativierung"))).toBe(true);
+  });
+
+  it("sperrt nichts: ein Vorschlag ist zum Ansehen da", () => {
+    const p = pruefstand(
+      eingabe({ clip: clip({ review: "bereit" }), kandidat: kandidat({ risk_flags: ["ad", "claim"] }) }),
+    );
+    expect(p.qualitaet).toBe("hinweis");
+    expect(p.postbereit).toBe(true);
+  });
+
+  it("bleibt still, wenn nichts markiert ist", () => {
+    expect(pruefstand(eingabe({ kandidat: kandidat() })).befunde).toHaveLength(0);
+  });
+});
+
+describe("die technische Prüfung der Datei", () => {
+  const mitPruefung = (ergebnis: "ok" | "hinweis" | "fehler", text: string) =>
+    eingabe({
+      clip: clip({ export_checks: [{ pruefung: "ton", ergebnis, text, gemessen: null }] } as never),
+    });
+
+  it("zeigt einen Fehler an der Datei als Befund", () => {
+    const p = pruefstand(mitPruefung("fehler", "In der Datei ist keine Tonspur."));
+    expect(p.befunde.some((b) => b.art === "technik" && b.schwere === "fehler")).toBe(true);
+  });
+
+  it("lässt die Qualitätsachse in Ruhe: ein leiser Ton sagt nichts anderes als der Sprecher", () => {
+    const p = pruefstand(mitPruefung("fehler", "In der Datei ist keine Tonspur."));
+    expect(p.qualitaet).toBe("hinweis");
+  });
+
+  it("zeigt bestandene Prüfungen nicht an", () => {
+    expect(pruefstand(mitPruefung("ok", "Die Datei hat Ton.")).befunde).toHaveLength(0);
+  });
+});

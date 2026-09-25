@@ -236,6 +236,11 @@ export interface TranscriptWord {
 export interface TranscriptStats {
   word_count?: number;
   speakers?: number;
+  /* Hat die Sprechertrennung stattgefunden? „skipped" heisst: sie war auf diesem Server nicht
+   * eingerichtet, und ALLE Wörter hängen an einem einzigen Sprecher. Das sieht in der Oberfläche
+   * aus wie ein Gespräch mit einer Person und ist es nicht. Der Worker schreibt das Feld seit
+   * jeher (activities/nlp.py), gelesen hat es niemand. */
+  diarization?: "done" | "skipped";
   mean_prob?: number;
   low_conf_ratio?: number;
   speaker_names?: Record<string, string>;

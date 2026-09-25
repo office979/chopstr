@@ -251,6 +251,15 @@ export function TranscriptEditor({ sourceId, title, durationS, videoSrc, transcr
             />
             <Toggle checked={followPlayback} onChange={setFollowPlayback} label="Text folgt Wiedergabe" />
           </div>
+          {/* Ohne Sprechertrennung hängen alle Wörter an einer Person. In der Liste steht dann
+              genau ein Sprecher, und wer einen zweiten sucht, sucht ewig. Der Worker vermerkt das
+              seit jeher in den Kennzahlen des Transkripts; gelesen hat es bisher niemand. */}
+          {transcript.stats.diarization === "skipped" && (
+            <p className="mt-4 border-t border-line pt-4 text-xs text-text-2">
+              Die Sprechertrennung ist auf diesem Server nicht eingerichtet. Alle Wörter hängen an
+              einer Person. Wer spricht, lässt sich hier von Hand zuordnen.
+            </p>
+          )}
           {(hint || showTextMode) && (
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
               {hint && (

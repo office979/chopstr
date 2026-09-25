@@ -18,7 +18,8 @@
 
 import { vorschauStand, type StandEingabe } from "@/lib/clips/vorschau-stand";
 import type { CaptionStyle } from "@/lib/clips/caption-style";
-import type { Clip, ClipStand, GuestApproval } from "@/lib/repo/types";
+import { warningsOf } from "@/lib/candidates/labels";
+import type { Candidate, Clip, ClipStand, GuestApproval } from "@/lib/repo/types";
 
 /* 1. Redaktionell: was hat ein Mensch entschieden? */
 export type Redaktion = "vorgeschlagen" | "in_arbeit" | "freigegeben" | "verworfen";
@@ -78,7 +79,7 @@ export const DATEI_SATZ: Record<Datei, string> = {
  * Stelle, an der es am engsten ist. */
 export interface Befund {
   schwere: "hinweis" | "fehler";
-  art: "sinn" | "tempo" | "datei" | "render" | "technik";
+  art: "sinn" | "tempo" | "datei" | "render" | "technik" | "pruefen";
   /* Was los ist und was hilft, in einem Satz. */
   text: string;
   /* Der Wortlaut der schlimmsten Stelle, falls bekannt. Damit findet man sie im Clip wieder. */
@@ -105,6 +106,10 @@ export interface PruefstandEingabe {
    * gesetzte Bildausschnitte oder ein geänderter Schnitt. Hier hereingereicht, damit dieses Modul
    * eine reine Rechnung bleibt. */
   bearbeitet?: boolean;
+  /* Der Kandidat, aus dem dieser Clip entstanden ist. Er trägt die Marker aus der Analyse:
+   * Werbung, heikles Thema, eine Behauptung, eine spätere Relativierung, und ob die Stelle ohne
+   * KI gefunden wurde. Sie standen bisher nur in der Datenbank. */
+  kandidat?: Pick<Candidate, "risk_flags" | "story_graph_flags"> | null;
 }
 
 /* Die Treuewarnungen aus dem Renderlauf, in Sätze übersetzt.
@@ -145,7 +150,7 @@ function tempoStelle(warnung: string): string | null {
   return m ? m[1] : null;
 }
 
-export function pruefstand({ clip, freigabe, stand, bearbeitet = false }: PruefstandEingabe): Pruefstand {
+export function pruefstand({ clip, freigabe, stand, bearbeitet = false, kandidat = null }: PruefstandEingabe): Pruefstand {
   const redaktion: Redaktion =
     clip.review === "verworfen"
       ? "verworfen"
@@ -197,6 +202,20 @@ export function pruefstand({ clip, freigabe, stand, bearbeitet = false }: Pruefs
     });
   }
 
+  /* Die Marker aus der Analyse. Sie sagen nichts über die Technik und nichts über den Schnitt,
+   * sondern: hier muss ein Mensch hinsehen. „Muss als Werbung gekennzeichnet werden" ist eine
+   * rechtliche Pflicht, „Ohne KI gefunden" heisst, dass die Stelle nur nach Regeln gewählt wurde
+   * und schwächer sein kann als üblich.
+   *
+   * Es gab eine fertige Funktion dafür, warningsOf, mit den Sätzen schon ausformuliert. Sie hatte
+   * keinen einzigen Aufrufer: die Marker standen in der Datenbank und wurden nirgends angezeigt.
+   * Sie sperren nichts - ein Vorschlag ist zum Ansehen da, und genau darum geht es hier. */
+  if (kandidat) {
+    for (const w of warningsOf(kandidat)) {
+      befunde.push({ schwere: "hinweis", art: "pruefen", text: w.label, stelle: null });
+    }
+  }
+
   /* Was die technische Prüfung an der fertigen Datei gefunden hat (Migration 0014). Sie läuft im
    * Worker nach dem Clippen und misst Dinge, die man dem Video nicht ansieht, solange niemand
    * hinsieht: ob überhaupt Ton drauf ist, ob die Lautstärke zu den anderen Videos der Plattform
@@ -237,7 +256,7 @@ export function pruefstand({ clip, freigabe, stand, bearbeitet = false }: Pruefs
 
   const qualitaet: Qualitaet = befunde.some((b) => b.schwere === "fehler" && (b.art === "sinn" || b.art === "render"))
     ? "fehler"
-    : befunde.some((b) => b.art === "sinn" || b.art === "tempo" || b.art === "technik")
+    : befunde.some((b) => b.art === "sinn" || b.art === "tempo" || b.art === "technik" || b.art === "pruefen")
       ? "hinweis"
       : "ok";
 

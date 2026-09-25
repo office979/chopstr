@@ -9,6 +9,7 @@ import { can } from "@/lib/auth/permissions";
 import { mediaUrl } from "@/lib/clips/labels";
 import { sentencesFromWords, sentenceRange } from "@/lib/transcript/sentences";
 import { fassung } from "@/lib/brand/fassung";
+import { pruefstand } from "@/lib/clips/pruefstand";
 import { ClipDetail } from "./ClipDetail";
 
 export const dynamic = "force-dynamic";
@@ -91,6 +92,7 @@ export default async function ClipPage({ params }: Props) {
         wordFrom={wordFrom}
         wordTo={wordTo}
         speakerNames={transcript?.stats.speaker_names ?? {}}
+        sprechertrennung={transcript?.stats.diarization ?? null}
         canEdit={can(session.role, "transcript.edit")}
         clipId={clip.id}
         /* Durch dieselbe Prüfung wie an der Schnittstelle: eine alte Zeile kann Felder enthalten,
@@ -111,6 +113,29 @@ export default async function ClipPage({ params }: Props) {
         /* Der Schnitt aus dem letzten Bauen. Daran haengt der Hinweis „das Video zeigt noch den
          * alten Schnitt"; ohne Plan gibt es nichts zu vergleichen. */
         gerenderteSegmente={clip.render_plan?.segments ?? null}
+        /* Die Befunde zu diesem Clip: was der Schnitt am Sinn verändert, was die Analyse markiert
+           hat, was die technische Prüfung an der Datei gefunden hat. Sie standen bisher nur in der
+           Clip-Übersicht, nicht auf der Seite, auf der entschieden wird. Gerechnet auf dem Server,
+           weil hier alles beisammen liegt. */
+        befunde={
+          pruefstand({
+            clip,
+            freigabe: null,
+            stand: {
+              status: clip.status,
+              hatDatei: Boolean(clip.file_key),
+              plan: clip.render_plan,
+              renderFehler: clip.render_error,
+              transkriptVersion: transcript?.version ?? null,
+              stil: Object.keys(eigenerStil).length
+                ? eigenerStil
+                : stilAusPlan((clip.render_plan?.captions as unknown as Record<string, unknown>) ?? null, clip.render_plan?.output.height),
+              schnitt: clip.composition,
+              zeitmarken: extras[0]?.zeitmarken ?? clip.zeitmarken,
+            },
+            kandidat: candidate,
+          }).befunde.filter((b) => b.art === "sinn" || b.art === "pruefen" || b.art === "technik")
+        }
         renderPlan={clip.render_plan}
         clipStatus={clip.status}
         renderFehler={clip.render_error}

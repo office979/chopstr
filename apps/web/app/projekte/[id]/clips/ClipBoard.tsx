@@ -379,10 +379,19 @@ export function ClipBoard({
         Object.keys(gespeicherterStil).length > 0 ||
         (clip.zeitmarken?.length ?? 0) > 0 ||
         clip.composition.length > 1;
-      aus.set(clip.id, pruefstand({ clip, freigabe: approvals.get(clip.id) ?? null, stand, bearbeitet }));
+      aus.set(
+        clip.id,
+        pruefstand({
+          clip,
+          freigabe: approvals.get(clip.id) ?? null,
+          stand,
+          bearbeitet,
+          kandidat: candidates.find((k) => k.id === clip.candidate_id) ?? null,
+        }),
+      );
     }
     return aus;
-  }, [clips, extras, approvals, transkriptVersion]);
+  }, [clips, extras, approvals, transkriptVersion, candidates]);
 
   /* Wie viele Clips passen zu welchem Filter? Ein Clip kann in mehreren stehen: ein freigegebener
    * mit veraltetem Video ist beides. Das ist kein Fehler der Zählung, sondern der Punkt der drei

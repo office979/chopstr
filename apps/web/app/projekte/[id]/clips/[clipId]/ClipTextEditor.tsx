@@ -44,6 +44,10 @@ interface Props {
   wordTo: number;
   speakers: string[];
   speakerNames: Record<string, string>;
+  /* War die Sprechertrennung eingerichtet? Ohne sie hängen alle Wörter an einem Sprecher, und die
+   * Auswahlliste unten hat genau einen Eintrag. Das muss dabeistehen, sonst sucht jemand den
+   * zweiten Sprecher, den es hier nie geben wird. */
+  sprechertrennung?: "done" | "skipped" | null;
   /* Stelle im ganzen Video, die gerade läuft */
   currentTime: number;
   canEdit: boolean;
@@ -64,6 +68,7 @@ export function ClipTextEditor({
   wordTo,
   speakers,
   speakerNames,
+  sprechertrennung = null,
   currentTime,
   canEdit,
   onEditWord,
@@ -144,6 +149,12 @@ export function ClipTextEditor({
       {/* Zusammengeklappt nur rund drei Zeilen, die mit dem Ton mitlaufen. Der ganze Text stand
         * vorher offen da und hat die halbe Seite gefuellt, obwohl fast immer nur die Stelle
         * interessiert, die gerade laeuft. */}
+      {sprechertrennung === "skipped" && (
+        <p className="text-xs text-text-3">
+          Die Sprechertrennung ist auf diesem Server nicht eingerichtet. Alle Wörter hängen an einer
+          Person. Du kannst sie unten von Hand zuordnen.
+        </p>
+      )}
       <div
         ref={kasten}
         className={cn(

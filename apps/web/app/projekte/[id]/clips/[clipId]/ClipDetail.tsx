@@ -23,6 +23,7 @@ import {
 } from "@/lib/clips/schnitt";
 import { pruefen } from "@/lib/clips/untertitel-pruefung";
 import { vorschauStand } from "@/lib/clips/vorschau-stand";
+import type { Befund } from "@/lib/clips/pruefstand";
 import { fassungSatz, type Fassung } from "@/lib/brand/fassung";
 import { ClipPreview } from "./ClipPreview";
 import { LiveVorschau } from "./LiveVorschau";
@@ -64,6 +65,7 @@ interface Props {
   wordFrom: number | null;
   wordTo: number | null;
   speakerNames: Record<string, string>;
+  sprechertrennung: "done" | "skipped" | null;
   canEdit: boolean;
   captionStyle: CaptionStyle;
   captionPresets: GespeicherteVorlage[];
@@ -92,6 +94,10 @@ interface Props {
   /* Die Farben dieser Marke, als schnelle Wahl bei den Untertiteln. Eine Agentur soll die
    * Kundenfarbe nicht bei jedem Clip aus einem Farbrad suchen. */
   markenFarben: string[];
+  /* Was an diesem Clip auffällt: ein Schnitt, der den Sinn verändert, ein Marker aus der Analyse
+   * („muss als Werbung gekennzeichnet werden"), ein Befund der technischen Prüfung. Gerechnet auf
+   * dem Server, siehe page.tsx. */
+  befunde: Befund[];
   /* Der Plan des letzten Laufs: daran hängt, ob das gebaute Video noch aktuell ist. */
   renderPlan: RenderPlan | null;
   clipStatus: ClipStatus;
@@ -134,6 +140,7 @@ export function ClipDetail({
   wordFrom,
   wordTo,
   speakerNames,
+  sprechertrennung,
   canEdit,
   captionStyle,
   captionPresets,
@@ -153,6 +160,7 @@ export function ClipDetail({
   markenFassung,
   markenName,
   markenFarben,
+  befunde,
   renderPlan,
   clipStatus,
   renderFehler,
@@ -983,6 +991,7 @@ export function ClipDetail({
                 wordTo={wordTo}
                 speakers={speakers}
                 speakerNames={speakerNames}
+                sprechertrennung={sprechertrennung}
                 currentTime={currentTime}
                 canEdit={canEdit}
                 onEditWord={editWord}
@@ -1093,7 +1102,16 @@ export function ClipDetail({
                   {fassungSatz(markenFassung)}
                 </p>
               )}
-              {!offeneAenderungen && offeneUntertitel === 0 && !(markenFassung && markenFassung.stand === "aelter") && (
+              {/* Die Befunde zum Clip selbst. Sie standen bisher nur in der Clip-Übersicht - also
+                  nicht auf der Seite, auf der man den Clip ansieht und freigibt. Ein Schnitt, der
+                  eine Verneinung wegschneidet, gehört genau hierher. */}
+              {befunde.map((b, i) => (
+                <p key={i} className={cn("text-sm", b.schwere === "fehler" ? "text-attention" : "text-text-2")}>
+                  {b.schwere === "fehler" ? "Fehler: " : "Hinweis: "}
+                  {b.text}
+                </p>
+              ))}
+              {!offeneAenderungen && offeneUntertitel === 0 && befunde.length === 0 && !(markenFassung && markenFassung.stand === "aelter") && (
                 <p className="text-sm text-text-2">Nichts. Alles gespeichert, keine offenen Untertitel.</p>
               )}
               <ButtonLink href={`/projekte/${sourceId}/clips`} variant="ghost" size="sm" className="self-start">

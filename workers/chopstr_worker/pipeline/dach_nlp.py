@@ -122,15 +122,28 @@ def is_ordinal(text: str) -> bool:
     return bool(_ORDINAL.match(_strip_trailing(text)))
 
 
-def is_sentence_end(words: list[dict], i: int, min_pause_s: float = 0.7) -> bool:
+def is_sentence_end(words: list[dict], i: int, min_pause_s: float = 0.7, silence=None) -> bool:
     """Endet Wort ``i`` einen Satz? Berücksichtigt Satzzeichen, Abkürzungen, Ordinal- und
-    Dezimalzahlen, lange Pausen und Sprecherwechsel."""
+    Dezimalzahlen, lange Pausen und Sprecherwechsel.
+
+    ``silence`` ist eine optionale ``pipeline.silence.SilenceMap``. Ist sie gesetzt, zählt
+    die **gemessene** Stille zwischen den beiden Wörtern, sofern sie länger ist als die
+    Lücke in den Wortzeiten. Grund: ASR-Wortzeiten verschlucken Pausen gelegentlich (belegt
+    in ``silence.py``), und eine übersehene Pause kostet eine Satzgrenze. Ohne ``silence``
+    verhält sich die Funktion unverändert.
+    """
     w = words[i]
     text = str(w.get("text", "")).strip()
     nxt = words[i + 1] if i + 1 < len(words) else None
     if nxt is None:
         return True
-    pause = float(nxt.get("start", 0.0)) - float(w.get("end", 0.0))
+    w_end, n_start = float(w.get("end", 0.0)), float(nxt.get("start", 0.0))
+    pause = n_start - w_end
+    if silence is not None:
+        # pause_after statt pause_between: verschluckt das ASR eine Pause, liegt der
+        # Anfang des nächsten Wortes innerhalb der echten Stille — ein Fenster von
+        # Wortende bis Wortanfang misst dann nur einen Bruchteil davon.
+        pause = max(pause, silence.pause_after(w_end))
     long_pause = pause >= min_pause_s
     speaker_change = nxt.get("speaker") is not None and nxt.get("speaker") != w.get("speaker")
 
@@ -146,9 +159,9 @@ def is_sentence_end(words: list[dict], i: int, min_pause_s: float = 0.7) -> bool
     return long_pause or speaker_change
 
 
-def sentence_boundaries(words: list[dict], min_pause_s: float = 0.7) -> list[int]:
+def sentence_boundaries(words: list[dict], min_pause_s: float = 0.7, silence=None) -> list[int]:
     """Indizes der Wörter, die einen Satz beenden (inklusive)."""
-    return [i for i in range(len(words)) if is_sentence_end(words, i, min_pause_s)]
+    return [i for i in range(len(words)) if is_sentence_end(words, i, min_pause_s, silence)]
 
 
 def forbidden_cut_ranges(sentence_text: str, word_times: list[dict]) -> list[tuple[float, float]]:

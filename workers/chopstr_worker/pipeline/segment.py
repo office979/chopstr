@@ -3,6 +3,11 @@
 Harte Regel: Clips beginnen und enden NUR an Satzgrenzen (Pflichtkriterium der Story-Rubrik).
 Kandidaten werden als Satz-Spannen erzeugt, nicht als Sekunden-Fenster. Satzgrenzen kommen aus
 ``dach_nlp.is_sentence_end`` (Abkürzungen, Ordinalzahlen, Pausen, Sprecherwechsel).
+
+Pausen stammen aus den ASR-Wortzeiten. Wird zusätzlich eine ``silence.SilenceMap`` übergeben,
+zählt die im Ton gemessene Stille, wo sie länger ist — ASR-Wortzeiten verschlucken Pausen
+gelegentlich (Beleg in ``silence.py``). ``snap_candidates`` zieht Clipgrenzen danach auf einen
+Punkt, an dem wirklich Stille ist.
 """
 
 from __future__ import annotations
@@ -47,11 +52,21 @@ class Candidate:
         return self.end - self.start
 
 
-def sentences_from_words(words: list[dict], min_pause_s: float = MIN_PAUSE_AS_BOUNDARY) -> list[Sentence]:
+def sentences_from_words(
+    words: list[dict],
+    min_pause_s: float = MIN_PAUSE_AS_BOUNDARY,
+    silence=None,
+) -> list[Sentence]:
+    """Wörter zu Sätzen. ``silence`` ist eine optionale ``silence.SilenceMap``.
+
+    Mit ``silence`` zählt an jeder Wortgrenze die gemessene Stille, falls sie länger ist
+    als die Lücke in den Wortzeiten — siehe ``pipeline/silence.py``. Ohne ``silence``
+    unverändertes Verhalten.
+    """
     sents: list[Sentence] = []
     buf_start = 0
     for i in range(len(words)):
-        if dach_nlp.is_sentence_end(words, i, min_pause_s):
+        if dach_nlp.is_sentence_end(words, i, min_pause_s, silence):
             chunk = words[buf_start : i + 1]
             sents.append(
                 Sentence(
@@ -91,6 +106,43 @@ def candidate_windows(sents: list[Sentence], min_len=12.0, max_len=90.0, stride=
     return cands
 
 
+def snap_candidates(cands: list[Candidate], silence, max_shift: float = 0.40) -> list[Candidate]:
+    """Zieht Anfang und Ende jedes Kandidaten auf einen Punkt, an dem wirklich Stille ist.
+
+    Transkriptzeiten liegen oft ein paar Hundertstel neben dem hörbaren Wortrand. Schneidet
+    man exakt dort, wird der Wortanlauf angeschnitten oder der Ausklang abgeschnitten.
+    Gemessen am 26.09.2026 lagen zwei von sieben geplanten Grenzen im Wort — nach dem
+    Verschieben um 60 bis 130 ms waren alle beidseitig unter -45 dB.
+
+    Findet sich in Reichweite keine Pause, bleibt die Grenze wie sie war. Lieber die
+    ursprüngliche Satzgrenze als ein Schnitt an der falschen Stelle.
+
+    Laufzeit: zwei bisect-Suchen je Kandidat, kein ffmpeg-Aufruf.
+    """
+    if silence is None or not len(silence):
+        return cands
+    out: list[Candidate] = []
+    for c in cands:
+        s = silence.snap(c.start, max_shift)
+        e = silence.snap(c.end, max_shift)
+        neu_start = c.start if s is None else s
+        neu_ende = c.end if e is None else e
+        if neu_ende - neu_start < 1.0:  # nie zu einem Nichts zusammenziehen
+            out.append(c)
+            continue
+        out.append(
+            Candidate(
+                first_sent=c.first_sent,
+                last_sent=c.last_sent,
+                start=round(neu_start, 3),
+                end=round(neu_ende, 3),
+                text=c.text,
+                speakers=c.speakers,
+            )
+        )
+    return out
+
+
 def chapterize(sents: list[Sentence], chunk_seconds=240.0) -> list[list[Sentence]]:
     """Grobe Kapitel (~4 Min) für den ersten LLM-Durchlauf."""
     chapters: list[list[Sentence]] = []
@@ -112,4 +164,5 @@ def numbered(sents: list[Sentence]) -> str:
     return "\n".join(f"[{s.idx}] ({s.speaker or '?'}) {s.text}" for s in sents)
 
 
-__all__ = ["MIN_PAUSE_AS_BOUNDARY", "Candidate", "Sentence", "candidate_windows", "chapterize", "numbered", "sentences_from_words"]
+__all__ = ["MIN_PAUSE_AS_BOUNDARY", "Candidate", "Sentence", "candidate_windows", "chapterize", "numbered",
+           "sentences_from_words", "snap_candidates"]

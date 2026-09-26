@@ -29,6 +29,10 @@ dev = [
   # Nur Entwicklung: statisches ffmpeg mit libass und drawtext für den lokalen Testmodus (scripts/local_env.sh
   # verlinkt es nach .local/bin). Docker-Images bringen ihr eigenes ffmpeg mit.
   "imageio-ffmpeg>=0.5",
+  # tests/test_schriften.py prüft mit fontTools, dass die vier geschnittenen Bold-Fassungen
+  # wirklich Strichstärke 700 haben. Lokal kam das Paket bisher nur zufällig als transitive
+  # Abhängigkeit mit; in CI fehlte es, der Test scheiterte dort seit 32ce872.
+  "fonttools>=4.50",
 ]
 
 [project.scripts]

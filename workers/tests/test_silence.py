@@ -6,6 +6,7 @@ Die reinen Funktionen laufen ohne ffmpeg. Die Tests mit echtem Ton sind mit
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import subprocess
 import time
@@ -249,3 +250,171 @@ def test_abfragen_brauchen_keinen_weiteren_prozess(tondatei):
 @needs_ffmpeg
 def test_scan_ohne_datei_gibt_leere_karte():
     assert len(silence.scan("/gibt/es/nicht.wav")) == 0
+
+
+# -- Serialisierung -------------------------------------------------------------------------
+def test_payload_hin_und_zurueck(karte):
+    p = karte.to_payload()
+    assert p["version"] == silence.PAYLOAD_VERSION
+    assert p["count"] == 4
+    zurueck = silence.SilenceMap.from_payload(p)
+    assert len(zurueck) == 4
+    assert zurueck.gaps[1].start == 6.43 and zurueck.gaps[1].end == 8.62
+    assert zurueck.is_silent_at(7.5)
+
+
+def test_payload_ist_json_serialisierbar(karte):
+    import json
+
+    wieder = json.loads(json.dumps(karte.to_payload()))
+    assert len(silence.SilenceMap.from_payload(wieder)) == 4
+
+
+@pytest.mark.parametrize(
+    "kaputt",
+    [
+        None,
+        {},
+        {"version": 999, "gaps": [[1, 2]]},
+        {"version": silence.PAYLOAD_VERSION, "gaps": [["a", "b"]]},
+        {"version": silence.PAYLOAD_VERSION, "gaps": [[1]]},
+        "kein dict",
+    ],
+)
+def test_kaputtes_payload_ergibt_leere_karte(kaputt):
+    """Ein beschädigtes Artefakt darf die Kandidatensuche nicht stoppen."""
+    assert len(silence.SilenceMap.from_payload(kaputt)) == 0
+
+
+def test_from_payload_sortiert():
+    p = {"version": silence.PAYLOAD_VERSION, "gaps": [[9.0, 10.0], [1.0, 2.0]]}
+    m = silence.SilenceMap.from_payload(p)
+    assert [g.start for g in m.gaps] == [1.0, 9.0]
+    assert m.is_silent_at(1.5) and m.is_silent_at(9.5)
+
+
+# -- Verdrahtung in der Activity ------------------------------------------------------------
+def test_silence_key_haengt_am_audio_key():
+    from chopstr_worker.activities import analyze
+
+    a = analyze.silence_key_for("derived/abc.wav")
+    b = analyze.silence_key_for("derived/xyz.wav")
+    assert a != b
+    assert a.startswith("silence/") and a.endswith(".json")
+    assert analyze.silence_key_for("derived/abc.wav") == a  # deterministisch
+
+
+def test_story_engine_reicht_die_karte_durch(monkeypatch):
+    """``story_engine.run`` muss ``silence`` bis in ``sentences_from_words`` durchreichen."""
+    from chopstr_worker.pipeline import story_engine
+
+    gesehen = {}
+    echt = story_engine.sentences_from_words
+
+    def spion(words, *a, **kw):
+        gesehen["silence"] = kw.get("silence")
+        return echt(words, *a, **kw)
+
+    monkeypatch.setattr(story_engine, "sentences_from_words", spion)
+    karte = silence.SilenceMap([silence.Gap(1.0, 3.0)])
+    words = [{"text": "a", "start": 0.0, "end": 0.5}, {"text": "b", "start": 3.1, "end": 3.5}]
+
+    class _LLM:
+        provider = "local-heuristic"
+
+        def model(self):
+            return "test"
+
+    with contextlib.suppress(Exception):  # uns interessiert nur, was ankam
+        story_engine.run(words, {}, {}, None, _LLM(), silence=karte)
+    assert gesehen.get("silence") is karte
+
+
+# -- load_or_scan_silence: Cache, Fehlertoleranz --------------------------------------------
+class _FakeStore:
+    """Minimaler Ersatz für ctx.store: merkt sich JSON im Speicher."""
+
+    def __init__(self, vorhanden: dict | None = None, kaputt: bool = False):
+        self.daten = dict(vorhanden or {})
+        self.kaputt = kaputt
+        self.geschrieben: list[str] = []
+
+    def exists(self, bucket, key):
+        return key in self.daten
+
+    def get_json(self, bucket, key):
+        if self.kaputt:
+            raise RuntimeError("Artefakt beschädigt")
+        return self.daten[key]
+
+    def put_json(self, bucket, key, payload):
+        self.daten[key] = payload
+        self.geschrieben.append(key)
+
+
+class _FakeCtx:
+    def __init__(self, store):
+        self.store = store
+
+
+def test_load_or_scan_ohne_audio_key_gibt_leere_karte():
+    from chopstr_worker.activities import analyze
+
+    karte = analyze.load_or_scan_silence(_FakeCtx(_FakeStore()), "s1", {})
+    assert len(karte) == 0
+
+
+def test_load_or_scan_liest_aus_dem_cache():
+    from chopstr_worker.activities import analyze
+
+    audio_key = "derived/abc.wav"
+    key = analyze.silence_key_for(audio_key)
+    payload = silence.SilenceMap([silence.Gap(6.43, 8.62)]).to_payload()
+    store = _FakeStore({key: payload})
+
+    karte = analyze.load_or_scan_silence(_FakeCtx(store), "s1", {"audio_key": audio_key})
+    assert len(karte) == 1 and karte.is_silent_at(7.5)
+    assert store.geschrieben == [], "aus dem Cache darf nichts neu geschrieben werden"
+
+
+def test_load_or_scan_ueberlebt_ein_kaputtes_artefakt(monkeypatch):
+    """Ein beschädigtes Artefakt führt zum Neu-Scan, nicht zum Abbruch."""
+    from chopstr_worker.activities import analyze, common
+
+    audio_key = "derived/abc.wav"
+    store = _FakeStore({analyze.silence_key_for(audio_key): {"kaputt": True}}, kaputt=True)
+    monkeypatch.setattr(common, "ensure_local_audio", lambda *a, **k: "/gibt/es/nicht.wav")
+
+    karte = analyze.load_or_scan_silence(_FakeCtx(store), "s1", {"audio_key": audio_key})
+    assert len(karte) == 0  # Scan der fehlenden Datei ergibt leer, aber kein Fehler
+
+
+def test_load_or_scan_ueberlebt_fehlenden_download(monkeypatch):
+    from chopstr_worker.activities import analyze, common
+
+    def _boom(*a, **k):
+        raise RuntimeError("S3 nicht erreichbar")
+
+    monkeypatch.setattr(common, "ensure_local_audio", _boom)
+    karte = analyze.load_or_scan_silence(_FakeCtx(_FakeStore()), "s1", {"audio_key": "derived/x.wav"})
+    assert len(karte) == 0
+
+
+@needs_ffmpeg
+def test_load_or_scan_scannt_und_legt_ab(monkeypatch, tondatei):
+    from chopstr_worker.activities import analyze, common
+
+    silence.clear_cache()
+    audio_key = "derived/ton.wav"
+    store = _FakeStore()
+    monkeypatch.setattr(common, "ensure_local_audio", lambda *a, **k: tondatei)
+
+    karte = analyze.load_or_scan_silence(_FakeCtx(store), "s1", {"audio_key": audio_key})
+    assert len(karte) >= 3
+    assert store.geschrieben == [analyze.silence_key_for(audio_key)]
+
+    # Zweiter Aufruf kommt aus dem Objektspeicher und schreibt nicht erneut.
+    store.geschrieben.clear()
+    wieder = analyze.load_or_scan_silence(_FakeCtx(store), "s1", {"audio_key": audio_key})
+    assert len(wieder) == len(karte)
+    assert store.geschrieben == []

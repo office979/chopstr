@@ -865,12 +865,18 @@ def run(
     weights: dict[str, float] | None = None,
     on_progress: ProgressFn | None = None,
     max_candidates: int = MAX_CANDIDATES,
+    silence=None,
 ) -> DetectReport:
-    """Alle vier Stufen. ``on_progress(done, total, n_candidates)`` wird nach jedem Kapitel aufgerufen."""
+    """Alle vier Stufen. ``on_progress(done, total, n_candidates)`` wird nach jedem Kapitel aufgerufen.
+
+    ``silence`` ist eine optionale ``pipeline.silence.SilenceMap``. Ist sie gesetzt, zaehlt an jeder
+    Wortgrenze die im Ton gemessene Stille, wo sie laenger ist als die Luecke in den ASR-Wortzeiten.
+    Verschluckt das ASR eine Pause, entsteht die Satzgrenze sonst nicht und ein Clip beginnt mitten
+    im Satz (Beleg in ``pipeline/silence.py``)."""
     brief = dict(brief or {})
     brand = dict(brand or {})
     weights = dict(weights) if weights else resolve_weights(brand.get("learned_weights"))
-    sents = sentences_from_words(words)
+    sents = sentences_from_words(words, silence=silence)
     chapters = chapterize(sents, CHAPTER_SECONDS)
     order = chapter_order(chapters, seeds_from_heat(heat_payload))
     report = DetectReport(

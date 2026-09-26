@@ -65,6 +65,8 @@ NOISE_DB = -40  # ab hier gilt es als still; Raumton liegt typisch darunter
 MIN_SILENCE_S = 0.30  # kürzer ist Atmen, keine Pause
 SCAN_TIMEOUT_S = 900
 EPS = 1e-6  # Gleitkommaluft: 6.49 - 6.43 ergibt 0.05999999999999872
+PAYLOAD_VERSION = 1  # Formatversion des Artefakts; Änderung macht alte Artefakte ungültig
+SCAN_VERSION = "silence-1"  # geht in den Cache-Key, damit ein neuer Scan alte Ergebnisse ersetzt
 
 _RE = re.compile(r"silence_(start|end):\s*(-?[0-9.]+)")
 _CACHE: dict[tuple[str, int, float, int, float], SilenceMap] = {}
@@ -200,6 +202,33 @@ class SilenceMap:
 
     def long_gaps(self, min_s: float) -> list[Gap]:
         return [g for g in self.gaps if g.length >= min_s]
+
+    # -- Serialisierung (Artefakt im Objektspeicher) ---------------------------------------
+    def to_payload(self, *, noise_db: int = NOISE_DB, min_silence_s: float = MIN_SILENCE_S) -> dict:
+        """Kompakte Form für ``store.put_json``. Paare statt Objekten hält die Datei klein."""
+        return {
+            "version": PAYLOAD_VERSION,
+            "noise_db": noise_db,
+            "min_silence_s": min_silence_s,
+            "count": len(self.gaps),
+            "gaps": [[g.start, g.end] for g in self.gaps],
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict | None, media: str = "") -> SilenceMap:
+        """Liest ``to_payload`` zurück. Unbekannte oder kaputte Form ergibt eine leere Karte."""
+        if not isinstance(payload, dict) or payload.get("version") != PAYLOAD_VERSION:
+            return EMPTY
+        gaps: list[Gap] = []
+        for paar in payload.get("gaps") or []:
+            try:
+                a, b = float(paar[0]), float(paar[1])
+            except (TypeError, ValueError, IndexError):
+                return EMPTY
+            if b > a:
+                gaps.append(Gap(a, b))
+        gaps.sort(key=lambda g: g.start)
+        return cls(gaps, media)
 
 
 EMPTY = SilenceMap([], "")

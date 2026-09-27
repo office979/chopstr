@@ -23,7 +23,7 @@ from typing import Any
 from temporalio import activity
 
 from .. import costlog, db, decision_log, editorial, events, outbox, storage, usage
-from ..pipeline import copy_engine, signals, story_engine
+from ..pipeline import copy_engine, segment, signals, story_engine
 from ..pipeline import silence as silence_mod
 from ..providers_llm import LLM
 from ..residency import Tenant
@@ -389,12 +389,16 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
                 f"Kein Sprachmodell für Provider {llm.provider} konfiguriert "
                 "(BEDROCK_MODEL_ID, MISTRAL_MODEL oder SELFHOST_LLM_MODEL setzen, für Entwicklung LLM_PROVIDER=local-heuristic)"
             )
-        # Die Stille-Karte veraendert die Satzgrenzen und damit die Kandidaten. Sie gehoert deshalb
-        # in den Idempotenz-Key, sonst liefert ein Re-Run das alte Ergebnis zurueck.
+        # Die Stille-Karte kann die Satzgrenzen und damit die Kandidaten veraendern. Dann gehoert
+        # sie in den Idempotenz-Key, sonst liefert ein Re-Run das alte Ergebnis zurueck.
+        # Aendert sie nichts, bleibt der Key unveraendert: sonst braeche jeder bestehende
+        # Zwischenspeicher und loeste einen neuen LLM-Lauf samt Kosten aus, ohne Wirkung.
         pausen = load_or_scan_silence(ctx, source_id, src)
-        versions = story_engine.prompt_versions()
-        sil_v = f"{silence_mod.SCAN_VERSION}:{len(pausen)}"
-        key = candidates_key_for(tv_id, tv_version, brief, [*versions, sil_v], llm.provider, model, weights)
+        versions = list(story_engine.prompt_versions())
+        if segment.silence_changes_boundaries(words, pausen):
+            versions.append(f"{silence_mod.SCAN_VERSION}:{len(pausen)}")
+            log.info("silence source=%s veraendert die Satzgrenzen, Kandidaten werden neu gesucht", source_id)
+        key = candidates_key_for(tv_id, tv_version, brief, versions, llm.provider, model, weights)
 
         cached = ctx.store.exists("derived", key)
         if cached:

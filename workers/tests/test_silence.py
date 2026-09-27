@@ -418,3 +418,34 @@ def test_load_or_scan_scannt_und_legt_ab(monkeypatch, tondatei):
     wieder = analyze.load_or_scan_silence(_FakeCtx(store), "s1", {"audio_key": audio_key})
     assert len(wieder) == len(karte)
     assert store.geschrieben == []
+
+
+# -- Idempotenz-Key bleibt stabil, wenn die Karte nichts ändert -----------------------------
+def test_karte_ohne_wirkung_aendert_die_grenzen_nicht():
+    """faster-whisper-Fall: die Pausen stehen schon in den Wortzeiten.
+
+    Dann darf der Kandidaten-Cache nicht brechen — ein Re-Run kostet sonst LLM-Tokens,
+    ohne dass sich am Ergebnis etwas ändert.
+    """
+    words = [
+        {"text": "eins.", "start": 0.0, "end": 1.0},
+        {"text": "zwei", "start": 3.5, "end": 4.0},  # Lücke 2,5s steht in den Wortzeiten
+    ]
+    karte = silence.SilenceMap([silence.Gap(1.05, 3.45)])
+    assert not segment.silence_changes_boundaries(words, karte)
+
+
+def test_karte_mit_wirkung_wird_erkannt():
+    """whisper.cpp-Fall: die Pause fehlt in den Wortzeiten, die Karte kennt sie."""
+    words = [
+        {"text": "schneidest", "start": 5.8, "end": 6.42},
+        {"text": "Erstens", "start": 6.45, "end": 9.10},
+    ]
+    karte = silence.SilenceMap([silence.Gap(6.43, 8.62)])
+    assert segment.silence_changes_boundaries(words, karte)
+
+
+def test_leere_karte_aendert_nie_etwas():
+    words = [{"text": "a", "start": 0.0, "end": 1.0}, {"text": "b", "start": 1.1, "end": 2.0}]
+    assert not segment.silence_changes_boundaries(words, None)
+    assert not segment.silence_changes_boundaries(words, silence.EMPTY)

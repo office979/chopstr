@@ -106,6 +106,25 @@ def candidate_windows(sents: list[Sentence], min_len=12.0, max_len=90.0, stride=
     return cands
 
 
+def silence_changes_boundaries(words: list[dict], silence, min_pause_s: float = MIN_PAUSE_AS_BOUNDARY) -> bool:
+    """Aendert die Stille-Karte die Satzgrenzen dieser Wortliste ueberhaupt?
+
+    Gebraucht fuer den Idempotenz-Key der Kandidatensuche. Kaeme die Karte dort bedingungslos
+    hinein, braeche sie jeden bestehenden Zwischenspeicher und loeste einen neuen LLM-Lauf samt
+    Kosten aus, auch wenn sich am Ergebnis nichts aendert.
+
+    Gemessen am 27.09.2026: bei faster-whisper mit ``vad_filter=True`` waren die Grenzen mit und
+    ohne Karte identisch - die Pausen stehen dort bereits in den Wortzeiten. Bei whisper.cpp
+    fehlten zwei von vier Pausen, dort aendert die Karte die Grenzen sehr wohl.
+
+    Kostet zwei Durchlaeufe durch die Wortliste, kein ffmpeg, kein LLM."""
+    if silence is None or not len(silence):
+        return False
+    ohne = dach_nlp.sentence_boundaries(words, min_pause_s)
+    mit = dach_nlp.sentence_boundaries(words, min_pause_s, silence)
+    return ohne != mit
+
+
 def snap_candidates(cands: list[Candidate], silence, max_shift: float = 0.40) -> list[Candidate]:
     """Zieht Anfang und Ende jedes Kandidaten auf einen Punkt, an dem wirklich Stille ist.
 
@@ -165,4 +184,4 @@ def numbered(sents: list[Sentence]) -> str:
 
 
 __all__ = ["MIN_PAUSE_AS_BOUNDARY", "Candidate", "Sentence", "candidate_windows", "chapterize", "numbered",
-           "sentences_from_words", "snap_candidates"]
+           "sentences_from_words", "silence_changes_boundaries", "snap_candidates"]

@@ -103,6 +103,56 @@ class Policy:
     def hart_max_s(self) -> float:
         return float(self.roh["laenge"]["hart_max_s"])
 
+    # -- Ausbeute (wie viele Kandidaten ein Video hergeben soll) ---------------------------------
+    @property
+    def kandidaten_je_minute(self) -> float:
+        return float(self._ausbeute.get("kandidaten_je_minute", 1.5))
+
+    @property
+    def min_je_kapitel(self) -> int:
+        return int(self._ausbeute.get("min_je_kapitel", 3))
+
+    @property
+    def max_je_kapitel(self) -> int:
+        return int(self._ausbeute.get("max_je_kapitel", 12))
+
+    @property
+    def obergrenze_gesamt(self) -> int:
+        return int(self._ausbeute.get("obergrenze_gesamt", 60))
+
+    @property
+    def ueberlappung_max(self) -> float:
+        return float(self._ausbeute.get("ueberlappung_max", 0.6))
+
+    @property
+    def anker_ohne_marker(self) -> bool:
+        return bool(self._ausbeute.get("anker_ohne_marker", True))
+
+    @property
+    def _ausbeute(self) -> dict:
+        """Fehlt der Abschnitt (aeltere Fassung der Grundlage), gelten die Vorgabewerte oben."""
+        return self.roh.get("ausbeute") or {}
+
+    @property
+    def vorschlag_ueberschuss(self) -> float:
+        return float(self._ausbeute.get("vorschlag_ueberschuss", 2.0))
+
+    def kandidaten_fuer(self, sekunden: float) -> int:
+        """Wie viele Kandidaten diese Spanne am Ende ANBIETEN soll."""
+        roh = (max(0.0, sekunden) / 60.0) * self.kandidaten_je_minute
+        return max(self.min_je_kapitel, min(self.max_je_kapitel, round(roh)))
+
+    def vorschlaege_fuer(self, sekunden: float) -> int:
+        """Wie viele VORSCHLAEGE diese Spanne erzeugen soll.
+
+        Mehr als ``kandidaten_fuer``, weil Tore, Laengenfenster und Ueberlappungsregel danach
+        aussieben. Der Ueberschuss lockert kein Tor, er sorgt nur dafuer, dass nach dem Sieben
+        noch genug uebrig ist."""
+        ziel = (max(0.0, sekunden) / 60.0) * self.kandidaten_je_minute * self.vorschlag_ueberschuss
+        untergrenze = self.min_je_kapitel
+        obergrenze = round(self.max_je_kapitel * self.vorschlag_ueberschuss)
+        return max(untergrenze, min(obergrenze, round(ziel)))
+
     @property
     def kontext_zugabe_s(self) -> float:
         """Wie viele Sekunden ein Clip ueber die harte Grenze wachsen darf, um sein Ende zu heilen.

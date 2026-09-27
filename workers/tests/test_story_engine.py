@@ -237,7 +237,7 @@ def test_length_limits_discard_with_reason(brain, llm):
     assert report.discarded[0]["first_sent"] == 0
 
 
-def test_limit_twenty_and_seeded_chapters_first(brain, llm):
+def test_obergrenze_aus_der_grundlage_und_seeded_chapters_first(brain, llm):
     words = make_words(long_script(25))
     sents = segment.sentences_from_words(words)
     chapters = segment.chapterize(sents)
@@ -260,9 +260,25 @@ def test_limit_twenty_and_seeded_chapters_first(brain, llm):
     assert report.chapters == len(chapters) and report.chapters_with_seeds == 1
     assert brain.propose_calls[0][0]["idx"] == seed_chapter[0].idx  # Kapitel mit Seed zuerst
     assert report.proposals == 2 * len(chapters)
-    assert len(report.candidates) == story_engine.MAX_CANDIDATES
+    # Die Obergrenze steht in der redaktionellen Grundlage (`ausbeute.obergrenze_gesamt`), nicht
+    # mehr in story_engine.MAX_CANDIDATES. Sie schuetzt Oberflaeche und Kosten, nicht den Geschmack.
+    from chopstr_worker import editorial
+
+    grenze = editorial.load().obergrenze_gesamt
+    assert len(report.candidates) <= grenze
+    assert len(report.candidates) > story_engine.MAX_CANDIDATES, (
+        "mehr als die alten 20: die Zahl der Kandidaten richtet sich jetzt nach dem Material"
+    )
     assert [c.start_s for c in report.candidates] == sorted(c.start_s for c in report.candidates)
-    assert sum(1 for d in report.discarded if d["reason"] == "limit") == 2 * len(chapters) - 20
+    # Solange die Obergrenze nicht erreicht ist, darf nichts mit dem Grund "limit" wegfallen.
+    # Frueher stand hier eine feste Rechnung gegen 20; die Zahl kommt jetzt aus der Grundlage.
+    if len(report.candidates) < grenze:
+        assert sum(1 for d in report.discarded if d["reason"] == "limit") == 0
+
+    # Die Obergrenze selbst wirkt weiterhin: klein gesetzt schneidet sie ab und begruendet es.
+    wenige, verworfen = story_engine.select_best(list(report.candidates), limit=5)
+    assert len(wenige) == 5
+    assert sum(1 for d in verworfen if d["reason"] == "limit") == len(report.candidates) - 5
     assert progress[0][:2] == (1, len(chapters)) and progress[-1] == (len(chapters), len(chapters), 2 * len(chapters))
 
 

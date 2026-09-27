@@ -36,7 +36,9 @@ CONTRACT = "candidates_v1"
 #     werden; die Laengenbewertung rechnet dann mit der Abspieldauer, nicht der Quellspanne.
 # Der Wert steckt im Idempotenz-Schluessel und erzwingt eine Neuberechnung. Ohne ihn
 # kaeme das alte Ergebnis aus dem Zwischenspeicher und die Aenderung waere unsichtbar.
-ENGINE_VERSION = "story_engine_v4"
+# v5: Ausbeute. Die Zahl der Kandidaten richtet sich nach der Laenge des Materials
+#     (`ausbeute` in der Grundlage), nicht mehr nach festen 3 je Kapitel und 20 je Quelle.
+ENGINE_VERSION = "story_engine_v5"
 # Die Laengengrenzen stehen in der Richtlinie (packages/editorial/clip_policy_v1.yaml) und nur
 # dort. Hier standen frueher 12 und 90 Sekunden, waehrend die Richtlinie 18 und 70 als „hart"
 # fuehrte: zwei Wahrheiten, von denen die laxere gewann. So ist an BP CW ein Clip von 78 Sekunden
@@ -47,8 +49,12 @@ MAX_LEN_S = 90.0
 # Tore, die sich durch Verlaengern nach hinten beheben lassen. Alle drei beschreiben ein kaputtes
 # ENDE; was am Anfang fehlt, holt die Verlaengerung nach hinten nicht zurueck.
 ENDE_TORE = ("fidelity", "sentence_boundaries", "no_open_loop")
+# Ruecklauf, falls die Grundlage fehlt. Massgeblich ist `ausbeute.obergrenze_gesamt`.
 MAX_CANDIDATES = 20
+# Ruecklauf und Notbremse. Massgeblich ist `ausbeute` in der Grundlage, siehe
+# Policy.vorschlaege_fuer(). MAX_PER_CHAPTER blieb als Rueckfallwert, falls die Grundlage fehlt.
 MAX_PER_CHAPTER = 4
+MAX_PER_CHAPTER_HART = 40
 MAX_REPAIR_ROUNDS = 2
 CHAPTER_SECONDS = 240.0
 # Ab wann zwei Spannen als derselbe Clip gelten, gemessen am KUERZEREN der beiden.
@@ -64,6 +70,7 @@ CHAPTER_SECONDS = 240.0
 # kein einziges ueberlappendes Paar zwischen 0 und 49 Prozent; der genaue Wert der Schwelle ist
 # deshalb unkritisch, solange er in dieser Luecke liegt. 0,4 ist die Linie, ab der ein Clip nicht
 # mehr fuer sich steht.
+# Ruecklauf, falls die Grundlage fehlt. Massgeblich ist `ausbeute.ueberlappung_max`.
 OVERLAP_SUPPRESS_ANTEIL = 0.4
 FIDELITY_TAIL_WORDS = 3
 SCORE_KEYS = ("hook", "payoff", "specificity", "tension", "audience_fit")
@@ -815,8 +822,27 @@ def _ueberdeckung(a: CandidateResult, b: CandidateResult) -> float:
     return gemeinsamer_anteil(a.start_s, a.end_s, b.start_s, b.end_s)
 
 
-def select_best(cands: list[CandidateResult], limit: int = MAX_CANDIDATES) -> tuple[list[CandidateResult], list[dict]]:
-    """Beste nach Rubrik (Gate-Erfüllung vor Score), überlappende Spannen nur einmal, maximal ``limit``."""
+def _policy():
+    """Redaktionelle Grundlage. Eigene Funktion, damit Tests sie ersetzen koennen."""
+    return editorial.load()
+
+
+def select_best(
+    cands: list[CandidateResult],
+    limit: int | None = None,
+    ueberlappung_max: float | None = None,
+) -> tuple[list[CandidateResult], list[dict]]:
+    """Beste nach Rubrik (Gate-Erfuellung vor Score), ueberlappende Spannen nur einmal.
+
+    ``limit`` und ``ueberlappung_max`` kommen aus der redaktionellen Grundlage
+    (`ausbeute.obergrenze_gesamt`, `ausbeute.ueberlappung_max`), nicht mehr aus Konstanten hier.
+    Wer die Ausbeute aendern will, aendert sie dort.
+
+    Was hier weiterhin unbedingt verworfen wird, ist ein gerissenes Tor. Das ist kein
+    Geschmacksurteil, sondern ein feststellbarer Fehler im Schnitt."""
+    pol = _policy()
+    limit = pol.obergrenze_gesamt if limit is None else limit
+    schwelle = pol.ueberlappung_max if ueberlappung_max is None else ueberlappung_max
     ordered = sorted(cands, key=lambda c: (c.gate_passed, c.total, -c.start_s), reverse=True)
     kept: list[CandidateResult] = []
     dropped: list[dict] = []
@@ -832,7 +858,7 @@ def select_best(cands: list[CandidateResult], limit: int = MAX_CANDIDATES) -> tu
             grund = "; ".join(str(g.get("detail") or "") for g in c.gates.values() if not g.get("passed"))
             dropped.append({"reason": "gate", "first_sent": c.first_sent, "last_sent": c.last_sent, "total": c.total, "detail": grund})
             continue
-        clash = next((k for k in kept if _ueberdeckung(c, k) >= OVERLAP_SUPPRESS_ANTEIL), None)
+        clash = next((k for k in kept if _ueberdeckung(c, k) >= schwelle), None)
         if clash is not None:
             dropped.append({"reason": "overlap", "first_sent": c.first_sent, "last_sent": c.last_sent, "total": c.total})
             continue
@@ -864,7 +890,7 @@ def run(
     llm: LLM,
     weights: dict[str, float] | None = None,
     on_progress: ProgressFn | None = None,
-    max_candidates: int = MAX_CANDIDATES,
+    max_candidates: int | None = None,
 ) -> DetectReport:
     """Alle vier Stufen. ``on_progress(done, total, n_candidates)`` wird nach jedem Kapitel aufgerufen."""
     brief = dict(brief or {})
@@ -884,7 +910,12 @@ def run(
     raw: list[CandidateResult] = []
     seen: set[tuple[int, int]] = set()
     for done, (_i, chapter, _has_seed) in enumerate(order, start=1):
-        moments = story_score.propose(chapter, brief, llm)[:MAX_PER_CHAPTER]
+        # Wie viele Vorschlaege dieses Kapitel liefern darf, steht in der Grundlage
+        # (`ausbeute`), nicht in einer Konstante. MAX_PER_CHAPTER schnitt hier vorher
+        # jedes Kapitel auf vier ab, auch wenn die Stufe davor sechzehn geliefert hatte.
+        kap_s = (chapter[-1].end - chapter[0].start) if chapter else 0.0
+        obergrenze = min(_policy().vorschlaege_fuer(kap_s), MAX_PER_CHAPTER_HART)
+        moments = story_score.propose(chapter, brief, llm)[:obergrenze]
         report.proposals += len(moments)
         for m in moments:
             first, last = int(m["first_sent"]), int(m["last_sent"])
@@ -905,7 +936,7 @@ def run(
             raw.append(out)
         if on_progress:
             on_progress(done, len(order), len(raw))
-    report.candidates, dropped = select_best(raw, max_candidates)
+    report.candidates, dropped = select_best(raw, max_candidates)  # None = Wert aus der Grundlage
     report.verworfen = [c for c in raw if all(c is not k for k in report.candidates)]
     report.discarded.extend(dropped)
     return report

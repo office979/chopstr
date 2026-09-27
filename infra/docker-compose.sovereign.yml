@@ -31,7 +31,7 @@ x-common-env: &common-env
   S3_FORCE_PATH_STYLE: "true"
   LANGUAGETOOL_URL: http://languagetool:8010/v2
   TUS_HOOK_SECRET: ${TUS_HOOK_SECRET:-dev-hook-secret}
-  UPLOAD_MAX_BYTES: "5368709120"
+  UPLOAD_MAX_BYTES: "26843545600"
   APP_ENV: ${APP_ENV:-production}
 
 # Sprachmodell und Fallbacks für Sovereign-Worker: selfhost-eu (vLLM im Stack) oder mistral-eu (EU-Anbieter).

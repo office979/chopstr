@@ -23,7 +23,7 @@ x-common-env: &common-env
   S3_FORCE_PATH_STYLE: "true"
   LANGUAGETOOL_URL: http://languagetool:8010/v2
   TUS_HOOK_SECRET: ${TUS_HOOK_SECRET:-dev-hook-secret}
-  UPLOAD_MAX_BYTES: "5368709120"
+  UPLOAD_MAX_BYTES: "26843545600"
   APP_ENV: development
 
 services:
@@ -127,7 +127,7 @@ services:
       -s3-bucket=chopstr-sources
       -s3-endpoint=http://minio:9000
       -s3-object-prefix=uploads/
-      -max-size=5368709120
+      -max-size=26843545600
       -hooks-http=http://web:3000/api/tus/hooks?secret=${TUS_HOOK_SECRET:-dev-hook-secret}
       -hooks-enabled-events=pre-create,post-finish
       -behind-proxy

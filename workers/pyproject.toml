@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 asr = ["faster-whisper>=1.1", "pyannote.audio>=3.3", "torch"]
-nlp = ["spacy>=3.7"]
+nlp = ["spacy>=3.8,<3.9"]
 vision = ["opencv-python-headless>=4.9"]
 dev = [
   "pytest>=8",

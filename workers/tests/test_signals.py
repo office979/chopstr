@@ -57,3 +57,4 @@ def test_combined_and_payload(tmp_path):
     assert payload["n_bins"] == 6
     assert len(payload["values"]) == 6
     assert isinstance(payload["seeds"], list)
+    assert payload["laughter_values"] == []  # Lachen wird noch nicht berechnet, ein Schlüssel für alle Leser

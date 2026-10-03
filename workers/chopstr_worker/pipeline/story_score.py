@@ -1,7 +1,8 @@
 """Story-Engine (Phase 2): LLM schlägt Momente vor, Rubrik bewertet mit Gates und Belegzitaten.
 
 Zweistufig, damit es bei 90-Min-Podcasts bezahlbar bleibt:
-  Stufe A (pro Kapitel): ``propose`` mit ``propose_moments_v1``
+  Stufe A (pro Kapitel): ``propose`` mit dem gepinnten ``propose_moments`` (v1; ab Fassung 2 v2 mit
+                         Episodenübersicht aus ``overview``, Seeds und Policy, AP5)
   Stufe B (pro Vorschlag): ``score`` mit ``score_clip_v2``; bei offenem Kontext erweitert
                            ``score_with_repair`` die Grenzen und bewertet neu (max. 2 Runden).
 
@@ -18,7 +19,9 @@ und ``prompts.load`` (versionierte Prompts).
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from typing import Any
 
 from .. import editorial, prompts
@@ -48,6 +51,80 @@ PROPOSE_SCHEMA = {
     },
     "required": ["moments"],
 }
+
+# Antwort zu ``propose_moments_v2`` (AP5): Obermenge von PROPOSE_SCHEMA. ``first_sent``, ``last_sent``,
+# ``structure`` und ``why`` bleiben Pflicht; dazu Payoff, Einstieg, Kontext, Funktion, Versprechen und
+# Suchrichtung. ``viewer_promise`` und ``central_idea`` dürfen null sein (der Heuristik-Provider kennt sie
+# nicht). Nach dem Aufruf prüft ``validate_moments_v2`` jede Antwort deterministisch gegen dieses Schema.
+NARRATIVE_TYPES = ["insight", "problem_solution", "story", "demonstration", "debate", "comedy", "how_to"]
+DIRECTIONS = ["both", "payoff_only", "opening_only"]
+PROPOSE_SCHEMA_V2 = {
+    "type": "object",
+    "properties": {
+        "moments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    **PROPOSE_SCHEMA["properties"]["moments"]["items"]["properties"],
+                    "payoff_sent": {"type": "integer"},
+                    "opening_sent": {"type": "integer"},
+                    "required_context_sents": {"type": "array", "items": {"type": "integer"}},
+                    "narrative_type": {"type": "string", "enum": NARRATIVE_TYPES},
+                    "viewer_promise": {"type": ["string", "null"]},
+                    "central_idea": {"type": ["string", "null"]},
+                    "direction": {"type": "string", "enum": DIRECTIONS},
+                },
+                "required": [
+                    *PROPOSE_SCHEMA["properties"]["moments"]["items"]["required"],
+                    "payoff_sent", "opening_sent", "required_context_sents", "narrative_type",
+                    "viewer_promise", "central_idea", "direction",
+                ],  # fmt: skip
+            },
+        }
+    },
+    "required": ["moments"],
+}
+
+# Antwort zu ``episode_overview_v1`` (AP5). Jede Angabe trägt Satznummern; was der Analyst nicht kennt,
+# ist null. Die Übersicht dient nur der Suche, nie als Zitat- oder Schnittquelle.
+_SENTS = {"type": "array", "items": {"type": "integer"}}
+_REF = {"type": ["integer", "null"]}
+
+
+def _entries(props: dict[str, Any], required: list[str]) -> dict[str, Any]:
+    return {"type": ["array", "null"], "items": {"type": "object", "properties": props, "required": required}}
+
+
+OVERVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "topics": _entries({"label": {"type": ["string", "null"]}, "sents": _SENTS}, ["label", "sents"]),
+        "speakers": _entries({"speaker": {"type": "string"}, "role": {"type": ["string", "null"]}, "sents": _SENTS}, ["speaker", "role", "sents"]),
+        "claims": _entries({"sent": {"type": "integer"}, "summary": {"type": ["string", "null"]}}, ["sent", "summary"]),
+        "evidence": _entries({"sent": {"type": "integer"}, "supports_sent": _REF}, ["sent", "supports_sent"]),
+        "objections": _entries({"sent": {"type": "integer"}, "against_sent": _REF}, ["sent", "against_sent"]),
+        "limitations": _entries({"sent": {"type": "integer"}, "limits_sent": _REF}, ["sent", "limits_sent"]),
+        "corrections": _entries({"sent": {"type": "integer"}, "corrects_sent": _REF}, ["sent", "corrects_sent"]),
+        "dependencies": _entries(
+            {"claim": _REF, "reason": _REF, "example": _REF, "limitation": _REF, "conclusion": _REF},
+            ["claim", "reason", "example", "limitation", "conclusion"],
+        ),
+        "heuristic": {"type": "boolean"},
+    },
+    "required": ["topics", "speakers", "claims", "evidence", "objections", "limitations", "corrections", "dependencies", "heuristic"],
+}
+# Satznummern je Eintrag der Übersicht: Hauptfeld (ohne gültige Nummer fällt der Eintrag weg) und Bezüge
+# (ungültige werden null) bzw. Listen (ungültige Nummern fallen heraus).
+_OVERVIEW_MAIN = {"claims": "sent", "evidence": "sent", "objections": "sent", "limitations": "sent", "corrections": "sent"}
+_OVERVIEW_REFS = {
+    "evidence": ("supports_sent",),
+    "objections": ("against_sent",),
+    "limitations": ("limits_sent",),
+    "corrections": ("corrects_sent",),
+    "dependencies": ("claim", "reason", "example", "limitation", "conclusion"),
+}
+_OVERVIEW_LISTS = {"topics": "sents", "speakers": "sents"}
 
 # Bestandsschema der Fassung ``score_clip_v1``: fünf Kriterien auf einer Skala von 0 bis 10. Es wird
 # nicht mehr an das Modell geschickt, bleibt aber die verbindliche Beschreibung dessen, was jedes
@@ -113,12 +190,23 @@ POLICY_TO_LEGACY = {
 LEGACY_TO_POLICY = {v: k for k, v in POLICY_TO_LEGACY.items()}
 LEGACY_SCALE_MAX = 10
 
+# Redaktionelle Teilwerte nach Master-Prompt Abschnitt 19 (AP9, ab score_clip_v3): Anker 0 bis 4, je mit
+# wörtlichem Beleg. Die Eigenständigkeit gegenüber anderen Kandidaten (``distinctiveness_vs_others``) misst
+# kein Modell, sie rechnet ``story_engine.select_best``.
+EDITORIAL_SUBSCORE_KEYS = (
+    "audience_relevance", "opening_clarity", "content_strength", "progress", "evidence_quality", "closing",
+    "naturalness",
+)  # fmt: skip
+SUBSCORE_SCALE_MAX = 4
+_CLIP_DELIMITER = re.compile(r"<(/?)clip>", re.IGNORECASE)
+_QUOTES = "\"'„“”‚‘’»«"
+
 
 def system_prompt() -> str:
-    return prompts.load("system_editor").render()
+    return prompts.load_pinned("system_editor").render()
 
 
-def rubric_schema(pol: editorial.Policy | None = None) -> dict:
+def rubric_schema(pol: editorial.Policy | None = None, subscores: bool = False) -> dict:
     """Antwortschema zur Grundlage: sieben Kriterien auf ihrer Skala, je mit Belegzitat.
 
     ``required`` enthält bewusst nur Gates und Flags, nicht die Punkte. Grund: neben dem Sprachmodell
@@ -127,6 +215,10 @@ def rubric_schema(pol: editorial.Policy | None = None) -> dict:
     sieben flachen Schlüsseln würde ihn abwürgen, ohne dass dadurch eine Bewertung besser würde.
     Dass am Ende beide Rubriken vollständig dastehen, stellt ``_harmonise`` sicher; kommt überhaupt
     keine Punktzahl, scheitert es dort laut.
+
+    ``subscores`` (ab ``score_clip_v3``, AP9): zusätzlich ``editorial_subscores`` nach Master-Prompt 19,
+    je Teilwert ``value`` 0 bis 4 und ``evidence``. Nicht in ``required``, weil die Heuristik sie nicht
+    liefert; geprüft wird in ``editorial_subscores``.
     """
     pol = pol or editorial.load()
     props: dict[str, Any] = {
@@ -143,6 +235,20 @@ def rubric_schema(pol: editorial.Policy | None = None) -> dict:
         "suggested_title_card": {"type": "string"},
         "why": {"type": "string"},
     }
+    if subscores:
+        entry = {
+            "type": "object",
+            "properties": {
+                "value": {"type": "integer", "minimum": 0, "maximum": SUBSCORE_SCALE_MAX},
+                "evidence": {"type": "string", "description": "wörtliches Zitat aus dem Kandidaten"},
+            },
+            "required": ["value", "evidence"],
+        }
+        props["editorial_subscores"] = {
+            "type": "object",
+            "properties": {k: entry for k in EDITORIAL_SUBSCORE_KEYS},
+            "required": list(EDITORIAL_SUBSCORE_KEYS),
+        }
     return {
         "type": "object",
         "properties": props,
@@ -203,7 +309,7 @@ def weights(p: prompts.Prompt | None = None) -> dict[str, float]:
     ``policy_weights``.
     """
     pol = editorial.load()
-    p = p or prompts.load("score_clip")
+    p = p or prompts.load_pinned("score_clip", pol)
     drift = weight_drift(p, pol)
     if drift:
         log.warning(
@@ -215,8 +321,29 @@ def weights(p: prompts.Prompt | None = None) -> dict[str, float]:
     return legacy_weights(pol)
 
 
-def propose(chapter: list[Sentence], brief: dict[str, Any], llm: LLM) -> list[dict]:
-    p = prompts.load("propose_moments")
+def propose(
+    chapter: list[Sentence],
+    brief: dict[str, Any],
+    llm: LLM,
+    overview: dict[str, Any] | None = None,
+    seeds: list[float] | None = None,
+    policy: editorial.Policy | None = None,
+) -> list[dict]:
+    """Momente eines Kapitels nach dem gepinnten ``propose_moments``.
+
+    Version 2 gilt nur, wenn die Policy sie pinnt UND die Suche verdrahtet ist
+    (``implementation.search.payoff_first``, ``editorial.search_settings(pol)["wired"]``): dann zusätzlich
+    Policy-Text mit Moment-Typen und Längenfenster, Episodenübersicht (aus ``overview``), Seeds als Sätze
+    mit Sekunde und das Kapitel in Begrenzern; die Antwort wird mit ``validate_moments_v2`` geprüft. Sonst,
+    auch unter Fassung 2 mit Schalter aus, der Pfad vor AP5 mit ``propose_moments_v1`` (``overview``,
+    ``seeds`` und ``policy`` bleiben ungenutzt); das ist der Rollback."""
+    pol = policy or editorial.load()
+    p = prompts.load_pinned("propose_moments", pol)
+    if p.version >= 2:
+        search = editorial.search_settings(pol)
+        if search is not None and search["wired"]:
+            return _propose_v2(p, chapter, brief, llm, overview, seeds, pol)
+        p = prompts.load_pinned("propose_moments", editorial.load(1))  # Pin der Fassung 1
     user = p.render(
         audience=brief.get("audience"),
         wanted=brief.get("wanted"),
@@ -232,6 +359,187 @@ def propose(chapter: list[Sentence], brief: dict[str, Any], llm: LLM) -> list[di
             m["prompt_version"] = p.prompt_version
             moments.append(m)
     return moments
+
+
+def propose_policy_text(pol: editorial.Policy) -> str:
+    """Kennung der Grundlage, ``Policy.als_prompt_text``, Moment-Typen mit Schlüssel und das harte
+    Längenfenster (für v2). Die erste Zeile „GRUNDLAGE: clip_policy_vN“ liest der Heuristik-Provider, damit
+    er dieselbe Fassung nutzt wie der Aufrufer."""
+    lines = [f"GRUNDLAGE: {editorial.policy_version(pol.version)}", pol.als_prompt_text(), ""]
+    lines.append(
+        f"LÄNGENFENSTER: gut zwischen {pol.gut_von_s:.0f} und {pol.gut_bis_s:.0f} s, "
+        f"nie unter {pol.hart_min_s:.0f} s und nie über {pol.hart_max_s:.0f} s."
+    )
+    lines.append("MOMENT-TYPEN (Schlüssel): " + ", ".join(f"{t.schluessel} ({t.name})" for t in pol.moment_typen))
+    return "\n".join(lines)
+
+
+def seed_lines(chapter: list[Sentence], seeds: list[float] | None) -> str | None:
+    """Je Heatmap-Seed im Kapitel der Satz an dieser Sekunde: „Sekunde 34, Satz 12: Text“. ``None`` ohne Seed."""
+    out = []
+    for t in sorted(float(x) for x in seeds or ()):
+        s = next((s for s in chapter if s.start <= t <= s.end), None)
+        if s is None and chapter and chapter[0].start <= t <= chapter[-1].end:
+            s = next((s for s in chapter if s.start >= t), None)  # Seed in einer Pause: nächster Satz
+        if s is not None:
+            out.append(f"Sekunde {t:.0f}, Satz {s.idx}: {s.text}")
+    return "\n".join(out) or None
+
+
+_DELIMITER = re.compile(r"<(/?)(chapter|seeds|episode_overview)>", re.IGNORECASE)
+
+
+def mask_delimiters(text: str | None) -> str | None:
+    """Begrenzer der v2-Prompts im Transkript oder in der Übersicht unschädlich machen: „</chapter>“ wird
+    „[/chapter]“, damit Daten den Datenblock nicht vorzeitig schließen."""
+    return None if text is None else _DELIMITER.sub(lambda m: f"[{m.group(1)}{m.group(2)}]", text)
+
+
+def _sent_no(value: Any, valid: set[int]) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value in valid else None
+
+
+def validate_moments_v2(out: dict[str, Any], valid_idx: set[int]) -> tuple[list[dict], list[dict]]:
+    """Antwort zu ``propose_moments_v2`` deterministisch gegen ``PROPOSE_SCHEMA_V2`` prüfen.
+
+    Ein Moment fällt weg, wenn eine Pflicht aus PROPOSE_SCHEMA fehlt, ein Wert nicht im Schema liegt,
+    eine Satznummer außerhalb des Kapitels liegt oder ``opening_sent``, ``payoff_sent`` oder ein
+    Kontextsatz nicht zwischen ``first_sent`` und ``last_sent`` steht oder der Einstieg nach dem Payoff
+    liegt. Fehlen nur Felder, die erst v2 verlangt, bleibt der Moment als Antwort im Format von v1 erhalten
+    (Rückwärtskompatibilität): die Felder stehen auf ``null`` (Kontext leer) und ``missing_v2_fields`` nennt
+    sie. Ist ``required_context_sents`` null, gilt der Kontext als unbekannt (leer, ``context_unknown``).
+    Vollständige Momente stehen vor unvollständigen (``story_engine`` nimmt je Kapitel die ersten).
+    Rückgabe: gültige Momente und Verworfene mit Grund."""
+    v1_required = PROPOSE_SCHEMA["properties"]["moments"]["items"]["required"]
+    v2_only = [k for k in PROPOSE_SCHEMA_V2["properties"]["moments"]["items"]["required"] if k not in v1_required]
+    kept, dropped = [], []
+    moments = out.get("moments") if isinstance(out, dict) else None
+    for m in moments if isinstance(moments, list) else []:
+        reason = None
+        if not isinstance(m, dict):
+            reason = "kein Objekt"
+        elif missing := [k for k in v1_required if k not in m]:
+            reason = "Pflichtfelder fehlen: " + ", ".join(missing)
+        else:
+            m = dict(m)
+            absent = [k for k in v2_only if k not in m]
+            for k in absent:
+                m[k] = [] if k == "required_context_sents" else None
+            if m["required_context_sents"] is None:
+                m["required_context_sents"] = []
+                m["context_unknown"] = True
+            first, last = _sent_no(m["first_sent"], valid_idx), _sent_no(m["last_sent"], valid_idx)
+            inner = {k: m[k] for k in ("opening_sent", "payoff_sent") if k not in absent}
+            context = m["required_context_sents"]
+            if first is None or last is None or any(_sent_no(v, valid_idx) is None for v in inner.values()):
+                reason = "Satznummer außerhalb des Kapitels"
+            elif first > last or not all(first <= v <= last for v in inner.values()):
+                reason = "Einstieg oder Payoff außerhalb des Moments"
+            elif len(inner) == 2 and inner["opening_sent"] > inner["payoff_sent"]:
+                reason = "Einstieg nach dem Payoff"
+            elif not isinstance(context, list) or any(_sent_no(c, valid_idx) is None for c in context):
+                reason = "Kontextsatz außerhalb des Kapitels"
+            elif not all(first <= c <= last for c in context):
+                reason = "Kontextsatz außerhalb des Moments"
+            elif (
+                m["structure"] not in STRUCTURES
+                or ("narrative_type" not in absent and m["narrative_type"] not in NARRATIVE_TYPES)
+                or ("direction" not in absent and m["direction"] not in DIRECTIONS)
+            ):
+                reason = "Wert nicht im Schema (structure, narrative_type oder direction)"
+            elif not isinstance(m["why"], str) or not all(m[k] is None or isinstance(m[k], str) for k in ("viewer_promise", "central_idea")):
+                reason = "Text erwartet (why, viewer_promise, central_idea)"
+            elif absent:
+                m["missing_v2_fields"] = absent
+        if reason:
+            dropped.append({"moment": m, "reason": reason})
+        else:
+            kept.append(m)
+    kept.sort(key=lambda m: bool(m.get("missing_v2_fields")))  # stabil: vollständige zuerst
+    return kept, dropped
+
+
+def _propose_v2(
+    p: prompts.Prompt,
+    chapter: list[Sentence],
+    brief: dict[str, Any],
+    llm: LLM,
+    overview: dict[str, Any] | None,
+    seeds: list[float] | None,
+    pol: editorial.Policy,
+) -> list[dict]:
+    user = p.render(
+        audience=brief.get("audience"),
+        wanted=brief.get("wanted"),
+        exclude=brief.get("exclude"),
+        platform=brief.get("platform", "linkedin"),
+        policy=propose_policy_text(pol),
+        episode_overview=mask_delimiters(json.dumps(overview, ensure_ascii=False, sort_keys=True)) if overview else None,
+        seeds=mask_delimiters(seed_lines(chapter, seeds)),
+        chapter_numbered=mask_delimiters(numbered(chapter)),
+    )
+    out = llm.structured(system_prompt(), user, PROPOSE_SCHEMA_V2, p.tool or "propose_moments", p.prompt_version, job_type="llm_propose")
+    moments, dropped = validate_moments_v2(out, {s.idx for s in chapter})
+    for d in dropped:
+        log.info("Vorschlag aus %s verworfen: %s", p.prompt_version, d["reason"])
+    incomplete = sum(1 for m in moments if m.get("missing_v2_fields"))
+    unknown = sum(1 for m in moments if m.get("context_unknown"))
+    if incomplete or unknown:
+        log.warning(
+            "%s: %d von %d Vorschlägen ohne v2-Felder, %d mit unbekanntem Kontext (abgewertet, nach hinten sortiert)",
+            p.prompt_version, incomplete, len(moments), unknown,
+        )  # fmt: skip
+    for m in moments:
+        m["prompt_version"] = p.prompt_version
+    return moments
+
+
+def validate_overview(out: dict[str, Any], valid_idx: set[int]) -> dict[str, Any]:
+    """Antwort zu ``episode_overview_v1`` deterministisch prüfen: Satznummern außerhalb des Kapitels
+    werden verworfen (Eintrag ohne gültigen Hauptsatz fällt weg, ungültiger Bezug wird null, ungültige
+    Listennummern fallen heraus); ein Abschnitt, der keine Liste ist, wird null."""
+    clean: dict[str, Any] = {}
+    for key in OVERVIEW_SCHEMA["required"]:
+        if key == "heuristic":
+            continue
+        raw = out.get(key) if isinstance(out, dict) else None
+        if not isinstance(raw, list):
+            clean[key] = None
+            continue
+        entries = []
+        for e in raw:
+            if not isinstance(e, dict):
+                continue
+            e = dict(e)
+            main = _OVERVIEW_MAIN.get(key)
+            if main and _sent_no(e.get(main), valid_idx) is None:
+                continue
+            for ref in _OVERVIEW_REFS.get(key, ()):
+                e[ref] = _sent_no(e.get(ref), valid_idx)
+            lst = _OVERVIEW_LISTS.get(key)
+            if lst:
+                e[lst] = [n for n in (e.get(lst) or []) if _sent_no(n, valid_idx) is not None]
+            entries.append(e)
+        clean[key] = entries
+    clean["heuristic"] = bool(out.get("heuristic")) if isinstance(out, dict) else False
+    return clean
+
+
+def overview(chapter: list[Sentence], llm: LLM, policy: editorial.Policy | None = None) -> dict[str, Any]:
+    """Episodenübersicht eines Kapitels nach dem gepinnten ``episode_overview`` (ab Fassung 2).
+
+    Nur für die Suche (``propose`` Version 2), nie als Zitat- oder Schnittquelle. Fassung 1 pinnt den
+    Prompt nicht; dort scheitert der Aufruf laut (``PolicyError``)."""
+    pol = policy or editorial.load()
+    p = prompts.load_pinned("episode_overview", pol)
+    user = p.render(chapter_numbered=mask_delimiters(numbered(chapter)))
+    out = llm.structured(system_prompt(), user, OVERVIEW_SCHEMA, p.tool or "episode_overview", p.prompt_version, job_type="llm_overview")
+    clean = validate_overview(out, {s.idx for s in chapter})
+    clean["first_sent"] = chapter[0].idx if chapter else None
+    clean["last_sent"] = chapter[-1].idx if chapter else None
+    clean["search_only"] = True
+    clean["prompt_version"] = p.prompt_version
+    return clean
 
 
 def _evidence_keys(pol: editorial.Policy) -> list[str]:
@@ -349,17 +657,65 @@ def _harmonise(r: dict, pol: editorial.Policy) -> tuple[dict[str, float], list[s
     return punkte, geraten
 
 
+def _normalised(text: str) -> str:
+    return " ".join(str(text).lower().split())
+
+
+def editorial_subscores(raw: Any, text: str, source: str, heuristic: bool = False) -> dict[str, Any]:
+    """Teilwerte nach Master-Prompt 19 (AP9) deterministisch prüfen.
+
+    Ein Wert gilt nur als ganze Zahl von 0 bis ``SUBSCORE_SCALE_MAX``. Ab 1 braucht er ein Zitat, das
+    wörtlich im Kandidatentext steht (Groß- und Kleinschreibung, Leerraum und umschließende
+    Anführungszeichen zählen nicht); ein nicht gefundenes Zitat verwirft den Wert auch bei 0. Verworfene
+    Werte stehen auf ``null`` und in ``ungrounded``. Die Heuristik misst keinen der Teilwerte: alle
+    ``null``, ``not_measured`` nennt sie. Ohne Ergebnisdaten bleibt alles ``uncalibrated``."""
+    entries = raw if isinstance(raw, dict) and not heuristic else {}
+    haystack = _normalised(text)
+    values: dict[str, int | None] = {}
+    evidence: dict[str, str] = {}
+    ungrounded: list[str] = []
+    for key in EDITORIAL_SUBSCORE_KEYS:
+        entry = entries.get(key)
+        value = entry.get("value") if isinstance(entry, dict) else None
+        quote = str(entry.get("evidence") or "").strip().strip(_QUOTES).strip() if isinstance(entry, dict) else ""
+        if not (isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= SUBSCORE_SCALE_MAX):
+            values[key] = None
+            continue
+        if (quote and _normalised(quote) not in haystack) or (value >= 1 and not quote):
+            values[key] = None
+            ungrounded.append(key)
+            continue
+        values[key] = value
+        evidence[key] = quote
+    return {
+        "scale_max": SUBSCORE_SCALE_MAX,
+        "calibration": "uncalibrated",
+        "source": "heuristic" if heuristic else source,
+        "values": values,
+        "evidence": evidence,
+        "ungrounded": ungrounded,
+        "not_measured": [k for k, v in values.items() if v is None and k not in ungrounded],
+    }
+
+
 def score(span_sents: list[Sentence], brief: dict[str, Any], llm: LLM) -> dict:
-    p = prompts.load("score_clip")
     pol = editorial.load()
+    p = prompts.load_pinned("score_clip", pol)
     text = " ".join(s.text for s in span_sents)
+    # Ab score_clip_v3 (AP9) steht der Kandidat zwischen <clip>-Begrenzern; ein Begrenzer im Transkript wird
+    # unschädlich gemacht, damit Daten den Datenblock nicht schließen (Master-Prompt 22).
+    subscores = p.version >= 3
+    candidate = numbered(span_sents)
+    if subscores:
+        candidate = _CLIP_DELIMITER.sub(lambda m: f"[{m.group(1)}clip]", candidate)
     user = p.render(
         audience=brief.get("audience"),
         platform=brief.get("platform", "linkedin"),
-        candidate_numbered=numbered(span_sents),
+        candidate_numbered=candidate,
         policy=pol.als_prompt_text(),
     )
-    r = llm.structured(system_prompt(), user, rubric_schema(pol), p.tool or "score_clip", p.prompt_version, job_type="llm_score")
+    schema = rubric_schema(pol, subscores=subscores)
+    r = llm.structured(system_prompt(), user, schema, p.tool or "score_clip", p.prompt_version, job_type="llm_score")
     punkte, geraten = _harmonise(r, pol)
     r["gate_passed"] = not (r["needs_earlier_context"] or r["ends_before_answer"] or r["unresolved_references"])
     r["rubric_points"] = punkte  # alle sieben auf der Skala der Grundlage
@@ -370,6 +726,9 @@ def score(span_sents: list[Sentence], brief: dict[str, Any], llm: LLM) -> dict:
     r["prompt_version"] = p.prompt_version
     r["policy_version"] = editorial.policy_version(pol.version)
     r["model_id"] = llm.model()
+    if subscores:
+        heuristic = bool(getattr(llm, "is_heuristic", False))
+        r["editorial_subscores"] = editorial_subscores(r.get("editorial_subscores"), text, p.prompt_version, heuristic)
     return r
 
 
@@ -394,19 +753,31 @@ def score_with_repair(sents: list[Sentence], first: int, last: int, brief: dict[
 
 __all__ = [
     "DEFAULT_WEIGHTS",
+    "DIRECTIONS",
+    "EDITORIAL_SUBSCORE_KEYS",
     "LEGACY_KEYS",
     "LEGACY_TO_POLICY",
+    "NARRATIVE_TYPES",
+    "OVERVIEW_SCHEMA",
     "POLICY_TO_LEGACY",
     "PROPOSE_SCHEMA",
+    "PROPOSE_SCHEMA_V2",
     "RUBRIC_SCHEMA",
     "STRUCTURES",
+    "SUBSCORE_SCALE_MAX",
+    "editorial_subscores",
     "legacy_weights",
+    "overview",
     "policy_weights",
     "propose",
+    "propose_policy_text",
     "rubric_schema",
     "score",
     "score_with_repair",
+    "seed_lines",
     "system_prompt",
+    "validate_moments_v2",
+    "validate_overview",
     "weight_drift",
     "weights",
 ]

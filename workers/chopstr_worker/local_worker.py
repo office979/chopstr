@@ -112,6 +112,11 @@ class LocalWorker:
                 signal.signal(sig, self.request_stop)
 
     def run_forever(self) -> None:
+        # Dieselbe Startprüfung wie der Temporal-Worker: fehlt eine gemeinsame Datei, endet der Start mit
+        # einer deutschen Meldung statt mit einem Traceback aus der Statuszeile darunter.
+        from .worker import check_assets
+
+        check_assets()
         log.info("local worker start interval=%.1fs outbox_every=%.0fs", self.interval_s, self.outbox_every_s)
         # Welcher Stand ist geladen? Python liest Module beim Start, ein laufender Worker arbeitet
         # also mit dem Code von damals. Ohne diese Zeile sieht ein Lauf mit veraltetem Code genauso
@@ -346,6 +351,10 @@ def main(argv: list[str] | None = None) -> int:
     worker = LocalWorker(interval_s=args.interval, outbox_every_s=args.outbox_every, limit=args.limit)
     worker.install_signal_handlers()
     if args.once:
+        # Dieselbe Startprüfung wie run_forever, auch für einen einzelnen Durchlauf.
+        from .worker import check_assets
+
+        check_assets()
         counts = worker.run_once()
         failed = sum(1 for _k, _i, r in worker.processed if r != "ok")
         log.info("once done %s failed=%s", " ".join(f"{k}={v}" for k, v in counts.items()), failed)

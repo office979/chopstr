@@ -31,7 +31,7 @@ REFERENZ_MEDIAN_S = 41.0  # Median der 105 guten Beispielclips
 
 @pytest.fixture
 def policy():
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     return editorial.load()
 
 
@@ -87,12 +87,12 @@ def test_die_laenge_kommt_aus_der_grundlage_und_nicht_aus_dem_code(policy, tmp_p
         """),
         encoding="utf-8",
     )
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path))
     try:
         assert heuristic_llm.score_clip(zehn_sekunden)["laenge_ok"] is True
     finally:
-        editorial.load.cache_clear()
+        editorial.clear_cache()
 
 
 def _kriterien_yaml() -> str:
@@ -288,3 +288,86 @@ def test_vorschlaege_nennen_den_moment_typ_in_der_begruendung(policy):
     for m in moments:
         assert m["why"].startswith("Heuristik ohne Sprachmodell")
         assert "Sekunden" in m["why"]
+
+
+# -- Fassung 2: gleiche Pronomen- und Rückverweisregel wie das Gate (AP4) ----------------------------------
+@pytest.fixture
+def policy_v2(monkeypatch):
+    from chopstr_worker.pipeline import dach_nlp
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    monkeypatch.setattr(dach_nlp, "nlp", lambda: None)
+    editorial.clear_cache()
+    yield editorial.load()
+    editorial.clear_cache()
+
+
+GATE_FAELLE = [
+    PRONOMEN_START,  # Treffer
+    "Sie hat dann jede Schicht selbst mitgemacht.",  # Treffer
+    AUFSCHLAG,  # kein Treffer
+    "Es gibt bei uns keine Nachtschicht mehr.",  # „Es“ ist Platzhalter
+    "Sie können morgen selbst ausprobieren, wie gut es läuft, glauben Sie mir!",  # Höflichkeitsform
+    "Frau Brenner kam aus der Gastronomie, und sie hatte nie ein Lager gesehen.",  # Bezug im Satz
+    "Ich sehe das anders.",  # Rückverweis
+    "Das ist genau der Punkt.",  # Rückverweis
+]
+
+
+@pytest.mark.parametrize("satz", GATE_FAELLE)
+def test_v2_standalone_folgt_den_gates(policy_v2, satz):
+    from chopstr_worker.pipeline import editorial_gates
+
+    words, sents = editorial_gates.from_sentence_texts([{"speaker": "SPEAKER_00", "text": satz}])
+    pronomen = not editorial_gates.unresolved_pronoun(words, sents, 0, 0, policy_v2)["passed"]
+    verweis = not editorial_gates.back_reference(words, sents, 0, 0, policy_v2)["passed"]
+    m = heuristic_llm._merkmale([{"idx": 0, "speaker": "SPEAKER_00", "text": satz}], policy_v2)
+    erwartet = 1.0 - (0.40 if pronomen else 0.0) - (0.25 if verweis else 0.0)
+    assert heuristic_llm._standalone(m, policy_v2) == pytest.approx(erwartet)
+
+
+def test_v2_hoeflichkeitsform_kostet_nicht_mehr_v1_bleibt(policy, policy_v2):
+    satz = [{"idx": 0, "speaker": "SPEAKER_00", "text": "Sie können morgen selbst ausprobieren, wie gut es läuft, glauben Sie mir!"}]
+    v1 = editorial.load(1)
+    assert heuristic_llm._standalone(heuristic_llm._merkmale(satz, v1), v1) == pytest.approx(0.60)
+    assert heuristic_llm._standalone(heuristic_llm._merkmale(satz, policy_v2), policy_v2) == pytest.approx(1.0)
+
+
+def test_v2_pronomen_kostet_weiter(policy_v2):
+    mit_pronomen = heuristic_llm.score_clip(_clip(REFERENZ_MEDIAN_S, PRONOMEN_START))
+    mit_aufschlag = heuristic_llm.score_clip(_clip(REFERENZ_MEDIAN_S, AUFSCHLAG))
+    assert mit_pronomen["rubrik"]["standalone"] < mit_aufschlag["rubrik"]["standalone"] == policy_v2.skala_max
+
+
+# -- AP9: Länge nur als Abzug (bewertung.length_only_as_penalty, nur Fassung 2) --------------------------------
+def _merkmale(p: editorial.Policy, text: str = AUFSCHLAG):
+    return heuristic_llm._merkmale(heuristic_llm.parse_numbered(_clip(REFERENZ_MEDIAN_S, text)), p)
+
+
+def test_ap9_v1_still_gives_the_length_bonus(policy):
+    assert editorial.length_only_as_penalty(policy) is False
+    m = _merkmale(policy)
+    assert heuristic_llm._aufloesung(m, policy, True) == pytest.approx(heuristic_llm._aufloesung(m, policy, False) + 0.20)
+    assert heuristic_llm._zielgruppe(m, policy, True) == pytest.approx(heuristic_llm.NEUTRAL + 0.10)
+
+
+def test_ap9_no_length_bonus_under_v2(policy_v2):
+    """Länge wirkt unter Fassung 2 nur über laenge_abzug mit gemessener Abspieldauer, nicht zusätzlich geschätzt."""
+    assert editorial.length_only_as_penalty(policy_v2) is True
+    m = _merkmale(policy_v2)
+    assert heuristic_llm._aufloesung(m, policy_v2, True) == heuristic_llm._aufloesung(m, policy_v2, False)
+    assert heuristic_llm._zielgruppe(m, policy_v2, True) == heuristic_llm._zielgruppe(m, policy_v2, False) == heuristic_llm.NEUTRAL
+    im_fenster = heuristic_llm.score_clip(_clip(REFERENZ_MEDIAN_S, AUFSCHLAG))
+    zu_kurz = heuristic_llm.score_clip(_clip(HEUTIGER_MEDIAN_S, AUFSCHLAG))
+    assert im_fenster["rubrik"]["aufloesung"] == zu_kurz["rubrik"]["aufloesung"]
+    assert im_fenster["rubrik"]["zielgruppe"] == zu_kurz["rubrik"]["zielgruppe"] == policy_v2.skala_max * heuristic_llm.NEUTRAL
+    assert zu_kurz["laenge_abzug"] > 0 == im_fenster["laenge_abzug"], "der Abzug bleibt"
+
+
+def test_ap9_length_only_as_penalty_rejects_non_bool(policy_v2):
+    import copy
+
+    roh = copy.deepcopy(policy_v2.roh)
+    roh["bewertung"]["length_only_as_penalty"] = "ja"
+    with pytest.raises(editorial.PolicyError, match="length_only_as_penalty"):
+        editorial.length_only_as_penalty(editorial.Policy(version=2, stand="", roh=roh))

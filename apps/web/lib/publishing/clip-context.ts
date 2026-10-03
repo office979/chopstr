@@ -9,7 +9,7 @@ import { aspectForSource } from "@/lib/clips/presets";
 import { ausgabe, type Ausgabe } from "@/lib/clips/ausgabe";
 import type { Candidate, Clip, GuestApproval, HookVersion, Plan, Source, Workspace } from "@/lib/repo/types";
 import type { ClipExtras } from "@/lib/repo/types-publishing";
-import { gateReasons, type GateReason } from "./gates";
+import { gateReasons, verdictReason, type GateReason } from "./gates";
 
 /* Clip mit allem, was Gates, Decision Log und Serien-Prüfung brauchen: Quelle, Kandidat, jüngste Gast-Freigabe,
  * aktuelle Hook-Version, Workspace, Plan und Zusatzspalten.
@@ -32,7 +32,8 @@ export interface ClipContext {
   veroeffentlichen: Ausgabe;
   /* Nachtragen, dass jemand selbst gepostet hat. Siehe lib/clips/ausgabe.ts, Zweck „eintragen". */
   eintragen: Ausgabe;
-  /* Dieselbe Antwort in der Form, die die Schnittstelle seit Phase 5 liefert. */
+  /* Dieselbe Antwort in der Form, die die Schnittstelle seit Phase 5 liefert, dazu das Urteil am
+   * Kandidaten (verdictReason), wie in /api/v1 und im Worker. */
   gates: GateReason[];
 }
 
@@ -86,6 +87,8 @@ export async function loadClipContext(sourceId: string, clipId: string): Promise
     tarifDarfPosten: Boolean(quota.plan?.features?.publishing),
   });
 
+  const verdict = verdictReason(clip.candidate_id, candidate);
+
   return {
     clip,
     extras: extra,
@@ -99,6 +102,6 @@ export async function loadClipContext(sourceId: string, clipId: string): Promise
     herunterladen,
     veroeffentlichen,
     eintragen,
-    gates: gateReasons(veroeffentlichen),
+    gates: verdict ? [...gateReasons(veroeffentlichen), verdict] : gateReasons(veroeffentlichen),
   };
 }

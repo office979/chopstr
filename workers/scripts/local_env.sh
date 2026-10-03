@@ -37,6 +37,12 @@ export ASR_COMPUTE="${ASR_COMPUTE:-int8}"
 export ASR_MODEL_DE="${ASR_MODEL_DE:-cstr/whisper-large-v3-turbo-german-int8_float32}"
 export HF_TOKEN="${HF_TOKEN:-}"                              # leer: Sprechertrennung wird übersprungen
 
+# -- Redaktionelle Grundlage ---------------------------------------------------------------------
+# CHOPSTR_POLICY_VERSION wählt die Fassung von packages/editorial/clip_policy_v<N>.yaml (Rollback-
+# Schalter, docs/ENTSCHEIDUNGEN.md P33). Hier bewusst nicht gesetzt: ohne Wert gilt der Standard des
+# Codes (editorial.POLICY_VERSION). Zum Vergleichen vor dem Start setzen, etwa
+#   export CHOPSTR_POLICY_VERSION=2
+
 # -- Web-App (Publishing über /api/internal/*) --------------------------------------------------
 export APP_INTERNAL_URL="${APP_INTERNAL_URL:-http://localhost:3000}"
 export INTERNAL_API_SECRET="${INTERNAL_API_SECRET:-}"

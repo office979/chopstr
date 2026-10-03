@@ -18,6 +18,7 @@ import contextlib
 import logging
 import signal
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 from . import config, residency
 from .activities import CPU_ACTIVITIES, GPU_ACTIVITIES
@@ -180,9 +181,78 @@ class _all:
             await w.__aexit__(*exc)
 
 
+def _require_list(data: Any, path: tuple[str, ...]) -> None:
+    """Pflichtschlüssel einer JSON-Datei: der Pfad muss existieren und auf eine nicht leere Liste zeigen."""
+    value = data
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            raise ValueError(f"Pflichtschlüssel {'.'.join(path)} fehlt")
+        value = value[key]
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"Pflichtschlüssel {'.'.join(path)} ist keine nicht leere Liste")
+
+
+def _load_pinned_prompts() -> None:
+    """Jeden Prompt laden, den die aktive Fassung pinnt; ein fehlender Pin fällt hier auf, nicht im Lauf."""
+    from . import editorial, prompts
+
+    policy = editorial.load()
+    for name in policy.prompt_pins:
+        prompts.load_pinned(name, policy)
+
+
+def check_assets() -> None:
+    """Startprüfung: redaktionelle Grundlage, gepinnte Prompts, Schriftenliste und Ausgaberegeln müssen
+    lesbar sein und ihre Pflichtschlüssel tragen.
+
+    Ohne diese Prüfung startet der Worker scheinbar gesund und scheitert erst mitten in der
+    Kandidatensuche (``PolicyError``) oder nach dem Encode (``FileNotFoundError``, ``KeyError``). Fehlt
+    etwas, bricht der Start mit einer deutschen Meldung ab, die sagt, was fehlt und welche Variable zählt."""
+    from . import editorial
+    from .pipeline import ausgabe_pruefung, captions_de
+
+    # (Bezeichnung, Variable, Prüfung, Voraussetzung). Scheitert die Voraussetzung, entfällt die Prüfung:
+    # sie würde denselben Fehler ein zweites Mal unter falscher Variable melden.
+    checks = (
+        ("Fassung der redaktionellen Grundlage", "CHOPSTR_POLICY_VERSION", editorial.active_version, None),
+        ("Redaktionelle Grundlage", "EDITORIAL_DIR", editorial.load, "CHOPSTR_POLICY_VERSION"),
+        ("Gepinnte Prompts", "PROMPTS_DIR", _load_pinned_prompts, "EDITORIAL_DIR"),
+        (
+            "Schriftenliste",
+            "CHOPSTR_CAPTION_FONTS",
+            lambda: _require_list(captions_de.schriften(), ("schriften",)),
+            None,
+        ),
+        (
+            "Ausgaberegeln",
+            "CHOPSTR_AUSGABE_REGELN",
+            lambda: _require_list(ausgabe_pruefung.regeln(), ("technische_pruefungen", "pruefungen")),
+            None,
+        ),
+    )
+    problems: list[str] = []
+    failed: set[str] = set()
+    for label, variable, load, requires in checks:
+        if requires in failed:
+            failed.add(variable)
+            continue
+        try:
+            load()
+        except Exception as exc:  # jede Ursache (fehlend, kaputtes YAML oder JSON) beendet den Start
+            failed.add(variable)
+            problems.append(f"  {label} ({variable}): {exc}")
+    if problems:
+        raise SystemExit(
+            "Der Worker startet nicht, weil gemeinsame Dateien fehlen oder unlesbar sind:\n"
+            + "\n".join(problems)
+            + "\nIm Image liegen sie unter /app/packages; die Variablen setzt infra/docker-compose.yml."
+        )
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    check_assets()
     queues = [q.strip() for q in args.queues.split(",") if q.strip()]
     asyncio.run(run_workers(queues, args.max_concurrent, schedules=args.ensure_schedules))
 

@@ -23,6 +23,16 @@ CONTRAST_MARKERS = (
     "um das einzuordnen", "nicht falsch verstehen", "das gilt nicht", "in unserem fall",
     "bei uns war das", "das ist aber die ausnahme", "das gilt nur", "mit einer einschränkung",
 )  # fmt: skip
+# Korrekturmarker (AP4, nur Regel v2): der Sprecher nimmt eine eigene Aussage zurück. Wortliste ohne Messung
+# (Herkunft H, origins.gates.later_correction.wordlist).
+CORRECTION_MARKERS = (
+    "ich korrigiere mich", "ich muss mich korrigieren", "muss ich korrigieren", "das stimmt so nicht",
+    "stimmt gar nicht", "das stimmt nöd", "das war falsch", "ich hab mich vertan", "ich habe mich vertan",
+    "nein, falsch", "nein, quatsch", "korrektur", "ich meinte", "ich meine natürlich", "um das richtigzustellen",
+)  # fmt: skip
+# Unter Regel v2 zusätzlich als Einschränkung (keine Korrektur): „genauer gesagt“ präzisiert; „ausser“ ist die
+# Schreibung ohne ß (Schweiz).
+CONTRAST_MARKERS_V2 = (*CONTRAST_MARKERS, "ausser", "genauer gesagt")
 LOOKAHEAD_S = 60.0
 MIN_OVERLAP = 0.15
 
@@ -54,7 +64,67 @@ def _lemmas(text: str) -> set[str]:
     return {_stem(t) for t in re.findall(r"[a-zäöüß]+", text.lower()) if len(t) > 3}
 
 
-def find_later_qualifications(sents: list[Sentence], clip_first: int, clip_last: int) -> list[dict]:
+def lexical_overlap(clip_text: str, later_text: str) -> float:
+    """Anteil der Inhaltswörter von ``later_text``, die auch in ``clip_text`` stehen (wie im Story-Graph)."""
+    lem = _lemmas(later_text)
+    return len(_lemmas(clip_text) & lem) / max(len(lem), 1)
+
+
+def _marker_tokens(marker: str) -> tuple[str, ...]:
+    return tuple(t for t in (dach_nlp.core_token(x) for x in marker.split()) if t)
+
+
+def find_marker(text: str, markers: tuple[str, ...]) -> str | None:
+    """Erster Marker aus ``markers``, der als ganze Wortfolge in ``text`` steht („außer“ trifft nicht
+    „außerdem“, Satzzeichen zählen nicht)."""
+    toks = [t for t in (dach_nlp.core_token(x) for x in text.split()) if t]
+    for m in markers:
+        mt = _marker_tokens(m)
+        if mt and any(tuple(toks[k : k + len(mt)]) == mt for k in range(len(toks) - len(mt) + 1)):
+            return m
+    return None
+
+
+def _find_later_qualifications_v2(sents: list[Sentence], clip_first: int, clip_last: int) -> list[dict]:
+    """Regel v2: Marker an Wortgrenzen, zusätzlich Korrekturmarker. Bei einer Korrektur zählt für den Bezug
+    auch der Satz danach, weil die Korrektur oft erst dort sagt, was sie richtigstellt."""
+    clip_text = " ".join(s.text for s in sents[clip_first : clip_last + 1])
+    end_t = sents[clip_last].end
+    hits = []
+    later = sents[clip_last + 1 :]
+    for n, s in enumerate(later):
+        if s.start - end_t > LOOKAHEAD_S:
+            break
+        marker = find_marker(s.text, CORRECTION_MARKERS)
+        kind = "correction"
+        if marker is None:
+            marker, kind = find_marker(s.text, CONTRAST_MARKERS_V2), "contrast"
+        if not marker:
+            continue
+        text = s.text
+        if kind == "correction" and n + 1 < len(later):
+            text = f"{s.text} {later[n + 1].text}"
+        overlap = lexical_overlap(clip_text, text)
+        if overlap >= MIN_OVERLAP:
+            hits.append(
+                {
+                    "sentence_idx": s.idx,
+                    "seconds_after": round(s.start - end_t, 1),
+                    "marker": marker,
+                    "text": s.text,
+                    "overlap": round(overlap, 2),
+                    "suggestion": f"Clip bis Satz {s.idx} verlängern oder Einschränkung als Text einblenden",
+                    "kind": kind,
+                }
+            )
+    return hits
+
+
+def find_later_qualifications(sents: list[Sentence], clip_first: int, clip_last: int, rule: str = "v1") -> list[dict]:
+    """Spätere Einschränkungen nach dem Clip. ``rule="v1"`` ist das Verhalten vor AP4 (Teilstring-Abgleich),
+    ``rule="v2"`` gleicht an Wortgrenzen ab und kennt Korrekturmarker (``kind``: contrast oder correction)."""
+    if rule == "v2":
+        return _find_later_qualifications_v2(sents, clip_first, clip_last)
     clip_text = " ".join(s.text for s in sents[clip_first : clip_last + 1])
     clip_lem = _lemmas(clip_text)
     end_t = sents[clip_last].end
@@ -83,7 +153,7 @@ def find_later_qualifications(sents: list[Sentence], clip_first: int, clip_last:
 
 
 def build_confirm_prompt(clip_text: str, later_text: str, seconds_after: float) -> tuple[str, prompts.Prompt]:
-    p = prompts.load("story_graph_confirm")
+    p = prompts.load_pinned("story_graph_confirm")
     return p.render(clip_text=clip_text, later_text=later_text, seconds_after=round(seconds_after)), p
 
 
@@ -106,4 +176,15 @@ def claims_in(text: str) -> list[str]:
     return out
 
 
-__all__ = ["CONFIRM_SCHEMA", "CONTRAST_MARKERS", "build_confirm_prompt", "claims_in", "confirm", "find_later_qualifications"]
+__all__ = [
+    "CONFIRM_SCHEMA",
+    "CONTRAST_MARKERS",
+    "CONTRAST_MARKERS_V2",
+    "CORRECTION_MARKERS",
+    "build_confirm_prompt",
+    "claims_in",
+    "confirm",
+    "find_later_qualifications",
+    "find_marker",
+    "lexical_overlap",
+]

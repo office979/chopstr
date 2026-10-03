@@ -1747,6 +1747,7 @@ def run(
     weights: dict[str, float] | None = None,
     on_progress: ProgressFn | None = None,
     max_candidates: int = MAX_CANDIDATES,
+    silence=None,
 ) -> DetectReport:
     """Alle vier Stufen. ``on_progress(done, total, n_candidates)`` wird nach jedem Kapitel aufgerufen.
 
@@ -1758,7 +1759,12 @@ def run(
     ``implementation.gates.discard_hard`` (AP4) verlassen Gate-Verletzer die Liste vor ``select_best`` (Grund
     ``gate:<schluessel>``, Quote je Gate in ``gate_rejections``). Unter Fassung 2 stehen die ClipCandidates im
     Bericht (AP8) und ihre kompakte Teilmenge additiv in der Rubrik. Mit ``roles.critic`` (AP6b) prüft der
-    Kritiker die Überlebenden von ``select_best`` (``apply_critic``)."""
+    Kritiker die Überlebenden von ``select_best`` (``apply_critic``).
+
+    ``silence`` ist eine optionale ``pipeline.silence.SilenceMap``. Sie wirkt nur darauf, ob an einer
+    Wortgrenze ueberhaupt eine Pause vorliegt: verschluckt das ASR eine, entsteht sonst keine
+    Satzgrenze und ein Clip beginnt mitten im Satz (Beleg in ``pipeline/silence.py``). Ohne sie
+    unveraendertes Verhalten."""
     brief = dict(brief or {})
     brand = dict(brand or {})
     weights = dict(weights) if weights else resolve_weights(brand.get("learned_weights"))
@@ -1766,11 +1772,11 @@ def run(
     # und Web dieselben Saetze sehen; nur ohne sie wird nach der neuen Regel zerlegt.
     pol = _active_policy()
     if _sentence_rule(pol) == "v1":
-        sents = sentences_from_words(words)
+        sents = sentences_from_words(words, silence=silence)
     else:
         args = _cut_args(words, pol)
         sents = sentences_from_annotated(words) or sentences_from_words(
-            words, rule=args["rule"], max_s=args["max_s"], max_words=args["max_words"]
+            words, rule=args["rule"], max_s=args["max_s"], max_words=args["max_words"], silence=silence
         )
     search_cfg = search_wired(pol)
     gate_cfg = gates_wired(pol)

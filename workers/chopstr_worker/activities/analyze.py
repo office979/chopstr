@@ -28,7 +28,8 @@ from typing import Any
 from temporalio import activity
 
 from .. import costlog, db, decision_log, editorial, events, outbox, storage, usage
-from ..pipeline import release_gate, signals, story_engine
+from ..pipeline import release_gate, segment, signals, story_engine
+from ..pipeline import silence as silence_mod
 from ..providers_llm import LLM
 from ..residency import Tenant
 from . import common
@@ -460,6 +461,51 @@ def auto_create_clips(
     return created
 
 
+def silence_key_for(audio_key: str) -> str:
+    """Cache-Key des Stille-Scans. Gleiche Mechanik wie ``asr_key_for``."""
+    params = {"noise_db": silence_mod.NOISE_DB, "min_silence_s": silence_mod.MIN_SILENCE_S}
+    return storage.derived_key(audio_key, params, silence_mod.SCAN_VERSION, "json", prefix="silence")
+
+
+def load_or_scan_silence(ctx: common.Context, source_id: str, src: dict):
+    """Stille-Karte der Quelle. Beim ersten Mal gescannt, danach aus dem Objektspeicher.
+
+    Warum ueberhaupt: Satzgrenzen entstehen unter anderem an langen Pausen. Verschluckt das ASR
+    eine Pause, fehlt die Grenze und ein Clip beginnt mitten im Satz. Die gemessene Stille gibt
+    den Wortzeiten eine zweite Meinung (Beleg in ``pipeline/silence.py``).
+
+    Schlaegt irgendetwas fehl, kommt eine leere Karte zurueck und die Kandidatensuche laeuft wie
+    bisher weiter. Eine fehlende Zweitmeinung darf keinen Clip verhindern - dieselbe Linie wie
+    ``render.capabilities()``."""
+    audio_key = src.get("audio_key")
+    if not audio_key:
+        log.info("Stille-Scan uebersprungen source=%s: keine Audio-Spur", source_id)
+        return silence_mod.EMPTY
+
+    key = silence_key_for(audio_key)
+    try:
+        if ctx.store.exists("derived", key):
+            karte = silence_mod.SilenceMap.from_payload(ctx.store.get_json("derived", key))
+            log.info("silence source=%s cached key=%s n=%s", source_id, key[:24], len(karte))
+            return karte
+    except Exception:  # noqa: BLE001 - ein kaputtes Artefakt darf die Suche nicht stoppen
+        log.warning("Stille-Artefakt unlesbar source=%s key=%s, wird neu gescannt", source_id, key[:24])
+
+    try:
+        local = common.ensure_local_audio(ctx, source_id, audio_key)
+        karte = silence_mod.scan(local)
+    except Exception as e:  # noqa: BLE001 - Download- oder ffmpeg-Fehler
+        log.warning("Stille-Scan fehlgeschlagen source=%s: %s", source_id, e)
+        return silence_mod.EMPTY
+
+    try:
+        ctx.store.put_json("derived", key, karte.to_payload())
+    except Exception:  # noqa: BLE001 - nicht speichern zu koennen macht den Scan nicht ungueltig
+        log.warning("Stille-Artefakt nicht gespeichert source=%s key=%s", source_id, key[:24])
+    log.info("silence source=%s scanned n=%s", source_id, len(karte))
+    return karte
+
+
 def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
     """Phase 2: Story-Engine über das aktuelle Transkript, Zeilen in ``candidates`` nach Vertrag candidates_v1.
 
@@ -491,7 +537,15 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
                 f"Kein Sprachmodell für Provider {llm.provider} konfiguriert "
                 "(BEDROCK_MODEL_ID, MISTRAL_MODEL oder SELFHOST_LLM_MODEL setzen, für Entwicklung LLM_PROVIDER=local-heuristic)"
             )
-        versions = story_engine.prompt_versions()
+        # Die Stille-Karte kann die Satzgrenzen und damit die Kandidaten veraendern. Dann gehoert
+        # sie in den Idempotenz-Key, sonst liefert ein Re-Run das alte Ergebnis zurueck.
+        # Aendert sie nichts, bleibt der Key unveraendert: sonst braeche jeder bestehende
+        # Zwischenspeicher und loeste einen neuen LLM-Lauf samt Kosten aus, ohne Wirkung.
+        pausen = load_or_scan_silence(ctx, source_id, src)
+        versions = list(story_engine.prompt_versions())
+        if segment.silence_changes_boundaries(words, pausen):
+            versions.append(f"{silence_mod.SCAN_VERSION}:{len(pausen)}")
+            log.info("silence source=%s veraendert die Satzgrenzen, Kandidaten werden neu gesucht", source_id)
         key = candidates_key_for(tv_id, tv_version, brief, versions, llm.provider, model, weights, heat)
 
         cached = ctx.store.exists("derived", key)
@@ -504,7 +558,9 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
                 common.heartbeat("chapter", done, total)
                 st.progress(done / max(total, 1), f"Kapitel {done} von {total} bewertet, {n} Kandidaten")
 
-            report = story_engine.run(words, brief, brand, heat, llm, weights=weights, on_progress=_progress)
+            report = story_engine.run(
+                words, brief, brand, heat, llm, weights=weights, on_progress=_progress, silence=pausen
+            )
             ctx.store.put_json("derived", key, report.to_json())
 
         ids = _write_rows(ctx, source_id, report.candidates)

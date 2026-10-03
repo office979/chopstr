@@ -136,13 +136,22 @@ def is_sentence_end(
     rule: str = "v1",
     max_s: float | None = None,
     max_words: int | None = None,
+    silence=None,
 ) -> bool:
     """Endet Wort ``i`` einen Satz? Adapter auf ``sentence_end_kind``.
 
     ``rule="v1"`` (Standard) liefert exakt das Verhalten vor AP2: Satzzeichen, Abkürzungen,
     Ordinal- und Dezimalzahlen, jede lange Pause und jeder Sprecherwechsel. ``rule="v2"`` siehe
-    ``sentence_end_kind``."""
-    return sentence_end_kind(words, i, rule=rule, min_pause_s=min_pause_s, max_s=max_s, max_words=max_words) != "none"
+    ``sentence_end_kind``.
+
+    ``silence`` ist eine optionale ``pipeline.silence.SilenceMap`` und wirkt nur darauf, ob an
+    dieser Stelle eine Pause vorliegt (siehe ``_gap``). Ohne sie unveraendertes Verhalten."""
+    return (
+        sentence_end_kind(
+            words, i, rule=rule, min_pause_s=min_pause_s, max_s=max_s, max_words=max_words, silence=silence
+        )
+        != "none"
+    )
 
 
 # -- Satzende-Regel v2 (AP2) und Verbklammer-Heuristik (AP3) --------------------------------------
@@ -512,8 +521,18 @@ def _pause_boundary_accepted(words: list[dict], i: int, rule: str) -> bool:
     return not bracket_heuristic(left, words[i + 1 : i + 1 + _RIGHT_SCAN_WORDS])["open"]
 
 
-def _gap(words: list[dict], j: int) -> float:
-    return float(words[j + 1].get("start", 0.0)) - float(words[j].get("end", 0.0))
+def _gap(words: list[dict], j: int, silence=None) -> float:
+    """Pause nach Wort ``j``. Mit ``silence`` zaehlt die im Ton gemessene Stille, wo sie laenger ist.
+
+    Warum: ASR-Wortzeiten verschlucken Pausen gelegentlich. Gemessen mit whisper small/de
+    erschien eine reale Stille von 2,19 s in den Wortzeiten als 0,0 s. Fehlt die Pause, entsteht
+    keine Satzgrenze und ein Clip beginnt mitten im Satz. Bei faster-whisper mit ``vad_filter``
+    stehen die Pausen dagegen schon in den Wortzeiten, dort aendert die Karte nichts (Beleg in
+    ``pipeline/silence.py``). Ohne ``silence`` unveraendertes Verhalten."""
+    luecke = float(words[j + 1].get("start", 0.0)) - float(words[j].get("end", 0.0))
+    if silence is None:
+        return luecke
+    return max(luecke, silence.pause_after(float(words[j].get("end", 0.0))))
 
 
 def _mag_title(words: list[dict], i: int, min_pause_s: float) -> bool:
@@ -531,7 +550,9 @@ def _mag_title(words: list[dict], i: int, min_pause_s: float) -> bool:
     return not (i > 0 and core_token(_text(words[i - 1])) in _PERSONAL_PRONOUNS)
 
 
-def _base_kind(words: list[dict], i: int, rule: str, min_pause_s: float, relaxed: bool = False) -> str:
+def _base_kind(
+    words: list[dict], i: int, rule: str, min_pause_s: float, relaxed: bool = False, silence=None
+) -> str:
     """Satzende-Art ohne Längen- und Kommagrenze (Regel v1 oder v2). ``relaxed`` (``v2_comma_heavy``): eine
     Pause ohne offene Klammer gilt auch vor kleingeschriebenem Wort, weil die Großschreibung dort nichts
     über den Satzanfang sagt."""
@@ -558,7 +579,9 @@ def _base_kind(words: list[dict], i: int, rule: str, min_pause_s: float, relaxed
             return "punct"
     if speaker_change:
         return "speaker_change"
-    if _gap(words, i) >= min_pause_s:
+    # Nur hier wirkt die Stille-Karte: ob ueberhaupt eine Pause vorliegt. Die Folgepruefungen
+    # von v2 (Grossschreibung, offene Klammer) bleiben unberuehrt.
+    if _gap(words, i, silence) >= min_pause_s:
         if rule == "v1" or _pause_boundary_accepted(words, i, rule):
             return "pause_candidate"
         if relaxed and _soft_candidate(words, i - len(_running_sentence(words, i, rule)) + 1, i, min_pause_s):
@@ -714,11 +737,12 @@ def sentence_end_kinds(
     min_pause_s: float = 0.7,
     max_s: float | None = None,
     max_words: int | None = None,
+    silence=None,
 ) -> list[str]:
     """``sentence_end_kind`` für alle Wörter in einem Durchgang (Zerlegung)."""
     base = _base_rule(rule)
     relaxed = rule == COMMA_HEAVY
-    kinds = [_base_kind(words, i, base, min_pause_s, relaxed) for i in range(len(words))]
+    kinds = [_base_kind(words, i, base, min_pause_s, relaxed, silence) for i in range(len(words))]
     if rule == "v1":
         return kinds
     max_s = MAX_SENTENCE_S if max_s is None else float(max_s)
@@ -739,6 +763,7 @@ def sentence_end_kind(
     min_pause_s: float = 0.7,
     max_s: float | None = None,
     max_words: int | None = None,
+    silence=None,
 ) -> str:
     """Art des Satzendes nach Wort ``i``: ``punct``, ``speaker_change``, ``pause_candidate``,
     ``length_cap``, ``end_of_text`` oder ``none`` (kein Satzende).
@@ -756,11 +781,11 @@ def sentence_end_kind(
     auch vor kleingeschriebenem Wort, sonst bis zur doppelten Grenze die längste Pause (``length_cap``)."""
     base = _base_rule(rule)
     relaxed = rule == COMMA_HEAVY
-    kind = _base_kind(words, i, base, min_pause_s, relaxed)
+    kind = _base_kind(words, i, base, min_pause_s, relaxed, silence)
     if rule == "v1" or kind != "none":
         return kind
     h = i
-    while h > 0 and _base_kind(words, h - 1, base, min_pause_s, relaxed) == "none":
+    while h > 0 and _base_kind(words, h - 1, base, min_pause_s, relaxed, silence) == "none":
         h -= 1
     stop = i + 1
     while _base_kind(words, stop, base, min_pause_s, relaxed) == "none":
@@ -827,9 +852,11 @@ def bracket_open_at_cut(
     )
 
 
-def sentence_boundaries(words: list[dict], min_pause_s: float = 0.7, rule: str = "v1") -> list[int]:
+def sentence_boundaries(
+    words: list[dict], min_pause_s: float = 0.7, rule: str = "v1", silence=None
+) -> list[int]:
     """Indizes der Wörter, die einen Satz beenden (inklusive)."""
-    return [i for i, k in enumerate(sentence_end_kinds(words, rule, min_pause_s)) if k != "none"]
+    return [i for i, k in enumerate(sentence_end_kinds(words, rule, min_pause_s, silence=silence)) if k != "none"]
 
 
 def nlp_status() -> str:

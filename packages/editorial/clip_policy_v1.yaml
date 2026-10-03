@@ -142,63 +142,6 @@ bewertung:
   punkte_gesamt: 14
 
 # ------------------------------------------------------------------------------------------------
-# Ausbeute: wie viele Kandidaten ein Video hergeben soll
-# ------------------------------------------------------------------------------------------------
-# [E] Gemessen am 27.09.2026 an einer echten Quelle (9,0 min, 1712 Woerter, 81 Saetze):
-#     moegliche Satzspannen im harten Laengenfenster 532, Vorschlaege der Engine 6,
-#     angeboten 3. Ausbeute 0,33 Clips je Minute.
-#
-# Das war zu wenig, und zwar aus einem Grund, der nicht als Entscheidung gedacht war: Die
-# Heuristik setzte Anker nur dort, wo ein Marker griff, und brach ab, sobald ein Satz keinen
-# Marker hatte. Die Marker greifen laut Messung weiter unten auf 2,4 bis 6,2 Prozent der Saetze.
-# Damit entstanden pro Kapitel ein bis zwei Vorschlaege, egal wie lang das Kapitel war.
-#
-# Das widersprach `bewertung.modus: sortieren`, der ausdruecklich sagt, dass kein Moment
-# unterdrueckt wird, sondern nur niedrig bewertet. Ein Moment, der gar nicht erst vorgeschlagen
-# wird, ist unterdrueckt.
-#
-# GRUNDHALTUNG: Ueber den Wert eines Clips entscheidet der Mensch, der das Werkzeug bedient.
-# Die Maschine entscheidet nur, was nachweislich kaputt ist (siehe `gates` in der Engine:
-# Satzgrenzen, Verbklammer, offenes Ende, Sinntreue, offene Verweise). Alles andere wird
-# angeboten und sortiert. Lieber ein schwacher Vorschlag zu viel als ein guter, den niemand
-# je gesehen hat.
-ausbeute:
-  # Richtwert, wie viele Kandidaten je Minute Quellmaterial angeboten werden. 1,5 entspricht
-  # bei einem Zielclip von 41 s grob einer vollen Abdeckung mit etwas Auswahl an starken Stellen.
-  kandidaten_je_minute: 1.5
-
-  # Untergrenze und Obergrenze je Kapitel, damit weder ein kurzes Kapitel leer ausgeht noch ein
-  # langes die Liste flutet.
-  min_je_kapitel: 3
-  max_je_kapitel: 12
-
-  # Harte Obergrenze pro Quelle. Schuetzt die Oberflaeche und die Kosten, nicht den Geschmack.
-  obergrenze_gesamt: 60
-
-  # Ab welcher zeitlichen Ueberdeckung zwei Kandidaten als derselbe Moment gelten.
-  #
-  # Der Wert war kurzzeitig auf 0,6 gelockert, um mehr Zuschnitte anzubieten. Das war falsch:
-  # An BP CW ist dokumentiert (tests/test_story_engine.py::test_der_fall_aus_dem_echten_video),
-  # dass ein Clip von 0 bis 19,6 s neben einem von 9,9 bis 87,9 s stand. Die Ueberdeckung betraegt
-  # dort 0,49. Zwei Clips, von denen einer zur Haelfte im anderen steckt, sind keine Auswahl,
-  # sondern dieselbe Sache zweimal, und sie kosten den Clipper Zeit beim Durchsehen.
-  #
-  # Mehr Auswahl entsteht deshalb eine Stufe frueher, ueber `vorschlag_ueberschuss` und
-  # `anker_ohne_marker`, nicht hier.
-  ueberlappung_max: 0.4
-
-  # UEBERSCHUSS. `kandidaten_je_minute` ist die Zahl, die am Ende ANGEBOTEN werden soll. Zwischen
-  # Vorschlag und Angebot sieben mehrere Stufen aus: die Tore (Satzgrenzen, Verbklammer, offenes
-  # Ende, Sinntreue), das harte Laengenfenster und die Ueberlappungsregel. An der Messquelle vom
-  # 27.09.2026 kamen von 11 Vorschlaegen 6 durch, also 55 Prozent. Wer 1,5 anbieten will, muss
-  # rund 3 vorschlagen. Der Faktor gilt nur fuer die Vorschlagsstufe und lockert kein Tor.
-  vorschlag_ueberschuss: 2.0
-
-  # Saetze ohne Marker duerfen Anker sein. Der Marker bleibt ein Bonus in der Ankerwahl, kein
-  # Eintrittsbillett. Ohne das deckt die Auswahl nur die 2,4 bis 6,2 Prozent Marker-Saetze ab.
-  anker_ohne_marker: true
-
-# ------------------------------------------------------------------------------------------------
 # Moment-Typen
 # ------------------------------------------------------------------------------------------------
 # [M] Modul 10.1. Die Erkennungszeichen stammen wörtlich aus dem Masterfile und sind hier als

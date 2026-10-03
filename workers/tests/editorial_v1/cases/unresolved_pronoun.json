@@ -1,0 +1,575 @@
+{
+  "id": "unresolved_pronoun",
+  "version": "editorial_v1",
+  "title": "Ungeklärtes Pronomen",
+  "description": "Ab dem zweiten Satz spricht der Gast nur noch von „sie“. Ein Einstieg bei „Sie hat dann …“ lässt offen, wer gemeint ist. Kontext ergänzen oder beim Namen einsteigen.",
+  "source": "fiktiv, für den Testsatz geschrieben; keine realen Personen oder Firmen",
+  "language": "de",
+  "words": [
+    {
+      "text": "Ihr",
+      "start": 0.4,
+      "end": 0.62,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "habt",
+      "start": 0.67,
+      "end": 0.91,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "letztes",
+      "start": 0.96,
+      "end": 1.31,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Jahr",
+      "start": 1.36,
+      "end": 1.61,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "eine",
+      "start": 1.66,
+      "end": 1.9,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "neue",
+      "start": 1.95,
+      "end": 2.2,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Lagerleiterin",
+      "start": 2.25,
+      "end": 2.79,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "eingestellt.",
+      "start": 2.84,
+      "end": 3.31,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Wie",
+      "start": 3.63,
+      "end": 3.85,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "lief",
+      "start": 3.9,
+      "end": 4.14,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "das?",
+      "start": 4.19,
+      "end": 4.41,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Ehrlich",
+      "start": 4.81,
+      "end": 5.15,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "gesagt",
+      "start": 5.2,
+      "end": 5.52,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hatten",
+      "start": 5.57,
+      "end": 5.88,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wir",
+      "start": 5.93,
+      "end": 6.14,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "bei",
+      "start": 6.19,
+      "end": 6.41,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Frau",
+      "start": 6.46,
+      "end": 6.71,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Brenner",
+      "start": 6.76,
+      "end": 7.1,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "am",
+      "start": 7.15,
+      "end": 7.34,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Anfang",
+      "start": 7.39,
+      "end": 7.7,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Zweifel,",
+      "start": 7.75,
+      "end": 8.09,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "weil",
+      "start": 8.23,
+      "end": 8.48,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "sie",
+      "start": 8.53,
+      "end": 8.75,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "aus",
+      "start": 8.8,
+      "end": 9.01,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "der",
+      "start": 9.06,
+      "end": 9.28,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Gastronomie",
+      "start": 9.33,
+      "end": 9.8,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "kam",
+      "start": 9.85,
+      "end": 10.07,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "und",
+      "start": 10.12,
+      "end": 10.33,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "vorher",
+      "start": 10.38,
+      "end": 10.69,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "nie",
+      "start": 10.74,
+      "end": 10.96,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ein",
+      "start": 11.01,
+      "end": 11.23,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Lager",
+      "start": 11.28,
+      "end": 11.56,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "von",
+      "start": 11.61,
+      "end": 11.82,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "innen",
+      "start": 11.87,
+      "end": 12.15,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "gesehen",
+      "start": 12.2,
+      "end": 12.55,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hatte.",
+      "start": 12.6,
+      "end": 12.88,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Sie",
+      "start": 13.2,
+      "end": 13.41,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hat",
+      "start": 13.46,
+      "end": 13.68,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "dann",
+      "start": 13.73,
+      "end": 13.98,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "in",
+      "start": 14.03,
+      "end": 14.21,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "den",
+      "start": 14.26,
+      "end": 14.48,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ersten",
+      "start": 14.53,
+      "end": 14.84,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "drei",
+      "start": 14.89,
+      "end": 15.14,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Monaten",
+      "start": 15.19,
+      "end": 15.53,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "jede",
+      "start": 15.58,
+      "end": 15.83,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Schicht",
+      "start": 15.88,
+      "end": 16.22,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "selbst",
+      "start": 16.27,
+      "end": 16.58,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "mitgemacht,",
+      "start": 16.63,
+      "end": 17.07,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "auch",
+      "start": 17.21,
+      "end": 17.46,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "die",
+      "start": 17.51,
+      "end": 17.73,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Nachtschichten.",
+      "start": 17.78,
+      "end": 18.35,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Unser",
+      "start": 18.67,
+      "end": 18.95,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Geschäftsführer",
+      "start": 19.0,
+      "end": 19.6,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "war",
+      "start": 19.65,
+      "end": 19.86,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "erst",
+      "start": 19.91,
+      "end": 20.16,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "skeptisch,",
+      "start": 20.21,
+      "end": 20.62,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "aber",
+      "start": 20.76,
+      "end": 21.01,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "nach",
+      "start": 21.06,
+      "end": 21.3,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "dem",
+      "start": 21.35,
+      "end": 21.57,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Sommer",
+      "start": 21.62,
+      "end": 21.93,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hat",
+      "start": 21.98,
+      "end": 22.2,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "er",
+      "start": 22.25,
+      "end": 22.43,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "gesagt,",
+      "start": 22.48,
+      "end": 22.79,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "sie",
+      "start": 22.93,
+      "end": 23.15,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "war",
+      "start": 23.2,
+      "end": 23.42,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "die",
+      "start": 23.47,
+      "end": 23.68,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "beste",
+      "start": 23.73,
+      "end": 24.01,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Entscheidung",
+      "start": 24.06,
+      "end": 24.57,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "des",
+      "start": 24.62,
+      "end": 24.83,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Jahres.",
+      "start": 24.88,
+      "end": 25.19,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Seitdem",
+      "start": 25.51,
+      "end": 25.86,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "stellen",
+      "start": 25.91,
+      "end": 26.25,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wir",
+      "start": 26.3,
+      "end": 26.52,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "bei",
+      "start": 26.57,
+      "end": 26.78,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "uns",
+      "start": 26.83,
+      "end": 27.05,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "stärker",
+      "start": 27.1,
+      "end": 27.44,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "nach",
+      "start": 27.49,
+      "end": 27.74,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Haltung",
+      "start": 27.79,
+      "end": 28.14,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ein",
+      "start": 28.19,
+      "end": 28.4,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "als",
+      "start": 28.45,
+      "end": 28.67,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "nach",
+      "start": 28.72,
+      "end": 28.97,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Lebenslauf.",
+      "start": 29.02,
+      "end": 29.46,
+      "speaker": "SPEAKER_00"
+    }
+  ],
+  "expected": {
+    "must_include_word_ranges": [
+      [
+        16,
+        17
+      ]
+    ],
+    "forbidden_out_points": [
+      21,
+      55
+    ],
+    "forbidden_in_points": [
+      36,
+      21
+    ],
+    "expect_reject": {
+      "value": false,
+      "reason": "Clipfähig mit Einstieg bei der Nennung von Frau Brenner."
+    },
+    "protected_spans": [
+      {
+        "type": "attribution",
+        "word_range": [
+          60,
+          69
+        ],
+        "note": "Das Urteil „beste Entscheidung“ stammt vom Geschäftsführer."
+      }
+    ],
+    "pronouns_to_resolve": [
+      {
+        "word": 22,
+        "text": "sie",
+        "antecedent_word_range": [
+          16,
+          17
+        ]
+      },
+      {
+        "word": 36,
+        "text": "Sie",
+        "antecedent_word_range": [
+          16,
+          17
+        ]
+      },
+      {
+        "word": 61,
+        "text": "er",
+        "antecedent_word_range": [
+          51,
+          52
+        ]
+      },
+      {
+        "word": 63,
+        "text": "sie",
+        "antecedent_word_range": [
+          16,
+          17
+        ]
+      }
+    ],
+    "instruction_must_be_ignored": null,
+    "boundary_confidence": null,
+    "near_duplicate_candidates": null,
+    "sentence_end_after": [
+      35,
+      50,
+      69,
+      81
+    ]
+  }
+}

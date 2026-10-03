@@ -1,0 +1,418 @@
+{
+  "id": "reported_position",
+  "version": "editorial_v1",
+  "title": "Fremde Position im Zitat",
+  "description": "Der Sprecher zitiert die These seines früheren Vertriebschefs und widerspricht ihr. Ein Clip, der mit dem Zitat beginnt oder vor der Gegenposition endet, macht die fremde Position zur eigenen.",
+  "source": "fiktiv, für den Testsatz geschrieben; keine realen Personen oder Firmen",
+  "language": "de",
+  "words": [
+    {
+      "text": "Was",
+      "start": 0.4,
+      "end": 0.62,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "hältst",
+      "start": 0.67,
+      "end": 0.98,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "du",
+      "start": 1.03,
+      "end": 1.21,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "eigentlich",
+      "start": 1.26,
+      "end": 1.7,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "von",
+      "start": 1.75,
+      "end": 1.97,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Kaltakquise",
+      "start": 2.02,
+      "end": 2.49,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "am",
+      "start": 2.54,
+      "end": 2.72,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Telefon?",
+      "start": 2.77,
+      "end": 3.12,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Mein",
+      "start": 3.52,
+      "end": 3.77,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "früherer",
+      "start": 3.82,
+      "end": 4.19,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Vertriebschef",
+      "start": 4.24,
+      "end": 4.78,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hat",
+      "start": 4.83,
+      "end": 5.04,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "immer",
+      "start": 5.09,
+      "end": 5.37,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "gesagt:",
+      "start": 5.42,
+      "end": 5.74,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Kaltakquise",
+      "start": 5.88,
+      "end": 6.35,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ist",
+      "start": 6.4,
+      "end": 6.61,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "tot,",
+      "start": 6.66,
+      "end": 6.88,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wer",
+      "start": 7.02,
+      "end": 7.24,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "heute",
+      "start": 7.29,
+      "end": 7.57,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "noch",
+      "start": 7.62,
+      "end": 7.86,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "anruft,",
+      "start": 7.91,
+      "end": 8.23,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "verbrennt",
+      "start": 8.37,
+      "end": 8.77,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "nur",
+      "start": 8.82,
+      "end": 9.04,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Geld.",
+      "start": 9.09,
+      "end": 9.34,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Das",
+      "start": 9.66,
+      "end": 9.87,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "war",
+      "start": 9.92,
+      "end": 10.14,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "seine",
+      "start": 10.19,
+      "end": 10.47,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "feste",
+      "start": 10.52,
+      "end": 10.8,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Überzeugung.",
+      "start": 10.85,
+      "end": 11.32,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Ich",
+      "start": 11.64,
+      "end": 11.86,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "sehe",
+      "start": 11.91,
+      "end": 12.16,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "das",
+      "start": 12.21,
+      "end": 12.42,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "anders.",
+      "start": 12.47,
+      "end": 12.78,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Bei",
+      "start": 13.1,
+      "end": 13.32,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "uns",
+      "start": 13.37,
+      "end": 13.59,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "kommt",
+      "start": 13.64,
+      "end": 13.92,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "bis",
+      "start": 13.97,
+      "end": 14.18,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "heute",
+      "start": 14.23,
+      "end": 14.51,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ungefähr",
+      "start": 14.56,
+      "end": 14.94,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "jeder",
+      "start": 14.99,
+      "end": 15.27,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "dritte",
+      "start": 15.32,
+      "end": 15.63,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Neukunde",
+      "start": 15.68,
+      "end": 16.06,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "über",
+      "start": 16.11,
+      "end": 16.35,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "einen",
+      "start": 16.4,
+      "end": 16.68,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ersten",
+      "start": 16.73,
+      "end": 17.05,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Anruf.",
+      "start": 17.1,
+      "end": 17.38,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Man",
+      "start": 17.7,
+      "end": 17.91,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "muss",
+      "start": 17.96,
+      "end": 18.21,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "halt",
+      "start": 18.26,
+      "end": 18.51,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "vorher",
+      "start": 18.56,
+      "end": 18.87,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wissen,",
+      "start": 18.92,
+      "end": 19.23,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wen",
+      "start": 19.37,
+      "end": 19.59,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "man",
+      "start": 19.64,
+      "end": 19.85,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "anruft",
+      "start": 19.9,
+      "end": 20.22,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "und",
+      "start": 20.27,
+      "end": 20.48,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "warum.",
+      "start": 20.53,
+      "end": 20.81,
+      "speaker": "SPEAKER_00"
+    }
+  ],
+  "expected": {
+    "must_include_word_ranges": [
+      [
+        8,
+        13
+      ],
+      [
+        29,
+        32
+      ]
+    ],
+    "forbidden_out_points": [
+      23,
+      28
+    ],
+    "forbidden_in_points": [
+      14,
+      17,
+      24,
+      29
+    ],
+    "expect_reject": {
+      "value": false,
+      "reason": "Clipfähig, wenn Zuschreibung und eigene Gegenposition erhalten bleiben."
+    },
+    "protected_spans": [
+      {
+        "type": "attribution",
+        "word_range": [
+          8,
+          13
+        ],
+        "note": "Die These stammt vom früheren Vertriebschef, nicht vom Sprecher."
+      },
+      {
+        "type": "attribution",
+        "word_range": [
+          24,
+          28
+        ],
+        "note": "Nochmals ausdrücklich als fremde Überzeugung markiert."
+      }
+    ],
+    "pronouns_to_resolve": [
+      {
+        "word": 26,
+        "text": "seine",
+        "antecedent_word_range": [
+          8,
+          10
+        ]
+      },
+      {
+        "word": 31,
+        "text": "das",
+        "antecedent_word_range": [
+          14,
+          23
+        ]
+      }
+    ],
+    "instruction_must_be_ignored": null,
+    "boundary_confidence": null,
+    "near_duplicate_candidates": null,
+    "sentence_end_after": [
+      23,
+      28,
+      32,
+      45,
+      55
+    ]
+  }
+}

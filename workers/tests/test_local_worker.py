@@ -193,3 +193,43 @@ def test_cli_once_returns_zero_without_work(fake_db, worker, monkeypatch):
 
     config.reload()
     assert local_worker.main(["--once", "--log-level", "WARNING"]) == 0
+
+
+def test_run_forever_checks_assets_before_the_loop(worker, monkeypatch, tmp_path):
+    """L7: Fehlt eine gemeinsame Datei, endet der lokale Worker mit der deutschen Meldung der Startprüfung
+    statt mit einem Traceback aus der Statuszeile; die Schleife läuft gar nicht erst an."""
+    from chopstr_worker import editorial
+
+    passes = []
+    monkeypatch.setattr(worker, "run_once", lambda: passes.append(1) or {})
+    monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path / "gibt_es_nicht"))
+    editorial.clear_cache()
+    try:
+        with pytest.raises(SystemExit) as excinfo:
+            worker.run_forever()
+    finally:
+        editorial.clear_cache()
+    assert str(excinfo.value).startswith("Der Worker startet nicht, weil gemeinsame Dateien fehlen")
+    assert passes == []
+
+
+def test_once_runs_the_startup_check_too(monkeypatch, tmp_path):
+    """``--once`` prüft die gemeinsamen Dateien wie ``run_forever`` und endet mit derselben Meldung."""
+    from chopstr_worker import config, editorial
+
+    passes = []
+    monkeypatch.setenv("DATABASE_URL", "postgres://x@127.0.0.1:1/x")
+    monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path / "gibt_es_nicht"))
+    monkeypatch.setattr(local_worker.LocalWorker, "run_once", lambda self: passes.append(1) or {})
+    monkeypatch.setattr(local_worker.LocalWorker, "install_signal_handlers", lambda self: None)
+    config.reload()
+    editorial.clear_cache()
+    try:
+        with pytest.raises(SystemExit) as excinfo:
+            local_worker.main(["--once"])
+    finally:
+        editorial.clear_cache()
+        monkeypatch.undo()
+        config.reload()
+    assert str(excinfo.value).startswith("Der Worker startet nicht, weil gemeinsame Dateien fehlen")
+    assert passes == []

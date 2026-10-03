@@ -1,0 +1,1658 @@
+{
+ "id": "real_werbeanzeige",
+ "source_id": "c958814e-6c21-41ee-bcc5-ea2c5cf3795b",
+ "note": "Eigenes Testmaterial des Nutzers, Whisper-Transkript einer Werbeanzeige aus der lokalen DB; Verkaufsaufruf am Ende.",
+ "exported_with": "eval.clip_eval.load_words",
+ "words": [
+  {
+   "end": 0.26,
+   "prob": 0.9648877084255219,
+   "text": "Deine",
+   "start": 0.0,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 0.42,
+   "prob": 0.8176427483558655,
+   "text": "E",
+   "start": 0.26,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 0.48,
+   "prob": 0.6162667572498322,
+   "text": "-Com",
+   "start": 0.42,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 0.8,
+   "prob": 0.7955451011657715,
+   "text": "Marketing",
+   "start": 0.48,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 1.22,
+   "prob": 0.9844310879707336,
+   "text": "Agency",
+   "start": 0.8,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 1.58,
+   "prob": 0.9947793483734131,
+   "text": "bekommt",
+   "start": 1.22,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 2.06,
+   "prob": 0.9948263764381409,
+   "text": "einfach",
+   "start": 1.58,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 2.38,
+   "prob": 0.9977259039878845,
+   "text": "keine",
+   "start": 2.06,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": true,
+   "sentence_idx": 0
+  },
+  {
+   "end": 3.04,
+   "prob": 0.938537985086441,
+   "text": "Neukundentermine",
+   "start": 2.38,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 3.12,
+   "prob": 0.9359662532806396,
+   "text": "in",
+   "start": 3.04,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 3.22,
+   "prob": 0.9225111603736877,
+   "text": "den",
+   "start": 3.12,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 3.58,
+   "prob": 0.9974104166030884,
+   "text": "Kalender",
+   "start": 3.22,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 3.76,
+   "prob": 0.8824963569641113,
+   "text": "und",
+   "start": 3.58,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 4.0,
+   "prob": 0.9961555600166321,
+   "text": "deine",
+   "start": 3.76,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 4.42,
+   "prob": 0.997336208820343,
+   "text": "ganzen",
+   "start": 4.0,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 4.96,
+   "prob": 0.9939977824687958,
+   "text": "Learnings",
+   "start": 4.42,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 5.18,
+   "prob": 0.9936763644218445,
+   "text": "aus",
+   "start": 4.96,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 5.96,
+   "prob": 0.9876873642206192,
+   "text": "zigtausend",
+   "start": 5.18,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 6.18,
+   "prob": 0.9514594674110413,
+   "text": "Euro",
+   "start": 5.96,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 6.68,
+   "prob": 0.7001326481501261,
+   "text": "Adspend",
+   "start": 6.18,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 6.88,
+   "prob": 0.9987190961837769,
+   "text": "für",
+   "start": 6.68,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 7.16,
+   "prob": 0.999113142490387,
+   "text": "deine",
+   "start": 6.88,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 7.5,
+   "prob": 0.9990313053131104,
+   "text": "Kunden",
+   "start": 7.16,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 8.04,
+   "prob": 0.9944542050361633,
+   "text": "sind",
+   "start": 7.5,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 8.46,
+   "prob": 0.9996720552444458,
+   "text": "einfach",
+   "start": 8.04,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 8.74,
+   "prob": 0.9997695088386536,
+   "text": "nicht",
+   "start": 8.46,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": true,
+   "sentence_idx": 0
+  },
+  {
+   "end": 9.02,
+   "prob": 0.9997652173042297,
+   "text": "auf",
+   "start": 8.74,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 9.24,
+   "prob": 0.9956839084625244,
+   "text": "deine",
+   "start": 9.02,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 9.52,
+   "prob": 0.9115886092185974,
+   "text": "Customer",
+   "start": 9.24,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 9.96,
+   "prob": 0.9628803730010986,
+   "text": "Acquisition",
+   "start": 9.52,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 10.52,
+   "prob": 0.9990676045417786,
+   "text": "anwendbar.",
+   "start": 9.96,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 10.9,
+   "prob": 0.9922348260879517,
+   "text": "Bro,",
+   "start": 10.66,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 11.16,
+   "prob": 0.9997639060020447,
+   "text": "keine",
+   "start": 11.0,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": true,
+   "sentence_idx": 1
+  },
+  {
+   "end": 11.44,
+   "prob": 0.9992356896400452,
+   "text": "Sorge,",
+   "start": 11.16,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 11.56,
+   "prob": 0.9933428168296814,
+   "text": "das",
+   "start": 11.5,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 11.66,
+   "prob": 0.9899448752403259,
+   "text": "ist",
+   "start": 11.56,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 11.76,
+   "prob": 0.9972084164619446,
+   "text": "ein",
+   "start": 11.66,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 12.18,
+   "prob": 0.9968188107013702,
+   "text": "bekanntes",
+   "start": 11.76,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 12.46,
+   "prob": 0.9994417230288187,
+   "text": "Phänomen",
+   "start": 12.18,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 12.62,
+   "prob": 0.999579131603241,
+   "text": "in",
+   "start": 12.46,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 12.72,
+   "prob": 0.9994514584541321,
+   "text": "der",
+   "start": 12.62,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 12.98,
+   "prob": 0.9983358979225159,
+   "text": "Branche,",
+   "start": 12.72,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 13.1,
+   "prob": 0.9994215965270996,
+   "text": "du",
+   "start": 13.1,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 13.22,
+   "prob": 0.9999172687530518,
+   "text": "bist",
+   "start": 13.1,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 13.4,
+   "prob": 0.9999196529388428,
+   "text": "damit",
+   "start": 13.22,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 13.58,
+   "prob": 0.9998449087142944,
+   "text": "nicht",
+   "start": 13.4,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": true,
+   "sentence_idx": 1
+  },
+  {
+   "end": 13.96,
+   "prob": 0.9992316961288452,
+   "text": "alleine",
+   "start": 13.58,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 14.24,
+   "prob": 0.9877898693084717,
+   "text": "und",
+   "start": 13.96,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 14.38,
+   "prob": 0.9998949766159058,
+   "text": "für",
+   "start": 14.24,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 14.48,
+   "prob": 0.9999582767486572,
+   "text": "dich",
+   "start": 14.38,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 14.62,
+   "prob": 0.9996886253356934,
+   "text": "gibt",
+   "start": 14.48,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 14.7,
+   "prob": 0.780790388584137,
+   "text": "es",
+   "start": 14.62,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 14.86,
+   "prob": 0.9996383190155029,
+   "text": "eine",
+   "start": 14.7,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 15.2,
+   "prob": 0.9995835423469543,
+   "text": "Lösung",
+   "start": 14.86,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 15.36,
+   "prob": 0.9988676309585571,
+   "text": "und",
+   "start": 15.2,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 15.5,
+   "prob": 0.9999198913574219,
+   "text": "die",
+   "start": 15.36,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 15.84,
+   "prob": 0.8605245053768158,
+   "text": "heisst",
+   "start": 15.5,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 16.58,
+   "prob": 0.988738626241684,
+   "text": "Outbound",
+   "start": 15.84,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 17.3,
+   "prob": 0.9924919307231903,
+   "text": "Outreach.",
+   "start": 16.58,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 1
+  },
+  {
+   "end": 17.66,
+   "prob": 0.9991299510002136,
+   "text": "Genau",
+   "start": 17.44,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 18.08,
+   "prob": 0.9998862743377686,
+   "text": "damit",
+   "start": 17.66,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 18.34,
+   "prob": 0.9998838901519775,
+   "text": "haben",
+   "start": 18.08,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 18.46,
+   "prob": 0.9998334646224976,
+   "text": "wir",
+   "start": 18.34,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 18.76,
+   "prob": 0.9998754262924194,
+   "text": "bereits",
+   "start": 18.46,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 19.08,
+   "prob": 0.9998694658279419,
+   "text": "über",
+   "start": 18.76,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 19.64,
+   "prob": 0.9616607427597046,
+   "text": "350",
+   "start": 19.08,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 20.24,
+   "prob": 0.9965940415859222,
+   "text": "Agenturen",
+   "start": 19.64,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 20.36,
+   "prob": 0.9998855590820312,
+   "text": "und",
+   "start": 20.24,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 20.76,
+   "prob": 0.873144288857778,
+   "text": "Freelancer",
+   "start": 20.36,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 21.26,
+   "prob": 0.9452699820200602,
+   "text": "nachweislich",
+   "start": 20.76,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 21.44,
+   "prob": 0.999468982219696,
+   "text": "dabei",
+   "start": 21.26,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 21.82,
+   "prob": 0.999257504940033,
+   "text": "geholfen,",
+   "start": 21.44,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 22.0,
+   "prob": 0.9998350143432617,
+   "text": "mehr",
+   "start": 21.82,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 22.44,
+   "prob": 0.9998050630092621,
+   "text": "Umsatz",
+   "start": 22.0,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 22.66,
+   "prob": 0.9994449019432068,
+   "text": "und",
+   "start": 22.44,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 22.94,
+   "prob": 0.9992291927337646,
+   "text": "zwischen",
+   "start": 22.66,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 23.3,
+   "prob": 0.9636795520782471,
+   "text": "drei",
+   "start": 22.94,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 23.48,
+   "prob": 0.9998822212219238,
+   "text": "und",
+   "start": 23.3,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 23.68,
+   "prob": 0.9995495676994324,
+   "text": "fünf",
+   "start": 23.48,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 24.12,
+   "prob": 0.9992156624794006,
+   "text": "Neukunden",
+   "start": 23.68,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 24.28,
+   "prob": 0.9954562187194824,
+   "text": "pro",
+   "start": 24.12,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 24.68,
+   "prob": 0.9991902709007263,
+   "text": "Monat",
+   "start": 24.28,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 25.06,
+   "prob": 0.6036432385444641,
+   "text": "dazu",
+   "start": 24.68,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 25.2,
+   "prob": 0.9980612397193909,
+   "text": "zu",
+   "start": 25.06,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 25.5,
+   "prob": 0.9956649541854858,
+   "text": "gewinnen.",
+   "start": 25.2,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 2
+  },
+  {
+   "end": 25.7,
+   "prob": 0.9848138689994812,
+   "text": "Und",
+   "start": 25.5,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 25.8,
+   "prob": 0.9998769760131836,
+   "text": "wenn",
+   "start": 25.7,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 25.9,
+   "prob": 0.9989449381828308,
+   "text": "du",
+   "start": 25.8,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 26.1,
+   "prob": 0.999872088432312,
+   "text": "jetzt",
+   "start": 25.9,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 26.34,
+   "prob": 0.9999256134033203,
+   "text": "wissen",
+   "start": 26.1,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 26.5,
+   "prob": 0.9996280670166016,
+   "text": "willst,",
+   "start": 26.34,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 26.66,
+   "prob": 0.9999340772628784,
+   "text": "wie",
+   "start": 26.58,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 26.84,
+   "prob": 0.9996250867843628,
+   "text": "genau",
+   "start": 26.66,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 27.04,
+   "prob": 0.999747097492218,
+   "text": "dieser",
+   "start": 26.84,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 27.42,
+   "prob": 0.9998138844966888,
+   "text": "Prozess",
+   "start": 27.04,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 27.56,
+   "prob": 0.9998525381088257,
+   "text": "für",
+   "start": 27.42,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 27.68,
+   "prob": 0.9999293088912964,
+   "text": "dich",
+   "start": 27.56,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 28.06,
+   "prob": 0.9996539354324341,
+   "text": "funktioniert",
+   "start": 27.68,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 28.24,
+   "prob": 0.9967498779296875,
+   "text": "und",
+   "start": 28.06,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 28.38,
+   "prob": 0.9999402761459351,
+   "text": "wie",
+   "start": 28.24,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 28.46,
+   "prob": 0.9999630451202393,
+   "text": "du",
+   "start": 28.38,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 28.56,
+   "prob": 0.9987793564796448,
+   "text": "ihn",
+   "start": 28.46,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 28.76,
+   "prob": 0.9999302625656128,
+   "text": "in",
+   "start": 28.56,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 29.1,
+   "prob": 0.9991880357265472,
+   "text": "deiner",
+   "start": 28.76,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 29.4,
+   "prob": 0.6180755496025085,
+   "text": "Ecom",
+   "start": 29.1,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 29.68,
+   "prob": 0.5620259642601013,
+   "text": "Marketing",
+   "start": 29.4,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 30.08,
+   "prob": 0.9979792237281799,
+   "text": "Agency",
+   "start": 29.68,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 30.64,
+   "prob": 0.9996140599250793,
+   "text": "implementiert",
+   "start": 30.08,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 31.12,
+   "prob": 0.9998445312182108,
+   "text": "bekommst,",
+   "start": 30.64,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 31.26,
+   "prob": 0.9997316002845764,
+   "text": "dann",
+   "start": 31.16,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 31.5,
+   "prob": 0.9812394082546234,
+   "text": "klick",
+   "start": 31.26,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 31.7,
+   "prob": 0.9995648264884949,
+   "text": "hier",
+   "start": 31.5,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 31.94,
+   "prob": 0.9999247789382935,
+   "text": "auf",
+   "start": 31.7,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 32.06,
+   "prob": 0.9998416900634766,
+   "text": "den",
+   "start": 31.94,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 32.24,
+   "prob": 0.9988815188407898,
+   "text": "Link",
+   "start": 32.06,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 32.44,
+   "prob": 0.9998512268066406,
+   "text": "unter",
+   "start": 32.24,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 32.68,
+   "prob": 0.9994794726371765,
+   "text": "dieser",
+   "start": 32.44,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 32.86,
+   "prob": 0.6943259835243225,
+   "text": "Ad.",
+   "start": 32.68,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 3
+  },
+  {
+   "end": 33.02,
+   "prob": 0.9996380805969238,
+   "text": "Ich",
+   "start": 32.92,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 33.12,
+   "prob": 0.8003305792808533,
+   "text": "habe",
+   "start": 33.02,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 33.2,
+   "prob": 0.9366462230682373,
+   "text": "dir",
+   "start": 33.12,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 33.28,
+   "prob": 0.9979923963546753,
+   "text": "ein",
+   "start": 33.2,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 33.4,
+   "prob": 0.9993475079536438,
+   "text": "ganz",
+   "start": 33.28,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 33.62,
+   "prob": 0.9657710492610931,
+   "text": "kurzes",
+   "start": 33.4,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 33.8,
+   "prob": 0.9972500205039978,
+   "text": "Video",
+   "start": 33.62,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 34.02,
+   "prob": 0.9984366297721863,
+   "text": "dazu",
+   "start": 33.8,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 34.46,
+   "prob": 0.999791830778122,
+   "text": "aufgenommen,",
+   "start": 34.02,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 34.8,
+   "prob": 0.999729335308075,
+   "text": "komplett",
+   "start": 34.58,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 35.28,
+   "prob": 0.9999128580093384,
+   "text": "kostenlos,",
+   "start": 34.8,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 35.5,
+   "prob": 0.8726105093955994,
+   "text": "kein",
+   "start": 35.36,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": true,
+   "sentence_idx": 4
+  },
+  {
+   "end": 35.78,
+   "prob": 0.9884219765663147,
+   "text": "Opt",
+   "start": 35.5,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 35.88,
+   "prob": 0.7886961698532104,
+   "text": "-in",
+   "start": 35.78,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 36.02,
+   "prob": 0.9998347759246826,
+   "text": "oder",
+   "start": 35.88,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 36.32,
+   "prob": 0.9022968610127767,
+   "text": "irgendein",
+   "start": 36.02,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 36.66,
+   "prob": 0.9978372852007548,
+   "text": "Quatsch,",
+   "start": 36.32,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 36.94,
+   "prob": 0.9840471148490906,
+   "text": "check",
+   "start": 36.74,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 37.1,
+   "prob": 0.9629228115081787,
+   "text": "das",
+   "start": 36.94,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 37.3,
+   "prob": 0.6165010929107666,
+   "text": "Ganze",
+   "start": 37.1,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 37.6,
+   "prob": 0.9998167157173157,
+   "text": "ab,",
+   "start": 37.3,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 37.92,
+   "prob": 0.9999607801437378,
+   "text": "da",
+   "start": 37.82,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 38.06,
+   "prob": 0.9999445676803589,
+   "text": "wird",
+   "start": 37.92,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 38.18,
+   "prob": 0.9983981251716614,
+   "text": "die",
+   "start": 38.06,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 38.4,
+   "prob": 0.9368671178817749,
+   "text": "Method",
+   "start": 38.18,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 38.62,
+   "prob": 0.9865574240684509,
+   "text": "einmal",
+   "start": 38.4,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 38.92,
+   "prob": 0.9996864795684814,
+   "text": "komplett",
+   "start": 38.62,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 39.36,
+   "prob": 0.9998084604740143,
+   "text": "erklärt",
+   "start": 38.92,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 39.52,
+   "prob": 0.9999161958694458,
+   "text": "und",
+   "start": 39.36,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 39.72,
+   "prob": 0.9997019171714783,
+   "text": "warum",
+   "start": 39.52,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 39.9,
+   "prob": 0.999980092048645,
+   "text": "das",
+   "start": 39.72,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 40.1,
+   "prob": 0.9917293190956116,
+   "text": "Ganze",
+   "start": 39.9,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 40.54,
+   "prob": 0.999906063079834,
+   "text": "funktioniert.",
+   "start": 40.1,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 4
+  },
+  {
+   "end": 40.84,
+   "prob": 0.9998601675033569,
+   "text": "Wir",
+   "start": 40.72,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 5
+  },
+  {
+   "end": 41.0,
+   "prob": 0.9998267292976379,
+   "text": "sehen",
+   "start": 40.84,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 5
+  },
+  {
+   "end": 41.12,
+   "prob": 0.9999761581420898,
+   "text": "uns,",
+   "start": 41.0,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 5
+  },
+  {
+   "end": 41.36,
+   "prob": 0.999700129032135,
+   "text": "nachdem",
+   "start": 41.18,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 5
+  },
+  {
+   "end": 41.44,
+   "prob": 0.9963610768318176,
+   "text": "du",
+   "start": 41.36,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 5
+  },
+  {
+   "end": 41.52,
+   "prob": 0.9997590184211731,
+   "text": "auf",
+   "start": 41.44,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 5
+  },
+  {
+   "end": 41.62,
+   "prob": 0.9997696280479431,
+   "text": "den",
+   "start": 41.52,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 5
+  },
+  {
+   "end": 41.78,
+   "prob": 0.9973588585853577,
+   "text": "Link",
+   "start": 41.62,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 5
+  },
+  {
+   "end": 42.04,
+   "prob": 0.9953095118204752,
+   "text": "geklickt",
+   "start": 41.78,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 5
+  },
+  {
+   "end": 42.32,
+   "prob": 0.999769389629364,
+   "text": "hast,",
+   "start": 42.04,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 5
+  },
+  {
+   "end": 42.72,
+   "prob": 0.9995394945144653,
+   "text": "bis",
+   "start": 42.54,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 5
+  },
+  {
+   "end": 42.96,
+   "prob": 0.9993550181388855,
+   "text": "dann,",
+   "start": 42.72,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 5
+  },
+  {
+   "end": 43.56,
+   "prob": 0.9965575933456421,
+   "text": "dein",
+   "start": 43.16,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 5
+  },
+  {
+   "end": 44.06,
+   "prob": 0.9702470004558563,
+   "text": "Jakob.",
+   "start": 43.56,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 5
+  }
+ ]
+}

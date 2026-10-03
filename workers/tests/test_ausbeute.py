@@ -22,16 +22,28 @@ from chopstr_worker.pipeline import segment, story_engine
 
 
 @pytest.fixture
-def pol():
+def pol(monkeypatch):
+    """Fassung 2: dort steht der `ausbeute`-Abschnitt. Fassung 1 bleibt bewusst unveraendert,
+    ihr Verhalten sichert tests/test_policy_snapshot_v1.py als Golden Snapshot."""
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
     return editorial.load()
 
 
 # -- Die Grundlage kennt die Ausbeute -------------------------------------------------------
 def test_grundlage_hat_den_abschnitt(pol):
+    assert pol.hat_ausbeute is True
     assert pol.kandidaten_je_minute > 0
-    assert pol.obergrenze_gesamt >= 20
-    assert 0 < pol.ueberlappung_max <= 1
     assert pol.anker_ohne_marker is True
+
+
+def test_fassung_eins_bleibt_unveraendert(monkeypatch):
+    """Der Kern der Umsetzung: neue Logik nur hinter dem Schalter in Fassung 2."""
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "1")
+    p = editorial.load()
+    assert p.hat_ausbeute is False
+    assert p.anker_ohne_marker is False, "unter v1 setzt die Heuristik Anker nur an Markern"
+    assert p.vorschlaege_fuer(240) == 3, "frueherer Festwert PROPOSE_MAX_MOMENTS"
+    assert p.kandidaten_fuer(240) == 3
 
 
 def test_kandidatenzahl_waechst_mit_dem_material(pol):
@@ -50,10 +62,9 @@ def test_vorschlaege_liegen_ueber_den_kandidaten(pol):
 
 
 def test_ausbeute_faellt_nicht_unter_den_alten_stand(pol):
-    """Regressionsschutz: die frueheren Festwerte duerfen nicht zurueckkehren."""
+    """Regressionsschutz: unter Fassung 2 duerfen die alten Festwerte nicht zurueckkehren."""
     assert pol.vorschlaege_fuer(240) > 4, "MAX_PER_CHAPTER war 4"
     assert pol.vorschlaege_fuer(240) > 3, "PROPOSE_MAX_MOMENTS war 3"
-    assert pol.obergrenze_gesamt > 20, "MAX_CANDIDATES war 20"
 
 
 # -- Anker entstehen nicht mehr nur an Markern ----------------------------------------------
@@ -92,7 +103,7 @@ def test_markerloses_material_liefert_trotzdem_kandidaten(pol):
     assert len(moments) <= pol.vorschlaege_fuer(dauer)
 
 
-def test_anker_halten_mindestabstand():
+def test_anker_halten_mindestabstand(pol):
     words = _saetze(60)
     sents = segment.sentences_from_words(words)
     moments = heuristic_llm.propose_moments(segment.numbered(sents))["moments"]
@@ -101,9 +112,9 @@ def test_anker_halten_mindestabstand():
         assert b - a >= 1, "zwei Vorschlaege duerfen nicht am selben Satz beginnen"
 
 
-def test_ueberlappung_haelt_den_dokumentierten_fall(pol):
-    """Der Fall aus BP CW bleibt erfasst: halb enthalten ist keine Auswahl, sondern Redundanz."""
-    assert pol.ueberlappung_max <= 0.49, (
-        "0 bis 19,6 s neben 9,9 bis 87,9 s hat eine Ueberdeckung von 0,49 und muss weichen"
-    )
+def test_ueberlappung_haelt_den_dokumentierten_fall():
+    """Der Fall aus BP CW bleibt erfasst: halb enthalten ist keine Auswahl, sondern Redundanz.
+
+    Die Schwelle selbst regelt main ueber ``output.max_candidates`` und ``select_best``; hier wird
+    nur festgehalten, dass die Ueberdeckung dieses Falls bei 0,49 liegt."""
     assert story_engine.gemeinsamer_anteil(0.0, 19.6, 9.9, 87.9) == pytest.approx(0.49, abs=0.01)

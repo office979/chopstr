@@ -1,6 +1,10 @@
 /* Zentrale Umgebungsvariablen mit Defaults */
 
-export const UPLOAD_MAX_BYTES_DEFAULT = 5 * 1024 * 1024 * 1024; // 5 GB
+/* 25 GB. Richtwert: ein 1080p-Podcast belegt rund 3,6 GB je Stunde, damit sind etwa sieben
+   Stunden Quellmaterial abgedeckt. Vorher 5 GB, was bei rund eineinhalb Stunden endete.
+   ACHTUNG: tusd hat in infra/docker-compose*.yml ein EIGENES `-max-size`. Wer hier aendert,
+   muss es dort mitaendern, sonst bricht der Upload beim Server ab und die App zeigt kein Limit. */
+export const UPLOAD_MAX_BYTES_DEFAULT = 25 * 1024 * 1024 * 1024; // 25 GB
 
 export function uploadMaxBytes(): number {
   const raw = process.env.UPLOAD_MAX_BYTES ?? process.env.NEXT_PUBLIC_UPLOAD_MAX_BYTES;

@@ -5,6 +5,7 @@ import { signalApprove } from "@/lib/temporal";
 import type { Clip, Platform } from "@/lib/repo/types";
 import { PLATFORMS, isPlatform } from "@/lib/clips/labels";
 import { candidateFeatures, recordDecision } from "@/lib/decision-log";
+import { EDITED_ERROR, acceptancePlatform, unchosenAutoDrafts } from "@/lib/clips/acceptance";
 
 export const dynamic = "force-dynamic";
 
@@ -48,21 +49,23 @@ export async function POST(request: NextRequest, { params }: Params) {
   const existing = await repo.getCandidate(cid);
   if (!existing || existing.source_id !== id) return Response.json({ error: "Kandidat nicht gefunden" }, { status: 404 });
   if (existing.human_verdict === "edited") {
-    return Response.json({ error: "Dieser Kandidat wurde durch eine neue Version ersetzt" }, { status: 409 });
+    return Response.json({ error: EDITED_ERROR }, { status: 409 });
   }
 
   /* Ziele: genau die gewählten. Die Standard-Plattform des Markenprofils ist in der Oberfläche
-   * vorausgewählt, aber abwählbar; sie wird hier nicht mehr erzwungen. Ohne Angabe gilt der
-   * Standard des Markenprofils, nicht mehr alle vier. */
-  const brand = source.brand_profile_id ? await repo.getBrandProfile(source.brand_profile_id) : null;
-  const defaultPlatform: Platform = brand?.default_platform ?? source.brief.platform ?? "linkedin";
-  let platforms: Platform[] = [defaultPlatform];
+   * vorausgewählt, aber abwählbar; sie wird hier nicht mehr erzwungen. Ohne Angabe gilt die
+   * Plattform eines schon vorhandenen Clips des Kandidaten (der Entwurf der Analyse wird so
+   * wiederverwendet), sonst Markenprofil, Briefing, reels wie im Worker (lib/clips/acceptance.ts). */
+  let platforms: Platform[];
   if (Array.isArray(body.platforms)) {
     const requested = body.platforms.filter(isPlatform);
     if (requested.length === 0) {
       return Response.json({ error: "Mindestens ein Ziel wählen" }, { status: 400 });
     }
     platforms = PLATFORMS.filter((p) => requested.includes(p));
+  } else {
+    const brand = source.brand_profile_id ? await repo.getBrandProfile(source.brand_profile_id) : null;
+    platforms = [acceptancePlatform(cid, await repo.listClips(id), brand, source)];
   }
 
   const keepSourceAspect = body.keep_source_aspect === true;
@@ -73,6 +76,19 @@ export async function POST(request: NextRequest, { params }: Params) {
       clips = await repo.createClips(cid, platforms, { keepSourceAspect });
     } catch (error) {
       return Response.json({ error: error instanceof Error ? error.message : "Clips konnten nicht angelegt werden" }, { status: 500 });
+    }
+    /* Ausdrücklich gewählte Plattformen: Automatik-Entwürfe auf anderen Plattformen fallen weg, bevor
+     * das Urteil sie für den lokalen Worker renderbar macht. */
+    if (Array.isArray(body.platforms)) {
+      for (const draft of unchosenAutoDrafts(cid, await repo.listClips(id), platforms)) {
+        await repo.updateClip(draft.id, { status: "deleted" });
+        await repo.audit({
+          action: "clip.auto_draft_dropped",
+          entity: "clips",
+          entity_id: draft.id,
+          payload: { source_id: id, candidate_id: cid, platform: draft.platform, chosen: platforms },
+        });
+      }
     }
   }
 

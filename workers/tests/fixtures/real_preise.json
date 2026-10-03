@@ -1,0 +1,568 @@
+{
+ "id": "real_preise",
+ "source_id": "16982bb5-f2e4-4d89-81ed-1ca44fd391d7",
+ "note": "Eigenes Testmaterial des Nutzers, Whisper-Transkript aus der lokalen DB; ein langer Satz nur mit Kommas.",
+ "exported_with": "eval.clip_eval.load_words",
+ "words": [
+  {
+   "end": 0.28,
+   "prob": 0.9199241101741791,
+   "text": "Ehrlich",
+   "start": 0.0,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 0.68,
+   "prob": 0.9997264742851257,
+   "text": "gesagt",
+   "start": 0.28,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 0.96,
+   "prob": 0.9998564720153809,
+   "text": "war",
+   "start": 0.68,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 1.16,
+   "prob": 0.999935507774353,
+   "text": "das",
+   "start": 0.96,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 1.36,
+   "prob": 0.9999699592590332,
+   "text": "der",
+   "start": 1.16,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 1.86,
+   "prob": 0.9986737966537476,
+   "text": "teuerste",
+   "start": 1.36,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 2.22,
+   "prob": 0.9999599456787109,
+   "text": "Fehler",
+   "start": 1.86,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 2.58,
+   "prob": 0.9998983144760132,
+   "text": "meiner",
+   "start": 2.22,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 3.16,
+   "prob": 0.9996373852094015,
+   "text": "Karriere,",
+   "start": 2.58,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 3.58,
+   "prob": 0.9969895482063293,
+   "text": "wir",
+   "start": 3.3,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 3.86,
+   "prob": 0.9999755620956421,
+   "text": "haben",
+   "start": 3.58,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 4.08,
+   "prob": 0.9999878406524658,
+   "text": "in",
+   "start": 3.86,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 4.52,
+   "prob": 0.999920129776001,
+   "text": "unserer",
+   "start": 4.08,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 4.96,
+   "prob": 0.997114360332489,
+   "text": "Branche",
+   "start": 4.52,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 5.42,
+   "prob": 0.9316753149032593,
+   "text": "40",
+   "start": 4.96,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 6.0,
+   "prob": 0.5415250658988953,
+   "text": "%",
+   "start": 5.42,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 6.5,
+   "prob": 0.9852051734924316,
+   "text": "Marge",
+   "start": 6.0,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 6.94,
+   "prob": 0.999983549118042,
+   "text": "verloren,",
+   "start": 6.5,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 7.54,
+   "prob": 0.999962568283081,
+   "text": "weil",
+   "start": 7.22,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 7.84,
+   "prob": 0.9999855756759644,
+   "text": "das",
+   "start": 7.54,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 8.6,
+   "prob": 0.9938975870609283,
+   "text": "Preismodell",
+   "start": 7.84,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 8.92,
+   "prob": 0.9998133778572083,
+   "text": "falsch",
+   "start": 8.6,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 9.18,
+   "prob": 0.9999690055847168,
+   "text": "war,",
+   "start": 8.92,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 9.64,
+   "prob": 0.9992390871047974,
+   "text": "alle",
+   "start": 9.36,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 9.98,
+   "prob": 0.9998037219047546,
+   "text": "sagen,",
+   "start": 9.64,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 10.46,
+   "prob": 0.9992789626121521,
+   "text": "du",
+   "start": 10.24,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 10.94,
+   "prob": 0.9997819364070892,
+   "text": "brauchst",
+   "start": 10.46,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 11.12,
+   "prob": 0.9994919300079346,
+   "text": "mehr",
+   "start": 10.94,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 11.82,
+   "prob": 0.9998535315195719,
+   "text": "Reichweite,",
+   "start": 11.12,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 12.34,
+   "prob": 0.9997871518135071,
+   "text": "das",
+   "start": 12.02,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 12.98,
+   "prob": 0.9997523625691732,
+   "text": "Gegenteil",
+   "start": 12.34,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 13.18,
+   "prob": 0.9999716281890869,
+   "text": "ist",
+   "start": 12.98,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 13.34,
+   "prob": 0.9999706745147705,
+   "text": "der",
+   "start": 13.18,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 13.62,
+   "prob": 0.9988337159156799,
+   "text": "Fall,",
+   "start": 13.34,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 14.34,
+   "prob": 0.9976621866226196,
+   "text": "Preise",
+   "start": 13.9,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 14.56,
+   "prob": 0.9999808073043823,
+   "text": "sind",
+   "start": 14.34,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 15.54,
+   "prob": 0.9993927776813507,
+   "text": "Positionierung,",
+   "start": 14.56,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 16.08,
+   "prob": 0.9994783997535706,
+   "text": "das",
+   "start": 15.82,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 16.38,
+   "prob": 0.9311662018299103,
+   "text": "heisst",
+   "start": 16.08,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 16.72,
+   "prob": 0.9999879598617554,
+   "text": "aber",
+   "start": 16.38,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 17.02,
+   "prob": 0.9999749660491943,
+   "text": "nicht,",
+   "start": 16.72,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": true,
+   "sentence_idx": 0
+  },
+  {
+   "end": 17.5,
+   "prob": 0.9998985528945923,
+   "text": "dass",
+   "start": 17.22,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 17.7,
+   "prob": 0.9999678134918213,
+   "text": "das",
+   "start": 17.5,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 17.92,
+   "prob": 0.9999396800994873,
+   "text": "für",
+   "start": 17.7,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 18.18,
+   "prob": 0.9999778270721436,
+   "text": "jede",
+   "start": 17.92,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 18.6,
+   "prob": 0.9974436461925507,
+   "text": "Branche",
+   "start": 18.18,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 18.92,
+   "prob": 0.9999252557754517,
+   "text": "gilt,",
+   "start": 18.6,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 19.42,
+   "prob": 0.9992401599884033,
+   "text": "im",
+   "start": 19.16,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 19.92,
+   "prob": 0.9996653199195862,
+   "text": "Handwerk",
+   "start": 19.42,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 20.3,
+   "prob": 0.9992746710777283,
+   "text": "zählt",
+   "start": 19.92,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 20.8,
+   "prob": 0.9996827244758606,
+   "text": "zuerst",
+   "start": 20.3,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 21.0,
+   "prob": 0.9999532699584961,
+   "text": "der",
+   "start": 20.8,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 21.34,
+   "prob": 0.9936135411262512,
+   "text": "Ruf,",
+   "start": 21.0,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 21.74,
+   "prob": 0.9999721050262451,
+   "text": "dann",
+   "start": 21.54,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 21.94,
+   "prob": 0.999931812286377,
+   "text": "der",
+   "start": 21.74,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  },
+  {
+   "end": 22.26,
+   "prob": 0.9992817044258118,
+   "text": "Preis.",
+   "start": 21.94,
+   "filler": null,
+   "speaker": "SPEAKER_00",
+   "negation": false,
+   "sentence_idx": 0
+  }
+ ]
+}

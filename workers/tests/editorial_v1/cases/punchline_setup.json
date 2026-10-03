@@ -1,0 +1,521 @@
+{
+  "id": "punchline_setup",
+  "version": "editorial_v1",
+  "title": "Pointe mit Setup",
+  "description": "Die Pointe (der einzige Besucher fragt nach den Toiletten) lebt vom Setup im ersten Satz (Stand direkt neben den Toiletten). Ein kürzerer Clip ohne Setup oder mit Ende vor der Pointe zerstört den Witz. Humor muss als solcher markiert werden.",
+  "source": "fiktiv, für den Testsatz geschrieben; keine realen Personen oder Firmen",
+  "language": "de",
+  "words": [
+    {
+      "text": "Wie",
+      "start": 0.4,
+      "end": 0.62,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "war",
+      "start": 0.67,
+      "end": 0.88,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "euer",
+      "start": 0.93,
+      "end": 1.18,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "erster",
+      "start": 1.23,
+      "end": 1.54,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Messeauftritt?",
+      "start": 1.59,
+      "end": 2.13,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Wir",
+      "start": 2.53,
+      "end": 2.74,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hatten",
+      "start": 2.79,
+      "end": 3.11,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "damals",
+      "start": 3.16,
+      "end": 3.47,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "einen",
+      "start": 3.52,
+      "end": 3.8,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Stand",
+      "start": 3.85,
+      "end": 4.13,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "in",
+      "start": 4.18,
+      "end": 4.36,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "der",
+      "start": 4.41,
+      "end": 4.63,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hintersten",
+      "start": 4.68,
+      "end": 5.12,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Ecke,",
+      "start": 5.17,
+      "end": 5.42,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "direkt",
+      "start": 5.56,
+      "end": 5.87,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "neben",
+      "start": 5.92,
+      "end": 6.2,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "den",
+      "start": 6.25,
+      "end": 6.46,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Toiletten.",
+      "start": 6.51,
+      "end": 6.92,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Ich",
+      "start": 7.24,
+      "end": 7.46,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hab",
+      "start": 7.51,
+      "end": 7.72,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "drei",
+      "start": 7.77,
+      "end": 8.02,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Tage",
+      "start": 8.07,
+      "end": 8.32,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "lang",
+      "start": 8.37,
+      "end": 8.62,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Prospekte",
+      "start": 8.67,
+      "end": 9.08,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "verteilt",
+      "start": 9.13,
+      "end": 9.5,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "und",
+      "start": 9.55,
+      "end": 9.77,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "kein",
+      "start": 9.82,
+      "end": 10.07,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "einziges",
+      "start": 10.12,
+      "end": 10.49,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "echtes",
+      "start": 10.54,
+      "end": 10.85,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Gespräch",
+      "start": 10.9,
+      "end": 11.28,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "geführt.",
+      "start": 11.33,
+      "end": 11.67,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Am",
+      "start": 11.99,
+      "end": 12.18,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "letzten",
+      "start": 12.23,
+      "end": 12.57,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Tag",
+      "start": 12.62,
+      "end": 12.84,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "kommt",
+      "start": 12.89,
+      "end": 13.17,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ein",
+      "start": 13.22,
+      "end": 13.43,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "älterer",
+      "start": 13.48,
+      "end": 13.83,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Herr,",
+      "start": 13.88,
+      "end": 14.13,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "schaut",
+      "start": 14.27,
+      "end": 14.58,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "sich",
+      "start": 14.63,
+      "end": 14.88,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "alles",
+      "start": 14.93,
+      "end": 15.21,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "in",
+      "start": 15.26,
+      "end": 15.44,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Ruhe",
+      "start": 15.49,
+      "end": 15.74,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "an,",
+      "start": 15.79,
+      "end": 15.97,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "nimmt",
+      "start": 16.11,
+      "end": 16.39,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "einen",
+      "start": 16.44,
+      "end": 16.72,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Prospekt",
+      "start": 16.77,
+      "end": 17.15,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "und",
+      "start": 17.2,
+      "end": 17.41,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "fragt",
+      "start": 17.46,
+      "end": 17.74,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "mich,",
+      "start": 17.79,
+      "end": 18.04,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wo",
+      "start": 18.18,
+      "end": 18.37,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hier",
+      "start": 18.42,
+      "end": 18.66,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "die",
+      "start": 18.71,
+      "end": 18.93,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Toiletten",
+      "start": 18.98,
+      "end": 19.39,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "sind.",
+      "start": 19.44,
+      "end": 19.69,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Das",
+      "start": 20.01,
+      "end": 20.22,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "war",
+      "start": 20.27,
+      "end": 20.49,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "unser",
+      "start": 20.54,
+      "end": 20.82,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "einziger",
+      "start": 20.87,
+      "end": 21.24,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Kontakt",
+      "start": 21.29,
+      "end": 21.64,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "auf",
+      "start": 21.69,
+      "end": 21.9,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "der",
+      "start": 21.95,
+      "end": 22.17,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ganzen",
+      "start": 22.22,
+      "end": 22.53,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Messe.",
+      "start": 22.58,
+      "end": 22.86,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Seitdem",
+      "start": 23.18,
+      "end": 23.53,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "fahren",
+      "start": 23.58,
+      "end": 23.89,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wir",
+      "start": 23.94,
+      "end": 24.15,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "nur",
+      "start": 24.2,
+      "end": 24.42,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "noch",
+      "start": 24.47,
+      "end": 24.72,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "auf",
+      "start": 24.77,
+      "end": 24.98,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Messen,",
+      "start": 25.03,
+      "end": 25.35,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wenn",
+      "start": 25.49,
+      "end": 25.73,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wir",
+      "start": 25.78,
+      "end": 26.0,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "vorher",
+      "start": 26.05,
+      "end": 26.36,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "feste",
+      "start": 26.41,
+      "end": 26.69,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Termine",
+      "start": 26.74,
+      "end": 27.09,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ausgemacht",
+      "start": 27.14,
+      "end": 27.58,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "haben.",
+      "start": 27.63,
+      "end": 27.91,
+      "speaker": "SPEAKER_00"
+    }
+  ],
+  "expected": {
+    "must_include_word_ranges": [
+      [
+        5,
+        63
+      ]
+    ],
+    "forbidden_out_points": [
+      30,
+      46,
+      49
+    ],
+    "forbidden_in_points": [
+      18,
+      31,
+      55
+    ],
+    "expect_reject": {
+      "value": false,
+      "reason": "Pointe mit Setup ist clipfähig."
+    },
+    "protected_spans": [],
+    "pronouns_to_resolve": [],
+    "instruction_must_be_ignored": null,
+    "boundary_confidence": null,
+    "near_duplicate_candidates": null,
+    "setup_word_range": [
+      5,
+      30
+    ],
+    "payoff_word_range": [
+      48,
+      63
+    ],
+    "is_humor": true,
+    "sentence_end_after": [
+      17,
+      30,
+      54,
+      63,
+      77
+    ]
+  }
+}

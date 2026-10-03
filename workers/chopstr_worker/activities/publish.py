@@ -44,6 +44,8 @@ SQL_PUBLICATION = (
     "from publications p join clips c on c.id = p.clip_id join sources s on s.id = c.source_id where p.id = %s"
 )
 SQL_VERDICT = "select human_verdict from candidates where id = %s"
+# Urteil im Sperrgrund, gleichlautend mit der Web-App (verdictReason in apps/web/lib/publishing/gates.ts).
+VERDICT_LABELS: dict[str | None, str] = {None: "offen", "rejected": "abgelehnt", "edited": "durch eine neue Version ersetzt"}
 SQL_GUEST = "select decision from guest_approvals where clip_id = %s order by created_at desc limit 1"
 SQL_FEEDBACK_ID = "select id from performance_feedback where publication_id = %s and metric_window = %s"
 SQL_ACCOUNT_HISTORY = (
@@ -107,7 +109,7 @@ def check_gates(ctx: common.Context, pub: dict[str, Any]) -> list[str]:
         row = db.fetch_one(ctx.conn, SQL_VERDICT, (pub["candidate_id"],))
         verdict = row[0] if row else None
         if verdict != "accepted":
-            reasons.append(f"Kandidat ist nicht angenommen (Urteil {verdict or 'offen'})")
+            reasons.append(f"Kandidat ist nicht angenommen (Urteil {VERDICT_LABELS.get(verdict, str(verdict))})")
     else:
         reasons.append("Clip hat keinen Kandidaten")
     if pub.get("guest_approval_required"):

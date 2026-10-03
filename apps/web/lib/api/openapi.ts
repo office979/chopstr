@@ -10,7 +10,7 @@ export const API_VERSION = "1.0.0";
 export const API_TITLE = "chopstr API";
 
 const PLATFORMS = ["tiktok", "reels", "shorts", "linkedin"] as const;
-const HOOK_PATTERNS = ["identity_call", "contrarian", "open_loop", "results_first", "mistake_warning"] as const;
+const HOOK_PATTERNS = ["identity_call", "contrarian", "open_loop", "results_first", "mistake_warning", "native"] as const;
 
 const uuid: JsonSchema = { type: "string", format: "uuid" };
 const idParam = (name: string, description: string) => ({ name, in: "path" as const, required: true as const, description, schema: { type: "string" } });
@@ -63,7 +63,7 @@ export const SCHEMAS: Record<string, JsonSchema> = {
     properties: {
       verdict: { type: "string", enum: ["accepted", "rejected"] },
       reason: { type: "string", maxLength: 500, description: "Pflicht bei rejected (Lernsignal)" },
-      platforms: { type: "array", items: { type: "string", enum: PLATFORMS }, minItems: 1, description: "Zielplattformen bei accepted, Standard alle vier" },
+      platforms: { type: "array", items: { type: "string", enum: PLATFORMS }, minItems: 1, description: "Zielplattformen bei accepted. Ohne Angabe gilt genau eine Plattform: die eines schon vorhandenen Clips des Kandidaten (etwa des Entwurfs der Analyse), sonst die Standard-Plattform des Markenprofils, sonst die Plattform aus dem Briefing, sonst reels. Mit Angabe fallen Automatik-Entwürfe auf nicht gewählten Plattformen weg." },
     },
     additionalProperties: false,
   },

@@ -1,0 +1,480 @@
+{
+  "id": "conditional_recommendation",
+  "version": "editorial_v1",
+  "title": "Bedingte Empfehlung",
+  "description": "Ein Ja mit Bedingung und später eine Einschränkung mit „Wobei“. Die Bedingung bleibt im Clip oder der Kandidat wird verworfen. Der Clip darf weder vor der Einschränkung enden noch auf ihr, sondern auf dem abschließenden Satz.",
+  "source": "fiktiv, für den Testsatz geschrieben; keine realen Personen oder Firmen",
+  "language": "de",
+  "words": [
+    {
+      "text": "Sollte",
+      "start": 0.4,
+      "end": 0.71,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "ein",
+      "start": 0.76,
+      "end": 0.98,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "kleiner",
+      "start": 1.03,
+      "end": 1.37,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Betrieb",
+      "start": 1.42,
+      "end": 1.77,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "auf",
+      "start": 1.82,
+      "end": 2.03,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "die",
+      "start": 2.08,
+      "end": 2.3,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Vier-Tage-Woche",
+      "start": 2.35,
+      "end": 2.88,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "umstellen?",
+      "start": 2.93,
+      "end": 3.34,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Meine",
+      "start": 3.74,
+      "end": 4.02,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Antwort",
+      "start": 4.07,
+      "end": 4.42,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ist:",
+      "start": 4.47,
+      "end": 4.68,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Ja,",
+      "start": 4.82,
+      "end": 5.01,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "aber",
+      "start": 5.15,
+      "end": 5.39,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "nur,",
+      "start": 5.44,
+      "end": 5.66,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wenn",
+      "start": 5.8,
+      "end": 6.05,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ihr",
+      "start": 6.1,
+      "end": 6.31,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "vorher",
+      "start": 6.36,
+      "end": 6.68,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "eure",
+      "start": 6.73,
+      "end": 6.97,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Abläufe,",
+      "start": 7.02,
+      "end": 7.37,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "z.",
+      "start": 7.51,
+      "end": 7.66,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "B.",
+      "start": 7.71,
+      "end": 7.86,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "die",
+      "start": 7.91,
+      "end": 8.13,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Urlaubsvertretung,",
+      "start": 8.18,
+      "end": 8.8,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "sauber",
+      "start": 8.94,
+      "end": 9.25,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "dokumentiert",
+      "start": 9.3,
+      "end": 9.8,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "habt.",
+      "start": 9.85,
+      "end": 10.1,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Bei",
+      "start": 10.42,
+      "end": 10.64,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "uns",
+      "start": 10.69,
+      "end": 10.9,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hat",
+      "start": 10.95,
+      "end": 11.17,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "das",
+      "start": 11.22,
+      "end": 11.44,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "im",
+      "start": 11.49,
+      "end": 11.67,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ersten",
+      "start": 11.72,
+      "end": 12.03,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Quartal",
+      "start": 12.08,
+      "end": 12.43,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "gut",
+      "start": 12.48,
+      "end": 12.69,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "funktioniert,",
+      "start": 12.74,
+      "end": 13.25,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "weil",
+      "start": 13.39,
+      "end": 13.63,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "jeder",
+      "start": 13.68,
+      "end": 13.96,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wusste,",
+      "start": 14.01,
+      "end": 14.33,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wer",
+      "start": 14.47,
+      "end": 14.68,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wen",
+      "start": 14.73,
+      "end": 14.95,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "vertritt.",
+      "start": 15.0,
+      "end": 15.37,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Wobei",
+      "start": 15.69,
+      "end": 15.97,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ich",
+      "start": 16.02,
+      "end": 16.24,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "dazusagen",
+      "start": 16.29,
+      "end": 16.7,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "muss:",
+      "start": 16.75,
+      "end": 17.0,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "In",
+      "start": 17.14,
+      "end": 17.32,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "der",
+      "start": 17.37,
+      "end": 17.59,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Werkstatt",
+      "start": 17.64,
+      "end": 18.04,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hätte",
+      "start": 18.09,
+      "end": 18.37,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "das",
+      "start": 18.42,
+      "end": 18.64,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "so",
+      "start": 18.69,
+      "end": 18.87,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "nicht",
+      "start": 18.92,
+      "end": 19.2,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "geklappt,",
+      "start": 19.25,
+      "end": 19.63,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "da",
+      "start": 19.77,
+      "end": 19.95,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "braucht",
+      "start": 20.0,
+      "end": 20.35,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "es",
+      "start": 20.4,
+      "end": 20.58,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "jemanden",
+      "start": 20.63,
+      "end": 21.01,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "vor",
+      "start": 21.06,
+      "end": 21.27,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Ort.",
+      "start": 21.32,
+      "end": 21.54,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Im",
+      "start": 21.86,
+      "end": 22.04,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Büro",
+      "start": 22.09,
+      "end": 22.34,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "würde",
+      "start": 22.39,
+      "end": 22.67,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ich",
+      "start": 22.72,
+      "end": 22.94,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "es",
+      "start": 22.99,
+      "end": 23.17,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "jederzeit",
+      "start": 23.22,
+      "end": 23.63,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wieder",
+      "start": 23.68,
+      "end": 23.99,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "machen.",
+      "start": 24.04,
+      "end": 24.35,
+      "speaker": "SPEAKER_00"
+    }
+  ],
+  "expected": {
+    "must_include_word_ranges": [
+      [
+        11,
+        25
+      ]
+    ],
+    "forbidden_out_points": [
+      11,
+      12,
+      40,
+      58
+    ],
+    "forbidden_in_points": [
+      12,
+      26,
+      41
+    ],
+    "expect_reject": {
+      "value": false,
+      "reason": "Die Empfehlung ist mit Bedingung und Einschränkung clipfähig."
+    },
+    "protected_spans": [
+      {
+        "type": "condition",
+        "word_range": [
+          11,
+          25
+        ],
+        "note": "Ja nur unter der Bedingung, dass die Abläufe dokumentiert sind."
+      },
+      {
+        "type": "condition",
+        "word_range": [
+          41,
+          58
+        ],
+        "note": "Einschränkung auf das Büro; ohne sie wirkt die Empfehlung allgemein."
+      }
+    ],
+    "pronouns_to_resolve": [
+      {
+        "word": 29,
+        "text": "das",
+        "antecedent_word_range": [
+          6,
+          7
+        ]
+      }
+    ],
+    "instruction_must_be_ignored": null,
+    "boundary_confidence": null,
+    "near_duplicate_candidates": null,
+    "softening_word_range": [
+      41,
+      58
+    ],
+    "sentence_end_after": [
+      25,
+      40,
+      58,
+      66
+    ],
+    "no_sentence_end_after": [
+      19,
+      20
+    ]
+  }
+}

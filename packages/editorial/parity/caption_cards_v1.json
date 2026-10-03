@@ -1,0 +1,680 @@
+{
+  "version": 1,
+  "description": "Gemeinsame Fälle für captions_de (pytest) und apps/web/lib/clips/captions.ts (vitest), AP10a. Zahl plus Einheit als Token (limit: Zeilenbreite, null für ohne Grenze), Trennung von Bindestrichwörtern nur am vorhandenen Bindestrich (nur Fälle, in denen jedes Segment in die Zeile passt; breitere Segmente teilt allein der Worker an Morphemgrenzen weiter), Kartenbau ohne Kommas (der Komma-Bruch P30 gilt nur im Worker).",
+  "unit_words": [
+    "$",
+    "%",
+    "cent",
+    "chf",
+    "cm",
+    "dollar",
+    "eur",
+    "euro",
+    "franken",
+    "g",
+    "grad",
+    "jahr",
+    "jahre",
+    "jahren",
+    "kg",
+    "km",
+    "km/h",
+    "kwh",
+    "m",
+    "mal",
+    "milliarde",
+    "milliarden",
+    "million",
+    "millionen",
+    "minute",
+    "minuten",
+    "mio",
+    "mio.",
+    "mm",
+    "monat",
+    "monate",
+    "monaten",
+    "mrd",
+    "mrd.",
+    "pfund",
+    "promille",
+    "prozent",
+    "prozentpunkte",
+    "punkte",
+    "rappen",
+    "sekunde",
+    "sekunden",
+    "stunde",
+    "stunden",
+    "tag",
+    "tage",
+    "tagen",
+    "tausend",
+    "tsd.",
+    "uhr",
+    "usd",
+    "woche",
+    "wochen",
+    "£",
+    "°",
+    "°c",
+    "€"
+  ],
+  "unit_tokens": [
+    {
+      "text": "Das sind 40 Prozent mehr.",
+      "limit": null,
+      "expected": [
+        [
+          "Das"
+        ],
+        [
+          "sind"
+        ],
+        [
+          "40",
+          "Prozent"
+        ],
+        [
+          "mehr."
+        ]
+      ]
+    },
+    {
+      "text": "Es kostet 3,5 Mio. Euro im Jahr.",
+      "limit": null,
+      "expected": [
+        [
+          "Es"
+        ],
+        [
+          "kostet"
+        ],
+        [
+          "3,5",
+          "Mio.",
+          "Euro"
+        ],
+        [
+          "im"
+        ],
+        [
+          "Jahr."
+        ]
+      ]
+    },
+    {
+      "text": "Dazu kommen 12 € pro Monat.",
+      "limit": null,
+      "expected": [
+        [
+          "Dazu"
+        ],
+        [
+          "kommen"
+        ],
+        [
+          "12",
+          "€"
+        ],
+        [
+          "pro"
+        ],
+        [
+          "Monat."
+        ]
+      ]
+    },
+    {
+      "text": "Treffen um 14.30 Uhr am Bahnhof.",
+      "limit": null,
+      "expected": [
+        [
+          "Treffen"
+        ],
+        [
+          "um"
+        ],
+        [
+          "14.30",
+          "Uhr"
+        ],
+        [
+          "am"
+        ],
+        [
+          "Bahnhof."
+        ]
+      ]
+    },
+    {
+      "text": "Wir haben 40.000 Euro verloren.",
+      "limit": null,
+      "expected": [
+        [
+          "Wir"
+        ],
+        [
+          "haben"
+        ],
+        [
+          "40.000",
+          "Euro"
+        ],
+        [
+          "verloren."
+        ]
+      ]
+    },
+    {
+      "text": "Seit 3 Jahren und 2 Monaten",
+      "limit": null,
+      "expected": [
+        [
+          "Seit"
+        ],
+        [
+          "3",
+          "Jahren"
+        ],
+        [
+          "und"
+        ],
+        [
+          "2",
+          "Monaten"
+        ]
+      ]
+    },
+    {
+      "text": "Das waren 40 Prozent. Euro gab es keine.",
+      "limit": null,
+      "expected": [
+        [
+          "Das"
+        ],
+        [
+          "waren"
+        ],
+        [
+          "40",
+          "Prozent."
+        ],
+        [
+          "Euro"
+        ],
+        [
+          "gab"
+        ],
+        [
+          "es"
+        ],
+        [
+          "keine."
+        ]
+      ]
+    },
+    {
+      "text": "Er wurde 40 und Prozent spielt keine Rolle",
+      "limit": null,
+      "expected": [
+        [
+          "Er"
+        ],
+        [
+          "wurde"
+        ],
+        [
+          "40"
+        ],
+        [
+          "und"
+        ],
+        [
+          "Prozent"
+        ],
+        [
+          "spielt"
+        ],
+        [
+          "keine"
+        ],
+        [
+          "Rolle"
+        ]
+      ]
+    },
+    {
+      "text": "Im Jahr 2024 Prozent",
+      "limit": null,
+      "expected": [
+        [
+          "Im"
+        ],
+        [
+          "Jahr"
+        ],
+        [
+          "2024",
+          "Prozent"
+        ]
+      ],
+      "note": "Bekannter Fehlalarm: eine Jahreszahl vor einer Einheit wird ebenfalls verbunden. Beide Seiten verhalten sich gleich."
+    },
+    {
+      "text": "um 12, Euro",
+      "limit": null,
+      "expected": [
+        [
+          "um"
+        ],
+        [
+          "12,"
+        ],
+        [
+          "Euro"
+        ]
+      ]
+    },
+    {
+      "text": "Es kostet 3,5 Milliarden Euro.",
+      "limit": 15,
+      "expected": [
+        [
+          "Es"
+        ],
+        [
+          "kostet"
+        ],
+        [
+          "3,5",
+          "Milliarden"
+        ],
+        [
+          "Euro."
+        ]
+      ]
+    },
+    {
+      "text": "Es kostet 3,5 Milliarden Euro.",
+      "limit": 20,
+      "expected": [
+        [
+          "Es"
+        ],
+        [
+          "kostet"
+        ],
+        [
+          "3,5",
+          "Milliarden",
+          "Euro."
+        ]
+      ]
+    },
+    {
+      "text": "Treffen um 14:30 Uhr",
+      "limit": null,
+      "expected": [
+        [
+          "Treffen"
+        ],
+        [
+          "um"
+        ],
+        [
+          "14:30",
+          "Uhr"
+        ]
+      ]
+    }
+  ],
+  "hyphen_words": [
+    {
+      "word": "Kunden-Anfrage-Bearbeitung",
+      "limit": 11,
+      "expected": [
+        "Kunden-",
+        "Anfrage-",
+        "Bearbeitung"
+      ]
+    },
+    {
+      "word": "Kunden-Anfrage-Bearbeitung",
+      "limit": 16,
+      "expected": [
+        "Kunden-Anfrage-",
+        "Bearbeitung"
+      ]
+    },
+    {
+      "word": "Kunden-Anfrage-Bearbeitung.",
+      "limit": 20,
+      "expected": [
+        "Kunden-Anfrage-",
+        "Bearbeitung."
+      ]
+    },
+    {
+      "word": "Kunden-Anfrage-Bearbeitung",
+      "limit": 30,
+      "expected": [
+        "Kunden-Anfrage-Bearbeitung"
+      ]
+    },
+    {
+      "word": "E-Mail-Marketing-Kampagnen-Auswertung",
+      "limit": 12,
+      "expected": [
+        "E-Mail-",
+        "Marketing-",
+        "Kampagnen-",
+        "Auswertung"
+      ]
+    },
+    {
+      "word": "Baden-Württemberg",
+      "limit": 12,
+      "expected": [
+        "Baden-",
+        "Württemberg"
+      ]
+    },
+    {
+      "word": "Nord-Ostsee-Kanal",
+      "limit": 7,
+      "expected": [
+        "Nord-",
+        "Ostsee-",
+        "Kanal"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "text": "Das sind 40 Prozent mehr.",
+      "limit": 12,
+      "max_lines": 1,
+      "words": [
+        {
+          "text": "Das",
+          "start": 0.0,
+          "end": 0.3
+        },
+        {
+          "text": "sind",
+          "start": 0.35,
+          "end": 0.65
+        },
+        {
+          "text": "40",
+          "start": 0.7,
+          "end": 1.0
+        },
+        {
+          "text": "Prozent",
+          "start": 1.05,
+          "end": 1.35
+        },
+        {
+          "text": "mehr.",
+          "start": 1.4,
+          "end": 1.7
+        }
+      ],
+      "expected": [
+        [
+          "Das",
+          "sind"
+        ],
+        [
+          "40",
+          "Prozent"
+        ],
+        [
+          "mehr."
+        ]
+      ]
+    },
+    {
+      "text": "Um 14.30 Uhr kommen 12 € dazu.",
+      "limit": 12,
+      "max_lines": 1,
+      "words": [
+        {
+          "text": "Um",
+          "start": 0.0,
+          "end": 0.3
+        },
+        {
+          "text": "14.30",
+          "start": 0.35,
+          "end": 0.65
+        },
+        {
+          "text": "Uhr",
+          "start": 0.7,
+          "end": 1.0
+        },
+        {
+          "text": "kommen",
+          "start": 1.05,
+          "end": 1.35
+        },
+        {
+          "text": "12",
+          "start": 1.4,
+          "end": 1.7
+        },
+        {
+          "text": "€",
+          "start": 1.75,
+          "end": 2.05
+        },
+        {
+          "text": "dazu.",
+          "start": 2.1,
+          "end": 2.4
+        }
+      ],
+      "expected": [
+        [
+          "Um"
+        ],
+        [
+          "14.30",
+          "Uhr"
+        ],
+        [
+          "kommen",
+          "12",
+          "€"
+        ],
+        [
+          "dazu."
+        ]
+      ]
+    },
+    {
+      "text": "Wir haben 40.000 Euro und 3,5 Mio. Euro verloren.",
+      "limit": 20,
+      "max_lines": 2,
+      "words": [
+        {
+          "text": "Wir",
+          "start": 0.0,
+          "end": 0.3
+        },
+        {
+          "text": "haben",
+          "start": 0.35,
+          "end": 0.65
+        },
+        {
+          "text": "40.000",
+          "start": 0.7,
+          "end": 1.0
+        },
+        {
+          "text": "Euro",
+          "start": 1.05,
+          "end": 1.35
+        },
+        {
+          "text": "und",
+          "start": 1.95,
+          "end": 2.25
+        },
+        {
+          "text": "3,5",
+          "start": 2.3,
+          "end": 2.6
+        },
+        {
+          "text": "Mio.",
+          "start": 2.65,
+          "end": 2.95
+        },
+        {
+          "text": "Euro",
+          "start": 3.0,
+          "end": 3.3
+        },
+        {
+          "text": "verloren.",
+          "start": 3.35,
+          "end": 3.65
+        }
+      ],
+      "expected": [
+        [
+          "Wir",
+          "haben",
+          "40.000",
+          "Euro"
+        ],
+        [
+          "und",
+          "3,5",
+          "Mio.",
+          "Euro",
+          "verloren."
+        ]
+      ]
+    },
+    {
+      "text": "Die Kunden-Anfrage-Bearbeitung dauert 3 Tage",
+      "limit": 15,
+      "max_lines": 2,
+      "words": [
+        {
+          "text": "Die",
+          "start": 0.0,
+          "end": 0.3
+        },
+        {
+          "text": "Kunden-Anfrage-Bearbeitung",
+          "start": 0.35,
+          "end": 0.65
+        },
+        {
+          "text": "dauert",
+          "start": 0.7,
+          "end": 1.0
+        },
+        {
+          "text": "3",
+          "start": 1.05,
+          "end": 1.35
+        },
+        {
+          "text": "Tage",
+          "start": 1.4,
+          "end": 1.7
+        }
+      ],
+      "expected": [
+        [
+          "Die",
+          "Kunden-Anfrage-Bearbeitung"
+        ],
+        [
+          "dauert",
+          "3",
+          "Tage"
+        ]
+      ]
+    },
+    {
+      "text": "Seit 2019 sind die Kosten um 40 Prozent gestiegen",
+      "limit": 18,
+      "max_lines": 1,
+      "words": [
+        {
+          "text": "Seit",
+          "start": 0.0,
+          "end": 0.3
+        },
+        {
+          "text": "2019",
+          "start": 0.35,
+          "end": 0.65
+        },
+        {
+          "text": "sind",
+          "start": 0.7,
+          "end": 1.0
+        },
+        {
+          "text": "die",
+          "start": 1.05,
+          "end": 1.35
+        },
+        {
+          "text": "Kosten",
+          "start": 1.4,
+          "end": 1.7
+        },
+        {
+          "text": "um",
+          "start": 1.75,
+          "end": 2.05
+        },
+        {
+          "text": "40",
+          "start": 2.1,
+          "end": 2.4
+        },
+        {
+          "text": "Prozent",
+          "start": 2.45,
+          "end": 2.75
+        },
+        {
+          "text": "gestiegen",
+          "start": 2.8,
+          "end": 3.1
+        }
+      ],
+      "expected": [
+        [
+          "Seit",
+          "2019",
+          "sind"
+        ],
+        [
+          "die",
+          "Kosten",
+          "um"
+        ],
+        [
+          "40",
+          "Prozent"
+        ],
+        [
+          "gestiegen"
+        ]
+      ]
+    }
+  ]
+}

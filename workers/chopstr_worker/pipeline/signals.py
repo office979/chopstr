@@ -137,12 +137,17 @@ def to_payload(heat: np.ndarray, bin_s: float = 1.0, top_k: int = 25, audio: np.
     ``audio`` ist der reine Audioanteil ohne Textmischung. Die Bewertung braucht ihn getrennt: Die
     Textsignale stecken bereits in der Rubrik, und sie ein zweites Mal über die Heatmap einzurechnen
     wäre eine Doppelzählung.
+
+    ``laughter_values`` ist der eine Schlüssel für Lachen je Bin (gelesen von ``payoff_search`` und
+    ``trim_plan``). Lachen wird noch nicht berechnet (Register: ``audio.merkmale.lachen`` not_implemented),
+    deshalb steht dort eine leere Liste; leer heißt für beide Leser „kein Lachen bekannt“.
     """
     out = {
         "bin_s": bin_s,
         "n_bins": int(len(heat)),
         "values": [round(float(v), 4) for v in heat],
         "seeds": seeds(heat, top_k=top_k),
+        "laughter_values": [],
     }
     if audio is not None:
         out["audio_values"] = [round(float(v), 4) for v in audio]

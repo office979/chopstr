@@ -4,16 +4,25 @@ Frontmatter (YAML) enthält ``name``, ``version``, optional ``tool``, ``inputs``
 ``render(**inputs)`` ersetzt ``{platzhalter}`` wie ``str.format``, lässt aber unbekannte geschweifte
 Klammern (z. B. JSON-Beispiele) unangetastet. ``prompt_version`` liefert ``"<name>_v<N>"`` für
 ``candidates.prompt_version`` und den LLM-Cache-Key.
+
+Der Produktionspfad lädt nur über ``load_pinned``: die Version kommt aus der aktiven redaktionellen
+Grundlage (``editorial.Policy.prompt_pins``). Eine neue ``<name>_v<N+1>.md`` wird erst wirksam, wenn
+eine Policy sie pinnt. ``load`` ohne Version nimmt weiter die höchste Datei, warnt aber im Log.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from . import editorial
+
+log = logging.getLogger("chopstr.prompts")
 
 _FRONT = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 _PLACEHOLDER = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
@@ -82,13 +91,17 @@ def parse(text: str, path: Path | None = None) -> Prompt:
 
 @lru_cache(maxsize=64)
 def load(name: str, version: int | None = None) -> Prompt:
-    """Lädt ``<name>_v<version>.md``; ohne Version die höchste vorhandene."""
+    """Lädt ``<name>_v<version>.md``; ohne Version die höchste vorhandene (mit Warnung, siehe ``load_pinned``)."""
     d = prompts_dir()
     if version is None:
         cands = sorted(d.glob(f"{name}_v*.md"), key=lambda p: int(p.stem.rsplit("_v", 1)[1]))
         if not cands:
             raise FileNotFoundError(f"Kein Prompt {name}_v*.md in {d}")
         path = cands[-1]
+        log.warning(
+            "Prompt %s ohne Version geladen, genommen wird die hoechste Datei %s; der Produktionspfad nutzt load_pinned",
+            name, path.name,
+        )  # fmt: skip
     else:
         path = d / f"{name}_v{version}.md"
         if not path.is_file():
@@ -96,8 +109,22 @@ def load(name: str, version: int | None = None) -> Prompt:
     return parse(path.read_text(encoding="utf-8"), path)
 
 
+def load_pinned(name: str, policy: editorial.Policy | None = None) -> Prompt:
+    """Lädt die Version, die die Policy pinnt; ohne Policy die aktive (``editorial.load()``).
+
+    Ein Name ohne Pin scheitert laut, statt still auf die höchste Datei zu fallen."""
+    pol = policy or editorial.load()
+    pins = pol.prompt_pins
+    if name not in pins:
+        raise editorial.PolicyError(
+            f"Prompt {name} ist in {editorial.policy_version(pol.version)} nicht gepinnt; "
+            "ohne Pin würde eine neue Prompt-Datei den Pfad still umschalten."
+        )
+    return load(name, pins[name])
+
+
 def clear_cache() -> None:
     load.cache_clear()
 
 
-__all__ = ["Prompt", "clear_cache", "load", "parse", "prompts_dir"]
+__all__ = ["Prompt", "clear_cache", "load", "load_pinned", "parse", "prompts_dir"]

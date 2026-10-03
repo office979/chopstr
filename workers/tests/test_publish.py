@@ -96,7 +96,7 @@ def test_gates_block_without_calling_web(fake_db, fake_context, pub, web):
     next(c for c in fake_db.candidates if c["id"] == pub["cand"])["human_verdict"] = "rejected"
     out = publish.run_publish_clip(fake_context, pub["pub"])
     assert out["status"] == "failed" and len(out["gates"]) == 2 and web.calls == []
-    assert "Clip ist nicht gerendert (Status draft)" in out["error"] and "Kandidat ist nicht angenommen (Urteil rejected)" in out["error"]
+    assert "Clip ist nicht gerendert (Status draft)" in out["error"] and "Kandidat ist nicht angenommen (Urteil abgelehnt)" in out["error"]
     assert fake_db.publications[pub["pub"]]["status"] == "failed"
     assert fake_db.outbox_events[-1]["event"] == "publication.failed"
     assert fake_db.decision_log[-1]["chosen"] == {"status": "failed", "reason": "gates"}

@@ -6,6 +6,12 @@ Rubrik-Gewichte: Ridge-Regression der fünf Scores (``hook``, ``payoff``, ``spec
 begrenzt und auf Summe 1 normalisiert, erst ab 20 Entscheidungen. Landet in ``brand_profiles.learned_weights``
 als ``{ weights, n, fitted_at, r2 }`` mit Audit ``learning.updated``; ``story_engine.resolve_weights`` liest es.
 
+P14 ist für die Rangfolge ausgesetzt (Entscheidung P29, AP9): die gelernten Gewichte werden weiter berechnet und
+protokolliert (``DetectReport.weights``, Decision Log), ändern aber keine Reihenfolge; die kommt aus
+``story_engine.policy_total`` nach der redaktionellen Grundlage. Unter Fassung 2 steht das je Kandidat in
+``rubric.learned_weights_applied`` (false) mit Grund. Die Logik hier bleibt unverändert, damit die Daten für
+später erhalten bleiben.
+
 Hook-Muster: ``hook_pattern_stats`` (shown, chosen, reward_sum, reward_n) für Thompson Sampling.
 ``update_hook_stats`` zählt inkrementell, ``rebuild_hook_stats`` rechnet nächtlich alles aus ``decision_log``
 und ``performance_feedback`` neu (idempotent). ``thompson_order`` liefert die Reihenfolge der fünf Muster.

@@ -1,12 +1,14 @@
 # Eval: ASR-Qualität und Clip-Auswahl, getrennt nach Dialekt
 
-Zwei Werkzeuge, beide ohne GPU lauffähig:
+Werkzeuge, alle ohne GPU lauffähig:
 
 | Skript | Frage | Aufruf |
 |---|---|---|
 | `wer_eval.py` | Wie gut hört der Worker Deutsch (DE/AT/CH)? | `python -m eval.wer_eval gold/ hyp/ --lexicon names.txt --json wer.json` |
 | `eval_harness.py` | Wie nah kommen die Kandidaten an die Redaktion? | `python -m eval.eval_harness gold_clips/ preds/ --k 10 --json clips.json` |
 | `referenzsatz.py` | Mit welchen Dateien wurde gemessen, und sind es noch dieselben? | `python -m eval.referenzsatz pruefen --positiv "…" --negativ "…"` |
+| `clip_eval.py` | Wie sauber schneiden die Vorschläge einer Quelle, unter welcher Richtlinie? | `python -m eval.clip_eval --titel "…" --policy-version 2 --json messung.json` |
+| `blind_compare.py` | Ist Fassung 2 bei gleicher Ausgabemenge redaktionell besser als Fassung 1? | `python -m eval.blind_compare --out blind/` und `--auswerten blind/` |
 
 Beide laufen aus `workers/` mit aktivierter venv (`.venv/bin/python -m eval.wer_eval ...`).
 
@@ -110,3 +112,169 @@ Für eine belastbare Aussage fehlen zwei Dinge, und beide kann nur die Redaktion
    Damit lässt sich messen, wie ein guter Clip aussieht, aber nicht, ob die Pipeline die richtige
    Stelle in einem einstündigen Video findet. Dafür braucht es Dateien im Format von
    `eval/clips/*.json`: ein langes Video und die Zeitmarken, die ein Mensch genommen hätte.
+
+## Grenzmessung je Richtlinie (`clip_eval.py --policy-version`)
+
+`--policy-version 1` oder `2` setzt `CHOPSTR_POLICY_VERSION` für die Messung der Schnittgrenzen; ohne
+Angabe gilt die aktive Fassung. Die gemessene Richtlinie steht im Ergebnis unter `richtlinie`. Unter
+Fassung 2 kommt `grenze_nur_aus_pause` je Vorschlag und `grenze_nur_aus_pause_anteil` in der
+Zusammenfassung dazu: Grenzen ohne Satzzeichen, nur aus einer Pause abgeleitet. Der Median der Länge ist
+bei gerader Anzahl das Mittel der beiden mittleren Werte. Die Vorschläge selbst
+kommen aus der Datenbank; wer beide Fassungen vergleichen will, lässt die Analyse je Fassung laufen
+oder nimmt den Blindvergleich.
+
+## Blindvergleich alt gegen neu (`blind_compare.py`, AP11)
+
+Frage: Findet chopstr mit Fassung 2 bei gleicher Ausgabemenge bessere Clips als mit Fassung 1? Das
+Ergebnis ist beobachtend, kein A/B-Test, kein Viralitätsmaß.
+
+### Ablauf
+
+1. Vorab festlegen: Erfolgskriterium, Mindestverbesserung und Auswertungsplan. Das Werkzeug schreibt
+   das Kriterium aus Plan Abschnitt 8 Punkt 5 beim Erzeugen in den Schlüssel (Fassung 2 ist in
+   Quellentreue und Eigenständigkeit nicht schlechter als Fassung 1, abzüglich `--toleranz`, Standard 0;
+   die Verwerfungsquote wird berichtet). Nach dem Bewerten wird es nicht mehr geändert.
+2. Rechnen:
+
+   ```bash
+   .venv/bin/python -m eval.blind_compare --out blind/                       # Fixtures (Demo und editorial_v1)
+   .venv/bin/python -m eval.blind_compare --out blind/ --transkripte transkripte/ --ohne-fixtures
+   .venv/bin/python -m eval.blind_compare --out blind/ --quelle <uuid>       # aus Postgres, braucht DATABASE_URL
+   ```
+
+   Je Quelle läuft `story_engine.run` mit Fassung 1 und mit Fassung 2, mit demselben Provider
+   (`--provider`, Standard `local-heuristic`), demselben Brief (`--brief`) und derselben Obergrenze
+   (`--k`, Standard 5). Für jeden angebotenen Kandidaten entsteht der Hook wie im Produkt
+   (`copy_engine.write_copy` für `brief.platform`, ohne LanguageTool). Je Quelle zählen die besten n
+   Kandidaten beider Fassungen, n ist die kleinere Ausgabemenge; der Überhang steht im Schlüssel unter
+   `nicht_gepaart`. Gepaart wird innerhalb einer Quelle nach größter Überdeckung (`--paarung
+   ueberdeckung`, Standard) oder nach Rang (`--paarung rang`).
+3. Dateien im Ordner:
+
+   | Datei | Für wen | Inhalt |
+   |---|---|---|
+   | `bewertung.json` | Bewertende | Clip-Paare `A` und `B`: Text, Zeiten, Dauer, `ausgabe` (welche Clips aus derselben Ausgabe stammen), `kontext` (Satzbereich in `quellen.json`). Kein Hook, keine Version, kein Score, keine Begründung; Quellen heißen `Q01`, `Q02` … |
+   | `hooks_bewertung.json` | Bewertende, am besten andere Personen | Hook-Paare in eigener Reihenfolge und eigener A/B-Zuordnung: gesprochener Hook, Overlay-Text (`null` heißt keiner), Clip-Text zum Abgleich |
+   | `quellen.json` | Bewertende | je Quelle das Transkript (bis 40 Sätze) oder plus/minus 5 Sätze um beide Clips jedes Paares, für beide Seiten gleich; bei Datenbankquellen der Medienverweis (`storage_key`) |
+   | `raster.json` | Bewertende | Kriterien für Clips und Hooks mit Ankern 0 bis 4 |
+   | `schluessel.json` | nur Auswertung | Zuordnung `A`/`B` zu Fassung für beide Bögen, echte Quellnamen, Seed, Paarung, Überhang, Erfolgskriterium |
+   | `lauf.json` | nur Auswertung | je Quelle und Variante: Vorschläge, Verwerfungen je Grund, Modellaufrufe, Laufzeit, Hook-Kennzahlen, editorial_v1-Ergebnis, ClipCandidates; dazu die Stil-Leck-Prüfung |
+
+   Reihenfolge der Paare und Seite A oder B sind zufällig mit festem Seed (`--seed`, Standard 1729);
+   derselbe Seed ergibt dieselben Dateien. `schluessel.json` und `lauf.json` nicht an die Bewertenden
+   geben.
+4. Bewerten: je Paar beide Seiten nach dem Raster (ganze Zahlen 0 bis 4, leer heißt nicht bewertet),
+   dann `praeferenz` `A`, `B` oder `gleich`; eine Präferenz ohne Kriterienwerte gilt als Fehler.
+   Quellentreue mit `quellen.json`, Natürlichkeit am Audio der Quelle prüfen. Clips und Hooks getrennt
+   bewerten, damit der Stil eines Hooks die Clip-Bewertung nicht verrät.
+5. Auswerten: `.venv/bin/python -m eval.blind_compare --auswerten blind/` schreibt `blind/bericht.md`.
+   Fehlt ein Paar im Schlüssel, steht ein unbekanntes Kriterium oder ein Wert außerhalb 0 bis 4 im
+   Bogen, bricht die Auswertung mit einer Meldung ab, die das Paar nennt.
+
+### Bewertungsseite (`bewertung.html`)
+
+Die Redaktion füllt die Bögen in einer einzelnen Datei aus, ohne Build, Server oder Installation:
+`eval/bewertung.html` im Browser öffnen (Doppelklick genügt), dann den Ordner des Laufs auf die Fläche
+ziehen oder über „Dateien wählen“ beziehungsweise „Ordner wählen“ laden. Gelesen werden nur
+`bewertung.json`, `hooks_bewertung.json`, `quellen.json` und `raster.json`; `schluessel.json` und
+`lauf.json` bleiben ungeöffnet, damit die Verblindung hält. Alles läuft lokal im Browser.
+
+Der Reiter Clips zeigt je Paar Seite A und Seite B nebeneinander (Text, Dauer, Segmentzahl, Zeiten) und
+darunter den Quellkontext aus `quellen.json` mit Markierung, welche Sätze zu A und zu B gehören. Hook,
+Versionskennung und Score erscheinen dort nicht. Der Reiter Hooks zeigt gesprochenen Hook, Overlay-Text
+und den Clip-Text zur Deckung. Je Kriterium aus `raster.json` stehen die Anker 0 bis 4 mit Text, dazu
+Präferenz (A, B, gleich) und ein Freitextfeld.
+
+Tastatur: `0` bis `4` setzen den Wert am Cursor und rücken vor (erst alle Kriterien von Seite A, dann
+von Seite B), Pfeiltasten bewegen den Cursor, `Entf` löscht den Wert, `A`, `B` und `G` setzen die
+Präferenz, `W` und `Z` blättern. Der Fortschritt liegt im `localStorage` des Browsers, getrennt je Bogen
+und Inhalt; „Lokalen Stand verwerfen“ setzt auf den Stand der geladenen Dateien zurück.
+
+„Bewertung exportieren“ lädt `bewertung.json` und `hooks_bewertung.json` im Format des Erzeugers
+herunter (gleiche Dateinamen, gleiche Schlüsselfolge, Werte als ganze Zahlen 0 bis 4 oder `null`). Beide
+Dateien in den Ordner des Laufs legen, die Originale ersetzen, und mit `--auswerten` rechnen. Sind
+Paare unvollständig, warnt die Seite und exportiert trotzdem: solche Paare tragen `"offen": true`, die
+Liste steht in `offene_paare`; die Auswertung ignoriert beides und zählt ein Paar ohne Präferenz als
+„offen“. Eine Präferenz ohne einen einzigen Kriterienwert wird nicht exportiert (sie ließe die
+Auswertung abbrechen) und in der Warnung genannt. Clips und Hooks am besten von verschiedenen Personen
+bewerten lassen; jede Person exportiert ihren Bogen, die Dateien eines Bogens sind nicht zusammenführbar.
+
+### Raster (Master-Prompt Abschnitte 19 und 26)
+
+Anker für alle Kriterien: 0 nicht vorhanden oder kritisch verletzt, 1 schwach, 2 brauchbar, 3 stark
+und begründet, 4 besonders überzeugend. Höher ist immer besser.
+
+| Clip-Kriterium | Frage |
+|---|---|
+| Quellentreue | Gibt der Clip wieder, was die Quelle sagt, ohne Sinnumkehr, verlorene Bedingung oder falsche Zuordnung? |
+| Eigenständigkeit | Versteht man den Clip ohne Vorwissen? |
+| Einstieg | Ist der Anfang klar, und trägt er bis zum Kern? |
+| Aufbau | Führt der Verlauf zum Kern, ohne Ballast und ohne Sprünge? |
+| Abschluss | Endet der Clip mit eingelöstem Versprechen? |
+| Natürlichkeit | Klingt der Schnitt natürlich (Sprachfluss, Atem, Pausen)? |
+| Duplikate | Wiederholt der Clip einen anderen Clip derselben Ausgabe? |
+| Manuelle Nacharbeit | Wie viel müsste die Redaktion am Schnitt ändern, bevor sie veröffentlicht? |
+
+| Hook-Kriterium | Frage |
+|---|---|
+| Deckung durch den Clip | Behauptet der Hook nicht mehr, als der Clip sagt? |
+| Klarheit | Versteht man den Hook beim ersten Lesen oder Hören? |
+| Einstieg in den Clip | Führt der Hook in den Clip, ohne etwas anderes zu versprechen? |
+| Ton | Klingt der Hook natürlich, ohne Floskel und Übertreibung? |
+
+Die Anker je Kriterium stehen in `raster.json`.
+
+### Bericht
+
+`bericht.md` beginnt mit den Quellen ohne Vorschlag und ohne angebotenen Kandidaten je Fassung und dem
+Urteil zum vorab festgelegten Erfolgskriterium (Erfüllt, Nicht erfüllt oder Nicht bewertet). Danach:
+Material und Ausgabemenge, Stil-Leck-Prüfung, Clip- und Hook-Bewertung (Mittel, Streuung und Anzahl je
+Kriterium, Präferenz mit zweiseitigem Vorzeichentest), Verwerfungsquote je Grund und Fassung (deutsche
+Bezeichnung mit Code in Klammern), Dubletten und Laufereignisse getrennt, Modellaufrufe und Laufzeit je
+Quellstunde (jeder strukturierte Aufruf am Provider gezählt, auch Hooks), editorial_v1-Bestehensquote
+je Fassung und Fall (geprüft mit `tests/editorial_v1/harness.py`) und getrennt die einzelnen Schalter.
+
+Stil-Leck-Prüfung: Segmente je Clip, Anteil mit Teaser, Dauer, Anteil der Hooks ohne Overlay-Text und
+die häufigsten Hook-Anfänge je Fassung. Weicht ein Merkmal deutlich ab (Anteile um mehr als 25
+Prozentpunkte, Dauer um mehr als 25 Prozent, ein Hook-Anfang bei mindestens der Hälfte einer Fassung
+und unter 20 Prozent der anderen), warnt der Bericht: Bewertende könnten die Fassung erkennen.
+
+Verwerfungsquote: Zähler sind die Verwerfungen aus `DetectReport.discarded`, Nenner alle Vorschläge der
+Stufe 2 mit Ergebnis (verworfen oder angeboten), bei Fassung 1 vom Modell, bei Fassung 2 von der Suche,
+ohne Dubletten. `DetectReport.proposals` steht zum Vergleich daneben. Dubletten sind derselbe Moment,
+mehrfach gefunden; ab Fassung 2 stehen sie nicht in `discarded`, sondern in `report.search["duplicates"]`
+und je Art in `report.search["duplicate_counts"]` (`duplicate_payoff`, `same_span`, `same_opening`,
+`same_statement`, `chapter_overlap`, `same_result`), unter Fassung 1 als `duplicate` in `discarded`. Sie
+stehen in einer eigenen Tabelle und zählen weder im Zähler noch im Nenner. Laufereignisse
+(`budget_exhausted`, `clip_candidate_error`, `llm_budget` beim Vorschlag) betreffen keinen einzelnen
+Vorschlag und stehen ebenfalls getrennt. Ein Eintrag ohne Grund heißt nach seiner Stufe
+(`ohne_grund/search`).
+
+editorial_v1 im Blindvergleich: geprüft wird jeder angebotene Kandidat mit dem Harness, Schnittplan und
+entfernte Stellen der Kürzung (`rubric.removed_spans`) zusammen, damit eine lokale Naht (technische Pause,
+Füllwort, Einwurf) nicht als Naht mitten im Satz zählt.
+
+Schalter: Fassung 2 mit allen Gruppenschaltern aus (Basis), je eine Gruppe an (Auswahl:
+`gates.discard_hard`, `search.payoff_first`; Hooks: `hook.native_spoken`; Kürzung: `trim.enabled`)
+und alle zusammen (Kombination), je mit Kandidaten, Verwerfungsquote, Modellaufrufen und den
+Hook-Kennzahlen (Anteil native, ohne Overlay, gesprochener Hook als ganzer Satz, mit Claim-Befund).
+Kürzung und Kombination setzen zusätzlich die Regel `trim.enabled: true`, weil sie in der Richtlinie bis
+zur Abnahme aus steht; nur der Schalter allein ergäbe die Basis. Die Varianten entstehen über eine Kopie
+der Richtlinie, auf die `EDITORIAL_DIR` für die Dauer des Laufs zeigt. Eigene Overrides mit `--override`
+(mehrfach) oder `CHOPSTR_BLIND_OVERRIDES` (durch Komma getrennt): Schalter als `pfad=true|false` (Pfade
+aus `editorial.V2_SWITCHES`), Regeln als `regel:pfad=wert`, erlaubt nur `regel:trim.enabled`,
+`regel:gates.discard_hard`, `regel:hook.allow_partial_opening` (je `true` oder `false`) und
+`regel:bewertung.modus_v2` (`sortieren` oder `sperren`). Beispiel:
+`CHOPSTR_BLIND_OVERRIDES="cut.padding=true,regel:trim.enabled=true"`. Ob ein Schalter laut
+`editorial.V2_IMPLEMENTED_SWITCHES` gebaut ist, steht in Klammern, gesetzte Regeln stehen dahinter.
+`--ohne-schalter` rechnet nur Fassung 1 und 2.
+
+### Was der Vergleich nicht leistet
+
+* Organische Veröffentlichungen sind kein A/B-Test. Reichweite nach dem Posten hängt an Zeitpunkt,
+  Thema, Konto und Plattform; sie belegt keine der beiden Fassungen.
+* Mit `local-heuristic` sind alle Werte unkalibriert und die Fixtures sind klein (14 Fälle plus Demo).
+  Das Werkzeug zeigt den Ablauf; belastbar wird es mit einem echten Provider und echtem Material.
+* Unsicherheit und negative Ergebnisse gehören in den Bericht wie positive.
+* Kein Kundenmaterial bei Wettbewerbern hochladen. Ein Vergleich mit anderen Werkzeugen gehört nicht
+  zu diesem Paket und braucht die Rechte am Material.

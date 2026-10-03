@@ -7,7 +7,10 @@ ASR-Ergebnis bereits im Storage (Re-Run), fließt auch der Text-Anteil ein (``si
 laufen und schreibt ``candidates`` nach ``packages/schema/CANDIDATES.md``.
 
 Seit dem Wegfall des Auswahlschritts legt ``detect_candidates`` im selben Zug für **jeden** Kandidaten
-eine ``clips``-Zeile an (``auto_create_clips``) und setzt den Kandidaten auf ``human_verdict = 'accepted'``.
+eine ``clips``-Zeile an (``auto_create_clips``) und setzt den Kandidaten auf ``human_verdict = 'accepted'``,
+außer ``auto_accept_blockers`` findet einen Blocker (harter Risikohinweis, freigaberelevante
+Behauptung im Text oder in der Titelkarte, oder ein Text, der sich nicht prüfen lässt): dann bleibt
+das Urteil leer und der Clip ein Entwurf ohne Render, bis ein Mensch ihn annimmt.
 Damit ist die Warteschlange des Renderers (``clips.status = 'draft'`` mit angenommenem Kandidaten)
 ohne menschliches Zutun gefüllt. Weil beide Wege — der lokale Worker und die Temporal-Activity —
 durch ``run_detect_candidates`` laufen, hängt die Clip-Erzeugung an genau einer Stelle.
@@ -15,6 +18,8 @@ durch ``run_detect_candidates`` laufen, hängt die Clip-Erzeugung an genau einer
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
 from datetime import UTC, datetime
@@ -23,12 +28,12 @@ from typing import Any
 from temporalio import activity
 
 from .. import costlog, db, decision_log, editorial, events, outbox, storage, usage
-from ..pipeline import copy_engine, segment, signals, story_engine
+from ..pipeline import release_gate, segment, signals, story_engine
 from ..pipeline import silence as silence_mod
 from ..providers_llm import LLM
 from ..residency import Tenant
 from . import common
-from .render import STEP_RENDER, ad_label_for, render_pack
+from .render import FALLBACK_CLIP_PLATFORM, STEP_RENDER, ad_label_for, default_clip_platform, render_pack
 from .transcribe import asr_key_for
 
 log = logging.getLogger("chopstr.activities.analyze")
@@ -42,8 +47,19 @@ SIGNALS_VERSION = "signals_v2"
 # -- Automatische Clips (ohne Auswahlschritt) ---------------------------------------------------
 # Gründerentscheidung: alle Kandidaten bekommen einen Clip, immer Hochformat, je Kandidat genau einer.
 AUTO_CLIP_ASPECT = "9:16"
-AUTO_CLIP_PLATFORM = "reels"  # Rückfall, wenn an der Quelle kein Markenprofil hängt
+# Rückfall, wenn weder das Markenprofil noch das Briefing eine Plattform nennt. Dieselbe Reihenfolge
+# (Markenprofil, Briefing, ``reels``) gilt in der Web-App (``apps/web/lib/clips/acceptance.ts``) und
+# im Render (``render.default_clip_platform``, dort steht der Wert).
+AUTO_CLIP_PLATFORM = FALLBACK_CLIP_PLATFORM
 AUTO_VERDICT_REASON = "automatisch angenommen (ohne Auswahlschritt)"
+# Produktregel Freigabepflicht (Master-Prompt Priorität 1 Originaltreue): Humor, sensible Themen und
+# Tatsachenbehauptungen nimmt nie die Automatik an. Der Clip-Entwurf entsteht trotzdem, das Urteil
+# bleibt leer, und ohne angenommenen Kandidaten rendert ihn kein Worker.
+# Harte Blocker aus ``risk_flags``. ``claim`` steht nicht darin: das Flag aus ``story_graph.claims_in``
+# trifft fast jeden Kandidaten. Ob eine Behauptung die Freigabe aufhält, entscheidet
+# ``release_gate.release_relevant_claims`` am Text des Kandidaten (``docs/ENTSCHEIDUNGEN.md`` P27).
+AUTO_ACCEPT_HARD_FLAGS = ("humor", "sensitive_topic")
+AUTO_HOLD_REASON_PREFIX = "automatische Freigabe ausgesetzt: "
 # Rundung der Kandidatenfenster für den Dublettenschutz (Zehntelsekunden)
 _WINDOW_DIGITS = 1
 
@@ -54,14 +70,31 @@ SQL_CLIP_FOR_CANDIDATE = "select id from clips where candidate_id = %s limit 1"
 SQL_CLIP_WINDOWS = (
     "select k.start_s, k.end_s from clips c join candidates k on k.id = c.candidate_id where c.source_id = %s"
 )
-# Re-Run: die noch nicht gerenderten Automatik-Clips und ihre Kandidaten weichen dem neuen Ergebnis.
+# Re-Run: die noch nicht gerenderten Automatik-Clips und ihre Kandidaten weichen dem neuen Ergebnis,
+# auch die zurückgehaltenen (Begründung beginnt mit ``AUTO_HOLD_REASON_PREFIX``); deren Kandidaten
+# haben kein Urteil und fallen danach mit allen anderen ohne Urteil weg.
+# Ein zurückgehaltener Entwurf, an dem ein Mensch schon gearbeitet hat (``review`` nicht mehr
+# ``offen``, nach dem Anlegen geändert, oder mit Einträgen in ``hook_versions``, ``caption_versions``
+# oder ``guest_approvals``), bleibt stehen und hält damit auch seinen Kandidaten.
 # Menschliche Urteile haben immer ein ``verdict_by`` und bleiben deshalb unberührt.
 SQL_DROP_AUTO_CLIPS = (
-    "delete from clips where status = 'draft' and candidate_id in "
-    "(select id from candidates where source_id = %s and verdict_by is null and verdict_reason = %s)"
+    "delete from clips where status = 'draft' and ("
+    "candidate_id in (select id from candidates where source_id = %s and verdict_by is null and verdict_reason = %s) "
+    "or (review = 'offen' and updated_at <= created_at "
+    "and not exists (select 1 from hook_versions h where h.clip_id = clips.id) "
+    "and not exists (select 1 from caption_versions v where v.clip_id = clips.id) "
+    "and not exists (select 1 from guest_approvals g where g.clip_id = clips.id) "
+    "and candidate_id in "
+    "(select id from candidates where source_id = %s and verdict_by is null and verdict_reason like %s)))"
 )
 SQL_DROP_AUTO_CANDIDATES = (
     "delete from candidates where source_id = %s and verdict_by is null and verdict_reason = %s "
+    "and not exists (select 1 from clips c where c.candidate_id = candidates.id)"
+)
+# Kandidaten ohne Urteil weichen dem neuen Lauf. Ein zurückgehaltener Kandidat, dessen Clip schon
+# gerendert ist (ein Mensch hat ihn angestoßen), bleibt stehen wie ein angenommener mit Clip.
+SQL_DROP_UNJUDGED_CANDIDATES = (
+    "delete from candidates where source_id = %s and human_verdict is null "
     "and not exists (select 1 from clips c where c.candidate_id = candidates.id)"
 )
 # Die Kandidaten, die einen Lauf ueberleben, weil jemand sie beurteilt hat.
@@ -143,17 +176,34 @@ def _load_heat(ctx: common.Context, src: dict) -> dict | None:
     return None
 
 
-def candidates_key_for(tv_id: str, tv_version: int, brief: dict, prompt_versions: list[str], provider: str, model: str, weights: dict) -> str:
+def candidates_key_for(
+    tv_id: str,
+    tv_version: int,
+    brief: dict,
+    prompt_versions: list[str],
+    provider: str,
+    model: str,
+    weights: dict,
+    heat: dict | None = None,
+) -> str:
     """Idempotenz-Key: Transkriptversion, Briefing, Prompt-Versionen, Provider/Modell, Gewichte,
     Engine UND redaktionelle Grundlage.
 
     Die Grundlage gehoert dazu, weil sie das Ergebnis bestimmt: Laengengrenzen, Kontextzugabe,
     Gewichte der Rubrik. Ohne sie bliebe nach einer Aenderung an der Richtlinie das alte Ergebnis
-    aus dem Zwischenspeicher stehen, und die Aenderung sieht aus, als haette sie nicht gewirkt."""
+    aus dem Zwischenspeicher stehen, und die Aenderung sieht aus, als haette sie nicht gewirkt.
+
+    Gemeint ist die aktive Fassung (``CHOPSTR_POLICY_VERSION``), nicht die Standardfassung, und die
+    ``prompt_versions`` sind die gepinnten (``story_engine.prompt_versions``): ein Wechsel auf v2
+    oder ein neuer Pin ergibt einen neuen Schlüssel.
+
+    Ab Fassung 2 zusätzlich: ``story_engine_v5`` statt v4, ``SIGNALS_VERSION`` und ein Hash der Heatmap
+    (Seeds und ``audio_values``, AP9-Vorgriff): eine neue Heatmap ergibt einen neuen Schlüssel."""
     try:
         policy = editorial.policy_version()
     except Exception:  # ohne Richtlinie lieber weiterarbeiten als gar nicht
         policy = "unbekannt"
+    extra = _policy_v2_key_params()
     params = {
         "transcript_version": tv_version,
         "brief": brief,
@@ -163,8 +213,59 @@ def candidates_key_for(tv_id: str, tv_version: int, brief: dict, prompt_versions
         "weights": weights,
         "engine": story_engine.ENGINE_VERSION,
         "policy": policy,
+        **extra,
     }
+    if extra:
+        params["engine"] = story_engine.ENGINE_VERSION_V2
+        params["signals"] = SIGNALS_VERSION
+        params["heat_sha256"] = heat_hash(heat)
     return storage.derived_key(f"transcript/{tv_id}", params, story_engine.CONTRACT, "json", prefix="candidates")
+
+
+def step_summary(report: story_engine.DetectReport) -> dict[str, Any]:
+    """Zusätzliche Werte für das Step-Event unter Fassung 2 (leer unter Fassung 1): Quote je Gate, Modellbudget,
+    Dubletten je Art (getrennt von den Verwerfungen) und eine Zusammenfassung der Suche je Kapitel."""
+    if not report.engine:
+        return {}
+    chapters = list((report.search or {}).get("chapters") or [])
+    return {
+        "gate_rejections": report.gate_rejections or None,
+        "llm_budget": report.llm_budget or None,
+        "duplicates": dict((report.search or {}).get("duplicate_counts") or {}),
+        "search": {
+            "chapters": len(chapters),
+            "model": sum(int(c.get("model") or 0) for c in chapters),
+            "search": sum(int(c.get("search") or 0) for c in chapters),
+            "search_rejected": sum(int(c.get("search_rejected") or 0) for c in chapters),
+            "evaluated": sum(int(c.get("evaluated") or 0) for c in chapters),
+        },
+    }
+
+
+def heat_hash(heat: dict | None) -> str | None:
+    """sha256 über Seeds und ``audio_values`` der Heatmap (die Teile, die die Engine liest), ``None`` ohne."""
+    if not heat:
+        return None
+    part = {"seeds": heat.get("seeds") or [], "audio_values": heat.get("audio_values") or [], "bin_s": heat.get("bin_s")}
+    return hashlib.sha256(json.dumps(part, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _policy_v2_key_params() -> dict[str, str]:
+    """Ab Fassung 2 zusätzlich im Schlüssel: der Inhalt der Richtlinie (sha256 der YAML-Datei) und wie die
+    Verbklammer geprüft wird (``nlp_status``). Unter Fassung 1 nichts, damit der Schlüssel und damit der
+    Rollback auf vorhandene Ergebnisse gleich bleiben."""
+    try:
+        version = editorial.active_version()
+        if version < 2:
+            return {}
+        policy = editorial.load()
+    except editorial.PolicyError:
+        return {}
+    path = editorial.policy_dir() / f"clip_policy_v{version}.yaml"
+    return {
+        "policy_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "nlp_status": story_engine.nlp_status_for(policy),
+    }
 
 
 def _merke_wellenform(ctx: common.Context, source_id: str, key: str) -> None:
@@ -182,8 +283,11 @@ def _drop_stale_auto_rows(ctx: common.Context, source_id: str) -> None:
     Kandidat den Lauf (``human_verdict`` ist gesetzt) und das neue Ergebnis käme obendrauf — doppelte
     Kandidaten und doppelte Clips. Entfernt werden deshalb die Automatik-Clips, die noch nicht gerendert
     sind (``draft``), und anschließend die Automatik-Kandidaten, an denen danach kein Clip mehr hängt.
-    Gerenderte Ergebnisse und alles mit menschlichem Urteil (``verdict_by`` gesetzt) bleiben stehen."""
-    ctx.conn.execute(SQL_DROP_AUTO_CLIPS, (source_id, AUTO_VERDICT_REASON))
+    Gerenderte Ergebnisse und alles mit menschlichem Urteil (``verdict_by`` gesetzt) bleiben stehen,
+    ebenso zurückgehaltene Entwürfe mit menschlicher Arbeit daran (siehe ``SQL_DROP_AUTO_CLIPS``)."""
+    ctx.conn.execute(
+        SQL_DROP_AUTO_CLIPS, (source_id, AUTO_VERDICT_REASON, source_id, AUTO_HOLD_REASON_PREFIX + "%")
+    )
     ctx.conn.execute(SQL_DROP_AUTO_CANDIDATES, (source_id, AUTO_VERDICT_REASON))
 
 
@@ -199,7 +303,7 @@ def _write_rows(ctx: common.Context, source_id: str, cands: list[story_engine.Ca
     Verglichen wird mit demselben Maß wie in der Auswahl (Anteil am kürzeren Abschnitt), damit nicht
     zwei verschiedene Begriffe von „dasselbe" nebeneinander stehen."""
     _drop_stale_auto_rows(ctx, source_id)
-    ctx.conn.execute("delete from candidates where source_id = %s and human_verdict is null", (source_id,))
+    ctx.conn.execute(SQL_DROP_UNJUDGED_CANDIDATES, (source_id,))
     ueberlebende = [
         (float(r[0] or 0.0), float(r[1] or 0.0))
         for r in db.fetch_all(ctx.conn, SQL_SURVIVING_CANDIDATES, (source_id,))
@@ -245,20 +349,45 @@ def _window(start: Any, end: Any) -> tuple[float, float]:
     return round(float(start or 0.0), _WINDOW_DIGITS), round(float(end or 0.0), _WINDOW_DIGITS)
 
 
-def clip_platform(ctx: common.Context, source_id: str) -> str:
-    """Standard-Plattform aus dem Markenprofil der Quelle; ohne Profil oder Wert ``reels``.
+def clip_platform(ctx: common.Context, source_id: str, brief: dict | None = None) -> str:
+    """Standard-Plattform der Quelle: Markenprofil, sonst die Plattform aus dem Briefing, sonst ``reels``.
 
-    Das Seitenverhältnis hängt bewusst nicht daran (immer ``9:16``), die Plattform steuert nur
-    Untertitel-Voreinstellung und Branding im Render."""
+    Dieselbe Reihenfolge nutzt die Web-App, wenn ein Mensch einen Kandidaten ohne Plattformwahl
+    annimmt (``defaultClipPlatform`` in ``apps/web/lib/clips/acceptance.ts``). Das Seitenverhältnis
+    hängt bewusst nicht daran (immer ``9:16``), die Plattform steuert nur Untertitel-Voreinstellung
+    und Branding im Render."""
+    value = ""
     try:
         row = db.fetch_one(ctx.conn, SQL_DEFAULT_PLATFORM, (source_id,))
+        value = str(row[0]).strip() if row and row[0] else ""
     except Exception as exc:  # Markenprofil ist Komfort, die Automatik darf daran nicht scheitern
         log.warning("default platform not readable source=%s error=%s", source_id, exc.__class__.__name__)
-        return AUTO_CLIP_PLATFORM
-    value = str(row[0]).strip() if row and row[0] else ""
-    if value not in copy_engine.PLATFORMS:
-        return AUTO_CLIP_PLATFORM
-    return value
+    return default_clip_platform(value, brief)
+
+
+def auto_accept_blockers(risk_flags: Any, text: str, title_card: str = "") -> list[str]:
+    """Was eine automatische Annahme verbietet: die harten Risikohinweise in der Reihenfolge des
+    Kandidaten, danach ``claim``, wenn Text oder Titelkarte eine freigaberelevante Behauptung
+    enthalten. Ist der Text leer, lässt sich das nicht prüfen; dann hält ``claim_unchecked`` den
+    Kandidaten sicher zurück.
+
+    Der ``claim``-Eintrag in ``risk_flags`` zählt hier nicht, nur ``release_gate``."""
+    blockers: list[str] = []
+    for flag in risk_flags or ():
+        if flag in AUTO_ACCEPT_HARD_FLAGS and flag not in blockers:
+            blockers.append(flag)
+    if not text.strip():
+        blockers.append("claim_unchecked")
+        if release_gate.release_relevant_claims(title_card):
+            blockers.append("claim")
+    elif release_gate.release_relevant_claims(text) or release_gate.release_relevant_claims(title_card):
+        blockers.append("claim")
+    return blockers
+
+
+def auto_hold_reason(blockers: list[str]) -> str:
+    """Begründung für einen zurückgehaltenen Kandidaten, lesbar in der Oberfläche."""
+    return f"{AUTO_HOLD_REASON_PREFIX}{', '.join(blockers)}, menschliche Prüfung nötig"
 
 
 def auto_create_clips(
@@ -273,11 +402,16 @@ def auto_create_clips(
 
     Idempotent auf zwei Ebenen: ein Kandidat mit vorhandenem Clip wird übersprungen, und ein Fenster,
     zu dem an dieser Quelle schon ein Clip existiert, bekommt keinen zweiten (zweiter Lauf, gelöschte
-    oder bereits gerenderte Clips)."""
-    platform = clip_platform(ctx, source_id)
+    oder bereits gerenderte Clips).
+
+    Angenommen wird nur ein Kandidat ohne Blocker aus ``auto_accept_blockers``. Sonst bleibt
+    ``human_verdict`` leer und ``verdict_reason`` nennt die Blocker; der Clip bleibt ``draft`` und
+    wird erst nach menschlicher Annahme gerendert."""
+    platform = clip_platform(ctx, source_id, dict(src.get("brief") or {}))
     ad_label = ad_label_for(dict(src.get("brief") or {}), src.get("country") or "AT")
     taken = {_window(r[0], r[1]) for r in db.fetch_all(ctx.conn, SQL_CLIP_WINDOWS, (source_id,))}
     created: list[str] = []
+    held = 0
     for candidate_id, cand in zip(candidate_ids, cands):
         if not candidate_id:
             continue
@@ -303,17 +437,27 @@ def auto_create_clips(
             status="draft",
             created_by=None,
         )
-        db.update(
-            ctx.conn,
-            "candidates",
-            {"id": candidate_id},
-            human_verdict="accepted",
-            verdict_reason=AUTO_VERDICT_REASON,
-            verdict_at=datetime.now(UTC),
+        blockers = auto_accept_blockers(
+            row.get("risk_flags"), str((row.get("rubric") or {}).get("text") or ""), title_card or ""
         )
+        if blockers:
+            db.update(ctx.conn, "candidates", {"id": candidate_id}, verdict_reason=auto_hold_reason(blockers))
+            held += 1
+        else:
+            db.update(
+                ctx.conn,
+                "candidates",
+                {"id": candidate_id},
+                human_verdict="accepted",
+                verdict_reason=AUTO_VERDICT_REASON,
+                verdict_at=datetime.now(UTC),
+            )
         taken.add(key)
         created.append(str(inserted[0]) if inserted else "")
-    log.info("auto clips source=%s platform=%s aspect=%s created=%s", source_id, platform, AUTO_CLIP_ASPECT, len(created))
+    log.info(
+        "auto clips source=%s platform=%s aspect=%s created=%s held=%s",
+        source_id, platform, AUTO_CLIP_ASPECT, len(created), held,
+    )  # fmt: skip
     return created
 
 
@@ -376,6 +520,10 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
         tv_id, tv_version, words = common.load_transcript(ctx, source_id)
         heat = _load_heat(ctx, src)
         brief = dict(src.get("brief") or {})
+        # Die Plattform, für die die Clips entstehen (Markenprofil, Briefing, reels). Die Story-Engine
+        # nennt sie in der Begründung; im Briefing steht sie deshalb im Cache-Schlüssel.
+        platform = clip_platform(ctx, source_id, brief)
+        brief["clip_platform"] = platform
         brand = {"country": src.get("country"), "address": src.get("address"), "learned_weights": src.get("learned_weights")}
         weights = story_engine.resolve_weights(brand["learned_weights"])
         tenant = Tenant(id=src["workspace_id"], tier=src["tier"], allow_us_subprocessors=bool(src.get("allow_us_subprocessors")))
@@ -398,7 +546,7 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
         if segment.silence_changes_boundaries(words, pausen):
             versions.append(f"{silence_mod.SCAN_VERSION}:{len(pausen)}")
             log.info("silence source=%s veraendert die Satzgrenzen, Kandidaten werden neu gesucht", source_id)
-        key = candidates_key_for(tv_id, tv_version, brief, versions, llm.provider, model, weights)
+        key = candidates_key_for(tv_id, tv_version, brief, versions, llm.provider, model, weights, heat)
 
         cached = ctx.store.exists("derived", key)
         if cached:
@@ -419,8 +567,7 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
         # Kein Auswahlschritt mehr: die Clips entstehen hier, nicht erst nach einem Urteil in der Oberfläche.
         clips = auto_create_clips(ctx, source_id, src, ids, report.candidates)
         decisions = decision_log.record_detect_report(
-            ctx.conn, src["workspace_id"], source_id, src.get("brand_profile_id"), report, ids,
-            str(brief.get("platform") or "linkedin"),
+            ctx.conn, src["workspace_id"], source_id, src.get("brand_profile_id"), report, ids, platform,
         )  # fmt: skip
         outbox.candidates_ready(ctx.conn, src["workspace_id"], source_id, len(report.candidates), report.gate_passed)
         events.set_source_status(ctx.conn, source_id, "ready", None)
@@ -454,6 +601,9 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
             cached=cached,
             key=key,
             decisions=decisions,
+            # Verbklammer-Prüfung unter Fassung 2: spacy, heuristic oder off; unter Fassung 1 null.
+            nlp_status=report.nlp_status or None,
+            **step_summary(report),
         )
     return ids
 
@@ -487,14 +637,18 @@ def notify(source_id: str, event: str) -> None:
 
 
 __all__ = [
+    "AUTO_ACCEPT_HARD_FLAGS",
     "AUTO_CLIP_ASPECT",
     "AUTO_CLIP_PLATFORM",
+    "AUTO_HOLD_REASON_PREFIX",
     "AUTO_VERDICT_REASON",
     "SIGNALS_VERSION",
     "STEP_CANDIDATES",
     "STEP_HEATMAP",
     "STEP_RENDER",
+    "auto_accept_blockers",
     "auto_create_clips",
+    "auto_hold_reason",
     "candidates_key_for",
     "clip_platform",
     "detect_candidates",

@@ -707,7 +707,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
     { name = "redis", specifier = ">=5" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
-    { name = "spacy", marker = "extra == 'nlp'", specifier = ">=3.7" },
+    { name = "spacy", marker = "extra == 'nlp'", specifier = ">=3.8,<3.9" },
     { name = "temporalio", specifier = ">=1.7" },
     { name = "torch", marker = "extra == 'asr'" },
 ]

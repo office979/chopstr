@@ -126,7 +126,7 @@ def test_verschluckte_pause_erzeugt_trotzdem_eine_satzgrenze():
     assert not dach_nlp.is_sentence_end(words, 0, 0.7)
 
     karte = silence.SilenceMap([silence.Gap(6.43, 8.62)])
-    assert dach_nlp.is_sentence_end(words, 0, 0.7, karte)
+    assert dach_nlp.is_sentence_end(words, 0, 0.7, silence=karte)
 
 
 def test_ohne_karte_unveraendertes_verhalten():
@@ -135,7 +135,7 @@ def test_ohne_karte_unveraendertes_verhalten():
         {"text": "zwei", "start": 2.0, "end": 3.0},
     ]
     assert dach_nlp.is_sentence_end(words, 0, 0.7) is True
-    assert dach_nlp.is_sentence_end(words, 0, 0.7, silence.EMPTY) is True
+    assert dach_nlp.is_sentence_end(words, 0, 0.7, silence=silence.EMPTY) is True
 
 
 def test_karte_erfindet_keine_grenze():
@@ -145,7 +145,7 @@ def test_karte_erfindet_keine_grenze():
         {"text": "dann", "start": 1.25, "end": 1.5},
     ]
     karte = silence.SilenceMap([silence.Gap(50.0, 60.0)])
-    assert not dach_nlp.is_sentence_end(words, 0, 0.7, karte)
+    assert not dach_nlp.is_sentence_end(words, 0, 0.7, silence=karte)
 
 
 def test_sentences_from_words_nutzt_die_karte():

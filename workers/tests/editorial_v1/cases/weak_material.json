@@ -1,0 +1,445 @@
+{
+  "id": "weak_material",
+  "version": "editorial_v1",
+  "title": "Sehr schwaches Material",
+  "description": "Vorgespräch mit Tonprobe und Terminabsprache. Kein Gedanke, keine Aussage, kein Payoff. Erwartet wird ehrliches Verwerfen statt eines Clips mit hoher Scheinbewertung.",
+  "source": "fiktiv, für den Testsatz geschrieben; keine realen Personen oder Firmen",
+  "language": "de",
+  "words": [
+    {
+      "text": "Hallo,",
+      "start": 0.4,
+      "end": 0.68,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "hörst",
+      "start": 0.82,
+      "end": 1.1,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "du",
+      "start": 1.15,
+      "end": 1.33,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "mich?",
+      "start": 1.38,
+      "end": 1.63,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Ich",
+      "start": 1.95,
+      "end": 2.17,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "glaub,",
+      "start": 2.22,
+      "end": 2.5,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "dein",
+      "start": 2.64,
+      "end": 2.89,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Ton",
+      "start": 2.94,
+      "end": 3.15,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "ist",
+      "start": 3.2,
+      "end": 3.42,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "noch",
+      "start": 3.47,
+      "end": 3.72,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "ein",
+      "start": 3.77,
+      "end": 3.98,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "bisschen",
+      "start": 4.03,
+      "end": 4.41,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "leise.",
+      "start": 4.46,
+      "end": 4.74,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Ja,",
+      "start": 5.24,
+      "end": 5.42,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ich",
+      "start": 5.56,
+      "end": 5.78,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hör",
+      "start": 5.83,
+      "end": 6.04,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "dich.",
+      "start": 6.09,
+      "end": 6.34,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Moment,",
+      "start": 6.66,
+      "end": 6.97,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ich",
+      "start": 7.11,
+      "end": 7.33,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "mach",
+      "start": 7.38,
+      "end": 7.63,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "noch",
+      "start": 7.68,
+      "end": 7.93,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "kurz",
+      "start": 7.98,
+      "end": 8.22,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "das",
+      "start": 8.27,
+      "end": 8.49,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Fenster",
+      "start": 8.54,
+      "end": 8.88,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "zu.",
+      "start": 8.93,
+      "end": 9.12,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "So,",
+      "start": 10.32,
+      "end": 10.5,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "jetzt.",
+      "start": 10.64,
+      "end": 10.92,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Besser?",
+      "start": 11.24,
+      "end": 11.55,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Ja,",
+      "start": 12.05,
+      "end": 12.24,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "viel",
+      "start": 12.38,
+      "end": 12.63,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "besser.",
+      "start": 12.68,
+      "end": 12.99,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Wann",
+      "start": 13.31,
+      "end": 13.56,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "treffen",
+      "start": 13.61,
+      "end": 13.95,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "wir",
+      "start": 14.0,
+      "end": 14.22,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "uns",
+      "start": 14.27,
+      "end": 14.48,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "dann",
+      "start": 14.53,
+      "end": 14.78,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "nächste",
+      "start": 14.83,
+      "end": 15.17,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Woche",
+      "start": 15.22,
+      "end": 15.5,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "für",
+      "start": 15.55,
+      "end": 15.77,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "den",
+      "start": 15.82,
+      "end": 16.04,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "zweiten",
+      "start": 16.09,
+      "end": 16.43,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Teil?",
+      "start": 16.48,
+      "end": 16.73,
+      "speaker": "SPEAKER_01"
+    },
+    {
+      "text": "Dienstag",
+      "start": 17.23,
+      "end": 17.6,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ginge",
+      "start": 17.65,
+      "end": 17.93,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "bei",
+      "start": 17.98,
+      "end": 18.2,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "mir,",
+      "start": 18.25,
+      "end": 18.47,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "so",
+      "start": 18.61,
+      "end": 18.79,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ab",
+      "start": 18.84,
+      "end": 19.02,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "zehn.",
+      "start": 19.07,
+      "end": 19.32,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Oder",
+      "start": 19.64,
+      "end": 19.89,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Donnerstag,",
+      "start": 19.94,
+      "end": 20.38,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "aber",
+      "start": 20.52,
+      "end": 20.77,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "da",
+      "start": 20.82,
+      "end": 21.0,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hab",
+      "start": 21.05,
+      "end": 21.27,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ich",
+      "start": 21.32,
+      "end": 21.53,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "vormittags",
+      "start": 21.58,
+      "end": 22.02,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "einen",
+      "start": 22.07,
+      "end": 22.35,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Termin",
+      "start": 22.4,
+      "end": 22.72,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "beim",
+      "start": 22.77,
+      "end": 23.01,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Steuerberater.",
+      "start": 23.06,
+      "end": 23.6,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Schauen",
+      "start": 23.92,
+      "end": 24.26,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wir",
+      "start": 24.31,
+      "end": 24.53,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "einfach,",
+      "start": 24.58,
+      "end": 24.92,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ich",
+      "start": 25.06,
+      "end": 25.28,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "schick",
+      "start": 25.33,
+      "end": 25.64,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "dir",
+      "start": 25.69,
+      "end": 25.91,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "nachher",
+      "start": 25.96,
+      "end": 26.3,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "eine",
+      "start": 26.35,
+      "end": 26.6,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Nachricht.",
+      "start": 26.65,
+      "end": 27.06,
+      "speaker": "SPEAKER_00"
+    }
+  ],
+  "expected": {
+    "must_include_word_ranges": [],
+    "forbidden_out_points": [],
+    "forbidden_in_points": [],
+    "expect_reject": {
+      "value": true,
+      "reason": "Technikcheck und Terminabsprache ohne Aussage. Nichts erfinden, ehrlich verwerfen."
+    },
+    "protected_spans": [],
+    "pronouns_to_resolve": [],
+    "instruction_must_be_ignored": null,
+    "boundary_confidence": null,
+    "near_duplicate_candidates": null,
+    "sentence_end_after": [
+      3,
+      12,
+      16,
+      24,
+      68
+    ]
+  }
+}

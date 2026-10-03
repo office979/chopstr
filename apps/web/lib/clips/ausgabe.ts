@@ -5,9 +5,9 @@
  * Sache, nämlich die Gastfreigabe. Sie prüfte nicht, ob der Clip überhaupt freigegeben ist, ob
  * die Datei noch zeigt, was eingestellt ist, und ob am Inhalt ein schwerer Befund hängt. Die
  * Oberfläche prüfte das alles und sperrte den Knopf, aber der Knopf ist nur ein Knopf: wer die
- * Adresse kennt, kam daran vorbei. Auf der Veröffentlichungsseite war es umgekehrt schlimmer, dort
- * stand eine Bedingung, die nie greifen kann - "der Kandidat ist angenommen" ist genau das, wodurch
- * der Clip überhaupt entsteht.
+ * Adresse kennt, kam daran vorbei. Das Urteil am Kandidaten („der Kandidat ist angenommen“) prüft
+ * nicht diese Datei, sondern lib/publishing/gates.ts (verdictReason), für Oberfläche und Schnittstelle
+ * gleich: seit der Freigabepflicht entstehen Entwürfe auch ohne angenommenen Kandidaten.
  *
  * Deshalb steht die Entscheidung jetzt hier, einmal, auf dem Server, und die Regeln kommen aus
  * packages/schema/ausgabe_regeln_v1.json. Dieselbe Datei liest der Worker. Die Oberfläche darf die

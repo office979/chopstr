@@ -32,7 +32,7 @@ from typing import Any
 
 from temporalio import activity
 
-from .. import costlog, db, decision_log, events, ingest, usage
+from .. import costlog, db, decision_log, editorial, events, ingest, learning, usage
 from ..pipeline import (
     ausgabe_pruefung,
     captions_de,
@@ -40,10 +40,12 @@ from ..pipeline import (
     compose,
     copy_de,
     copy_engine,
+    dach_nlp,
     fidelity,
     reframe,
     render,
     render_plan,
+    transitions,
 )
 from ..pipeline import (
     effekte as effekte_mod,
@@ -119,7 +121,7 @@ def _load_candidate(ctx: common.Context, candidate_id: str) -> dict[str, Any]:
     }
 
 
-def _load_brand_extra(ctx: common.Context, source_id: str) -> dict[str, Any]:
+def _load_brand_extra(ctx: common.Context, source_id: str, brief: dict | None = None) -> dict[str, Any]:
     row = db.fetch_one(ctx.conn, SQL_BRAND_EXTRA, (source_id,))
     keys = [
         "gender_mode", "banned_phrases", "tone_adjectives", "default_platform", "caption_preset", "caption_style",
@@ -133,7 +135,7 @@ def _load_brand_extra(ctx: common.Context, source_id: str) -> dict[str, Any]:
     out["gender_mode"] = out.get("gender_mode") or "neutral"
     out["banned_phrases"] = list(out.get("banned_phrases") or [])
     out["tone_adjectives"] = list(out.get("tone_adjectives") or [])
-    out["default_platform"] = out.get("default_platform") or "linkedin"
+    out["default_platform"] = default_clip_platform(out.get("default_platform"), brief)
     # Kein Ersatzwert: NULL heißt „keine ausdrückliche Wahl“ und muss so bei caption_preset_for
     # ankommen, sonst gewinnt der ruhige LinkedIn-Stil wieder im Hochformat (Migration 0007).
     out["caption_preset"] = out.get("caption_preset") or None
@@ -210,6 +212,20 @@ def brand_assets_for(ctx: common.Context, ci: dict[str, Any]) -> dict[str, Any]:
                     log.warning("brand logo download failed asset=%s error=%s", asset["id"], exc.__class__.__name__)
                     out["notes"].append("Logo-Asset konnte nicht geladen werden, kein Wasserzeichen")
     return out
+
+
+# Letzter Rückfall der Plattform, wenn weder Markenprofil noch Briefing eine nennen. Dieselbe Reihenfolge
+# gilt in ``analyze.clip_platform`` und in der Web-App (``apps/web/lib/clips/acceptance.ts``).
+FALLBACK_CLIP_PLATFORM = "reels"
+
+
+def default_clip_platform(brand_default: Any, brief: dict | None) -> str:
+    """Standard-Plattform: Markenprofil, sonst Briefing, sonst ``FALLBACK_CLIP_PLATFORM``."""
+    for value in (brand_default, (brief or {}).get("platform")):
+        candidate = str(value or "").strip()
+        if candidate in PLATFORMS:
+            return candidate
+    return FALLBACK_CLIP_PLATFORM
 
 
 def ad_label_for(brief: dict, country: str) -> str | None:
@@ -486,6 +502,34 @@ def clip_words(words: list[dict], segments: list[dict]) -> list[dict]:
     return out
 
 
+# Kontext nach dem Clip für den Copy-Schritt (Fassung 2): die nächsten Sätze, höchstens so viele Sekunden.
+CONTEXT_AFTER_SENTENCES = 5
+CONTEXT_AFTER_MAX_S = 60.0
+
+
+def context_after_text(
+    words: list[dict], segments: list[dict], sentences: int = CONTEXT_AFTER_SENTENCES, max_s: float = CONTEXT_AFTER_MAX_S
+) -> str:
+    """Transkripttext nach dem letzten Clip-Segment (in Quellzeit): Wörter, deren Mitte hinter dem Ende liegt,
+    bis ``sentences`` Satzenden (``dach_nlp.sentence_end_kinds`` mit Regel v2) oder ``max_s`` Sekunden ab dem
+    Ende erreicht sind. Leer, wenn danach nichts mehr gesagt wird."""
+    if not segments or not words:
+        return ""
+    end = max(float(seg["end"]) for seg in segments)
+    tail = [w for w in words if (float(w["start"]) + float(w["end"])) / 2.0 > end and float(w["start"]) - end <= max_s]
+    if not tail:
+        return ""
+    kinds = dach_nlp.sentence_end_kinds(tail, rule="v2")
+    out, ends = [], 0
+    for w, kind in zip(tail, kinds):
+        out.append(str(w["text"]))
+        if kind != "none":
+            ends += 1
+            if ends >= sentences:
+                break
+    return " ".join(out)
+
+
 def fidelity_warnings(words: list[dict], segments: list[dict], cand_start: float | None, cand_end: float | None) -> list[dict]:
     """``fidelity.check_cut`` über den Kandidatenbereich: was die Komposition weglässt, wird geprüft."""
     body = sorted((s for s in segments if s.get("role", "body") != "teaser"), key=lambda s: float(s["start"]))
@@ -575,7 +619,7 @@ def run_render_pack(ctx: common.Context, candidate_id: str, destination: str) ->
     cand = _load_candidate(ctx, candidate_id)
     source_id = cand["source_id"]
     src = db.load_source(ctx.conn, source_id)
-    extra = _load_brand_extra(ctx, source_id)
+    extra = _load_brand_extra(ctx, source_id, dict(src.get("brief") or {}))
     clip = _find_or_create_clip(ctx, cand, src, destination, clip_id_hint)
     clip_id = clip["id"]
     db.update(ctx.conn, "clips", {"id": clip_id}, status="rendering", destination=destination, render_error=None)
@@ -588,6 +632,34 @@ def run_render_pack(ctx: common.Context, candidate_id: str, destination: str) ->
             db.update(ctx.conn, "clips", {"id": clip_id}, status="failed", render_error=msg)
             raise
     return clip_id
+
+
+def candidate_composition(
+    cand: dict, segments: list[dict], words: list[dict] | None = None, policy: editorial.Policy | None = None
+) -> dict | None:
+    """Die Komposition aus der Kürzung des Kandidaten (AP7, ``rubric.composition``), solange der Clip genau
+    die Segmente dieser Komposition schneidet (``rubric.composition.segments``). Verglichen wird gegen die
+    Komposition selbst, nicht gegen ``cand.segments``: eine Web-Revision schreibt neue Segmente, kopiert aber
+    die alte Rubrik mit; dann gilt die Komposition nicht mehr. Ohne ``segments`` in der Komposition (ältere
+    Zeilen) lässt sich das nicht prüfen, sie gilt dann ebenfalls nicht. ``render_plan.build_plan`` setzt
+    ``filler_cuts`` nur mit ihr. Mit ``words`` (AP10b, cut.padding) werden beide Seiten über
+    ``render_plan.cut_segments`` verglichen: nach dem Render stehen in ``clips.composition`` die gepaddeten
+    Segmente, die Komposition des Kandidaten ist ungepaddet; das Padding ist idempotent."""
+    comp = (cand.get("rubric") or {}).get("composition")
+    if not isinstance(comp, dict) or not isinstance(comp.get("segments"), list):
+        return None
+    try:
+        if words is None:
+            return comp if render_plan.normalize_segments(comp["segments"]) == segments else None
+        own = render_plan.cut_segments(comp["segments"], words, policy)
+        return comp if own == render_plan.cut_segments(segments, words, policy) else None
+    except Exception:  # unlesbare Altzeile: ohne Komposition rendern
+        return None
+
+
+def clip_composition_from_timeline(plan: dict) -> list[dict]:
+    """``clips.composition`` aus ``plan.timeline`` (AP10b): Quellsegmente mit Vor- und Nachlauf."""
+    return [{"start": e["source_in"], "end": e["source_out"], "role": e["role"]} for e in plan["timeline"]]
 
 
 def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, extra: dict, clip: dict, destination: str, t0: float) -> None:
@@ -605,7 +677,6 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         platform=destination,
     )
     segments = render_plan.normalize_segments(clip["composition"])
-    comp = compose.Composition.from_json(segments)
     aspect = clip["aspect"]
     out_w, out_h = render_plan.output_size(aspect)
 
@@ -613,6 +684,12 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     st.progress(0.05, "Copy: Hooks und Post-Texte", clip_id=clip_id, phase="copy")
     common.heartbeat("render", "copy")
     tv_id, tv_version, words = common.load_transcript(ctx, source_id)
+    # AP10b (Fassung 2, cut.padding): geschnitten wird mit Vor- und Nachlauf an Wortgrenzen. Reframe,
+    # Captions und Effekte brauchen dieselben Schnittzeiten wie der Plan, sonst laufen Bild, Ton und
+    # Untertitel auseinander. Copy und Sinntreue bleiben auf den Segmenten des Clips.
+    policy = editorial.load()
+    cut_on = transitions.cut_rules(policy) is not None
+    cut_segs = render_plan.cut_segments(segments, words, policy) if cut_on else segments
     text = " ".join(str(w["text"]) for w in clip_words(words, segments))
     hook = _load_hook(ctx, clip_id)
     llm_usage: list[dict] = []
@@ -626,7 +703,22 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
                 "(BEDROCK_MODEL_ID, MISTRAL_MODEL oder SELFHOST_LLM_MODEL setzen, für Entwicklung LLM_PROVIDER=local-heuristic)"
             )
         llm_provider = llm.provider
-        copy = copy_engine.write_copy(llm, text, brand, PLATFORMS, s)
+        # Fassung 2 (AP6a): Thompson-Reihenfolge der Hook-Muster je Markenprofil und Wörter mit ``prob`` für den
+        # Claim-Check; unter Fassung 1 ohne beides, Auswahl wie bisher.
+        native_hooks = copy_engine.native_hooks_enabled()
+        pattern_order = None
+        if native_hooks and src.get("brand_profile_id"):
+            try:
+                pattern_order = learning.thompson_order(learning.load_hook_stats(conn, str(src["brand_profile_id"])))
+            except Exception as exc:  # Lernstatistik darf den Render nie stoppen
+                log.warning("hook stats unavailable clip=%s error=%s: %s", clip_id, exc.__class__.__name__, str(exc)[:200])
+        # Fassung 2: Transkript nach dem Clip, damit eine spätere Korrektur oder Relativierung die Aussage
+        # nicht zum Text-Hook macht (copy_engine.retracted_statements).
+        after = {"context_after": context_after_text(words, segments)} if policy.version >= 2 else {}
+        copy = copy_engine.write_copy(
+            llm, text, brand, PLATFORMS, s,
+            pattern_order=pattern_order, words=clip_words(words, segments) if native_hooks else None, **after,
+        )  # fmt: skip
         hook = _write_hook_version(ctx, clip_id, copy)
         try:
             decision_log.record_copy_result(
@@ -651,7 +743,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     override, override_note = _load_reframe_override(ctx, clip_id)
     zeitmarken, marken_note = _load_zeitmarken(ctx, clip_id)
     rf = reframe.plan_reframe(
-        str(local_src), segments, words, clip.get("speaker_positions"), aspect,
+        str(local_src), cut_segs, words, clip.get("speaker_positions"), aspect,
         src_w=src_probe.width, src_h=src_probe.height, out_size=(out_w, out_h), reframe_override=override,
         zeitmarken=zeitmarken,
     )  # fmt: skip
@@ -664,7 +756,8 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     # 3) Captions auf der Ausgabe-Timeline
     st.progress(0.35, "Captions auf der Ausgabe-Timeline", clip_id=clip_id, phase="captions")
     common.heartbeat("render", "captions")
-    out_words = compose.remap_words(words, comp)
+    # Unter cut.padding nach Wortmitte: ein Wort an der Segmentgrenze verliert seine Caption nicht.
+    out_words = compose.remap_words(words, compose.Composition.from_json(cut_segs), by_midpoint=cut_on)
     clip_style, style_note = _load_caption_style(ctx, clip_id)
     if style_note:
         rf.notes.append(style_note)
@@ -690,7 +783,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         rf.notes.append(schrift_note)
     # Effekte auf der Clip-Zeitachse. Beim ersten Clippen setzt die Automatik welche; danach gilt,
     # was am Clip steht - auch eine leere Liste, denn die heisst „ich will keine".
-    clip_dauer = sum(float(seg["end"]) - float(seg["start"]) for seg in segments)
+    clip_dauer = sum(float(seg["end"]) - float(seg["start"]) for seg in cut_segs)
     effekte_liste, effekte_neu, effekte_note = _load_effekte(ctx, clip_id, out_words, clip_dauer)
     if effekte_note:
         rf.notes.append(effekte_note)
@@ -727,7 +820,14 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         zeitmarken=zeitmarken,
         effekte=effekte_liste,
         musik=musik_dict,
+        composition=candidate_composition(cand, segments, words if cut_on else None, policy),
+        policy=policy,
+        words=words,
+        src_vfr=src_probe.vfr,
     )
+    if cut_on:
+        # Übergangsbefunde (transition_*) zusätzlich zu den Sinntreue-Befunden; hoch nur bei Schnitt im Wort.
+        fid = [*fid, *transitions.check_transitions(plan, words, policy)]
     try:
         decision_log.record_reframe_strategy(
             ctx.conn, src["workspace_id"], clip_id, plan,
@@ -867,6 +967,14 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         # sie in der Zeitleiste nicht auf, und der Nutzer koennte sie weder verschieben noch
         # loeschen. Was er selbst gesetzt hat, wird hier nicht angefasst.
         **({"effekte": db.jsonb(effekte_liste)} if effekte_neu else {}),
+        # AP10b: unter cut.padding stehen nach einem erfolgreichen Render die gepaddeten Quellsegmente
+        # (plan.timeline, gleiche Reihenfolge und Rollen) am Clip, damit das Web die Ausgabezeit aus
+        # denselben Segmenten rechnet wie das Video. Der Kandidat bleibt unverändert.
+        **(
+            {"composition": db.jsonb(clip_composition_from_timeline(plan))}
+            if "timeline" in plan and technik != "fehler"
+            else {}
+        ),
         destination=destination,
         # Ein technischer Fehler an der fertigen Datei fuehrt NICHT zu ``rendered``. Die Datei
         # liegt zwar im Speicher (sie hilft beim Nachsehen, was schiefging), aber sie gilt nicht

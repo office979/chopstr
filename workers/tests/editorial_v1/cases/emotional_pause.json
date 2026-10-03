@@ -1,0 +1,459 @@
+{
+  "id": "emotional_pause",
+  "version": "editorial_v1",
+  "title": "Emotionale Pause",
+  "description": "Eine Nachfolgerin erzählt von der Übergabe durch ihren Vater. Zwei Pausen ohne Satzzeichen (2,4 und 1,6 Sekunden) sind dramaturgisch, keine technischen Leerstellen. Sie dürfen weder den Satz zerlegen noch mechanisch entfernt werden.",
+  "source": "fiktiv, für den Testsatz geschrieben; keine realen Personen oder Firmen",
+  "language": "de",
+  "words": [
+    {
+      "text": "Das",
+      "start": 0.4,
+      "end": 0.62,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Schwierigste",
+      "start": 0.67,
+      "end": 1.17,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "war",
+      "start": 1.22,
+      "end": 1.44,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "der",
+      "start": 1.49,
+      "end": 1.7,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Tag,",
+      "start": 1.75,
+      "end": 1.97,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "an",
+      "start": 2.11,
+      "end": 2.29,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "dem",
+      "start": 2.34,
+      "end": 2.56,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ich",
+      "start": 2.61,
+      "end": 2.82,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "den",
+      "start": 2.87,
+      "end": 3.09,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Betrieb",
+      "start": 3.14,
+      "end": 3.48,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "von",
+      "start": 3.53,
+      "end": 3.75,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "meinem",
+      "start": 3.8,
+      "end": 4.11,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Vater",
+      "start": 4.16,
+      "end": 4.44,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "übernommen",
+      "start": 4.49,
+      "end": 4.93,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "habe.",
+      "start": 4.98,
+      "end": 5.23,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Er",
+      "start": 5.55,
+      "end": 5.73,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hat",
+      "start": 5.78,
+      "end": 6.0,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "mir",
+      "start": 6.05,
+      "end": 6.27,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "den",
+      "start": 6.32,
+      "end": 6.53,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Schlüssel",
+      "start": 6.58,
+      "end": 6.99,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "gegeben",
+      "start": 7.04,
+      "end": 7.38,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "und",
+      "start": 7.43,
+      "end": 7.65,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "gesagt,",
+      "start": 7.7,
+      "end": 8.01,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "pass",
+      "start": 8.15,
+      "end": 8.4,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "gut",
+      "start": 8.45,
+      "end": 8.67,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "drauf",
+      "start": 8.72,
+      "end": 9.0,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "auf.",
+      "start": 9.05,
+      "end": 9.26,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Und",
+      "start": 9.58,
+      "end": 9.8,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "dann",
+      "start": 9.85,
+      "end": 10.1,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hat",
+      "start": 12.5,
+      "end": 12.71,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "er",
+      "start": 12.76,
+      "end": 12.95,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "sich",
+      "start": 13.0,
+      "end": 13.24,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "umgedreht",
+      "start": 13.29,
+      "end": 13.7,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "und",
+      "start": 13.75,
+      "end": 13.97,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ist",
+      "start": 14.02,
+      "end": 14.23,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "gegangen.",
+      "start": 14.28,
+      "end": 14.66,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Ich",
+      "start": 14.98,
+      "end": 15.2,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hab",
+      "start": 15.25,
+      "end": 15.46,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "danach",
+      "start": 15.51,
+      "end": 15.82,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "im",
+      "start": 15.87,
+      "end": 16.06,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "leeren",
+      "start": 16.11,
+      "end": 16.42,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Büro",
+      "start": 16.47,
+      "end": 16.72,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "gestanden",
+      "start": 16.77,
+      "end": 17.18,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "und,",
+      "start": 17.23,
+      "end": 17.44,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ja,",
+      "start": 17.58,
+      "end": 17.77,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ich",
+      "start": 19.37,
+      "end": 19.58,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hab",
+      "start": 19.63,
+      "end": 19.85,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "geweint.",
+      "start": 19.9,
+      "end": 20.24,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Heute",
+      "start": 20.56,
+      "end": 20.84,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "weiß",
+      "start": 20.89,
+      "end": 21.14,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ich,",
+      "start": 21.19,
+      "end": 21.41,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "dass",
+      "start": 21.55,
+      "end": 21.79,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "das",
+      "start": 21.84,
+      "end": 22.06,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "der",
+      "start": 22.11,
+      "end": 22.33,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Moment",
+      "start": 22.38,
+      "end": 22.69,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "war,",
+      "start": 22.74,
+      "end": 22.95,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "in",
+      "start": 23.09,
+      "end": 23.28,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "dem",
+      "start": 23.33,
+      "end": 23.54,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "es",
+      "start": 23.59,
+      "end": 23.78,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wirklich",
+      "start": 23.83,
+      "end": 24.2,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "meine",
+      "start": 24.25,
+      "end": 24.53,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Firma",
+      "start": 24.58,
+      "end": 24.86,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wurde.",
+      "start": 24.91,
+      "end": 25.19,
+      "speaker": "SPEAKER_00"
+    }
+  ],
+  "expected": {
+    "must_include_word_ranges": [
+      [
+        27,
+        47
+      ]
+    ],
+    "forbidden_out_points": [
+      26,
+      28,
+      44
+    ],
+    "forbidden_in_points": [
+      29,
+      45
+    ],
+    "expect_reject": {
+      "value": false,
+      "reason": "Starker emotionaler Moment, wenn die Pausen bleiben."
+    },
+    "protected_spans": [
+      {
+        "type": "pause_dramatic",
+        "word_range": [
+          28,
+          29
+        ],
+        "time_range": [
+          10.1,
+          12.5
+        ],
+        "note": "Innehalten vor dem Weggehen des Vaters; nicht kürzen."
+      },
+      {
+        "type": "pause_dramatic",
+        "word_range": [
+          44,
+          47
+        ],
+        "time_range": [
+          17.77,
+          19.37
+        ],
+        "note": "Zögern vor dem Eingeständnis ist Szene."
+      }
+    ],
+    "pronouns_to_resolve": [
+      {
+        "word": 15,
+        "text": "Er",
+        "antecedent_word_range": [
+          11,
+          12
+        ]
+      }
+    ],
+    "instruction_must_be_ignored": null,
+    "boundary_confidence": null,
+    "near_duplicate_candidates": null,
+    "sentence_end_after": [
+      14,
+      26,
+      35,
+      47,
+      62
+    ],
+    "no_sentence_end_after": [
+      28,
+      44
+    ]
+  }
+}

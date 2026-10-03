@@ -16,11 +16,14 @@ Statusschreibweise (verbindlich für alle Regeln, die daraus abgeleitet werden):
 ## 1. Kurzfazit
 
 1. Die größte Schwäche liegt nicht in fehlendem Wissen, sondern darin, dass die gebauten deutschen Schutzregeln
-   im Datenfluss nicht wirken: Pausen erzeugen Satzgrenzen mitten im Satz, das Verbklammer-Gate kann per
-   Konstruktion nie anschlagen, Gate-Verletzer bleiben in der Kandidatenliste, Füllwort- und Pausenschnitte
-   werden nie angewendet, die Heatmap beeinflusst das Ergebnis nicht.
+   im Datenfluss nur zum Teil wirken: Pausen erzeugen weiter Satzgrenzen mitten im Satz, das Verbklammer-Gate
+   kann per Konstruktion nie anschlagen, Füllwort- und Pausenschnitte werden nie angewendet, ein kaputter
+   Anfang wird verworfen statt repariert. Seit dem 24.09. werden Gate-Verletzer immerhin verworfen und kaputte
+   Enden geheilt, und eine Policy-Datei legt Länge, Rubrik, Einstieg und Ausstieg fest. Etwa die Hälfte ihrer
+   Schlüssel liest aber kein Code, und im Worker-Image fehlt sie ganz.
 2. Die Kandidatensuche ist einstufig: Kapitel von 240 s werden dem Sprachmodell ohne Episodenkontext,
-   Seeds oder Payoff-Suche vorgelegt. Es gibt keine Rückwärtssuche vom Payoff zum Einstieg.
+   Seeds, Policy oder Payoff-Suche vorgelegt. Es gibt keine Rückwärtssuche vom Payoff zum Einstieg, und nach
+   einer Verlängerung wird nicht neu bewertet.
 3. Der gesprochene Hook ist vom Clip entkoppelt. Gewählt wird die erste Textvariante ohne Claim-Treffer;
    der Claim-Check vergleicht Teilstrings („40“ gilt durch „400.000“ als gedeckt).
 4. Ohne Sprachmodell (lokaler Heuristik-Provider) sind alle Rubrikwerte, das Eigenständigkeits-Gate und die
@@ -49,32 +52,57 @@ Statusschreibweise (verbindlich für alle Regeln, die daraus abgeleitet werden):
 
 ## 2. Bestandsaufnahme des Codes: wo die Kernfunktion heute versagt
 
-Der Audit hat den Worker-Code gelesen und einzelne Defekte im venv nachgeprüft. Pfade beziehen sich auf
-`workers/chopstr_worker` (W) und `apps/web/lib` (A). Drei Problemarten nach Master-Prompt Abschnitt 3.
+Der erste Audit lief gegen den Stand vom 23.09. (a563fe4). Zwischen 23.09. und 26.09. kamen 127 Commits hinzu,
+darunter eine redaktionelle Policy-Schicht (`workers/chopstr_worker/editorial.py`,
+`packages/editorial/clip_policy_v1.yaml`, `packages/prompts/score_clip_v2.md`), eine Evaluations-Suite
+(`workers/eval`), Kamera-Tracking und viele Änderungen an story_engine, story_score, heuristic_llm und
+captions_de. Jeder Befund wurde am 03.10. gegen HEAD (d58d35e) neu geprüft, mit Python-Aufrufen im venv.
+Pfade beziehen sich auf `workers/chopstr_worker` (W) und `apps/web/lib` (A). Drei Problemarten nach
+Master-Prompt Abschnitt 3.
 
-| Nr. | Befund | Problemart | Fundstelle | Schwere |
-|---|---|---|---|---|
-| 1 | Pausen ab 0,7 s oder Sprecherwechsel beenden einen Satz auch ohne Satzzeichen; die Spannungspause vor der Zahl wird zur Satzgrenze. Abkürzungsliste enthält „so“, „do“, „i“, „mag“, „max“, „art“, „min“: „Das ist so.“ ist kein Satzende. Gate `sentence_boundaries` steht fest auf bestanden. | Ausführung | W/pipeline/dach_nlp.py:58-66, 125-146; W/pipeline/story_engine.py:241; A/candidates/gates.ts:59 | kritisch |
-| 2 | Verbklammer-Gate prüft Satzanfang und Satzende gegen Sperrbereiche innerhalb desselben Satzes und ist damit immer legal. Ohne spaCy-Modell (nicht installiert) meldet es „nicht verfügbar“ und gilt als bestanden. | Ausführung | W/pipeline/dach_nlp.py:154-189; W/pipeline/story_engine.py:183-196; workers/Dockerfile:20 | kritisch |
-| 3 | Heatmap-Seeds ordnen nur die Kapitelreihenfolge, jedes Kapitel wird trotzdem bewertet, Seeds fehlen im Prompt, Cache-Key ohne Heatmap. Lachen und Applaus werden nie befüllt. | Auswahl | W/pipeline/story_engine.py:156-165, 514; W/pipeline/story_score.py:85-91; W/activities/analyze.py:53, 86-97 | kritisch |
-| 4 | Verwerfen findet nicht statt: bis zu 20 Kandidaten inklusive Gate-Verletzern, keine Mindestpunktzahl, Duplikate nur über IoU 0,6 (ein 20-s-Clip in einem 60-s-Clip hat IoU 0,33 und bleibt). | Auswahl | W/pipeline/story_engine.py:36-40, 451-472 | kritisch |
-| 5 | Kandidat ist immer genau ein Segment. `auto_remove_ranges`, `from_keep_ranges`, Teaser-Validator und Splice-Zähler sind gebaut, aber nie aufgerufen; `filler_cuts` ist immer False. Keine Pausenklassen. | Redaktion | W/pipeline/compose.py:17-99; W/pipeline/render_plan.py:141; W/activities/render.py:248 | hoch |
-| 6 | Kontexttreue hängt allein am Sprachmodell: Reparatur nur ein Satz pro Runde, höchstens zwei Runden, nur auf LLM-Flags; kein deterministischer Detektor für Pronomen ohne Bezug; Story-Graph nur vorwärts, 60 s, Teilstring-Treffer („außer“ trifft „außerdem“); kein Reward-Ende (Nachlauf nach der Pointe bleibt). | Redaktion | W/pipeline/story_score.py:128-144; W/pipeline/story_graph.py:20-26, 57-82 | hoch |
-| 7 | Hook gehört nicht zum Clip: `spoken_hook` wird nie verwendet, erste Variante ohne Claim-Issue gewinnt (faktisch immer `identity_call`), Thompson-Reihenfolge im Worker nicht angeschlossen, Wortlimit- und Lint-Verstöße disqualifizieren nicht. Claim-Check per Teilstring. Heuristik-Hooks stellen eigene Rahmungen voran („Das Gegenteil stimmt:“), die der Clip nicht deckt. | Redaktion | W/pipeline/copy_engine.py:114-158; W/pipeline/fidelity.py:61-71; W/heuristic_llm.py:278-304; W/activities/render.py:468, 525 | hoch |
-| 8 | Schnittkanten exakt auf ASR-Wortgrenzen, 20-ms-Fade, kein Vor- und Nachlauf; Anlaute und Endkonsonanten gehen verloren, bei „nicht“ am Satzende sinnrelevant. | Ausführung | W/pipeline/story_engine.py:430; W/pipeline/render.py:215-226 | hoch |
-| 9 | Captions: ein ASS-Event je Wort ohne Überbrückung der Wortlücken (Flackern), pyphen-Silbentrennung statt Morpheme („Kundenan-/fragenbea-/rbeitung“), Bruch nach jedem Komma, keine Mindestanzeigedauer, Zahl und Einheit trennbar, Keyword-Highlight nur in der Web-Vorschau. | Ausführung | W/pipeline/captions_de.py:167-243, 319-325; A/clips/captions.ts:101-106 | hoch |
-| 10 | Reframing: OpenCV und YuNet nicht installiert, Standard ist Mittelcrop; Positions-Clusterung macht aus einem bewegten Gesicht drei Positionen und wählt `two_speakers`; Sprecherzuordnung wird geraten und gespeichert. | Ausführung | W/pipeline/reframe.py:56-65, 221-254; workers/Dockerfile:20-23 | kritisch (außerhalb des Master-Prompt-Scopes, siehe Abschnitt 8) |
-| 11 | Heuristik-Provider: `is_humor` immer False (Pflicht zur menschlichen Humorprüfung entfällt still), `suggested_title_card` immer leer, Story-Graph-Urteile immer null, Spezifitäts-Regex trifft jedes deutsche Substantiv, Zielgruppe wird ignoriert. | Auswahl | W/heuristic_llm.py:104-221 | hoch |
-| 12 | Lernschleife: Retention-Kurve wird gespeichert, nie auf die Wortzeitachse gelegt; Web-Revision übernimmt veraltete Gates (standalone, fidelity) nach Grenzänderung. | Redaktion | W/activities/publish.py:271; A/candidates/gates.ts:52-65 | mittel |
+| Nr. | Befund (Stand 03.10.) | Status | Problemart | Fundstelle | Schwere |
+|---|---|---|---|---|---|
+| 1 | Pausen ab 0,7 s oder Sprecherwechsel beenden weiter einen Satz ohne Satzzeichen (eine Pause von 0,9 s in „In Wahrheit haben wir … drei Jahre“ erzeugt zwei Sätze); die Abkürzungsliste enthält weiter „so“, „i“, „mag“, „max“, „art“, „min“ („Das ist so.“ ist kein Satzende). Das Gate `sentence_boundaries` prüft seit 43c9fbb wirklich (Satzzeichen am letzten Wort und am Wort davor). Ein kaputtes Ende wird um höchstens zwei Sätze oder 7 s geheilt, ein kaputter Anfang nicht: solche Kandidaten werden verworfen statt nach vorn erweitert. Die Web-Revision setzt das Gate weiter fest auf bestanden. Satzende ist dreifach definiert (Zerlegung mit Pause, Gate nur Satzzeichen, Eval mit Pause). | teilweise behoben | Ausführung | W/pipeline/dach_nlp.py:58-66, 125-146; W/pipeline/segment.py:50-56; W/pipeline/story_engine.py:412-436, 628-680; A/candidates/gates.ts:59 | hoch |
+| 2 | Verbklammer-Gate prüft Satzanfang und Satzende gegen Sperrbereiche innerhalb desselben Satzes und ist damit per Konstruktion immer legal (geprüft mit simuliertem spaCy und Sperrbereich über die ganze Klammer: `passed: True`). Ohne Sprachmodell (`de_core_news_*` ist weder im venv noch im Image) meldet es „nicht verfügbar“ und gilt als bestanden. | gilt | Ausführung | W/pipeline/story_engine.py:360-373; W/pipeline/dach_nlp.py:154-189; workers/Dockerfile:20 | kritisch |
+| 3 | Heatmap-Seeds ordnen weiter nur die Kapitel und fehlen im Prompt. Der reine Audioanteil (RMS, Flux) wirkt seit 017cf81 mit plus/minus 15 Prozent auf den Gesamtwert und auf die Teaser-Wahl, steht aber nicht im Cache-Key (neue Heatmap, altes Ergebnis). Lachen, Applaus, Pause vor Aussage und Energieanstieg stehen in der Policy, werden aber von keinem Code gelesen. | teilweise behoben | Auswahl | W/pipeline/story_engine.py:190-226, 333-342, 886; W/activities/analyze.py:112, 145-166; W/pipeline/signals.py:123-149 | hoch |
+| 4 | Verwerfen findet jetzt statt: Gate-Verletzer werden trotz höchster Punktzahl verworfen (Grund „gate“), Dubletten über den Anteil am kürzeren Clip (Schwelle 0,4; 20 bis 40 s in 0 bis 60 s ergibt 1,0), Längengrenzen 18 bis 70 s aus der Policy. Bewusst keine Mindestpunktzahl (`bewertung.modus: sortieren`, Entscheidung vom 24.09., nicht im Entscheidungsregister), weiter höchstens 20 Kandidaten. Die Schwellen `schwelle_schneiden` und `schwelle_verwerfen` liest kein Code. | weitgehend behoben | Auswahl | W/pipeline/story_engine.py:50, 67, 585-599, 802-844 | niedrig |
+| 5 | Teaser-Validator und `with_teaser` sind seit 08680f4 angeschlossen (Hook vorziehen, Vorsprung mindestens 2,0, höchstens 6 s, nicht aus dem letzten Viertel). `auto_remove_ranges` und `from_keep_ranges` werden weiter nie aufgerufen, `filler_cuts` ist immer False, keine Pausenklassen, kein Splice-Zähler im Worker. | teilweise behoben | Redaktion | W/pipeline/story_engine.py:721-733; W/pipeline/dach_nlp.py:224; W/pipeline/compose.py:70-79; W/pipeline/render_plan.py:198 | hoch |
+| 6 | Kontexttreue hängt am Anfang allein am Sprachmodell (ein Satz je Runde, zwei Runden). Am Ende gibt es seit 99fb592 eine deterministische Heilung, die allerdings den Abschwächungssatz („wobei“) einschließt und darauf endet, im Widerspruch zu `ausstieg.vor_der_abschwaechung`. Kein Gate für Pronomen ohne Bezug (nur Punktabzug in der Heuristik). Story-Graph unverändert, nur vorwärts, „außer“ trifft „außerdem“ (Überlappung 0,67). Kein Ende auf der Pointe. Nach der Verlängerung wird nicht neu bewertet. | teilweise behoben | Redaktion | W/pipeline/story_score.py:376-392; W/pipeline/story_engine.py:628-680, 697-702; W/pipeline/story_graph.py:20-26, 57-82 | hoch |
+| 7 | Hook gehört nicht zum Clip: `spoken_hook` wird nie verwendet, erste Variante ohne Claim-Treffer gewinnt, Thompson-Reihenfolge im Worker nicht übergeben, Wortlimit- und Lint-Verstöße disqualifizieren nicht. Claim-Check per Teilstring („40 Euro gespart“ gegen „400.000 Euro“ ergibt keinen Treffer, „4 Tipps“ gegen „2024“ ebenso). Heuristik-Hooks stellen eigene Rahmungen voran („Das Gegenteil stimmt: Aber wir haben gelernt“). | gilt | Redaktion | W/pipeline/copy_engine.py:156-158, 264-279; W/pipeline/fidelity.py:61-71; W/heuristic_llm.py:589-626; W/activities/render.py:629, 714 | hoch |
+| 8 | Schnittkanten exakt auf Satzzeiten, 20-ms-Fade, kein Vor- und Nachlauf; `LEAD_IN_S` und `LEAD_OUT_S` existieren nur im ungenutzten `from_keep_ranges`. Der eigene Referenzsatz zeigt bei guten Clips einen Nachlauf von 0,63 s im Median gegen 0,19 s bei schlechten. | gilt | Ausführung | W/pipeline/story_engine.py:719; W/pipeline/render.py:237-262; W/pipeline/compose.py:16-17 | hoch |
+| 9 | Captions: ein ASS-Event je Wort ohne Überbrückung der Lücken (Events 0,00 bis 0,20, 0,50 bis 0,70, 1,20 bis 1,60), wortweise ist im Hochformat jetzt Standard; pyphen statt Morphemen („Kundenan-/fragenbea-/rbeitung“); Bruch nach jedem Komma; keine Mindestanzeigedauer; Keyword-Highlight nur in der Web-Vorschau. | gilt | Ausführung | W/pipeline/captions_de.py:339-364, 438-488, 554-598; A/clips/captions.ts:101-128 | hoch |
+| 10 | Tracking mit Einstellungen, Mundbewegung und Personen gleichzeitig im Bild ist gebaut (`tracking.py`), die Strategie `two_speakers` kommt jetzt aus der Personenzahl statt aus einer Positionsclusterung. OpenCV und YuNet sind weiter weder im venv noch im Image, Standard bleibt der Mittelcrop; im Ersatzweg werden Sprecherpositionen geraten und gespeichert. | teilweise behoben | Ausführung | W/pipeline/reframe.py:70-79, 888-890, 926-929; W/pipeline/tracking.py; W/activities/render.py:662, 865; workers/Dockerfile:20 | kritisch für Produktion, außerhalb des Master-Prompt-Scopes |
+| 11 | Heuristik-Provider: `is_humor` immer False (Pflicht zur menschlichen Humorprüfung entfällt still), `suggested_title_card` immer leer, Story-Graph-Urteil immer null, Spezifität gibt plus 0,15 ab drei großgeschriebenen Wörtern, Zielgruppe ist ausdrücklich neutral und ignoriert den Brief. Neu sind Emotion, Standalone mit Pronomen und Gastgeberfrage sowie Moment-Typen. Die Summen bleiben scheingenau: im Probelauf alle Kandidaten bei 12,0 bis 12,7 von 14, also über der Schwelle „schneiden“. Länge wird mit 2,5 Wörtern je Sekunde geschätzt, gemessen sind etwa 3. | teilweise behoben | Auswahl | W/heuristic_llm.py:174-233, 363-372, 428-436, 529-542 | hoch |
+| 12 | Lernschleife: Retention-Kurve wird gespeichert, nie auf die Wortzeitachse gelegt; Web-Revision übernimmt veraltete Gates (standalone, fidelity) nach Grenzänderung. Neu: Die gelernten Gewichte wirken seit 7a1f3e7 nicht mehr auf die Rangfolge, `weighted_total` ruft niemand auf, `total` kommt aus `policy_total`. Entscheidung P14 läuft damit ins Leere. | gilt, verschärft | Redaktion | W/activities/publish.py:271; A/candidates/gates.ts:52-65; W/pipeline/story_engine.py:180-187, 791 | mittel |
+| 13 | Die redaktionelle Policy fehlt im Worker-Image: Dockerfile und Dockerfile.gpu kopieren nur `packages/prompts`, nicht `packages/editorial`, `packages/design` und `packages/schema`; docker-compose setzt kein `EDITORIAL_DIR`. `editorial.load()` wirft dort `PolicyError`, `story_score.score` fängt das nicht ab. Dieselbe Lücke gilt für `caption_fonts.json` und `ausgabe_regeln_v1.json`. Außerdem liest kein Code: `zusammenhang.*`, `ausschluss.begruessung_und_abschied`, `insiderwitz_ohne_kontext`, `audio.merkmale.*`, `einstieg.nie_mitten_im_satz`, `nie_in_selbstkorrektur`, `ausstieg.verbklammer_nicht_trennen`, beide Schwellen. `einleitungen_kappen` wirkt nur als Punktabzug. | neu | Ausführung | workers/Dockerfile:14-20; infra/docker-compose.yml:150-179; W/editorial.py:296-309; packages/editorial/clip_policy_v1.yaml:229-350 | kritisch für Produktion |
+
+Weitere neue Befunde, die der erste Audit nicht kannte:
+
+- Der Sprachmodell-Vorschlag (`propose_moments_v1`) kennt weder Policy noch Länge noch Moment-Typen; nur der
+  Heuristik-Vorschlag beachtet das Längenfenster.
+- Die Rubrik beschreibt die Spanne vor der Verlängerung; nach `kontext_verlaengern` wird nicht neu bewertet.
+- Die Heuristik zählt die Länge doppelt: als Bonus in `aufloesung` und `zielgruppe` und noch einmal als
+  `laenge_abzug` in `policy_total`, einmal geschätzt, einmal gemessen.
+- `auto_create_clips` setzt seit 127edb9 jeden überlebenden Kandidaten auf `accepted` und rendert ihn, auch mit
+  `humor`, `sensitive_topic` oder `claim`. Die Heuristik setzt `is_humor` nie. Die Ausgaberegeln kennen keine
+  Regel zu Humor oder sensiblen Themen. Das ist ein Widerspruch zur Produktregel „menschliche Freigabe“.
+- Die Policy beruft sich auf „105 gute Beispielclips, Median 41,3 s“; der eingefrorene Referenzsatz enthält
+  vier gute und zwölf schlechte Clips und ist selbst als „nicht belastbar“ markiert.
+- `candidates.policy_version` existiert nicht als Spalte, nur im `rubric`-JSON.
+- `prompts.load` ohne Versionsangabe nimmt die höchste Datei; neue `_vN+1`-Prompts würden den alten Pfad still
+  umschalten. Für Rollback über `policy_version` müssen Prompt-Versionen explizit gepinnt werden.
 
 Wo der Code mehr leistet als verlangt (behalten): getrennte Normalform für Dialekt mit geschützten Begriffen,
-vollständiger Teaser-Validator, ehrliche Unsicherheit (`confirmed = null`, `heuristic_only`, `scores_stale`),
-deterministischer Render-Plan mit Hash, zweistufiges Loudnorm nach dem neueren Standard, Residency-Guard auch
-für LanguageTool, serverseitiger Claim-Check bei manuell bearbeiteten Hooks.
+Teaser-Validator jetzt angeschlossen, ehrliche Unsicherheit (`confirmed = null`, `heuristic_only`,
+`scores_stale`), deterministischer Render-Plan mit Hash, zweistufiges Loudnorm nach dem neueren Standard,
+Residency-Guard auch für LanguageTool, serverseitiger Claim-Check bei manuell bearbeiteten Hooks, eine
+einzige serverseitige Ausgabeentscheidung (P16), bei der `inhalt_fehler` das Veröffentlichen sperrt, und eine
+redaktionelle Policy mit Herkunftsangaben je Regel.
 
 Wurzelursache: Syntax, Kontext und Pacing sind als nachträgliche Prüfungen gebaut, nicht als Bedingungen der
-Erzeugung. Grenzen werden nicht verschoben, Segmente nicht gesplittet, Gates nicht als Ausschluss genutzt.
-Optionale Pakete fallen still auf „bestanden“ zurück.
+Erzeugung. Für das Clip-Ende ist das inzwischen umgesetzt (heilen oder verwerfen). Für Anfang, Satzzerlegung,
+Verbklammer, Füllwörter und Schnittkanten gilt es weiter. Neu hinzugekommen: Die Policy beschreibt mehr, als
+der Code umsetzt, und sie fehlt im Container-Build. Optionale Pakete fallen still auf „bestanden“ zurück.
 
 ## 3. Was die Forschung trägt und was nicht
 
@@ -239,14 +267,15 @@ erfülltes Versprechen, Zielgruppenrelevanz, redaktionelle Wirkung, technische E
 
 | Prio | Maßnahme | Wirkung | Aufwand | Phase |
 |---|---|---|---|---|
-| 1 | Satzsegmentierung reparieren: primär Satzzeichen, Pause allein nur mit großgeschriebenem Folgewort und ohne offenes finites Verb; Abkürzungsliste bereinigen; `sentence_boundaries` als echte Prüfung. | behebt Clips, die vor dem Kernwort enden | mittel | 1 |
+| 0 | Produktionsbug außerhalb des redaktionellen Scopes, sofort: `packages/editorial`, `packages/design`, `packages/schema` ins Worker-Image kopieren oder `EDITORIAL_DIR` und die Pfadvariablen in docker-compose setzen; `auto_create_clips` darf Kandidaten mit Humor-, Sensitiv- oder Claim-Flag nicht automatisch rendern. | Worker läuft im Container, Freigabepflicht bleibt | niedrig | vor 1 |
+| 1 | Eine einzige Satzende-Funktion für Zerlegung, Gate und Eval: primär Satzzeichen, Pause nur als Grenzkandidat mit großgeschriebenem Folgewort und ohne offenes finites Verb; Abkürzungsliste bereinigen; Anfang deterministisch nach vorn heilen (Spiegel von `kontext_verlaengern`) und danach neu bewerten; Heilung des Endes darf nicht auf dem Abschwächungssatz enden. | behebt Clips, die vor dem Kernwort enden oder mitten im Satz beginnen | mittel | 1 |
 | 2 | Verbklammer über Grenzen prüfen (Vorsatz und Folgesatz zusammen); fehlendes Modell laut melden statt still bestehen; deterministischer Rückfall ohne spaCy (Satzklammer-Heuristik auf trennbaren Verben und Nebensatzkonnektoren). | Sinnumkehr durch Out-Point verhindert | mittel | 1 |
 | 3 | Deterministische Gates vor dem Ranking: Pronomen ohne Antezedens im ersten Satz, Rückverweise („wie gesagt“, „das von vorhin“), offene Frage ohne Antwort, Negation oder Bedingung am Grenzsatz, indirekte Rede, Forward-Referenz ohne Auflösung. Gate-Verletzer werden verworfen, nicht sortiert. | Eigenständigkeit und Versprechen | mittel | 1 und 2 |
 | 4 | Versionierter Testsatz mit den 14 Pflichtfällen des Master-Prompts als Fixtures, Tests rot vor der Reparatur. | Nachweis statt Behauptung | niedrig | 1 |
 | 5 | Payoff-first-Suche: Payoff-Kandidaten (Erklärung, Ergebnis, Vorgehen, Pointe, Auflösung) finden, rückwärts erforderlichen Kontext und Einstieg bestimmen; Gegenrichtung (Einstieg-first) und Abgleich beider; Kapitel mit Überlappung, Seeds im Prompt, Episodenübersicht. | richtiger Gedanke häufiger gefunden | hoch | 2 |
 | 6 | Native Hook-Auswahl: der gesprochene Einstieg ist eine Originalstelle; mehrere substanziell verschiedene Einstiege intern vergleichen; Text-Hook darf nicht mehr behaupten als der Clip (Claim-Check auf normalisierte Zahlentoken, Geltungsbereich „bei uns“ vs. „für alle“); Hyperbel-Liste; Lint-Verstöße disqualifizieren. | Versprechen passt zum Inhalt | mittel | 2 |
 | 7 | Remove-/Keep-Logik aktivieren: Komposition aus mehreren Segmenten, Schutzbereiche (Negation, Bedingung, Maßstab, Zeit, Unsicherheit, Definition, Sprecher, Korrektur), Pausenklassen, Reward-Ende (Nachlauf nach Payoff kappen), Splice-Limit, Debatten nie umordnen. | Ballast raus, Bedeutung bleibt | hoch | 2 |
-| 8 | Redundanz über Containment statt IoU; Mindestanforderungen statt Mindestpunktzahl; höchstens zehn Kandidaten; Verwerfen als Ergebnis mit Grund. | weniger Doppelungen, ehrliche Listen | niedrig | 2 |
+| 8 | Containment ist umgesetzt. Offen: höchstens zehn Kandidaten, tote Policy-Schlüssel entweder umsetzen oder als `nicht_umgesetzt` kennzeichnen, Policy-Version und Prompt-Version explizit pinnen, gelernte Gewichte entweder in `policy_total` abbilden oder P14 als ausgesetzt dokumentieren. | ehrliche Listen, Rollback möglich | niedrig | 2 |
 | 9 | Rollen trennen: Analyst (Materialübersicht, Abhängigkeiten, spätere Korrekturen), Editor (Auswahl), Kritiker (gezielte Widerlegung), Evaluator (Anforderungen); Heuristik-Provider als „unkalibriert“ sichtbar; Humor-Flag nicht still False. | Gegenprüfung | mittel | 2 |
 | 10 | ClipCandidate-Schema als Adapter über dem bestehenden Kandidatenformat (Herkunftsbereiche, removed_spans, meaning_dependencies, quality_gate_results, editorial_subscores, uncertainties, Versionen). | Auditierbarkeit | mittel | 2 |
 | 11 | Echte Zeitstempel: Vor- und Nachlauf an Wortgrenzen, boundary_confidence, konservativer Schnitt bei Unsicherheit, Original- und Clip-Timeline getrennt, Übergangsprüfung (abgeschnittenes Phonem, Atem, Caption-Übertragung). | keine abgeschnittenen Wörter | mittel | 3 |

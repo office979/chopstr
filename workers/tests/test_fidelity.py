@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from chopstr_worker.pipeline import fidelity
 
 
@@ -160,3 +162,97 @@ def test_v2_ambiguous_number_words_times_and_spaces():
     assert values == [(8.0, "noun:leute"), (1e6, "EUR"), (11.0, "noun:freunde")]
     assert fidelity.hook_claim_check_v2("Start 9:30 Uhr", "Wir starten um 9.30 Uhr.") == []
     assert fidelity.hook_claim_check_v2("40\u00a0000 Euro", "Wir haben 40.000 Euro gespart.") == []
+
+
+def test_v2_scope_uses_dach_nlp_sentences():
+    """M4: „z. B.“ und „am 3. Mai“ trennen keinen Satz; Einschränker und Verallgemeinerer stehen zusammen."""
+    finding = ["Geltungsbereich: 'für alle' im Hook, der Clip schränkt ein ('bei uns')"]
+    assert fidelity.hook_claim_check_v2("Das gilt für alle", "Bei uns z. B. gilt das für alle.") == finding
+    assert fidelity.hook_claim_check_v2("Das gilt für alle", "Bei uns, also am 3. Mai, galt das für alle.") == finding
+    assert fidelity.text_sentences("Bei uns z. B. gilt das. Am 3. Mai auch.") == ["Bei uns z. B. gilt das.", "Am 3. Mai auch."]
+
+
+def test_v2_immer_idioms_quantity_words_direction_and_single_scope_finding():
+    assert fidelity.hook_claim_check_v2("Immer mehr Kunden", "Bei uns kommen immer mehr Kunden.") == []
+    assert fidelity.hook_claim_check_v2("Wie immer pünktlich", "Wir waren pünktlich.") == []
+    assert fidelity.hook_claim_check_v2("Millionen Kunden", "Wir haben viele Kunden.") == ["Mengenwort 'Millionen' steht so nicht im Clip"]
+    assert fidelity.hook_claim_check_v2("2 Millionen Kunden", "Wir haben 2 Millionen Kunden.") == []
+    assert fidelity.hook_claim_check_v2("Das gilt für jede Firma", "Bei uns gilt das.") == [
+        "Geltungsbereich: 'jede firma' im Hook, der Clip schränkt ein ('bei uns')"
+    ]
+    assert fidelity.hook_claim_check_v2("Über 40 Prozent sparen", "Fast 40 % sparen wir.") == [
+        "Zahl '40': der Hook sagt mehr, als der Clip trägt (Richtung umgekehrt)"
+    ]
+    assert fidelity.hook_claim_check_v2("Fast 40 Prozent", "Wir sparen fast 40 % im Jahr.") == []
+
+
+def test_v2_uncertain_multiplier_or_unit_transfers_to_the_number():
+    words = [{"text": "rund"}, {"text": "40"}, {"text": "Tausend", "prob": 0.3}, {"text": "Euro"}, {"text": "gespart."}]
+    assert fidelity.uncertain_number_tokens(words) == ["40 Tausend Euro", "40"]
+    words = [{"text": "40.000"}, {"text": "Euro", "prob": 0.3}, {"text": "gespart."}]
+    assert fidelity.uncertain_number_tokens(words) == ["40.000 Euro gespart.", "40.000"]
+
+
+# -- AP7: Schutzbereiche aus trim_plan (nur Policy v2) ------------------------------------------------
+
+
+def test_protected_removed_is_high_under_v2_only():
+    from chopstr_worker import editorial
+
+    words = _words(["Ja,", "aber", "nur,", "wenn", "ihr", "vorher", "dokumentiert.", "Dann", "klappt", "es."])
+    cut = [(0, 1), (7, 9)]  # Bedingung „nur, wenn ihr vorher dokumentiert“ fehlt
+    v2 = fidelity.check_cut(words, cut, policy=editorial.load(2))
+    hit = next(w for w in v2 if w["type"] == "protected_removed")
+    assert hit["severity"] == "high"
+    assert {d["type"] for d in hit["detail"]} >= {"condition", "qualifier"}
+    without = fidelity.check_cut(words, cut)
+    assert without == fidelity.check_cut(words, cut, policy=editorial.load(1))
+    assert not any(w["type"] == "protected_removed" for w in without)
+    assert not any(w["type"] == "protected_removed" for w in fidelity.check_cut(words, [(0, 9)], policy=editorial.load(2)))
+
+
+def test_protected_removed_also_catches_a_removed_correction():
+    from chopstr_worker import editorial
+
+    words = _words(["Drei", "Monate,", "beziehungsweise", "vier.", "Das", "war", "lang."])
+    v2 = fidelity.check_cut(words, [(0, 1), (4, 6)], policy=editorial.load(2))
+    hit = next(w for w in v2 if w["type"] == "protected_removed")
+    assert [d["type"] for d in hit["detail"]] == ["correction"]
+    assert not any(w["type"] == "negation_removed" for w in v2)  # die alte Prüfung sah das nicht
+
+
+# -- CONTRAST_STARTS an Wortgrenzen (AP4, nur Regel v2) --------------------------------------------------
+
+
+def _ends_before_contrast(tail_tokens, rule):
+    words = _words(["Wir", "rechnen", "jede", "Preisänderung", "durch.", *tail_tokens])
+    return any(w["type"] == "ends_before_contrast" for w in fidelity.check_cut(words, [(0, 4)], rule=rule))
+
+
+def test_v1_reads_ausserdem_as_contrast_unchanged():
+    """Bekannter Defekt (RK 2 Befund 6), unter v1 bewusst unverändert."""
+    assert _ends_before_contrast(["Außerdem", "sprechen", "wir"], "v1") is True
+    assert fidelity.check_cut(_words(["Wir", "rechnen.", "Außerdem", "nie."]), [(0, 1)]) == fidelity.check_cut(
+        _words(["Wir", "rechnen.", "Außerdem", "nie."]), [(0, 1)], rule="v1"
+    )
+
+
+@pytest.mark.parametrize(
+    ("tail", "expected"),
+    [
+        (["Außerdem", "sprechen", "wir"], False),
+        (["Außerhalb", "der", "Saison"], False),
+        (["Aberglaube", "hilft", "nicht"], False),
+        (["Außer", "im", "Sommer"], True),
+        (["Aber,", "und", "das"], True),
+        (["Wobei", "ich", "dazusagen"], True),
+    ],
+)
+def test_v2_matches_contrast_starts_at_word_boundaries(tail, expected):
+    assert _ends_before_contrast(tail, "v2") is expected
+
+
+def test_starts_with_contrast_rule_switch():
+    assert fidelity.starts_with_contrast("außerdem sprechen wir") is True
+    assert fidelity.starts_with_contrast("außerdem sprechen wir", "v2") is False
+    assert fidelity.starts_with_contrast("„aber das", "v2") is True

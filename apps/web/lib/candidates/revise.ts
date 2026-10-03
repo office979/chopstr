@@ -1,5 +1,5 @@
 import type { Candidate, ReviseCandidateInput, StoryGraphFlag } from "@/lib/repo/types";
-import { clipText, sentenceRange, type Sentence } from "@/lib/transcript/sentences";
+import { clipText, sentenceRange, type Sentence, type SentenceRule, type WordLike } from "@/lib/transcript/sentences";
 import { allGatesPassed, recomputeGates } from "@/lib/candidates/gates";
 
 export const TITLE_CARD_MAX_WORDS = 8;
@@ -21,6 +21,8 @@ export function buildRevision(
   prev: Candidate,
   sentences: Sentence[],
   input: ReviseCandidateInput,
+  /* Wortliste und Satzregel der Transkriptversion: damit prüft das Satzgrenzen-Tor an echten Wortzeiten. */
+  transcript?: { words: WordLike[]; rule: SentenceRule },
 ): Revision | RevisionError {
   const { first_sent, last_sent } = input;
   if (!Number.isInteger(first_sent) || !Number.isInteger(last_sent)) return { error: "Satzindizes fehlen" };
@@ -50,6 +52,8 @@ export function buildRevision(
         first: range[0],
         last: range[range.length - 1],
         after: sentences.find((s) => s.idx === last_sent + 1),
+        words: transcript?.words,
+        rule: transcript?.rule,
       })
     : prev.gates;
   const flags: StoryGraphFlag[] = prev.story_graph_flags

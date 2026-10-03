@@ -244,6 +244,8 @@ export interface TranscriptStats {
   mean_prob?: number;
   low_conf_ratio?: number;
   speaker_names?: Record<string, string>;
+  /* Satzende-Regel, nach der der Worker sentence_idx geschrieben hat (AP2): v1, v2 oder v1_fallback_no_punct. */
+  sentence_rule?: string;
 }
 
 export interface TranscriptVersion {

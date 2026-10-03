@@ -314,6 +314,12 @@ class Policy:
         return tuple(str(x).lower() for x in self.hook.get("hyperbole") or ())
 
     @property
+    def allow_partial_opening(self) -> bool:
+        """``hook.allow_partial_opening``: Teilsatz-Auszüge als Hook erlaubt. Fehlt die Regel, gilt false
+        (ganzer Originalsatz oder kein Overlay)."""
+        return self.hook.get("allow_partial_opening") is True
+
+    @property
     def hook_native_spoken(self) -> bool:
         """Gesprochener Hook als Originalstelle und Auswahl v2: Regel ``hook.native_spoken`` und Schalter
         ``implementation.hook.native_spoken`` müssen beide true sein; einer auf false ist der Rollback."""
@@ -595,4 +601,229 @@ def verb_bracket_settings(policy: Policy) -> dict[str, Any] | None:
     return {"active": policy.ausstieg.get("verbklammer_nicht_trennen") is not False, "fallback": fallback, "lists": lists}
 
 
-__all__ += ["SENTENCE_RULE_SWITCH", "context_front", "never_end_on_qualification", "sentence_rule", "verb_bracket_settings"]
+def sentence_limits(policy: Policy) -> tuple[float, int]:
+    """Obergrenze der Satzlänge unter Regel v2 (Sekunden, Wörter) aus ``segmentation``; ohne Werte 25 und 40."""
+    raw = policy.roh.get("segmentation") if isinstance(policy.roh.get("segmentation"), dict) else {}
+    try:
+        return float(raw.get("max_sentence_s", 25)), int(raw.get("max_sentence_words", 40))
+    except (TypeError, ValueError):
+        raise PolicyError(f"clip_policy_v{policy.version}: segmentation.max_sentence_s und max_sentence_words sind Zahlen.") from None
+
+
+__all__ += [
+    "SENTENCE_RULE_SWITCH",
+    "context_front",
+    "never_end_on_qualification",
+    "sentence_limits",
+    "sentence_rule",
+    "verb_bracket_settings",
+]
+
+
+# -- AP5: Suche vom Payoff und vom Einstieg (Abschnitt ``search``, nur Fassung 2) ------------------
+SEARCH_SWITCH = "search.payoff_first"
+# Hook-Typen aus Master-Prompt Abschnitt 9, in dieser Reihenfolge; Schlüssel von search.hook_type_markers.
+SEARCH_HOOK_TYPES = (
+    "concrete_contradiction", "mistake_with_consequence", "result_with_open_cause", "scene_with_stakes",
+    "decision_rule", "demonstration", "self_correction", "recognizable_problem", "perspective_shift", "punchline",
+)  # fmt: skip
+# Payoff-Arten, die über Wortmarker erkannt werden (search.payoff_markers). Ergebnis mit Zahl, Auflösung
+# nach Frage, Pointe nach Setup und Lachen erkennt payoff_search aus der Struktur.
+SEARCH_PAYOFF_MARKER_TYPES = ("rule", "consequence", "explanation", "lesson")
+# Abschnitt search ist eine Regel der Fassung 2 und braucht Herkunft; Pins für AP5.
+V2_RULE_SECTIONS = (*V2_RULE_SECTIONS, "search")
+V2_PIN_CHANGES.update({"propose_moments": 2, "episode_overview": 1})
+
+
+def _marker_table(raw: Any, keys: tuple[str, ...], name: str, version: int) -> dict[str, tuple[str, ...]]:
+    if not isinstance(raw, dict) or set(raw) != set(keys):
+        raise PolicyError(f"clip_policy_v{version}: search.{name} braucht genau die Schlüssel {', '.join(keys)}.")
+    table = {key: tuple(str(x).lower() for x in (raw[key] or ()) if str(x).strip()) for key in keys}
+    empty = [key for key, markers in table.items() if not markers]
+    if empty:
+        raise PolicyError(f"clip_policy_v{version}: search.{name} ohne Marker für {', '.join(empty)}.")
+    return table
+
+
+def search_settings(policy: Policy) -> dict[str, Any] | None:
+    """Einstellungen der Suche aus ``search`` (AP5) oder ``None`` in Fassung 1 und ohne Abschnitt.
+
+    Rückgabe ``{payoff_first, opening_first, chapter_overlap_s, max_llm_calls_per_source_hour,
+    payoff_markers, hook_type_markers, wired}``. ``payoff_search`` und der Heuristik-Provider lesen die
+    Werte immer, sobald der Abschnitt da ist; ``wired`` ist ``implementation.search.payoff_first`` und
+    sagt, ob ``story_engine.run`` die Suche schon nutzt (bis zur Verdrahtung false). Ein fehlender oder
+    unbrauchbarer Wert scheitert laut."""
+    if policy.version < 2 or "search" not in policy.roh:
+        return None
+    raw = policy.roh["search"]
+    v = policy.version
+    if not isinstance(raw, dict):
+        raise PolicyError(f"clip_policy_v{v}: search muss ein Abschnitt sein.")
+    try:
+        settings: dict[str, Any] = {
+            "payoff_first": raw["payoff_first"],
+            "opening_first": raw["opening_first"],
+            "chapter_overlap_s": float(raw["chapter_overlap_s"]),
+            "max_llm_calls_per_source_hour": int(raw["max_llm_calls_per_source_hour"]),
+        }
+    except (KeyError, TypeError, ValueError):
+        raise PolicyError(
+            f"clip_policy_v{v}: search braucht payoff_first, opening_first, chapter_overlap_s und "
+            "max_llm_calls_per_source_hour."
+        ) from None
+    if not all(isinstance(settings[k], bool) for k in ("payoff_first", "opening_first")):
+        raise PolicyError(f"clip_policy_v{v}: search.payoff_first und search.opening_first sind true oder false.")
+    if settings["chapter_overlap_s"] < 0 or settings["max_llm_calls_per_source_hour"] < 1:
+        raise PolicyError(f"clip_policy_v{v}: search.chapter_overlap_s ab 0, search.max_llm_calls_per_source_hour ab 1.")
+    settings["payoff_markers"] = _marker_table(raw.get("payoff_markers"), SEARCH_PAYOFF_MARKER_TYPES, "payoff_markers", v)
+    settings["hook_type_markers"] = _marker_table(raw.get("hook_type_markers"), SEARCH_HOOK_TYPES, "hook_type_markers", v)
+    settings["wired"] = _switch_value(policy.roh.get("implementation") or {}, SEARCH_SWITCH) is True
+    return settings
+
+
+__all__ += ["SEARCH_HOOK_TYPES", "SEARCH_PAYOFF_MARKER_TYPES", "SEARCH_SWITCH", "search_settings"]
+
+
+# -- AP7: Kürzen innerhalb des Clips (Abschnitt ``trim``, nur Fassung 2) ----------------------------
+TRIM_SWITCH = "trim.enabled"
+# Der Abschnitt ``trim`` ist ein Regelabschnitt: jede Regel darin braucht eine Herkunft in ``origins``.
+V2_RULE_SECTIONS = (*V2_RULE_SECTIONS, "trim")
+TRIM_PAUSE_CUES = {"dramatic_before": ("number", "negation", "contrast", "punchline"), "reaction_after": ("question", "laughter", "reaction_word")}
+
+
+def trim_settings(policy: Policy) -> dict[str, Any] | None:
+    """Einstellungen für ``pipeline.trim_plan`` aus ``trim`` und ``zusammenhang.mindest_dichte``.
+
+    ``None`` in Fassung 1 und ohne Abschnitt ``trim``. ``enabled`` ist nur true, wenn ``trim.enabled``
+    und der Schalter ``implementation.trim.enabled`` beide true sind; das ist die Verdrahtung in der
+    Kandidatensuche (Rollback: einer von beiden auf false). Die Bausteine selbst lesen die übrigen
+    Werte auch bei ausgeschaltetem Schalter. Ein unbrauchbarer Wert oder eine Lockerung von E6 (mehr
+    als zwei Splices, Debatten umordnen) scheitert laut."""
+    if policy.version < 2 or not isinstance(policy.roh.get("trim"), dict):
+        return None
+    name = f"clip_policy_v{policy.version}"
+    raw = policy.roh["trim"]
+    try:
+        pauses, removal, tail = raw["pause_classes"], raw["removal"], raw["reward_end"]
+        settings: dict[str, Any] = {
+            "enabled": raw["enabled"] is True and _switch_value(policy.roh.get("implementation") or {}, TRIM_SWITCH) is True,
+            "pause_target_s": float(raw["pause_target_s"]),
+            "min_trim_gain_s": float(raw["min_trim_gain_s"]),
+            "long_silence_s": float(raw["long_silence_s"]),
+            "min_segment_s": float(raw["min_segment_s"]),
+            "max_semantic_splices": int(raw["max_semantic_splices"]),
+            "debate_no_reorder": raw["debate_no_reorder"],
+            "dramatic_before": tuple(str(x) for x in pauses["dramatic_before"]),
+            "reaction_after": tuple(str(x) for x in pauses["reaction_after"]),
+            "reaction_words": tuple(str(x).lower() for x in pauses["reaction_words"]),
+            "punchline_window_s": float(pauses["punchline_window_s"]),
+            "orientation_min_s": float(pauses["orientation_min_s"]),
+            "orientation_markers": tuple(str(x).lower() for x in pauses["orientation_markers"]),
+            "fillers": str(removal["fillers"]),
+            "backchannel": removal["backchannel"],
+            "restarts": removal["restarts"],
+            "edge_markers": tuple(str(x).lower() for x in removal["edge_markers"]),
+            "never_remove": tuple(str(x).lower() for x in removal["never_remove"]),
+            "weak_summary": tuple(str(x).lower() for x in tail["weak_summary"]),
+            "sales_call": tuple(str(x).lower() for x in tail["sales_call"]),
+            "farewell": tuple(str(x).lower() for x in tail["farewell"]),
+            "repeat_overlap": float(tail["repeat_overlap"]),
+            "organisation_markers": tuple(str(x).lower() for x in policy.ausschluss.get("organisations_marker") or ()),
+            "min_density": float(policy.zusammenhang["mindest_dichte"]),
+        }
+    except (KeyError, TypeError, ValueError):
+        raise PolicyError(
+            f"{name}: trim braucht enabled, pause_target_s, min_trim_gain_s, long_silence_s, min_segment_s, "
+            "max_semantic_splices, debate_no_reorder, pause_classes, removal, reward_end und zusammenhang.mindest_dichte."
+        ) from None
+    if not all(isinstance(settings[k], bool) for k in ("debate_no_reorder", "backchannel", "restarts")):
+        raise PolicyError(f"{name}: trim.debate_no_reorder, removal.backchannel und removal.restarts sind true oder false.")
+    if settings["pause_target_s"] <= 0:
+        raise PolicyError(f"{name}: trim.pause_target_s muss größer als null sein (Pausen nie auf null kürzen).")
+    if settings["max_semantic_splices"] > 2 or settings["max_semantic_splices"] < 0:
+        raise PolicyError(f"{name}: trim.max_semantic_splices darf E6 nicht lockern (0 bis 2).")
+    if settings["debate_no_reorder"] is not True:
+        raise PolicyError(f"{name}: trim.debate_no_reorder muss true sein (E6, Debatten nie umordnen).")
+    if settings["fillers"] != "hard":
+        raise PolicyError(f"{name}: trim.removal.fillers kennt nur hard (P3).")
+    for key, allowed in TRIM_PAUSE_CUES.items():
+        unknown = [x for x in settings[key] if x not in allowed]
+        if unknown:
+            raise PolicyError(f"{name}: trim.pause_classes.{key} kennt {', '.join(unknown)} nicht.")
+    return settings
+
+
+__all__ += ["TRIM_SWITCH", "trim_settings"]
+
+
+# -- AP4: Harte Gates (Abschnitt ``gates``) und Modus sperren (``bewertung.modus_v2``), nur Fassung 2 --------
+GATES_SWITCH = "gates.discard_hard"
+GATE_RULE_KEYS = (
+    "unresolved_pronoun", "back_reference", "open_question_unanswered", "boundary_negation_condition",
+    "reported_speech", "forward_reference", "speaker_turn", "later_correction", "embedded_instruction",
+    "meta_speech",
+)  # fmt: skip
+BLOCK_MODES = ("sortieren", "sperren")
+V2_RULE_SECTIONS = (*V2_RULE_SECTIONS, "gates")
+V2_PIN_CHANGES.update({"system_editor": 2})
+
+
+def gates_settings(policy: Policy) -> dict[str, Any] | None:
+    """Einstellungen der harten Gates (``pipeline.editorial_gates``) oder ``None`` in Fassung 1 und ohne
+    Abschnitt ``gates``.
+
+    ``enabled`` je Gate aus ``gates.<schluessel>``; ``discard_hard`` ist die Regel (verwerfen oder nur
+    berichten); ``switch`` ist ``implementation.gates.discard_hard`` und sagt, ob ``story_engine`` die Gates
+    schon anwendet (erst mit dem Paket, das sie dort liest). Fehlt ein Schlüssel oder ist er kein
+    Wahrheitswert, scheitert das laut."""
+    if policy.version < 2 or "gates" not in policy.roh:
+        return None
+    raw = policy.roh["gates"]
+    name = f"clip_policy_v{policy.version}"
+    if not isinstance(raw, dict):
+        raise PolicyError(f"{name}: gates muss ein Abschnitt mit Schaltern sein.")
+    missing = [k for k in (*GATE_RULE_KEYS, "discard_hard") if k not in raw]
+    if missing:
+        raise PolicyError(f"{name}: gates ohne Schalter: {', '.join(missing)}")
+    not_bool = [k for k in (*GATE_RULE_KEYS, "discard_hard") if not isinstance(raw[k], bool)]
+    if not_bool:
+        raise PolicyError(f"{name}: gates.{not_bool[0]} ist true oder false.")
+    return {
+        "enabled": {k: raw[k] for k in GATE_RULE_KEYS},
+        "discard_hard": raw["discard_hard"],
+        "switch": _switch_value(policy.roh.get("implementation") or {}, GATES_SWITCH) is True,
+    }
+
+
+def block_mode_settings(policy: Policy, heuristic: bool | None = None) -> dict[str, Any] | None:
+    """Modus der Bewertung ab Fassung 2 (``bewertung.modus_v2``) oder ``None`` in Fassung 1 und ohne Wert.
+
+    ``bewertung.modus`` (v1) bleibt unverändert. ``mode`` ist der Wert aus ``modus_v2``; ``effective_mode`` gilt
+    für den Lauf: mit ``heuristic=True`` und ``only_with_language_model`` bleibt es bei ``sortieren``, weil die
+    Werte der Heuristik unkalibriert sind (RESEARCH-CLIPPING-KERN Abschnitt 2 Nr. 11). ``discard_below`` und
+    ``cut_from`` sind die Schwellen 7 und 10 aus ``bewertung``."""
+    bewertung = policy.roh.get("bewertung") or {}
+    if policy.version < 2 or "modus_v2" not in bewertung:
+        return None
+    name = f"clip_policy_v{policy.version}"
+    mode = bewertung["modus_v2"]
+    if mode not in BLOCK_MODES:
+        raise PolicyError(f"{name}: bewertung.modus_v2 muss sortieren oder sperren sein, nicht {mode!r}.")
+    only_llm = bewertung.get("only_with_language_model")
+    if not isinstance(only_llm, bool):
+        raise PolicyError(f"{name}: bewertung.only_with_language_model ist true oder false.")
+    reason = str(bewertung.get("begruendung") or "").strip()
+    if not reason:
+        raise PolicyError(f"{name}: bewertung.begruendung fehlt.")
+    effective = "sortieren" if (heuristic and only_llm) else mode
+    return {
+        "mode": mode,
+        "effective_mode": effective,
+        "only_with_language_model": only_llm,
+        "reason": reason,
+        "discard_below": policy.schwelle_verwerfen,
+        "cut_from": policy.schwelle_schneiden,
+    }
+
+
+__all__ += ["GATES_SWITCH", "GATE_RULE_KEYS", "block_mode_settings", "gates_settings"]

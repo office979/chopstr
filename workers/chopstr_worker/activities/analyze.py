@@ -18,6 +18,7 @@ durch ``run_detect_candidates`` laufen, hängt die Clip-Erzeugung an genau einer
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 from datetime import UTC, datetime
@@ -188,6 +189,7 @@ def candidates_key_for(tv_id: str, tv_version: int, brief: dict, prompt_versions
         policy = editorial.policy_version()
     except Exception:  # ohne Richtlinie lieber weiterarbeiten als gar nicht
         policy = "unbekannt"
+    extra = _policy_v2_key_params()
     params = {
         "transcript_version": tv_version,
         "brief": brief,
@@ -197,8 +199,27 @@ def candidates_key_for(tv_id: str, tv_version: int, brief: dict, prompt_versions
         "weights": weights,
         "engine": story_engine.ENGINE_VERSION,
         "policy": policy,
+        **extra,
     }
     return storage.derived_key(f"transcript/{tv_id}", params, story_engine.CONTRACT, "json", prefix="candidates")
+
+
+def _policy_v2_key_params() -> dict[str, str]:
+    """Ab Fassung 2 zusätzlich im Schlüssel: der Inhalt der Richtlinie (sha256 der YAML-Datei) und wie die
+    Verbklammer geprüft wird (``nlp_status``). Unter Fassung 1 nichts, damit der Schlüssel und damit der
+    Rollback auf vorhandene Ergebnisse gleich bleiben."""
+    try:
+        version = editorial.active_version()
+        if version < 2:
+            return {}
+        policy = editorial.load()
+    except editorial.PolicyError:
+        return {}
+    path = editorial.policy_dir() / f"clip_policy_v{version}.yaml"
+    return {
+        "policy_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "nlp_status": story_engine.nlp_status_for(policy),
+    }
 
 
 def _merke_wellenform(ctx: common.Context, source_id: str, key: str) -> None:
@@ -479,6 +500,8 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
             cached=cached,
             key=key,
             decisions=decisions,
+            # Verbklammer-Prüfung unter Fassung 2: spacy, heuristic oder off; unter Fassung 1 null.
+            nlp_status=report.nlp_status or None,
         )
     return ids
 

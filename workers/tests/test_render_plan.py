@@ -193,3 +193,27 @@ def test_zeitmarken_aendern_den_plan_hash():
     ohne = render_plan.plan_hash(_plan("tiktok"), 1, 1)
     mit = render_plan.plan_hash(_plan("tiktok", zeitmarken=[{"ab_s": 3.0, "zoom": 1.6}]), 1, 1)
     assert ohne != mit
+
+
+# -- AP7: filler_cuts aus der Komposition (nur Policy v2) ---------------------------------------------
+
+
+def test_filler_cuts_follow_the_composition_under_v2():
+    from chopstr_worker import editorial
+
+    v2 = editorial.load(2)
+    assert _plan("linkedin", composition={"local_cuts": 3}, policy=v2)["filler_cuts"] is True
+    assert _plan("linkedin", composition={"local_cuts": 0, "semantic_splices": 1}, policy=v2)["filler_cuts"] is False
+
+
+def test_filler_cuts_and_hash_unchanged_under_v1(monkeypatch):
+    from chopstr_worker import editorial
+
+    monkeypatch.delenv("CHOPSTR_POLICY_VERSION", raising=False)
+    editorial.clear_cache()
+    before = _plan("linkedin")
+    for kw in ({"composition": {"local_cuts": 3}}, {"composition": {"local_cuts": 3}, "policy": editorial.load(1)}):
+        plan = _plan("linkedin", **kw)
+        assert plan == before and plan["filler_cuts"] is False
+        assert render_plan.plan_hash(plan, 1, 3) == render_plan.plan_hash(before, 1, 3)
+    editorial.clear_cache()

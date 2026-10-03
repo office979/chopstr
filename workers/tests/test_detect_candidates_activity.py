@@ -120,7 +120,7 @@ def test_active_policy_version_is_part_of_the_cache_key(fake_db, fake_context, s
     analyze.run_detect_candidates(fake_context, source)
     fin = fake_db.events_for("detect_candidates")[-1]["payload"]
     assert fin["key"] != key_v1 and fin["cached"] is False
-    assert fin["prompt_versions"] == ["propose_moments_v1", "score_clip_v2", "story_graph_confirm_v1"]
+    assert fin["prompt_versions"] == ["propose_moments_v2", "score_clip_v2", "story_graph_confirm_v1"]
     assert fake_db.candidates
     assert {c["rubric"]["policy_version"] for c in fake_db.candidates} == {"clip_policy_v2"}
 
@@ -561,3 +561,68 @@ def test_local_worker_picks_up_the_auto_clips(fake_db, fake_context, branded_sou
     rows = fake_db.execute(local_worker.SQL_PENDING_CLIPS, (10,)).fetchall()
     assert {str(r[1]) for r in rows} == accepted
     assert {r[2] for r in rows} == {"tiktok"}
+
+
+def test_finished_payload_names_the_nlp_status(fake_db, fake_context, source, monkeypatch):
+    """AP3: unter Fassung 2 steht im finished-Event, wie die Verbklammer geprüft wurde; unter Fassung 1 null."""
+    from chopstr_worker import editorial
+    from chopstr_worker.pipeline import dach_nlp
+
+    monkeypatch.setattr(dach_nlp, "nlp", lambda: None)
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "1")
+    editorial.clear_cache()
+    analyze.run_detect_candidates(fake_context, source)
+    assert fake_db.events_for("detect_candidates")[-1]["payload"]["nlp_status"] is None
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    editorial.clear_cache()
+    analyze.run_detect_candidates(fake_context, source)
+    assert fake_db.events_for("detect_candidates")[-1]["payload"]["nlp_status"] == "heuristic"
+    editorial.clear_cache()
+
+
+def test_cache_key_under_v1_is_the_key_before_ap2(monkeypatch):
+    """Unter Fassung 1 kommen weder Richtlinien-Hash noch nlp_status in den Schlüssel: gleiche Parameter
+    wie vor AP2, also trifft ein Rollback die vorhandenen Ergebnisse."""
+    from chopstr_worker import editorial, storage
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "1")
+    editorial.clear_cache()
+    args = ("tv1", 3, dict(BRIEF), ["propose_moments_v1", "score_clip_v2", "story_graph_confirm_v1"], "local-heuristic", "m", {"hook": 1.0})
+    before = storage.derived_key(
+        "transcript/tv1",
+        {
+            "transcript_version": 3, "brief": dict(BRIEF), "prompt_versions": args[3], "provider": "local-heuristic",
+            "model": "m", "weights": {"hook": 1.0}, "engine": story_engine.ENGINE_VERSION, "policy": "clip_policy_v1",
+        },
+        story_engine.CONTRACT, "json", prefix="candidates",
+    )  # fmt: skip
+    assert analyze.candidates_key_for(*args) == before
+    editorial.clear_cache()
+
+
+def test_cache_key_under_v2_follows_policy_content_and_nlp_status(monkeypatch, tmp_path):
+    import shutil
+
+    from chopstr_worker import editorial
+    from chopstr_worker.pipeline import dach_nlp
+
+    monkeypatch.setattr(dach_nlp, "nlp", lambda: None)
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    editorial.clear_cache()
+    args = ("tv1", 3, dict(BRIEF), ["propose_moments_v1"], "local-heuristic", "m", {"hook": 1.0})
+    key = analyze.candidates_key_for(*args)
+
+    for name in ("clip_policy_v1.yaml", "clip_policy_v2.yaml"):
+        shutil.copy(editorial.policy_dir() / name, tmp_path / name)
+    with (tmp_path / "clip_policy_v2.yaml").open("a", encoding="utf-8") as f:
+        f.write("\n# Kommentar ändert den Inhalt\n")
+    monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path))
+    editorial.clear_cache()
+    assert analyze.candidates_key_for(*args) != key
+
+    monkeypatch.delenv("EDITORIAL_DIR")
+    editorial.clear_cache()
+    monkeypatch.setattr(dach_nlp, "nlp", lambda: object())
+    assert analyze.candidates_key_for(*args) != key
+    editorial.clear_cache()

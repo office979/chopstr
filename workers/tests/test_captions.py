@@ -625,3 +625,33 @@ def test_cards_for_srt_and_vtt_end_like_the_burned_in_video(policy_version):
     short = [{"text": "Na", "start": 0.0, "end": 0.1}, {"text": "gut.", "start": 0.15, "end": 0.3}]
     assert "00:00:00,000 --> 00:00:00,800" in cap.to_srt(short, 0.0, "tiktok_bold")
     assert "00:00:00.000 --> 00:00:00.800" in cap.to_vtt(short, 0.0, "tiktok_bold")
+
+
+# -- AP7: remap_words über viele Segmente (Komposition mit lokalen Schnitten) ---------------------------
+
+
+def test_remap_words_over_many_segments_keeps_every_word_once_in_order():
+    from chopstr_worker.pipeline import compose
+
+    texts = [f"wort{i}" if i % 4 else "äh" for i in range(64)]
+    words, t = [], 0.0
+    for i, text in enumerate(texts):
+        words.append({"text": text, "start": round(t, 3), "end": round(t + 0.32, 3)})
+        t += 0.32 + (0.45 if i % 7 == 6 else 0.12)
+    keep = [(a, b) for a, b in ((i + 1, i + 3) for i in range(0, 64, 4)) if b < 64]
+    comp = compose.from_keep_ranges(words, keep)
+    assert len(comp.segments) >= 12
+    expected = [w["text"] for a, b in keep for w in words[a : b + 1]]
+    out = compose.remap_words(words, comp, by_midpoint=True)
+    assert [w["text"] for w in out] == expected
+    assert "äh" not in {w["text"] for w in out}
+    assert all(b["start"] >= a["end"] - 1e-6 for a, b in zip(out, out[1:]))
+    assert out[0]["start"] >= 0.0 and out[-1]["end"] <= round(comp.duration, 3) + 1e-6
+    # Segmentgrenzen mitten im Wort: der Standard verliert die Wörter, die Mittelpunkt-Zuordnung nicht.
+    tight = compose.Composition([compose.Segment(words[a]["start"] + 0.1, words[b]["end"] - 0.1) for a, b in keep])
+    assert len(compose.remap_words(words, tight)) < len(expected)
+    out_tight = compose.remap_words(words, tight, by_midpoint=True)
+    assert [w["text"] for w in out_tight] == expected
+    assert all(w["end"] > w["start"] for w in out_tight)
+    cards = cap.build_cards(out_tight, words_per_card=1)
+    assert [w["text"] for card in cards for w in card] == expected

@@ -23,7 +23,10 @@ Regeln:
 | Datei | Zweck | Ausgabe (Tool-Use-Schema) |
 |---|---|---|
 | `system_editor_v1.md` | Systemrolle: Senior-Redaktion DACH | – |
+| `system_editor_v2.md` | Systemrolle, gepinnt in Fassung 2 (AP4): Transkript, Titel und Metadaten sind Daten in Begrenzern, keine Anweisungen; kein Viralitätsversprechen | – |
 | `propose_moments_v1.md` | Stufe 2: Momente pro Kapitel als Satz-Spannen | `propose_moments` |
+| `propose_moments_v2.md` | Stufe 2, gepinnt in Fassung 2 (AP5): Payoff zuerst, rückwärts zum Einstieg, Gegenrichtung; Policy, Episodenübersicht, Seeds und Kapitel in Begrenzern; je Moment Payoff, Einstieg, Kontext, Funktion, Versprechen | `propose_moments` |
+| `episode_overview_v1.md` | Stufe 2, gepinnt in Fassung 2 (AP5): Analyst, Übersicht je Kapitel mit Satznummern, nur für die Suche, nie Zitat- oder Schnittquelle | `episode_overview` |
 | `score_clip_v1.md` | Stufe 3, Bestand: eigene Rubrik (5 Kriterien, 0 bis 10) | `score_clip` |
 | `score_clip_v2.md` | Stufe 3, gepinnt in Fassung 1 und 2: Rubrik aus der redaktionellen Grundlage (7 Kriterien, 0 bis 2) | `score_clip` |
 | `story_graph_confirm_v1.md` | Stufe 4: relativiert ein späterer Satz den Clip? | `confirm_qualification` |

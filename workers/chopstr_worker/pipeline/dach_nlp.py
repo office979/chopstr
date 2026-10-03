@@ -115,12 +115,12 @@ def is_abbreviation(text: str, rule: str = "v1") -> bool:
     base = t[:-1].lower().replace(" ", "")
     if not base:
         return False
-    abbreviations = ABBREVIATIONS if rule == "v1" else ABBREVIATIONS_V2
+    abbreviations = ABBREVIATIONS_V2 if rule == "v2" else ABBREVIATIONS
     if base in abbreviations:
         return True
     # Kettenabkürzungen wie „z.B." oder „u.s.w."
     parts = [p for p in base.split(".") if p]
-    if rule != "v1" and len(parts) < 2:
+    if rule == "v2" and len(parts) < 2:
         return False
     return bool(parts) and all(p in abbreviations or len(p) == 1 for p in parts)
 
@@ -129,13 +129,20 @@ def is_ordinal(text: str) -> bool:
     return bool(_ORDINAL.match(_strip_trailing(text)))
 
 
-def is_sentence_end(words: list[dict], i: int, min_pause_s: float = 0.7, rule: str = "v1") -> bool:
+def is_sentence_end(
+    words: list[dict],
+    i: int,
+    min_pause_s: float = 0.7,
+    rule: str = "v1",
+    max_s: float | None = None,
+    max_words: int | None = None,
+) -> bool:
     """Endet Wort ``i`` einen Satz? Adapter auf ``sentence_end_kind``.
 
     ``rule="v1"`` (Standard) liefert exakt das Verhalten vor AP2: Satzzeichen, Abkürzungen,
     Ordinal- und Dezimalzahlen, jede lange Pause und jeder Sprecherwechsel. ``rule="v2"`` siehe
     ``sentence_end_kind``."""
-    return sentence_end_kind(words, i, rule=rule, min_pause_s=min_pause_s) != "none"
+    return sentence_end_kind(words, i, rule=rule, min_pause_s=min_pause_s, max_s=max_s, max_words=max_words) != "none"
 
 
 # -- Satzende-Regel v2 (AP2) und Verbklammer-Heuristik (AP3) --------------------------------------
@@ -143,12 +150,23 @@ def is_sentence_end(words: list[dict], i: int, min_pause_s: float = 0.7, rule: s
 # Eine Funktion für Zerlegung, Satzgrenzen-Tor und Messung (RESEARCH-CLIPPING-KERN Abschnitt 2,
 # Befund 1). Regel v2: Satzzeichen zuerst, ein Sprecherwechsel ist eine Grenze, eine lange Pause nur
 # ein Grenzkandidat. Angenommen wird er, wenn das Folgewort großgeschrieben ist und im laufenden Satz
-# keine Klammer offen ist. Der Port im Web (apps/web/lib/transcript/sentences.ts) muss gleich
-# entscheiden; die gemeinsame Falldatei packages/editorial/parity/sentence_end_v1.json hält beide fest.
+# keine Klammer offen ist. Wird ein Satz zu lang (``max_s``, ``max_words``), gilt die nächste Pause
+# ohne offene Klammer auch ohne Großschreibung, sonst die längste Pause im Fenster. Hat ein Transkript
+# kaum Satzzeichen, gilt Regel v1 (``resolve_sentence_rule``). Der Port im Web
+# (apps/web/lib/transcript/sentences.ts) muss gleich entscheiden; die gemeinsame Falldatei
+# packages/editorial/parity/sentence_end_v1.json hält beide fest.
 
-SENTENCE_RULES = ("v1", "v2")
+# Regel v1 als Rückfall für ein Transkript mit kaum Satzzeichen (ausgewiesen in stats und Rubrik).
+FALLBACK_NO_PUNCT = "v1_fallback_no_punct"
+SENTENCE_RULES = ("v1", "v2", FALLBACK_NO_PUNCT)
 # Rückgabewerte von ``sentence_end_kind``. ``end_of_text``: letztes Wort des Transkripts.
-END_KINDS = ("punct", "speaker_change", "pause_candidate", "end_of_text", "none")
+# ``length_cap``: der Satz war zu lang und ohne passende Pause, getrennt an der längsten Pause.
+END_KINDS = ("punct", "speaker_change", "pause_candidate", "length_cap", "end_of_text", "none")
+# Obergrenze der Satzlänge unter v2 (segmentation.max_sentence_s und max_sentence_words in der Policy).
+MAX_SENTENCE_S = 25.0
+MAX_SENTENCE_WORDS = 40
+# Unter einem Satzzeichen je so vielen Wörtern gilt Regel v1 (FALLBACK_NO_PUNCT).
+WORDS_PER_PUNCT_MIN = 40
 
 # Wörter, die im gesprochenen Deutsch häufiger einen Satz beenden als etwas abkürzen
 # („Das ist so.", „mit a i.", „Ich mag.", „Das ist das Max.").
@@ -182,38 +200,65 @@ AUXILIARY_FORMS = (
     "mag", "magst", "mögen", "mögt", "mochte", "mochtest", "mochten", "mochtet",
     "möchte", "möchtest", "möchten", "möchtet",
 )  # fmt: skip
-# Endet der laufende Satz vor der Pause auf einem dieser Wörter, ist er nicht zu Ende: unbestimmter
-# Artikel, Präposition ohne Partikelgebrauch, Nebensatzkonnektor. Bewusst NICHT dabei: der bestimmte
-# Artikel (auch Demonstrativpronomen, „Ich weiß das."), Präpositionen, die zugleich Verbpartikel sind
-# („Wir fangen an."), und beiordnende Konjunktionen. Ein „aber" vor Pause und großgeschriebenem
-# Neuanfang ist ein abgebrochener Satz, kein offener (transcript_fixtures.DEMO_SCRIPT, Satz 11).
+# Endet der laufende Satz vor der Pause auf einem dieser Wörter, ist er nicht zu Ende: Artikel,
+# Präposition ohne Partikelgebrauch, Nebensatzkonnektor. „ein" nur, wenn im Satz kein Vollverb steht
+# („Wir kaufen morgen ein" ist zu Ende). Bewusst NICHT dabei: „das" (auch Demonstrativpronomen, „Ich
+# weiß das."), Präpositionen, die zugleich Verbpartikel sind („Wir fangen an."), und beiordnende
+# Konjunktionen. Ein „aber" vor Pause und großgeschriebenem Neuanfang ist ein abgebrochener Satz, kein
+# offener (transcript_fixtures.DEMO_SCRIPT, Satz 11).
 PAUSE_OPEN_END_WORDS = frozenset(
-    {"ein", "eine", "einen", "einem", "einer", "eines", "des"}
+    {"ein", "eine", "einen", "einem", "einer", "eines", "des", "der", "dem", "den"}
     | {
         "bei", "von", "zum", "zur", "für", "gegen", "ohne", "in", "im", "ins", "am", "ans", "beim", "vom",
-        "seit", "zwischen", "hinter", "neben", "wegen", "trotz", "aufs", "fürs",
+        "seit", "zwischen", "hinter", "neben", "wegen", "trotz", "aufs", "fürs", "bis",
     }
     | set(SUBORDINATORS)
 )  # fmt: skip
 
 _LEADING = "\"'„»«“”‘’([{"
-_TERMINAL = (".", "!", "?")
-_CLAUSE_PUNCT = (".", "!", "?", ",", ";", ":")
-_PARTICIPLE = re.compile(r"^(?:[a-zäöüß]*ge[a-zäöüß]{3,}(?:t|en)|(?:be|ver|er|ent|zer|emp|miss)[a-zäöüß]{3,}t|[a-zäöüß]{3,}iert)$")
+_CLOSERS = "\"'»«“”‘’)]}"
+_PARTICIPLE = re.compile(
+    r"^(?:"
+    r"[a-zäöüß]*ge[a-zäöüß]{3,}(?:t|en)"
+    r"|(?:vor|an|zu|auf|ab|aus|ein|nach|mit)?(?:be|ver|er|ent|zer|emp|miss)[a-zäöüß]{3,}(?:t|en)"
+    r"|(?:über|unter|wider|hinter|voll)[a-zäöüß]{3,}(?:t|en)"
+    r"|[a-zäöüß]{3,}iert"
+    r"|getan"
+    r")$"
+)
 _INFINITIVE = re.compile(r"^[a-zäöüß]{2,}(?:en|ern|eln)$")
 _VERB_LIKE = re.compile(r"^[a-zäöüß]{2,}(?:e|st|t|en|ern|eln|te|ten)$")
+# Wörter in Partizip-Gestalt, die als Adjektiv oder Adverb stehen.
+_NOT_PARTICIPLE = frozenset(
+    {"insgesamt", "bestimmt", "bereit", "bekannt", "gestern", "überhaupt", "derzeit", "beliebt", "verschieden"}
+)  # fmt: skip
 _NOT_INFINITIVE = frozenset(
     {
         "einen", "keinen", "meinen", "deinen", "seinen", "ihren", "unseren", "euren", "diesen", "jenen",
         "welchen", "allen", "vielen", "wenigen", "anderen", "eben", "neben", "gegen", "wegen", "oben",
         "unten", "morgen", "denen", "deren", "ihnen", "seiten", "trotzdem", "zusammen", "dafür",
         "stattdessen", "indessen", "unterdessen", "währenddessen", "deswegen", "weswegen", "übrigen",
+        "gestern", "selten", "innen", "außen", "hinten", "vorn", "vorne", "drinnen", "draußen",
     }
 )  # fmt: skip
 # Begleiter auf -e, die keine Verbform sind („dass wir die | Kunden …").
 _DETERMINERS_E = frozenset(
     {"die", "eine", "keine", "meine", "deine", "seine", "ihre", "unsere", "eure", "diese", "jene", "welche", "alle", "viele", "manche", "einige", "beide"}
 )  # fmt: skip
+# Großgeschrieben am Anfang des Folgeteils zeigen diese Wörter einen neuen Satz an (ein Nomen dagegen
+# ist auch mitten im Satz groß): Artikel, Pronomen, Konjunktionen, Satzadverbien.
+_NEW_SENTENCE_STARTERS = frozenset(
+    {
+        "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "und", "aber",
+        "oder", "denn", "doch", "jetzt", "dann", "heute", "jeder", "jede", "jedes", "ich", "du", "er", "sie",
+        "es", "wir", "man", "so", "also", "deshalb", "deswegen", "da", "hier", "dort", "was", "wer", "wie",
+        "wo", "warum", "seitdem", "danach", "außerdem", "trotzdem", "allerdings", "wobei", "nein", "ja",
+        "genau", "okay", "gut", "dieser", "diese", "dieses", "unser", "unsere", "mein", "meine", "kein",
+        "keine", "niemand", "alle", "viele",
+    }
+)  # fmt: skip
+# Personalpronomen; gefolgt von einem Verb beginnt rechts ein neuer Satz („… | Und wir wachsen.").
+_PERSONAL_PRONOUNS = frozenset({"ich", "du", "er", "sie", "es", "wir", "ihr", "man"})
 _BRACKET_MAX_WORDS = 40
 _RIGHT_SCAN_WORDS = 10
 
@@ -222,8 +267,15 @@ def _text(w: dict | str) -> str:
     return str(w.get("text", "") if isinstance(w, dict) else w).strip()
 
 
+def _base_rule(rule: str) -> str:
+    """``v1`` oder ``v2``; ``v1_fallback_no_punct`` entscheidet wie ``v1``."""
+    if rule not in SENTENCE_RULES:
+        raise ValueError(f"unbekannte Satzende-Regel {rule!r} (erlaubt: {', '.join(SENTENCE_RULES)})")
+    return "v2" if rule == "v2" else "v1"
+
+
 def _ends_with_ellipsis(text: str) -> bool:
-    t = text.rstrip("\"'»«“”‘’)]}")
+    t = text.rstrip(_CLOSERS)
     return t.endswith(("…", "..."))
 
 
@@ -234,7 +286,16 @@ def _has_terminal_punct(text: str, rule: str = "v2") -> bool:
     stripped = _strip_trailing(text)
     if stripped.endswith(("!", "?")):
         return True
-    return stripped.endswith(".") and not is_ordinal(stripped) and not is_abbreviation(stripped, rule)
+    return stripped.endswith(".") and not is_ordinal(stripped) and not is_abbreviation(stripped, _base_rule(rule))
+
+
+def _ends_open_clause(text: str) -> bool:
+    """Komma, Semikolon oder Doppelpunkt am Wort: der Teilsatz geht weiter („Passen Sie auf, äh,")."""
+    return text.rstrip(_CLOSERS).endswith((",", ";", ":"))
+
+
+def _ends_clause(text: str) -> bool:
+    return text.rstrip(_CLOSERS).endswith((",", ";", ":", ".", "!", "?"))
 
 
 def _is_lower(text: str) -> bool:
@@ -247,9 +308,16 @@ def _is_upper(text: str) -> bool:
     return bool(t[:1]) and t[:1].isupper()
 
 
+def _is_noun_like(w) -> bool:
+    """Großgeschrieben und kein typischer Satzanfang: vermutlich ein Nomen."""
+    t = _text(w)
+    return _is_upper(t) and core_token(t) not in _NEW_SENTENCE_STARTERS
+
+
 def is_participle(text: str) -> bool:
-    """Partizip II, kleingeschrieben („gemacht", „angefangen", „verkauft")."""
-    return _is_lower(text) and bool(_PARTICIPLE.match(core_token(text)))
+    """Partizip II, kleingeschrieben („gemacht", „angefangen", „vorbereitet", „verloren", „getan")."""
+    tok = core_token(text)
+    return _is_lower(text) and tok not in _NOT_PARTICIPLE and bool(_PARTICIPLE.match(tok))
 
 
 def is_infinitive(text: str) -> bool:
@@ -258,11 +326,21 @@ def is_infinitive(text: str) -> bool:
     return _is_lower(text) and tok not in _NOT_INFINITIVE and bool(_INFINITIVE.match(tok))
 
 
-def _clause(words: list, seps: tuple[str, ...]) -> list:
-    """Die Wörter nach dem letzten Trennzeichen vor dem letzten Wort (das letzte Wort gehört dazu)."""
+def _adjective_before_noun(seq: list, k: int) -> bool:
+    """Steht ``seq[k]`` mit Adjektivendung direkt vor einem Nomen („einen großen | Fehler")?"""
+    if k + 1 >= len(seq) or _ends_clause(_text(seq[k])):
+        return False
+    return core_token(_text(seq[k])).endswith(("e", "en", "er", "es", "em")) and _is_noun_like(seq[k + 1])
+
+
+def _clause(words: list, clause_level: bool) -> list:
+    """Die Wörter nach dem letzten Satzende (``clause_level``: auch nach Komma, Semikolon, Doppelpunkt)
+    vor dem letzten Wort; das letzte Wort gehört dazu. Satzende heißt echtes Satzzeichen, also nicht
+    nach Abkürzung oder Ordinalzahl („am 3. Oktober", „mit Dr. Müller", „z. B.")."""
     start = 0
     for j in range(len(words) - 1):
-        if _strip_trailing(_text(words[j])).endswith(seps) or _text(words[j]).endswith(seps):
+        t = _text(words[j])
+        if _has_terminal_punct(t) or (clause_level and _ends_open_clause(t)):
             start = j + 1
     return list(words[start:])
 
@@ -278,12 +356,14 @@ def bracket_heuristic(
 
     Drei Signale, jedes nur bei eindeutiger Lage (Plan AP3):
       (a) trennbares Verb: rechts beginnt kleingeschrieben eine Verbpartikel mit Satzzeichen
-          („an."), links steht ein finites Verb;
-      (b) Nebensatz: links steht im laufenden Teilsatz ein Konnektor („dass", „weil"), das letzte
-          Wort vor dem Schnitt ist kein Verb;
+          („an."), links steht ein Verb;
+      (b) Nebensatz: links steht im laufenden Teilsatz ein Konnektor („dass", „weil") und danach kein
+          verbähnliches Wort;
       (c) Hilfs- oder Modalverb: links steht ein finites Hilfs- oder Modalverb ohne schließendes
           Partizip oder Infinitiv, rechts folgt im selben Satz kleingeschrieben ein Partizip oder ein
-          Infinitiv am Satzende, bevor ein neues finites Hilfsverb kommt.
+          Infinitiv am Satzende, bevor ein neues finites Hilfsverb oder ein neuer Satz (großgeschriebener
+          Satzanfang, Personalpronomen mit Verb) kommt.
+    Adjektive vor einem Nomen („einen großen | Fehler") zählen weder als Partizip noch als Infinitiv.
     Rückgabe ``{open, signal, detail, available: "heuristic"}``."""
     particles = tuple(particles or VERB_PARTICLES)
     subordinators = tuple(subordinators or SUBORDINATORS)
@@ -301,17 +381,18 @@ def bracket_heuristic(
     if _has_terminal_punct(_text(lw)):
         return out
 
-    def verb_like(w) -> bool:
-        tok = core_token(_text(w))
-        if tok in _DETERMINERS_E:
+    def verb_like(seq: list, k: int) -> bool:
+        t = _text(seq[k])
+        tok = core_token(t)
+        if tok in _DETERMINERS_E or _adjective_before_noun(seq, k):
             return False
-        return tok in auxiliaries or is_participle(_text(w)) or (_is_lower(_text(w)) and bool(_VERB_LIKE.match(tok)))
+        return tok in auxiliaries or is_participle(t) or (_is_lower(t) and bool(_VERB_LIKE.match(tok)))
 
     # (a) trennbares Verb
     r0 = _text(rw)
-    if _is_lower(r0) and core_token(r0) in particles and r0.rstrip("\"'»«“”‘’)]}").endswith(_CLAUSE_PUNCT):
-        sentence = _clause(left, _TERMINAL)
-        if any(verb_like(w) for w in sentence):
+    if _is_lower(r0) and core_token(r0) in particles and r0.rstrip(_CLOSERS).endswith((",", ";", ":", ".", "!", "?")):
+        sentence = _clause(left, clause_level=False)
+        if any(verb_like(sentence, k) for k in range(len(sentence))):
             return {
                 "open": True,
                 "signal": "separable_particle",
@@ -319,41 +400,65 @@ def bracket_heuristic(
                 "available": "heuristic",
             }
 
-    # (b) Nebensatz ohne finites Verb am Ende
-    if not _text(lw).endswith(","):
-        part = _clause(left, _CLAUSE_PUNCT)
-        conn = next((core_token(_text(w)) for w in part if core_token(_text(w)) in subordinators), None)
-        if conn and not verb_like(lw):
+    # (b) Nebensatz ohne Verb nach dem Konnektor
+    if not _ends_open_clause(_text(lw)):
+        part = _clause(left, clause_level=True)
+        at = next((k for k, w in enumerate(part) if core_token(_text(w)) in subordinators), None)
+        if at is not None and not any(verb_like(part, k) for k in range(at + 1, len(part))):
             return {
                 "open": True,
                 "signal": "subordinate_clause",
-                "detail": f"Nebensatz mit „{conn}“ ohne Verb am Ende",
+                "detail": f"Nebensatz mit „{core_token(_text(part[at]))}“ ohne Verb am Ende",
                 "available": "heuristic",
             }
 
     # (c) finites Hilfs- oder Modalverb ohne schließendes Partizip oder Infinitiv
-    sentence = _clause(left, _TERMINAL)
+    if _is_upper(r0) and core_token(r0) in _NEW_SENTENCE_STARTERS:
+        return out  # rechts beginnt ein neuer Satz („Er hat recht | Die Kunden warten.")
+    sentence = _clause(left, clause_level=False)
     aux_at = max((k for k, w in enumerate(sentence) if core_token(_text(w)) in auxiliaries), default=None)
-    if aux_at is not None:
-        # Ein Partizip schließt überall, ein Infinitiv nur am Ende („haben dann stattdessen" bleibt offen).
-        tail = sentence[aux_at + 1 :]
-        closed = any(is_participle(_text(w)) for w in tail) or bool(tail and is_infinitive(_text(tail[-1])))
-        if not closed:
-            for w in right[:_RIGHT_SCAN_WORDS]:
-                t = _text(w)
-                if core_token(t) in auxiliaries:
-                    break
-                final = t.rstrip("\"'»«“”‘’)]}").endswith(_CLAUSE_PUNCT)
-                if is_participle(t) or (is_infinitive(t) and final):
-                    return {
-                        "open": True,
-                        "signal": "auxiliary_bracket",
-                        "detail": f"„{_text(sentence[aux_at])}“ und „{core_token(t)}“ gehören zusammen",
-                        "available": "heuristic",
-                    }
-                if t.rstrip("\"'»«“”‘’)]}").endswith(_TERMINAL):
-                    break
+    if aux_at is None:
+        return out
+    # Ein Partizip schließt überall, ein Infinitiv nur am Ende („haben dann stattdessen" bleibt offen),
+    # und keines von beiden, wenn es als Adjektiv vor einem Nomen steht.
+    joined = sentence + right[:1]
+    tail = range(aux_at + 1, len(sentence))
+    closed = any(is_participle(_text(sentence[k])) and not _adjective_before_noun(joined, k) for k in tail)
+    if len(sentence) > aux_at + 1 and is_infinitive(_text(sentence[-1])) and not _adjective_before_noun(joined, len(sentence) - 1):
+        closed = True
+    if closed:
+        return out
+    scan = right[:_RIGHT_SCAN_WORDS]
+    for k, w in enumerate(scan):
+        t = _text(w)
+        tok = core_token(t)
+        if tok in auxiliaries:
+            break
+        if tok in _PERSONAL_PRONOUNS and k + 1 < len(scan) and verb_like(scan, k + 1):
+            break  # Personalpronomen mit Verb: neuer Satz
+        if not _adjective_before_noun(scan, k):
+            final = t.rstrip(_CLOSERS).endswith((",", ";", ":", ".", "!", "?"))
+            if is_participle(t) or (is_infinitive(t) and final):
+                return {
+                    "open": True,
+                    "signal": "auxiliary_bracket",
+                    "detail": f"„{_text(sentence[aux_at])}“ und „{tok}“ gehören zusammen",
+                    "available": "heuristic",
+                }
+        if _has_terminal_punct(t):
+            break
     return out
+
+
+def resolve_sentence_rule(words: list[dict], rule: str) -> str:
+    """Die Regel, die für dieses Transkript gilt: unter ``v2`` mit weniger als einem Satzzeichen je
+    ``WORDS_PER_PUNCT_MIN`` Wörtern ``v1_fallback_no_punct`` (Zerlegung wie v1; ohne Satzzeichen trägt
+    nur die Pause), sonst die Regel selbst."""
+    _base_rule(rule)
+    if rule != "v2" or not words:
+        return rule
+    punct = sum(1 for w in words if _has_terminal_punct(_text(w)))
+    return "v2" if punct * WORDS_PER_PUNCT_MIN >= len(words) else FALLBACK_NO_PUNCT
 
 
 def _running_sentence(words: list[dict], i: int, rule: str) -> list[dict]:
@@ -364,45 +469,59 @@ def _running_sentence(words: list[dict], i: int, rule: str) -> list[dict]:
     return words[a : i + 1]
 
 
-def _ends_open_clause(text: str) -> bool:
-    """Komma, Semikolon oder Doppelpunkt am Wort: der Teilsatz geht weiter („Passen Sie auf, äh,")."""
-    return text.rstrip("\"'»«“”‘’)]}").endswith((",", ";", ":"))
+def _ends_open(sentence: list[dict]) -> bool:
+    """Endet der Satz auf Artikel, Präposition oder Konnektor (``PAUSE_OPEN_END_WORDS``)?"""
+    tok = core_token(_text(sentence[-1]))
+    if tok not in PAUSE_OPEN_END_WORDS:
+        return False
+    if tok == "ein":  # auch Verbpartikel („kaufen … ein"): nur offen, wenn im Satz kein Vollverb steht
+        return not any(
+            core_token(_text(w)) not in AUXILIARY_FORMS
+            and core_token(_text(w)) not in _DETERMINERS_E
+            and _is_lower(_text(w))
+            and bool(_VERB_LIKE.match(core_token(_text(w))))
+            for w in sentence[:-1]
+        )
+    return True
 
 
 def _pause_boundary_accepted(words: list[dict], i: int, rule: str) -> bool:
     """Grenzkandidat aus einer Pause: angenommen nur mit großgeschriebenem Folgewort und ohne offene Klammer."""
-    nxt = words[i + 1]
-    if not _is_upper(_text(nxt)):
-        return False
-    if _ends_open_clause(_text(words[i])) or core_token(_text(words[i])) in PAUSE_OPEN_END_WORDS:
+    if not _is_upper(_text(words[i + 1])) or _ends_open_clause(_text(words[i])):
         return False
     left = _running_sentence(words, i, rule)
-    right = words[i + 1 : i + 1 + _RIGHT_SCAN_WORDS]
-    return not bracket_heuristic(left, right)["open"]
+    if _ends_open(left):
+        return False
+    return not bracket_heuristic(left, words[i + 1 : i + 1 + _RIGHT_SCAN_WORDS])["open"]
 
 
-def sentence_end_kind(words: list[dict], i: int, rule: str = "v2", min_pause_s: float = 0.7) -> str:
-    """Art des Satzendes nach Wort ``i``: ``punct``, ``speaker_change``, ``pause_candidate``,
-    ``end_of_text`` oder ``none`` (kein Satzende).
+def _gap(words: list[dict], j: int) -> float:
+    return float(words[j + 1].get("start", 0.0)) - float(words[j].get("end", 0.0))
 
-    Regel ``v1``: das Verhalten vor AP2. Jede Pause ab ``min_pause_s`` gilt als ``pause_candidate`` und
-    damit als Satzende; Abkürzungen nach ``ABBREVIATIONS``.
 
-    Regel ``v2``: Satzzeichen zuerst (Abkürzung nach ``ABBREVIATIONS_V2``, Ordinal- und Dezimalzahl
-    wie bisher; Auslassungspunkte sind kein Satzzeichen, sondern ein Abbruch). Ein Sprecherwechsel ist
-    eine Grenze. Eine Pause ab ``min_pause_s`` ist nur ein Kandidat: ``pause_candidate`` nur, wenn das
-    Folgewort großgeschrieben ist, der Satz nicht auf Artikel, Präposition oder Nebensatzkonnektor
-    endet und ``bracket_heuristic`` keine offene Klammer findet. Sonst ``none``."""
-    if rule not in SENTENCE_RULES:
-        raise ValueError(f"unbekannte Satzende-Regel {rule!r} (erlaubt: v1, v2)")
+def _mag_title(words: list[dict], i: int, min_pause_s: float) -> bool:
+    """Unter v2 ist „Mag." (Magister) nur Abkürzung, wenn das Folgewort großgeschrieben ist, am Wort kein
+    weiteres Satzzeichen steht, weder Pause noch Sprecherwechsel folgt und davor kein Personalpronomen
+    steht („Ich bin Mag. Huber" ja; „Ich mag." und „Das mag. | Aber" mit Pause nein)."""
+    text = _text(words[i])
+    if text.lstrip(_LEADING).lower() != "mag." or i + 1 >= len(words):
+        return False
+    nxt = words[i + 1]
+    if not _is_upper(_text(nxt)) or _gap(words, i) >= min_pause_s:
+        return False
+    if nxt.get("speaker") is not None and nxt.get("speaker") != words[i].get("speaker"):
+        return False
+    return not (i > 0 and core_token(_text(words[i - 1])) in _PERSONAL_PRONOUNS)
+
+
+def _base_kind(words: list[dict], i: int, rule: str, min_pause_s: float) -> str:
+    """Satzende-Art ohne Längengrenze (Regel v1 oder v2)."""
     w = words[i]
     text = str(w.get("text", "")).strip()
     nxt = words[i + 1] if i + 1 < len(words) else None
     if nxt is None:
         return "end_of_text"
-    pause = float(nxt.get("start", 0.0)) - float(w.get("end", 0.0))
     speaker_change = nxt.get("speaker") is not None and nxt.get("speaker") != w.get("speaker")
-
     stripped = _strip_trailing(text)
     if rule == "v2" and _ends_with_ellipsis(text):
         pass  # Abbruch, kein Satzzeichen: Sprecherwechsel und Pause entscheiden
@@ -411,24 +530,134 @@ def sentence_end_kind(words: list[dict], i: int, rule: str = "v2", min_pause_s: 
     elif stripped.endswith("."):
         nxt_text = str(nxt.get("text", "")).strip()
         # Dezimalzahl über Wortgrenze („2." + „4") oder Ordinal/Datum („3." + „Platz", „12." + „Oktober")
-        if not (is_ordinal(stripped) or nxt_text[:1].isdigit() or is_abbreviation(stripped, rule)):
+        if not (
+            is_ordinal(stripped)
+            or nxt_text[:1].isdigit()
+            or is_abbreviation(stripped, rule)
+            or (rule == "v2" and _mag_title(words, i, min_pause_s))
+        ):
             return "punct"
     if speaker_change:
         return "speaker_change"
-    if pause >= min_pause_s:
+    if _gap(words, i) >= min_pause_s:
         if rule == "v1" or _pause_boundary_accepted(words, i, rule):
             return "pause_candidate"
     return "none"
 
 
-def cut_boundary_kind(words: list[dict], i: int, rule: str = "v2", min_pause_s: float = 0.7) -> str:
+def _too_long(words: list[dict], start: int, j: int, max_s: float, max_words: int) -> bool:
+    return j - start + 1 >= max_words or float(words[j].get("end", 0.0)) - float(words[start].get("start", 0.0)) >= max_s
+
+
+def _soft_candidate(words: list[dict], start: int, j: int, min_pause_s: float) -> bool:
+    """Pause ohne offene Klammer, ohne Großschreibung des Folgeworts (nur bei zu langem Satz)."""
+    if _gap(words, j) < min_pause_s:
+        return False
+    left = words[max(start, j - _BRACKET_MAX_WORDS + 1) : j + 1]
+    if _ends_open(left):
+        return False
+    return not bracket_heuristic(left, words[j + 1 : j + 1 + _RIGHT_SCAN_WORDS])["open"]
+
+
+def _length_breaks(words: list[dict], h: int, stop: int, min_pause_s: float, max_s: float, max_words: int) -> dict[int, str]:
+    """Zusätzliche Satzenden in der Strecke ``h`` bis ``stop`` (``stop`` ist ein Satzende ohne
+    Längengrenze). Ab ``max_s`` oder ``max_words`` gilt die nächste Pause ohne offene Klammer; findet
+    sich bis zur doppelten Grenze keine, die längste Pause dazwischen (``length_cap``)."""
+    out: dict[int, str] = {}
+    start = h
+    while start < stop:
+        cap = next((c for c in range(start, stop + 1) if _too_long(words, start, c, max_s, max_words)), None)
+        if cap is None or cap >= stop:
+            break
+        window_end = next((e for e in range(cap, stop + 1) if _too_long(words, start, e, 2 * max_s, 2 * max_words)), stop)
+        last = min(window_end, stop - 1)
+        k = next((j for j in range(cap, last + 1) if _soft_candidate(words, start, j, min_pause_s)), None)
+        if k is not None:
+            out[k] = "pause_candidate"
+        elif window_end >= stop:
+            break  # der Satz endet ohnehin innerhalb der doppelten Grenze
+        else:
+            k = max(range(cap, last + 1), key=lambda j: (round(_gap(words, j), 2), -j))
+            out[k] = "length_cap"
+        start = k + 1
+    return out
+
+
+def sentence_end_kinds(
+    words: list[dict],
+    rule: str = "v2",
+    min_pause_s: float = 0.7,
+    max_s: float | None = None,
+    max_words: int | None = None,
+) -> list[str]:
+    """``sentence_end_kind`` für alle Wörter in einem Durchgang (Zerlegung)."""
+    base = _base_rule(rule)
+    kinds = [_base_kind(words, i, base, min_pause_s) for i in range(len(words))]
+    if rule == "v1":
+        return kinds
+    max_s = MAX_SENTENCE_S if max_s is None else float(max_s)
+    max_words = MAX_SENTENCE_WORDS if max_words is None else int(max_words)
+    h = 0
+    for i, k in enumerate(kinds):
+        if k != "none":
+            for j, kind in _length_breaks(words, h, i, min_pause_s, max_s, max_words).items():
+                kinds[j] = kind
+            h = i + 1
+    return kinds
+
+
+def sentence_end_kind(
+    words: list[dict],
+    i: int,
+    rule: str = "v2",
+    min_pause_s: float = 0.7,
+    max_s: float | None = None,
+    max_words: int | None = None,
+) -> str:
+    """Art des Satzendes nach Wort ``i``: ``punct``, ``speaker_change``, ``pause_candidate``,
+    ``length_cap``, ``end_of_text`` oder ``none`` (kein Satzende).
+
+    Regel ``v1``: das Verhalten vor AP2. Jede Pause ab ``min_pause_s`` gilt als ``pause_candidate`` und
+    damit als Satzende; Abkürzungen nach ``ABBREVIATIONS``. ``v1_fallback_no_punct`` (Regel v2 bei
+    kaum Satzzeichen) entscheidet wie v1, mit der Längengrenze von v2.
+
+    Regel ``v2``: Satzzeichen zuerst (Abkürzung nach ``ABBREVIATIONS_V2``, Ordinal- und Dezimalzahl
+    wie bisher; Auslassungspunkte sind kein Satzzeichen, sondern ein Abbruch). Ein Sprecherwechsel ist
+    eine Grenze. Eine Pause ab ``min_pause_s`` ist nur ein Kandidat: ``pause_candidate`` nur, wenn das
+    Folgewort großgeschrieben ist, der Satz nicht auf Artikel, Präposition oder Nebensatzkonnektor
+    endet und ``bracket_heuristic`` keine offene Klammer findet. Wird der Satz länger als ``max_s``
+    Sekunden oder ``max_words`` Wörter (Standard 25 und 40), gilt die nächste Pause ohne offene Klammer
+    auch vor kleingeschriebenem Wort, sonst bis zur doppelten Grenze die längste Pause (``length_cap``)."""
+    base = _base_rule(rule)
+    kind = _base_kind(words, i, base, min_pause_s)
+    if rule == "v1" or kind != "none":
+        return kind
+    h = i
+    while h > 0 and _base_kind(words, h - 1, base, min_pause_s) == "none":
+        h -= 1
+    stop = i + 1
+    while _base_kind(words, stop, base, min_pause_s) == "none":
+        stop += 1
+    max_s = MAX_SENTENCE_S if max_s is None else float(max_s)
+    max_words = MAX_SENTENCE_WORDS if max_words is None else int(max_words)
+    return _length_breaks(words, h, stop, min_pause_s, max_s, max_words).get(i, "none")
+
+
+def cut_boundary_kind(
+    words: list[dict],
+    i: int,
+    rule: str = "v2",
+    min_pause_s: float = 0.7,
+    max_s: float | None = None,
+    max_words: int | None = None,
+) -> str:
     """Satzende-Art für einen Schnitt nach Wort ``i`` (Satzgrenzen-Tor, Messung, Anfang heilen).
 
     Wie ``sentence_end_kind``; unter ``v2`` gilt ein Sprecherwechsel nach Komma, Semikolon oder
     Doppelpunkt nicht als Satzende des Sprechers (Einwurf des Gegenübers mitten im Satz, „Ich bin da
     ganz ehrlich," | „Okay." | „ich hänge …"). Die Zerlegung trennt dort weiter nach Sprecher."""
-    kind = sentence_end_kind(words, i, rule, min_pause_s)
-    if rule != "v1" and kind == "speaker_change" and _ends_open_clause(_text(words[i])):
+    kind = sentence_end_kind(words, i, rule, min_pause_s, max_s, max_words)
+    if _base_rule(rule) == "v2" and kind == "speaker_change" and _ends_open_clause(_text(words[i])):
         return "none"
     return kind
 
@@ -473,7 +702,7 @@ def bracket_open_at_cut(
 
 def sentence_boundaries(words: list[dict], min_pause_s: float = 0.7, rule: str = "v1") -> list[int]:
     """Indizes der Wörter, die einen Satz beenden (inklusive)."""
-    return [i for i in range(len(words)) if is_sentence_end(words, i, min_pause_s, rule=rule)]
+    return [i for i, k in enumerate(sentence_end_kinds(words, rule, min_pause_s)) if k != "none"]
 
 
 def nlp_status() -> str:
@@ -634,6 +863,8 @@ def annotate(
     protected_terms: list[str] | None = None,
     dialect: str | None = None,
     rule: str = "v1",
+    max_s: float | None = None,
+    max_words: int | None = None,
 ) -> list[dict]:
     """Fügt jedem Wort ``filler``, ``negation`` und ``sentence_idx`` hinzu (in-place, gibt Liste zurück).
 
@@ -643,9 +874,10 @@ def annotate(
     (``normalize_ch``); ``text`` bleibt unverändert, geschützte Begriffe werden nie normalisiert."""
     classify_fillers(words)
     idx = 0
-    for i, w in enumerate(words):
+    kinds = sentence_end_kinds(words, rule, min_pause_s, max_s, max_words)
+    for w, kind in zip(words, kinds, strict=True):
         w["sentence_idx"] = idx
-        if is_sentence_end(words, i, min_pause_s, rule=rule):
+        if kind != "none":
             idx += 1
     if dialect == "de-CH":
         for w in words:
@@ -661,7 +893,13 @@ __all__ = [
     "AUXILIARY_FORMS",
     "END_KINDS",
     "PAUSE_OPEN_END_WORDS",
+    "FALLBACK_NO_PUNCT",
+    "MAX_SENTENCE_S",
+    "MAX_SENTENCE_WORDS",
     "SENTENCE_RULES",
+    "WORDS_PER_PUNCT_MIN",
+    "resolve_sentence_rule",
+    "sentence_end_kinds",
     "SUBORDINATORS",
     "VERB_PARTICLES",
     "bracket_heuristic",

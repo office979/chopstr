@@ -252,3 +252,16 @@ def test_check_boundaries_v2_reports_pause_only_boundaries():
     assert b["satzende"] is True and b["grenze_nur_aus_pause"] == ["Ende"]
     b = clip_eval.check_boundaries(_clip(woerter, 4, 7), woerter, rule="v2")
     assert b["satzanfang"] is True and b["grenze_nur_aus_pause"] == ["Anfang"]
+
+
+def test_check_boundaries_without_policy_files_measures_with_v1(monkeypatch, tmp_path):
+    from chopstr_worker import editorial
+
+    monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path))
+    editorial.clear_cache()
+    try:
+        assert clip_eval.active_sentence_rule() == "v1"
+        woerter = satz(["Das", "ist", "gut."])
+        assert "grenze_nur_aus_pause" not in clip_eval.check_boundaries(_clip(woerter, 0, 2), woerter)
+    finally:
+        editorial.clear_cache()

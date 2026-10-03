@@ -6,9 +6,9 @@
 
 import { describe, expect, it } from "vitest";
 import { buildRevision, isRevisionError } from "@/lib/candidates/revise";
-import { recomputeGates, sentenceBoundariesGate } from "@/lib/candidates/gates";
+import { allGatesPassed, countGates, recomputeGates, sentenceBoundariesGate } from "@/lib/candidates/gates";
 import type { Candidate, CandidateGates } from "@/lib/repo/types";
-import type { Sentence } from "@/lib/transcript/sentences";
+import type { Sentence, WordLike } from "@/lib/transcript/sentences";
 
 function satz(idx: number, text: string, start: number, end: number, speaker = "SPEAKER_00"): Sentence {
   return { idx, text, start, end, speaker, word_range: [idx * 10, idx * 10 + 9] };
@@ -119,5 +119,82 @@ describe("buildRevision", () => {
     const rev = buildRevision(kandidat(3, 4), SAETZE, { first_sent: 0, last_sent: 0 });
     if (isRevisionError(rev)) throw new Error(rev.error);
     expect(rev.gates.sentence_boundaries.passed).toBe(true);
+  });
+});
+
+describe("Satzgrenzen-Tor an den echten Wörtern (N8)", () => {
+  function woerter(text: string, pauseNach: Record<number, number> = {}): WordLike[] {
+    let t = 0;
+    return text.split(" ").map((w, k) => {
+      const wort = { text: w, start: t, end: t + 0.3, speaker: "SPEAKER_00" };
+      t += 0.32 + (pauseNach[k] ?? 0);
+      return wort;
+    });
+  }
+  const w = woerter("Das ist gut. Das bringt bei uns nicht viel. Wir machen weiter.", { 6: 0.9 });
+  const s = (idx: number, a: number, b: number): Sentence => ({
+    idx, text: w.slice(a, b + 1).map((x) => x.text).join(" "), start: w[a].start, end: w[b].end, speaker: "SPEAKER_00", word_range: [a, b],
+  });
+
+  it("v2: Pause vor kleingeschriebenem Wort ist kein Satzende", () => {
+    const g = sentenceBoundariesGate({ first: s(0, 0, 0), last: s(1, 3, 6), words: w, rule: "v2" });
+    expect(g.passed).toBe(false);
+    expect(g.detail).toContain("endet mitten im Satz auf „uns“");
+  });
+
+  it("v1: wie das Tor des Workers unter Fassung 1 (nur Satzzeichen)", () => {
+    const g = sentenceBoundariesGate({ first: s(1, 4, 4), last: s(2, 5, 6), words: w, rule: "v1" });
+    expect(g.passed).toBe(false);
+    expect(g.detail).toBe("faengt mitten im Satz an, davor steht „Das“; endet mitten im Satz auf „uns“");
+    expect(sentenceBoundariesGate({ first: s(0, 0, 2), last: s(1, 3, 8), words: w, rule: "v1" }).passed).toBe(true);
+  });
+
+  it("buildRevision nutzt Wörter und Regel der Transkriptversion", () => {
+    const saetze = [s(0, 0, 2), s(1, 3, 6), s(2, 7, 8), s(3, 9, 11)];
+    const prev = { ...kandidat(3, 4), first_sent: 2, last_sent: 3 };
+    const rev = buildRevision(prev, saetze, { first_sent: 1, last_sent: 1 }, { words: w, rule: "v2" });
+    if (isRevisionError(rev)) throw new Error(rev.error);
+    expect(rev.gates.sentence_boundaries.passed).toBe(false);
+  });
+});
+
+/* AP4: Der Worker schreibt zusätzliche Gate-Ergebnisse (rubric.quality_gate_results, später weitere
+ * Schlüssel). Unbekannte Schlüssel in gates und rubric dürfen die fünf Pflichtkriterien nicht verändern. */
+describe("unbekannte zusätzliche Schlüssel (AP4)", () => {
+  const extra = {
+    ...BESTANDEN,
+    unresolved_pronoun: { passed: false, detail: "Pronomen „Sie“ ohne Bezug im Clip", healable: "front", origin: "R" },
+    embedded_instruction: { passed: true, detail: "Anweisung an ein Modell", flagged: true, quotes: ["Liebe KI"] },
+  } as unknown as CandidateGates;
+
+  it("allGatesPassed und countGates zählen nur die fünf Pflichtkriterien", () => {
+    expect(allGatesPassed(extra)).toBe(true);
+    expect(countGates(extra)).toEqual({ passed: 5, total: 5 });
+    const failing = { ...extra, fidelity: { passed: false, detail: "endet direkt vor „aber“" } } as CandidateGates;
+    expect(allGatesPassed(failing)).toBe(false);
+    expect(countGates(failing)).toEqual({ passed: 4, total: 5 });
+  });
+
+  it("fehlende Pflichtschlüssel gelten weiter als nicht durchgefallen", () => {
+    const partial = { unresolved_pronoun: { passed: false, detail: "x" } } as unknown as CandidateGates;
+    expect(allGatesPassed(partial)).toBe(true);
+    expect(countGates(partial)).toEqual({ passed: 5, total: 5 });
+  });
+
+  it("buildRevision übernimmt die Pflichtkriterien trotz zusätzlicher Schlüssel in gates und rubric", () => {
+    const base = kandidat(3, 4);
+    const prev = {
+      ...base,
+      gates: extra,
+      rubric: {
+        ...base.rubric,
+        quality_gate_results: { unresolved_pronoun: { passed: false, detail: "x", origin: "R" } },
+        block_mode: { mode: "sperren", effective_mode: "sortieren" },
+      },
+    } as unknown as Candidate;
+    const rev = buildRevision(prev, SAETZE, { first_sent: 3, last_sent: 3 });
+    if (isRevisionError(rev)) throw new Error(rev.error);
+    expect(rev.gate_passed).toBe(true);
+    expect(countGates(rev.gates)).toEqual({ passed: 5, total: 5 });
   });
 });

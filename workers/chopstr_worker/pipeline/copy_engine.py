@@ -45,14 +45,21 @@ LT_MAX_NOTES_PER_TEXT = 5
 NATIVE_PATTERN = "native"
 RULE_V1 = "first_without_claim_issues"
 RULE_V2 = "first_valid_after_thompson"
-# Wörtlicher Auszug (gesprochener Hook, nativer Text-Hook): Sätze über ``dach_nlp.sentence_end_kind`` (Regel
-# v2: Abkürzungen, Ordinal- und Dezimalzahlen), Sätze unter drei Wörtern gehören zum nächsten. Ein langer
-# Satz wird nur an einer Phrasengrenze gekürzt (nach Komma, Semikolon, Doppelpunkt oder vor einer
-# Konjunktion), und nur, wenn davor ein vollständiger Teilsatz steht. Nie hart auf eine Wortzahl.
+# Wörtlicher Auszug (gesprochener Hook, nativer Text-Hook). Sätze über ``dach_nlp.sentence_end_kind`` (Regel
+# v2: Abkürzungen, Ordinal- und Dezimalzahlen); ein Satz mit weniger als drei Inhaltswörtern gehört zum
+# nächsten (Füll- und Rückmeldewörter zählen nicht). Standard unter Fassung 2 (``hook.allow_partial_opening``
+# false): der Text-Hook ist immer ein ganzer Originalsatz oder es gibt keinen. Teilsatz-Auszüge nur als
+# Opt-in; Fehlerrichtung ist immer ganzer Satz oder kein Overlay, nie ein Bruchstück.
 MIN_PHRASE_WORDS = 3
-COORDINATORS = frozenset({"und", "oder", "aber", "denn", "sondern", "doch", "jedoch", "sowie"})
-# Vor einem Objektsatz („dass“, „ob“) nur schneiden, wenn der Hauptsatz davor nicht auf dem Verb endet
-# („Wichtig ist, | dass“ bleibt zusammen, „Das war so teuer, | dass“ darf getrennt werden).
+NATIVE_SENTENCE_WINDOW = 4  # Text-Hook nur aus den ersten vier Sätzen des Clips
+FILLER_WORDS = frozenset(dach_nlp.HARD_FILLERS | dach_nlp.BACKCHANNEL | {"also", "naja", "na", "tja", "gut", "so"})
+COORDINATORS = frozenset({"und", "oder", "denn", "sowie"})
+# Nie davor schneiden: Kontrast, Bedingung und Einschränkung gehören zur Aussage („… jedem Kunden, | aber
+# nicht …“, „Wir haben die Preise erhöht, | ohne vorher …“, „Das lohnt sich, | wenn …“).
+CONTRAST_NO_CUT = frozenset({
+    *fidelity.CONTRAST_STARTS, "sondern", "doch", "jedoch", "ohne", "statt", "anstatt", "wenn", "falls",
+    "sofern", "solange", "soweit",
+})  # fmt: skip
 OBJECT_CLAUSE_STARTS = frozenset({"dass", "ob"})
 ARTICLES = frozenset({
     "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "eines", "kein",
@@ -63,32 +70,69 @@ ARTICLES = frozenset({
 PREPOSITIONS = frozenset({
     "bei", "von", "zum", "zur", "für", "gegen", "ohne", "in", "im", "ins", "am", "ans", "beim", "vom", "seit",
     "zwischen", "hinter", "neben", "wegen", "trotz", "aufs", "fürs", "mit", "nach", "aus", "über", "unter",
-    "vor", "auf", "an", "durch", "um", "bis", "ab", "per", "pro", "laut",
+    "vor", "auf", "an", "durch", "um", "bis", "ab", "per", "pro", "laut", "statt", "anstatt",
 })  # fmt: skip
 COPULA = frozenset({
     "ist", "sind", "war", "waren", "wird", "werden", "wurde", "wurden", "bin", "bist", "seid", "wäre", "wären",
     "sei",
 })  # fmt: skip
 OPEN_QUANTIFIERS = frozenset({"rund", "etwa", "ca", "knapp", "fast", "mehr", "weniger", "als", "wie", "so", "sehr", "zu"})
+W_WORDS = frozenset({
+    "wer", "wen", "wem", "wessen", "was", "wie", "wo", "wann", "warum", "weshalb", "wieso", "weswegen", "woher",
+    "wohin", "womit", "wofür", "worüber", "woran", "worauf", "wovon", "wozu", "welche", "welcher", "welches",
+    "welchen", "welchem",
+})  # fmt: skip
+CORRELATES = frozenset({
+    "darum", "daran", "davon", "dafür", "dazu", "darauf", "darüber", "dabei", "dadurch", "daraus", "darin",
+    "damit", "dahin", "davor", "danach", "dagegen", "darunter",
+})  # fmt: skip
+GRADE_PARTICLES = frozenset({"nur", "auch", "noch", "sogar", "schon", "erst", "bereits", "selbst", "gerade", "eben", "bloß"})
+RELATIVE_PRONOUNS = frozenset({
+    "der", "die", "das", "dem", "den", "deren", "dessen", "denen", "welche", "welcher", "welches", "welchen",
+    "welchem", "wo",
+})  # fmt: skip
+INFINITIVE_INTROS = frozenset({"um", "ohne", "statt", "anstatt"})
+# Nach Verben des Sagens, Zeigens und Meinens folgt der Inhalt erst: nicht davor schneiden.
+SAYING_VERBS = frozenset({
+    "sage", "sagst", "sagt", "sagen", "sagte", "sagten", "gesagt", "meine", "meinst", "meint", "meinen",
+    "meinte", "meinten", "gemeint", "glaube", "glaubst", "glaubt", "glauben", "glaubte", "geglaubt", "denke",
+    "denkst", "denkt", "denken", "dachte", "dachten", "gedacht", "zeige", "zeigst", "zeigt", "zeigen", "zeigte",
+    "gezeigt", "finde", "findest", "findet", "finden", "fand", "weiß", "weißt", "wissen", "wisst", "wusste",
+    "wussten", "gewusst", "erkläre", "erklärt", "erklären", "erklärte", "behaupte", "behauptet", "behaupten",
+    "hoffe", "hofft", "hoffen", "erzähle", "erzählt", "erzählen", "erzählte", "frage", "fragt", "fragen",
+    "fragte", "gefragt", "sehe", "siehst", "sieht", "sehen", "sah", "gesehen", "merke", "merkt", "gemerkt",
+    "heißt", "bedeutet",
+})  # fmt: skip
 NON_VERBS = frozenset({
     "nicht", "jetzt", "erst", "meist", "fast", "selbst", "sonst", "bereits", "seit", "gut", "oft", "nichts",
     "recht", "leicht", "weit", "zuletzt", "zuerst", "etwa", "heute", "gerade", "genau", "insgesamt", "eben",
     "neben", "gegen", "wegen", "oben", "unten", "morgen", "trotzdem", "zusammen", "allen", "vielen", "anderen",
+    "alle", "gerne", "gern", "ohne", "eine", "keine", "seite", "ganze", "ganzen", "eigene", "eigenen", "beste",
+    "besten", "letzte", "letzten", "erste", "ersten", "nächste", "nächsten", "halbe", "halben", "ende", "einfach",
 })  # fmt: skip
 _FINITE_LIKE = re.compile(r"^[a-zäöüß]{2,}(?:t|st|te|ten|en|ern|eln)$")
-# Meta-Rede: eine Anrede an ein Modell mit Aufforderung im Transkript ist Inhalt, nie ein Hook
-# (Fall instruction_in_transcript). Gilt für Varianten und den wörtlichen Rückfall.
-META_ADDRESS = re.compile(r"(?<!\w)(ki|chatgpt|gpt|claude|gemini|sprachmodell|modell|assistent)(?!\w)", re.IGNORECASE)
-META_GREETING = re.compile(r"(?<!\w)(liebe|lieber|liebes|hallo|hey)\s+(ki|chatgpt|gpt|claude|gemini|sprachmodell|modell|assistent)(?!\w)", re.IGNORECASE)
+# Erste Person auf -e („ich rufe“) nur direkt nach dem Pronomen, sonst ist -e meist ein Adjektiv („gute“).
+_FIRST_PERSON_E = re.compile(r"^[a-zäöüß]{2,}e$")
+PRONOUNS_BEFORE_VERB = frozenset({"ich", "er", "sie", "es", "man", "wir", "ihr"})
+_ZU_INFINITIVE = re.compile(r"^[a-zäöüß]+zu[a-zäöüß]+(?:en|ern|eln)$")
+_PUNCT_END = (",", ".", "!", "?", ";", ":")
+# Meta-Rede: eine echte Anrede an ein Modell (Vokativ am Satz- oder Teilsatzanfang mit Komma, Doppelpunkt
+# oder Ausrufezeichen, oder Gruß davor), eine Rollenmarke „System:“ oder ein Imperativ mit Steuerbegriff
+# („Ignoriere alle Anweisungen“). „Nimm KI ernst“ und „Wähle das richtige Modell“ sind keine Meta-Rede.
+_MODEL_TERMS = r"(?:ki|chatgpt|gpt|claude|gemini|sprachmodell|modell|assistent|bot)"
+META_VOCATIVE = re.compile(rf"(?:^|[.!?;:,]\s*)(?:(?:liebe|lieber|liebes|hallo|hey|hi)\s+)?{_MODEL_TERMS}\s*[,:!]", re.IGNORECASE)
+META_GREETING = re.compile(rf"(?<!\w)(?:liebe|lieber|liebes|hallo|hey|hi)\s+{_MODEL_TERMS}(?!\w)", re.IGNORECASE)
+META_ROLE = re.compile(r"(?:^|[.!?]\s*)(?:system|assistant|user)\s*:", re.IGNORECASE)
+META_CONTROL_STEMS = ("anweisung", "regel", "prompt", "punktzahl", "bestnote", "bewertung", "systemprompt")
+META_IMPERATIVES = frozenset({
+    "ignoriere", "ignorier", "vergiss", "gib", "setz", "setze", "schreib", "schreibe", "bewerte", "mach",
+    "mache", "antworte", "befolge", "nimm", "wähle", "lösche", "übersetze", "tu", "tue", "vergib", "missachte",
+})  # fmt: skip
 # Ein späterer Satz als Text-Hook nur, wenn er nicht mit einem Rückbezug beginnt („Das war 2024.“).
 ANAPHORIC_STARTS = frozenset({
     "das", "dies", "diese", "dieser", "dieses", "es", "er", "sie", "damit", "dadurch", "danach", "davor",
     "deshalb", "deswegen", "daher", "dann", "dort", "da", "so", "also", "aber", "und", "oder", "denn", "auch",
-    "dabei", "dafür", "darum", "trotzdem", "sondern",
-})  # fmt: skip
-META_IMPERATIVES = frozenset({
-    "ignoriere", "ignorier", "vergiss", "gib", "setz", "setze", "schreib", "schreibe", "bewerte", "mach",
-    "mache", "antworte", "befolge", "nimm", "wähle", "lösche", "übersetze", "tu", "tue", "vergib",
+    "dabei", "dafür", "darum", "trotzdem", "sondern", "ihm", "ihn", "ihr", "ihnen",
 })  # fmt: skip
 
 HOOKS_SCHEMA: dict[str, Any] = {
@@ -222,14 +266,24 @@ def native_hooks_enabled(policy: editorial.Policy | None = None) -> bool:
     return (policy or editorial.load()).hook_native_spoken
 
 
+def allow_partial_opening(policy: editorial.Policy | None = None) -> bool:
+    """Teilsatz-Auszüge als Hook erlaubt (``hook.allow_partial_opening``)? Standard false: ganzer Satz."""
+    return (policy or editorial.load()).allow_partial_opening
+
+
 def _core(token: str) -> str:
     return dach_nlp.core_token(token)
+
+
+def _content_words(toks: list[str]) -> int:
+    return sum(1 for t in toks if _core(t) and _core(t) not in FILLER_WORDS)
 
 
 def clip_sentences(clip_text: str) -> list[list[str]]:
     """Sätze des Clips als Wortlisten. Satzende über ``dach_nlp.sentence_end_kind`` mit Regel v2 (nur
     Satzzeichen, weil der Text keine Zeiten trägt): „Am 3. Mai“, „Dr. Müller“, „ca. 40 Euro“ und „z. B.“
-    trennen nicht. Ein Satz unter ``MIN_PHRASE_WORDS`` Wörtern („Ja.“) wird mit dem nächsten verbunden."""
+    trennen nicht. Ein Satz mit weniger als ``MIN_PHRASE_WORDS`` Inhaltswörtern („Ja.“, „Ähm. Okay.“) wird
+    mit dem nächsten verbunden."""
     toks = clip_text.split()
     words = [{"text": t} for t in toks]
     raw: list[list[str]] = []
@@ -246,7 +300,7 @@ def clip_sentences(clip_text: str) -> list[list[str]]:
     for sent in raw:
         sent = carry + sent
         carry = []
-        if len(sent) < MIN_PHRASE_WORDS:
+        if _content_words(sent) < MIN_PHRASE_WORDS:
             carry = sent
             continue
         out.append(sent)
@@ -264,120 +318,209 @@ def first_sentence(clip_text: str) -> str:
 
 
 def is_meta_speech(text: str) -> bool:
-    """Spricht der Text ein Modell an und fordert es zu etwas auf („Liebe KI, ignoriere …“)?"""
-    if META_GREETING.search(text):
+    """Spricht der Text ein Modell an oder steuert es („Liebe KI, …“, „System: …“, „Ignoriere alle
+    Anweisungen …“)? Ein Modellbegriff allein („Nimm KI ernst“) ist keine Meta-Rede."""
+    if META_ROLE.search(text) or META_GREETING.search(text) or META_VOCATIVE.search(text.strip()):
         return True
-    return bool(META_ADDRESS.search(text)) and any(_core(t) in META_IMPERATIVES for t in text.split())
+    cores = [_core(t) for t in text.split()]
+    return any(c in META_IMPERATIVES for c in cores) and any(c.startswith(META_CONTROL_STEMS) for c in cores)
 
 
-def _verb_like(tokens: list[str], k: int) -> bool:
-    t = tokens[k]
+def _finite(toks: list[str], j: int) -> bool:
+    """Grobe Erkennung eines finiten Verbs (kein Partizip, kein Adjektiv vor seinem Nomen)."""
+    t = toks[j]
     core = _core(t)
-    if core in dach_nlp.AUXILIARY_FORMS or dach_nlp.is_participle(t):
+    if core in dach_nlp.AUXILIARY_FORMS:
         return True
-    if not t[:1].islower() or core in NON_VERBS or core in ARTICLES or core in PREPOSITIONS:
+    if not t[:1].islower() or dach_nlp.is_participle(t) or len(core) < 3:
         return False
-    prev = _core(tokens[k - 1]) if k > 0 else ""
-    nxt = tokens[k + 1] if k + 1 < len(tokens) else ""
+    if core in NON_VERBS or core in ARTICLES or core in PREPOSITIONS or core in W_WORDS or core in CORRELATES:
+        return False
+    if core in COORDINATORS or core in dach_nlp.SUBORDINATORS or core in GRADE_PARTICLES:
+        return False
+    prev = _core(toks[j - 1]) if j > 0 else ""
+    nxt = toks[j + 1] if j + 1 < len(toks) else ""
     if prev in ARTICLES | PREPOSITIONS and nxt[:1].isupper():
         return False  # Adjektiv vor seinem Nomen („die neue Plattform“)
+    if prev == "zu" or _ZU_INFINITIVE.match(core):
+        return False  # Infinitiv mit zu („zu schalten“, „auszugleichen“)
+    if _FIRST_PERSON_E.match(core) and prev in PRONOUNS_BEFORE_VERB:
+        return True
     return bool(_FINITE_LIKE.match(core))
 
 
-def _valid_cut(toks: list[str], k: int) -> bool:
-    """Darf der Satz ``toks`` nach ``k`` Wörtern enden? (Grenze, vollständiger Teilsatz, kein offenes Ende)"""
+def _segment(toks: list[str], start: int) -> list[str]:
+    """Wörter ab ``start`` bis einschließlich des nächsten Kommas (oder Satzende)."""
+    out = []
+    for t in toks[start:]:
+        out.append(t)
+        if t.rstrip("\"'»«“”‘’)").endswith((",", ";", ":")):
+            break
+    return out
+
+
+def _has_finite(toks: list[str], start: int, end: int) -> bool:
+    return any(_finite(toks, j) for j in range(start, end))
+
+
+def _cut_problem(toks: list[str], k: int) -> str | None:
+    """Warum der Satz ``toks`` nach ``k`` Wörtern nicht enden darf, oder None, wenn der Auszug geschlossen ist."""
     if k < MIN_PHRASE_WORDS or k >= len(toks):
-        return False
+        return "zu kurz oder ganzer Satz"
     last, nxt = toks[k - 1], _core(toks[k])
-    if not (last.rstrip("\"'»«“”‘’)").endswith((",", ";", ":")) or nxt in COORDINATORS or nxt in dach_nlp.SUBORDINATORS):
-        return False
+    comma = last.rstrip("\"'»«“”‘’)").endswith((",", ";", ":"))
+    if nxt in CONTRAST_NO_CUT:
+        return "vor Kontrast oder Einschränkung"
+    clause_starts = dach_nlp.SUBORDINATORS + tuple(INFINITIVE_INTROS)
+    if not (comma or nxt in COORDINATORS or nxt in clause_starts):
+        return "keine Phrasengrenze"
     bare = last.rstrip(",;:\"'»«“”‘’)")
     core = _core(last)
-    if not core or core.isdigit() or dach_nlp.is_ordinal(bare) or dach_nlp.is_abbreviation(bare, "v2"):
-        return False
-    if core in ARTICLES or core in PREPOSITIONS or core in COPULA or core in OPEN_QUANTIFIERS:
-        return False
-    if core in COORDINATORS or core in dach_nlp.SUBORDINATORS:
-        return False
+    if not core or any(ch.isdigit() for ch in core) or dach_nlp.is_ordinal(bare) or dach_nlp.is_abbreviation(bare, "v2"):
+        return "endet auf Zahl oder Abkürzung"
+    closed_word_sets = (
+        ARTICLES, PREPOSITIONS, COPULA, OPEN_QUANTIFIERS, COORDINATORS, dach_nlp.SUBORDINATORS, W_WORDS,
+        CORRELATES, GRADE_PARTICLES, CONTRAST_NO_CUT,
+    )  # fmt: skip
+    if any(core in words for words in closed_word_sets):
+        return "endet auf Funktionswort"
     if last[:1].islower() and _core(toks[k - 2]) in ARTICLES | PREPOSITIONS:
-        return False  # offene Nominalgruppe („über die neue“)
-    prefix = toks[:k]
-    if not any(_verb_like(toks, j) for j in range(k)):
-        return False
-    if _core(prefix[0]) in dach_nlp.SUBORDINATORS and not any(t.endswith(",") for t in prefix[:-1]):
-        return False  # nur Nebensatz, der Hauptsatz fehlt
-    if nxt in OBJECT_CLAUSE_STARTS and _verb_like(toks, k - 1):
-        return False
-    right = toks[k:]
-    if nxt in dach_nlp.SUBORDINATORS:
+        return "offene Nominalgruppe"
+    prefix, rest = toks[:k], toks[k:]
+    cores = [_core(t) for t in prefix]
+    first_seg = _segment(toks, 0)
+    if len(first_seg) > k:
+        first_seg = prefix
+    if cores[0] in dach_nlp.SUBORDINATORS or cores[0] in INFINITIVE_INTROS:
+        later = len(first_seg)
+        if later >= k or not _has_finite(toks, later, k):
+            return "nur Nebensatz"
+    elif not _has_finite(toks, 0, len(first_seg)):
+        return "erstes Segment ohne finites Verb"
+    starts = [j for j in range(1, k) if prefix[j - 1].rstrip("\"'»«“”‘’)").endswith((",", ";", ":"))]
+    for n, j in enumerate(starts):
+        end = starts[n + 1] if n + 1 < len(starts) else k
+        if not _has_finite(toks, j, end):
+            return "Teilsatz ohne finites Verb (Aufzählung, Apposition)"
+    for j in range(1, k):
+        if prefix[j - 1].rstrip("\"'»«“”‘’)").endswith(","):
+            c = cores[j]
+            c2 = cores[j + 1] if j + 1 < k else ""
+            if c in RELATIVE_PRONOUNS or c in W_WORDS or (c in PREPOSITIONS and c2 in RELATIVE_PRONOUNS):
+                return "Relativsatz oder w-Satz offen"
+    for j in range(k - 1):
+        if prefix[j].rstrip("\"'»«“”‘’)").endswith(",") and (cores[j] in COPULA or _finite(toks, j)):
+            return "Parenthese nach finitem Verb"
+    if any(c in SAYING_VERBS for c in cores):
+        return "Verb des Sagens, Zeigens oder Meinens"
+    for j, c in enumerate(cores):
+        if c in INFINITIVE_INTROS and not any(
+            cc == "zu" or re.fullmatch(r"[a-zäöüß]+zu[a-zäöüß]+en", cc) for cc in cores[j + 1 :]
+        ):
+            return "um, ohne oder statt ohne zu plus Infinitiv"
+    for t in rest:
+        if t[:1].islower() and _core(t) in dach_nlp.VERB_PARTICLES and t.rstrip("\"'»«“”‘’)").endswith(_PUNCT_END):
+            return "Verbpartikel steht im Rest des Satzes"
+    if nxt in OBJECT_CLAUSE_STARTS and (_finite(toks, k - 1) or dach_nlp.is_participle(last)):
+        return "Objektsatz nach dem Verb"
+    if nxt in COORDINATORS:
+        seg = _segment(toks, k + 1)
+        if not _has_finite(toks, k + 1, k + 1 + len(seg)):
+            return "Aufzählung, kein neuer Teilsatz"
+    elif comma and nxt not in clause_starts:
+        seg = _segment(toks, k)
+        if not _has_finite(toks, k, k + len(seg)):
+            return "Aufzählung oder Apposition"
+    right = rest
+    if nxt in clause_starts:
         # Der eingeschobene Nebensatz gehört nicht zur Klammer des Hauptsatzes: geprüft wird, was nach ihm
         # kommt („Wir haben die Preise, | weil alles teurer wurde, dreimal angepasst.“ bleibt offen).
         end = next((j for j, t in enumerate(right) if t.rstrip("\"'»«“”‘’)").endswith(",")), None)
         right = right[end + 1 :] if end is not None else []
-    return not right or not dach_nlp.bracket_heuristic(prefix, right)["open"]
+    if right and dach_nlp.bracket_heuristic(prefix, right)["open"]:
+        return "Verbklammer offen"
+    return None
 
 
 def phrase_cuts(toks: list[str], max_words: int) -> list[int]:
     """Gültige Schnittlängen eines Satzes bis ``max_words`` Wörter, längste zuerst."""
-    return [k for k in range(min(max_words, len(toks) - 1), MIN_PHRASE_WORDS - 1, -1) if _valid_cut(toks, k)]
+    return [k for k in range(min(max_words, len(toks) - 1), MIN_PHRASE_WORDS - 1, -1) if _cut_problem(toks, k) is None]
 
 
 def _join(toks: list[str], k: int | None = None) -> str:
     return " ".join(toks if k is None else toks[:k]).rstrip(",;:")
 
 
-def verbatim_excerpt(toks: list[str], max_words: int, avoid_values: set[float] | frozenset[float] = frozenset()) -> str | None:
-    """Wörtlicher Auszug aus einem Satz: ganz, wenn er passt, sonst bis zur längsten gültigen Phrasengrenze.
-    None, wenn es keine gibt oder jeder Auszug eine Zahl aus ``avoid_values`` enthält."""
-
-    def clean(text: str) -> bool:
-        return not avoid_values or not fidelity.number_values([text]) & set(avoid_values)
-
-    if len(toks) <= max_words and clean(" ".join(toks)):
+def verbatim_excerpt(toks: list[str], max_words: int, accept=None) -> str | None:
+    """Geschlossener Teilsatz-Auszug (Opt-in ``hook.allow_partial_opening``): der ganze Satz, wenn er passt,
+    sonst bis zur längsten gültigen Phrasengrenze. ``accept`` prüft jeden Kandidaten zusätzlich (Claim-Check,
+    unsichere Zahl, Meta-Rede). None, wenn es keinen gibt."""
+    ok = accept or (lambda _text: True)
+    if len(toks) <= max_words and ok(" ".join(toks)):
         return " ".join(toks)
-    return next((_join(toks, k) for k in phrase_cuts(toks, max_words) if clean(_join(toks, k))), None)
+    return next((_join(toks, k) for k in phrase_cuts(toks, max_words) if ok(_join(toks, k))), None)
 
 
-def verbatim_opening(
-    clip_text: str,
-    max_words: int,
-    avoid_values: set[float] | frozenset[float] = frozenset(),
-    other_sentences: bool = False,
-) -> tuple[str, str]:
-    """Wörtlicher Auszug für einen Hook. Gibt (Text, Herkunft) zurück.
+def sentence_hook(toks: list[str], max_words: int, partial: bool, accept=None) -> str | None:
+    """Hook aus einem Satz: der ganze Satz bis ``max_words`` Wörter; mit ``partial`` auch ein geschlossener
+    Teilsatz-Auszug; sonst None."""
+    ok = accept or (lambda _text: True)
+    if len(toks) <= max_words:
+        return " ".join(toks) if ok(" ".join(toks)) else None
+    return verbatim_excerpt(toks, max_words, ok) if partial else None
 
-    Herkunft: ``first_sentence`` (ganz), ``first_sentence_part`` (an einer Phrasengrenze gekürzt),
-    ``other_sentence`` oder ``other_sentence_part`` (ein späterer kurzer Originalsatz, nur mit
-    ``other_sentences``), ``first_sentence_long`` (keine gültige Grenze, der ganze erste Satz) oder
-    ``none`` (jede Stelle nennt eine Zahl aus ``avoid_values``: kein Text, also kein Overlay). Ein späterer
-    Satz zählt nicht, wenn er mit einem Rückbezug beginnt oder ein Modell anspricht.
 
-    Für den gesprochenen Hook ohne ``other_sentences``: der Einstieg bleibt der Einstieg. Für den Text-Hook
-    mit ``other_sentences``: Sätze mit Meta-Rede an ein Modell zählen nicht."""
+def spoken_opening(clip_text: str, partial: bool = False) -> tuple[str, str]:
+    """Gesprochener Hook: der wörtliche Einstieg des Clips. Gibt (Text, Herkunft) zurück: ``first_sentence``,
+    ``first_sentence_part`` (nur mit ``partial`` und gültiger Grenze) oder ``first_sentence_long``."""
     sents = clip_sentences(clip_text)
     if not sents:
-        return "", "none"
-    for idx, toks in enumerate(sents if other_sentences else sents[:1]):
-        if (other_sentences and is_meta_speech(" ".join(toks))) or (idx > 0 and _core(toks[0]) in ANAPHORIC_STARTS):
+        return "", "none_too_long"
+    first = " ".join(sents[0])
+    if len(sents[0]) <= SPOKEN_MAX_WORDS:
+        return first, "first_sentence"
+    part = verbatim_excerpt(sents[0], SPOKEN_MAX_WORDS) if partial else None
+    return (part, "first_sentence_part") if part else (first, "first_sentence_long")
+
+
+def native_onscreen(
+    clip_text: str, uncertain: list[str] | tuple[str, ...] = (), partial: bool = False
+) -> tuple[str, str]:
+    """Text-Hook des Rückfalls. Gibt (Text, Herkunft) zurück.
+
+    Standard (``partial`` false): ein ganzer Originalsatz mit höchstens ``ONSCREEN_MAX_WORDS`` Wörtern, ohne
+    unsichere Zahl, ohne Meta-Rede und ohne Claim-Befund; zuerst der erste Satz, sonst der nächste solche Satz
+    ohne Rückbezug innerhalb der ersten vier Sätze. Herkunft ``first_sentence`` oder ``other_sentence``; mit
+    ``partial`` auch ``*_part``. Gibt es keinen, ist der Text leer (kein Overlay): ``none_meta`` (der erste
+    Satz ist Meta-Rede), ``none_uncertain`` (er nennt eine unsicher erkannte Zahl) oder ``none_too_long``."""
+    sents = clip_sentences(clip_text)
+
+    def accept(text: str) -> bool:
+        return not is_meta_speech(text) and not fidelity.hook_claim_check_v2(text, clip_text, uncertain)
+
+    for idx, toks in enumerate(sents[:NATIVE_SENTENCE_WINDOW]):
+        if idx > 0 and _core(toks[0]) in ANAPHORIC_STARTS:
             continue
-        text = verbatim_excerpt(toks, max_words, avoid_values)
+        text = sentence_hook(toks, ONSCREEN_MAX_WORDS, partial, accept)
         if text is not None:
             kind = "first_sentence" if idx == 0 else "other_sentence"
             return text, kind if text == " ".join(toks) else f"{kind}_part"
-    first = " ".join(sents[0])
-    if avoid_values and fidelity.number_values([first]) & set(avoid_values):
-        return ("", "none") if other_sentences else (first, "first_sentence_long")
-    if other_sentences and is_meta_speech(first):
-        return "", "none"
-    return first, "first_sentence_long"
+    first = " ".join(sents[0]) if sents else ""
+    if first and is_meta_speech(first):
+        return "", "none_meta"
+    if first and fidelity.number_values([first]) & fidelity.number_values(uncertain):
+        return "", "none_uncertain"
+    return "", "none_too_long"
 
 
 OPENING_NOTES = {
-    "first_sentence_part": "wörtlicher Teil des ersten Satzes, an einer Phrasengrenze gekürzt",
+    "first_sentence_part": "wörtlicher Teil des ersten Satzes, an einer geschlossenen Phrasengrenze gekürzt",
     "other_sentence": "wörtlich ein späterer kurzer Satz des Clips",
-    "other_sentence_part": "wörtlicher Teil eines späteren Satzes, an einer Phrasengrenze gekürzt",
-    "first_sentence_long": "erster Satz ungekürzt, keine gültige Phrasengrenze innerhalb der Wortgrenze",
-    "none": "kein Text: jede Originalstelle nennt eine unsicher erkannte Zahl",
+    "other_sentence_part": "wörtlicher Teil eines späteren Satzes, an einer geschlossenen Phrasengrenze gekürzt",
+    "first_sentence_long": "erster Satz ungekürzt, länger als die Wortgrenze",
+    "none_too_long": "kein Text: kein ganzer kurzer Originalsatz ohne Befund in den ersten vier Sätzen",
+    "none_meta": "kein Text: der Einstieg spricht ein Modell an",
+    "none_uncertain": "kein Text: der Einstieg nennt eine unsicher erkannte Zahl, kein anderer kurzer Satz passt",
 }
 
 
@@ -405,17 +548,18 @@ def select_variant_v2(variants: list[HookVariant]) -> HookVariant | None:
     return next((v for v in variants if not variant_disqualifiers(v)), None)
 
 
-def native_variant(clip_text: str, brand: copy_de.BrandProfile, uncertain: list[str] | tuple[str, ...] = ()) -> HookVariant:
-    """Rückfall ohne gültige Variante: Text-Hook als wörtlicher Auszug (Muster ``native``), bevorzugt aus dem
-    ersten Satz, sonst aus einem späteren kurzen Satz; nie mit einer unsicher erkannten Zahl."""
-    avoid = fidelity.number_values(uncertain)
-    spoken, _ = verbatim_opening(clip_text, SPOKEN_MAX_WORDS)
-    raw, kind = verbatim_opening(clip_text, ONSCREEN_MAX_WORDS, avoid, other_sentences=True)
-    onscreen, notes = copy_de.lint(raw, brand)
+def native_variant(
+    clip_text: str, brand: copy_de.BrandProfile, uncertain: list[str] | tuple[str, ...] = (), partial: bool = False
+) -> tuple[HookVariant, str]:
+    """Rückfall ohne gültige Variante (Muster ``native``): Text-Hook nach ``native_onscreen``, gesprochen der
+    wörtliche Einstieg. Gibt (Variante, Herkunft des Text-Hooks); ein leerer Text-Hook heißt kein Overlay."""
+    spoken, _ = spoken_opening(clip_text, partial)
+    raw, kind = native_onscreen(clip_text, uncertain, partial)
+    onscreen, notes = copy_de.lint(raw, brand) if raw else ("", [])
     if kind != "first_sentence":
         notes.append(f"On-Screen-Hook: {OPENING_NOTES[kind]}")
     claims = fidelity.hook_claim_check_v2(onscreen, clip_text, uncertain) if onscreen else []
-    return HookVariant(NATIVE_PATTERN, spoken, onscreen, notes, claims)
+    return HookVariant(NATIVE_PATTERN, spoken, onscreen, notes, claims), kind
 
 
 def order_variants(variants: list[HookVariant], pattern_order: list[str] | None) -> list[HookVariant]:
@@ -616,8 +760,17 @@ def write_copy(
 def _select_v2(
     variants: list[HookVariant], clip_text: str, brand: copy_de.BrandProfile, uncertain: list[str]
 ) -> tuple[HookVariant, str, list[str], list[str], dict[str, Any]]:
-    """Auswahl unter Fassung 2: Claim-Check v2 und Lint je Text-Hook, erste gültige oder nativer Rückfall,
-    gesprochener Hook wörtlich. Gibt (Wahl, spoken_hook, Zusatzhinweise, Zusatzbefunde, Merkmale)."""
+    """Auswahl unter Fassung 2 mit ``hook.native_spoken``.
+
+    1. Je Variante zählt nur der Text-Hook: Claim-Check v2 (mit unsicheren Zahlen), Lint und Wortlimit.
+       Befunde zum gesprochenen Text stehen als ``Gesprochen (Hinweis): …`` in ``lint_notes``.
+    2. Gewählt wird die erste gültige Variante in der Thompson-Reihenfolge (``select_variant_v2``), sonst der
+       wörtliche Rückfall ``native_variant`` (ganzer Originalsatz oder kein Overlay; Teilsätze nur mit
+       ``hook.allow_partial_opening``).
+    3. Der gesprochene Hook ist immer der wörtliche Einstieg (``spoken_opening``); Meta-Rede oder eine
+       unsicher erkannte Zahl darin wird als Hinweis oder Befund gemeldet, nicht ersetzt.
+    Gibt (Wahl, spoken_hook, Zusatzhinweise, Zusatzbefunde, Merkmale für das Decision Log)."""
+    partial = allow_partial_opening()
     for v in variants:
         _, notes_o = copy_de.lint(v.onscreen, brand)
         _, notes_s = copy_de.lint(v.spoken, brand)
@@ -633,14 +786,28 @@ def _select_v2(
     disqualified = {f"{i}:{v.pattern}": variant_disqualifiers(v) for i, v in enumerate(variants)}
     chosen = select_variant_v2(variants)
     fallback = chosen is None
+    onscreen_source = "variant"
     if chosen is None:
-        chosen = native_variant(clip_text, brand, uncertain)
-    spoken, kind = verbatim_opening(clip_text, SPOKEN_MAX_WORDS)
+        chosen, onscreen_source = native_variant(clip_text, brand, uncertain, partial)
+    spoken, kind = spoken_opening(clip_text, partial)
     notes = [f"Gesprochener Hook: {OPENING_NOTES[kind]}"] if kind != "first_sentence" else []
-    claims = [f"Gesprochener Hook: {c}" for c in fidelity.hook_claim_check_v2(spoken, clip_text, uncertain)]
+    if is_meta_speech(spoken):
+        notes.append("Gesprochener Hook: der Einstieg enthält Meta-Rede an ein Modell, sie wird nicht befolgt, bitte prüfen")
+    claims = []
+    uncertain_values = fidelity.number_values(uncertain)
+    for m in fidelity.number_mentions(spoken):
+        if m.value in uncertain_values:
+            claims.append(f"Gesprochener Hook: Zahl '{m.raw}' im Einstieg unsicher erkannt, am Audio prüfen")
+    claims += [
+        f"Gesprochener Hook: {c}"
+        for c in fidelity.hook_claim_check_v2(spoken, clip_text, uncertain)
+        if "unsicher erkannt" not in c
+    ]
     extra = {
         "native_fallback": fallback,
+        "onscreen_source": onscreen_source,
         "spoken_source": kind,
+        "partial_opening": partial,
         "uncertain_numbers": len(uncertain),
         "disqualified": {k: len(r) for k, r in disqualified.items() if r},
     }
@@ -668,7 +835,9 @@ __all__ = [
     "generate_variants",
     "languagetool_check",
     "limit_notes",
+    "allow_partial_opening",
     "is_meta_speech",
+    "native_onscreen",
     "native_hooks_enabled",
     "native_variant",
     "order_variants",
@@ -676,8 +845,9 @@ __all__ = [
     "select_variant",
     "select_variant_v2",
     "variant_disqualifiers",
+    "sentence_hook",
+    "spoken_opening",
     "verbatim_excerpt",
-    "verbatim_opening",
     "word_count",
     "write_copy",
 ]

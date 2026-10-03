@@ -47,12 +47,19 @@ class Candidate:
         return self.end - self.start
 
 
-def sentences_from_words(words: list[dict], min_pause_s: float = MIN_PAUSE_AS_BOUNDARY, rule: str = "v1") -> list[Sentence]:
+def sentences_from_words(
+    words: list[dict],
+    min_pause_s: float = MIN_PAUSE_AS_BOUNDARY,
+    rule: str = "v1",
+    max_s: float | None = None,
+    max_words: int | None = None,
+) -> list[Sentence]:
     """Sätze nach der Satzende-Regel ``rule`` (``v1`` wie vor AP2, ``v2`` siehe ``dach_nlp.sentence_end_kind``)."""
     sents: list[Sentence] = []
     buf_start = 0
+    kinds = dach_nlp.sentence_end_kinds(words, rule, min_pause_s, max_s, max_words)
     for i in range(len(words)):
-        if dach_nlp.is_sentence_end(words, i, min_pause_s, rule=rule):
+        if kinds[i] != "none":
             chunk = words[buf_start : i + 1]
             sents.append(
                 Sentence(

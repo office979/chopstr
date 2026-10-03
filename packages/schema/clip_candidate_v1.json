@@ -1,0 +1,569 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clip_candidate_v1.json",
+  "title": "ClipCandidate (clip_candidate_v1)",
+  "description": "Internes Ergebnisformat nach Master-Prompt Abschnitt 21. Vertrag: packages/schema/CLIP_CANDIDATE.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "candidate_id",
+    "source_asset_id",
+    "source_version",
+    "objective",
+    "audience_context",
+    "audience_context_provenance",
+    "central_idea",
+    "viewer_promise",
+    "payoff_description",
+    "narrative_type",
+    "opening_source_span",
+    "required_context_spans",
+    "payoff_source_span",
+    "segments",
+    "removed_spans",
+    "meaning_dependencies",
+    "unresolved_questions",
+    "quality_gate_results",
+    "editorial_subscores",
+    "assessment_uncertainties",
+    "decision",
+    "decision_reason",
+    "alternatives_considered",
+    "model_version",
+    "prompt_version",
+    "policy_version",
+    "externally_verified",
+    "calibration"
+  ],
+  "properties": {
+    "contract": {
+      "const": "clip_candidate_v1"
+    },
+    "candidate_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_asset_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_version": {
+      "type": [
+        "integer",
+        "string",
+        "null"
+      ]
+    },
+    "objective": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "audience_context": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "audience_context_provenance": {
+      "enum": [
+        "explicit",
+        null
+      ]
+    },
+    "central_idea": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "viewer_promise": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "payoff_description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "narrative_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "opening_source_span": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/span"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "required_context_spans": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/span"
+      }
+    },
+    "payoff_source_span": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/span"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/segment"
+      }
+    },
+    "removed_spans": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/removed_span"
+      }
+    },
+    "meaning_dependencies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/meaning_dependency"
+      }
+    },
+    "unresolved_questions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/question"
+      }
+    },
+    "quality_gate_results": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/gate"
+      }
+    },
+    "editorial_subscores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scale_max",
+        "values"
+      ],
+      "properties": {
+        "scale_max": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "assessment_uncertainties": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/uncertainty"
+      }
+    },
+    "decision": {
+      "enum": [
+        "accept",
+        "reject"
+      ]
+    },
+    "decision_reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "alternatives_considered": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/alternative"
+      }
+    },
+    "model_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "prompt_version": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "policy_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "externally_verified": {
+      "type": "null"
+    },
+    "calibration": {
+      "enum": [
+        "uncalibrated",
+        "calibrated"
+      ]
+    }
+  },
+  "$defs": {
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_in",
+        "source_out",
+        "word_range",
+        "sentence_range",
+        "note"
+      ],
+      "properties": {
+        "source_in": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "source_out": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "word_range": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "sentence_range": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "segment_id",
+        "source_in",
+        "source_out",
+        "output_in",
+        "output_out",
+        "speaker_id",
+        "word_ids",
+        "verbatim_text",
+        "editorial_role",
+        "boundary_confidence"
+      ],
+      "properties": {
+        "segment_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_in": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "source_out": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "output_in": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "output_out": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "speaker_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "word_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "verbatim_text": {
+          "type": "string"
+        },
+        "editorial_role": {
+          "enum": [
+            "teaser",
+            "body"
+          ]
+        },
+        "boundary_confidence": {
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "removed_span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_in",
+        "source_out",
+        "removal_reason",
+        "protected_context_check"
+      ],
+      "properties": {
+        "source_in": {
+          "type": "number"
+        },
+        "source_out": {
+          "type": "number"
+        },
+        "removal_reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "protected_context_check": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "meaning_dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "sentence_idx",
+        "source_in",
+        "source_out",
+        "text",
+        "marker",
+        "confirmed",
+        "detail"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "later_qualification"
+          ]
+        },
+        "sentence_idx": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "source_in": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "source_out": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "marker": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "text"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "unresolved_reference",
+            "needs_earlier_context",
+            "ends_before_answer"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "required": [
+        "passed",
+        "detail"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        }
+      }
+    },
+    "uncertainty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "detail",
+        "word_id",
+        "text",
+        "prob"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "low_confidence_number",
+            "low_confidence_name",
+            "heuristic_only",
+            "nlp_unavailable",
+            "boundary_from_pause",
+            "boundary_confidence_missing",
+            "story_graph_unconfirmed"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        },
+        "word_id": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prob": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "alternative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "first_sent",
+        "last_sent",
+        "total",
+        "reason"
+      ],
+      "properties": {
+        "candidate_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "first_sent": {
+          "type": "integer"
+        },
+        "last_sent": {
+          "type": "integer"
+        },
+        "total": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

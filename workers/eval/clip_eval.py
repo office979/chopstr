@@ -196,8 +196,20 @@ def starts_with_backref(words: list[dict], i_start: int, i_ende: int) -> bool | 
 
 
 def active_sentence_rule() -> str:
-    """Satzende-Regel der aktiven Richtlinie, dieselbe wie im Lauf (``editorial.sentence_rule``)."""
-    return editorial.sentence_rule(editorial.load())
+    """Satzende-Regel der aktiven Richtlinie, dieselbe wie im Lauf (``editorial.sentence_rule``). Ohne
+    Richtlinien-Dateien misst das Werkzeug weiter mit Regel v1."""
+    try:
+        return editorial.sentence_rule(editorial.load())
+    except editorial.PolicyError:
+        return "v1"
+
+
+def _sentence_limits() -> dict[str, Any]:
+    try:
+        max_s, max_words = editorial.sentence_limits(editorial.load())
+    except editorial.PolicyError:
+        return {}
+    return {"max_s": max_s, "max_words": max_words}
 
 
 def check_boundaries(cand: dict, words: list[dict], rule: str | None = None) -> dict[str, Any]:
@@ -206,7 +218,8 @@ def check_boundaries(cand: dict, words: list[dict], rule: str | None = None) -> 
     ``rule`` ist die Satzende-Regel (``v1`` oder ``v2``, ohne Angabe die der aktiven Richtlinie), also
     dieselbe Entscheidung wie Zerlegung und Satzgrenzen-Tor. Unter ``v2`` steht zusätzlich
     ``grenze_nur_aus_pause``: welche Grenze (Anfang, Ende) nur aus einer angenommenen Pause stammt."""
-    rule = rule or active_sentence_rule()
+    rule = dach_nlp.resolve_sentence_rule(words, rule or active_sentence_rule())
+    limits = _sentence_limits() if rule == "v2" else {}
     i_start = word_index_at(words, cand["start_s"], "start")
     i_ende = word_index_at(words, cand["end_s"], "ende")
     laenge = round(cand["end_s"] - cand["start_s"], 2)
@@ -232,17 +245,17 @@ def check_boundaries(cand: dict, words: list[dict], rule: str | None = None) -> 
     # Ohne diese Unterscheidung meldet die Messung für jeden eigenständigen Clip „Satzanfang: ja".
     nur_pause: list[str] = []
     if i_start > 0:
-        art = dach_nlp.cut_boundary_kind(words, i_start - 1, rule)
+        art = dach_nlp.cut_boundary_kind(words, i_start - 1, rule, **limits)
         satzanfang = art != "none"
-        if art == "pause_candidate":
+        if art in ("pause_candidate", "length_cap"):
             nur_pause.append("Anfang")
     else:
         erstes_roh = str(words[0].get("text", "")).lstrip("\"'„»(-– ")
         satzanfang = bool(erstes_roh[:1].isupper())
     # Satzende: das letzte Wort des Clips beendet einen Satz.
-    art = dach_nlp.cut_boundary_kind(words, i_ende, rule)
+    art = dach_nlp.cut_boundary_kind(words, i_ende, rule, **limits)
     satzende = art != "none"
-    if art == "pause_candidate":
+    if art in ("pause_candidate", "length_cap"):
         nur_pause.append("Ende")
 
     rueckverweis = starts_with_backref(words, i_start, i_ende)
@@ -355,7 +368,7 @@ def zusammenfassung(zeilen: list[dict]) -> dict[str, Any]:
         return {"vorschlaege": 0}
     g = [z["grenzen"] for z in zeilen]
     laengen = sorted(x["laenge_s"] for x in g)
-    return {
+    out = {
         "vorschlaege": n,
         "satzanfang_anteil": round(sum(1 for x in g if x["satzanfang"]) / n, 3),
         "satzende_anteil": round(sum(1 for x in g if x["satzende"]) / n, 3),
@@ -368,6 +381,21 @@ def zusammenfassung(zeilen: list[dict]) -> dict[str, Any]:
         "laenge_min_s": laengen[0],
         "laenge_max_s": laengen[-1],
     }
+    # Nur unter Regel v2 gemessen (check_boundaries): Anteil der Vorschläge mit einer Grenze nur aus Pause.
+    if any("grenze_nur_aus_pause" in x for x in g):
+        out["grenze_nur_aus_pause_anteil"] = round(sum(1 for x in g if x.get("grenze_nur_aus_pause")) / n, 3)
+    return out
+
+
+def use_policy_version(version: int | None) -> str:
+    """Setzt ``CHOPSTR_POLICY_VERSION`` für diesen Prozess (ohne Angabe bleibt die aktive) und liefert
+    die Kennung der gemessenen Richtlinie, etwa ``clip_policy_v2``."""
+    if version is not None:
+        if version not in (1, 2):
+            raise SystemExit(f"--policy-version {version}: erlaubt sind 1 und 2.")
+        os.environ[editorial.POLICY_VERSION_ENV] = str(version)
+        editorial.clear_cache()
+    return editorial.policy_version()
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -379,7 +407,12 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--k", type=int, default=10, help="Precision@k, Standard 10")
     ap.add_argument("--schwelle", type=float, default=0.5, help="Mindestabdeckung für einen Treffer, Standard 0,5")
     ap.add_argument("--json", dest="json_out", default=None, help="Ergebnis zusätzlich als JSON ablegen")
+    ap.add_argument(
+        "--policy-version", type=int, default=None,
+        help="Richtlinie für die Grenzmessung (1 oder 2), Standard CHOPSTR_POLICY_VERSION",
+    )  # fmt: skip
     args = ap.parse_args(argv)
+    richtlinie = use_policy_version(args.policy_version)
 
     if not os.environ.get("DATABASE_URL"):
         raise SystemExit("DATABASE_URL fehlt. Vorher: source scripts/local_env.sh")
@@ -402,6 +435,7 @@ def main(argv: list[str] | None = None) -> None:
     stellen = load_references(args.referenzen)
     ergebnis: dict[str, Any] = {
         "quelle": {"id": quelle["id"], "titel": quelle["title"], "dauer_s": quelle["duration_s"]},
+        "richtlinie": richtlinie,
         "woerter": len(words),
         "grenzen": zusammenfassung(zeilen),
         "vorschlaege": zeilen,
@@ -411,7 +445,7 @@ def main(argv: list[str] | None = None) -> None:
 
     print(f"Quelle: {quelle['title']}  ({quelle['id']})")
     dauer = f"{quelle['duration_s']:.0f} s" if quelle["duration_s"] else "unbekannt"
-    print(f"Dauer: {dauer}, Transkript: {len(words)} Wörter, Vorschläge: {len(kandidaten)}")
+    print(f"Dauer: {dauer}, Transkript: {len(words)} Wörter, Vorschläge: {len(kandidaten)}, Richtlinie: {richtlinie}")
     print()
     print(tabelle(zeilen))
     print()

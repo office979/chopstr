@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from . import dach_nlp
 from .dach_nlp import NEGATIONS
 
 QUALIFIERS = {
@@ -28,8 +29,25 @@ def _tokens(text: str) -> list[str]:
     return re.findall(r"[a-zäöüß]+", text.lower())
 
 
-def check_cut(original_words: list[dict], kept_ranges: list[tuple[int, int]]) -> list[dict]:
-    """original_words: Wortliste des Kandidaten; kept_ranges: behaltene Wortindex-Bereiche (inklusiv)."""
+def starts_with_contrast(tail: str, rule: str = "v1") -> bool:
+    """Beginnt ``tail`` (kleingeschrieben) mit einem Kontrastwort? ``v1`` vergleicht den Textanfang (vor AP4,
+    „außerdem“ gilt als „außer“), ``v2`` das erste ganze Wort (RESEARCH-CLIPPING-KERN Abschnitt 2 Nr. 6)."""
+    if rule != "v2":
+        return tail.startswith(CONTRAST_STARTS)
+    first = next((t for t in (dach_nlp.core_token(x) for x in tail.split()) if t), "")
+    return first in CONTRAST_STARTS
+
+
+def check_cut(
+    original_words: list[dict], kept_ranges: list[tuple[int, int]], rule: str = "v1", policy=None
+) -> list[dict]:
+    """original_words: Wortliste des Kandidaten; kept_ranges: behaltene Wortindex-Bereiche (inklusiv).
+
+    ``rule`` betrifft nur ``ends_before_contrast``: ``v2`` gleicht ``CONTRAST_STARTS`` an Wortgrenzen ab.
+
+    Mit ``policy`` der Fassung 2 (Abschnitt ``trim``, AP7) zusätzlich ``protected_removed`` (hoch): ein
+    Wort eines Schutzbereichs aus ``trim_plan.protected_spans`` fehlt. Ohne ``policy`` oder unter
+    Fassung 1 bleibt die Prüfung wie vorher."""
     warnings = []
     kept: set[int] = set()
     for a, b in kept_ranges:
@@ -46,13 +64,25 @@ def check_cut(original_words: list[dict], kept_ranges: list[tuple[int, int]]) ->
 
     last_kept = max(kept) if kept else -1
     tail = " ".join(str(w["text"]) for w in original_words[last_kept + 1 : last_kept + 4]).lower()
-    if tail.startswith(CONTRAST_STARTS):
+    if starts_with_contrast(tail, rule):
         warnings.append({"type": "ends_before_contrast", "severity": "high", "detail": tail})
 
     for (_a1, b1), (a2, _b2) in zip(kept_ranges, kept_ranges[1:]):
         gap = float(original_words[a2]["start"]) - float(original_words[b1]["end"])
         if gap > MAX_JOIN_GAP_S:
             warnings.append({"type": "joined_statements", "severity": "high", "detail": f"{gap:.0f}s Abstand im Original"})
+    if policy is not None and policy.version >= 2:
+        from .. import editorial
+        from . import trim_plan
+
+        if editorial.trim_settings(policy) is not None:
+            hit = [
+                {"type": p["type"], "word_range": p["word_range"], "text": p["text"]}
+                for p in trim_plan.protected_spans(original_words, policy)
+                if any(i not in kept for i in range(p["word_range"][0], p["word_range"][1] + 1))
+            ]
+            if hit:
+                warnings.append({"type": "protected_removed", "severity": "high", "detail": hit})
     return warnings
 
 
@@ -119,6 +149,13 @@ RESTRICTORS = (
     "bei uns", "bei mir", "bei einem kunden", "bei einer kundin", "in unserem fall", "in meinem fall",
     "in unserem betrieb", "für uns", "damals",
 )  # fmt: skip
+# Wendungen mit „immer“, die nichts verallgemeinern („immer mehr“, „wie immer“).
+IMMER_IDIOMS = ("immer mehr", "immer wieder", "immer noch", "wie immer")
+# Mengenwörter ohne Ziffer („Millionen Kunden“): im Hook nur, wenn der Clip dasselbe Wort sagt.
+QUANTITY_STEMS = ("million", "milliard", "dutzend")
+# Richtung einer Zahl: „über 40 Prozent“ ist nicht „fast 40 %“.
+DIRECTION_UP = ("über", "mehr als", "mindestens", "ab")
+DIRECTION_DOWN = ("fast", "knapp", "unter", "höchstens", "weniger als", "beinahe")
 
 _MENTION = re.compile(
     r"(?<![\w.,:])(?P<time>\d{1,2}[:.]\d{2})(?=\s*Uhr(?!\w))"
@@ -138,6 +175,18 @@ class NumberMention:
     raw: str
     value: float
     unit: str | None
+    direction: str | None = None  # "up" (über, mehr als, mindestens) oder "down" (fast, knapp, unter)
+
+
+def _direction_before(text: str, start: int) -> str | None:
+    before = " ".join(text[:start].lower().split()[-2:])
+    for word in DIRECTION_UP:
+        if re.search(rf"(?<!\w){re.escape(word)}$", before):
+            return "up"
+    for word in DIRECTION_DOWN:
+        if re.search(rf"(?<!\w){re.escape(word)}$", before):
+            return "down"
+    return None
 
 
 def _number_value(raw: str) -> float:
@@ -248,7 +297,7 @@ def number_mentions(text: str) -> list[NumberMention]:
                 unit = "EUR"
             elif before.lower().endswith("chf"):
                 unit = "CHF"
-        out.append(NumberMention(raw, value, unit))
+        out.append(NumberMention(raw, value, unit, _direction_before(text, m.start())))
         consumed = pos
     return out
 
@@ -262,6 +311,20 @@ def unrecognized_number_words(text: str) -> list[str]:
             continue
         if low.startswith(NUMBER_WORD_STEMS) and any(part in low for part in NUMBER_WORD_PARTS):
             out.append(m.group(0))
+    return out
+
+
+def quantity_words(text: str) -> list[str]:
+    """Mengenwörter ohne vorangehende Zahl („Millionen Kunden“, „Dutzende Anfragen“)."""
+    out = []
+    prev = ""
+    for m in re.finditer(r"(?<!\w)[^\W_]+(?!\w)", text):
+        word = m.group(0)
+        low = word.lower()
+        is_number = any(ch.isdigit() for ch in prev) or parse_number_word(prev) is not None or prev in ARTICLE_ONE
+        if low.startswith(QUANTITY_STEMS) and not is_number:
+            out.append(word)
+        prev = low
     return out
 
 
@@ -290,9 +353,55 @@ def _covered(h: NumberMention, clip: list[NumberMention], low_words: set[str]) -
     )
 
 
+def _direction_conflict(h: NumberMention, clip: list[NumberMention]) -> bool:
+    """Hook „über 40 Prozent“, Clip nur „fast 40 %“ (oder umgekehrt): jede passende Stelle zeigt in die
+    andere Richtung."""
+    if h.direction is None:
+        return False
+    same = [c for c in clip if c.value == h.value and (h.unit is None or c.unit == h.unit or c.unit is None)]
+    return bool(same) and all(c.direction is not None and c.direction != h.direction for c in same)
+
+
 def phrase_hits(phrases: tuple[str, ...] | list[str], low: str) -> list[str]:
     """Phrasen, die im kleingeschriebenen Text an Wortgrenzen stehen."""
     return [p for p in phrases if re.search(rf"(?<!\w){re.escape(p)}(?!\w)", low)]
+
+
+def _phrase_spans(phrases: tuple[str, ...] | list[str], low: str) -> list[str]:
+    """Wie ``phrase_hits``, aber überlappende Treffer zählen einmal, der längste gewinnt
+    („für jede firma“ ist ein Befund, nicht „jede firma“ und „für jede“)."""
+    taken: list[tuple[int, int]] = []
+    out: list[str] = []
+    for p in sorted(phrases, key=len, reverse=True):
+        for m in re.finditer(rf"(?<!\w){re.escape(p)}(?!\w)", low):
+            if any(m.start() < e and s0 < m.end() for s0, e in taken):
+                continue
+            taken.append((m.start(), m.end()))
+            if p not in out:
+                out.append(p)
+    return [p for p in phrases if p in out]
+
+
+def _without_idioms(low: str) -> str:
+    for idiom in IMMER_IDIOMS:
+        low = re.sub(rf"(?<!\w){re.escape(idiom)}(?!\w)", " ", low)
+    return low
+
+
+def text_sentences(text: str) -> list[str]:
+    """Sätze nach ``dach_nlp.sentence_end_kind`` (Regel v2, nur Satzzeichen): „z. B.“ und „am 3. Mai“ trennen
+    nicht. Der Web-Port nutzt ``sentenceEndKind`` aus apps/web/lib/transcript/sentences.ts."""
+    toks = text.split()
+    words = [{"text": t, "start": 0.0, "end": 0.0} for t in toks]
+    out, cur = [], []
+    for i, t in enumerate(toks):
+        cur.append(t)
+        if dach_nlp.sentence_end_kind(words, i, rule="v2") != "none":
+            out.append(" ".join(cur))
+            cur = []
+    if cur:
+        out.append(" ".join(cur))
+    return out
 
 
 def _unit_label(unit: str | None) -> str:
@@ -305,14 +414,14 @@ def _scope_issues(low_hook: str, clip_text: str) -> list[tuple[str, str]]:
     """(Verallgemeinerer, Einschränker) für Befunde zum Geltungsbereich.
 
     Kein Befund, wenn der Hook selbst einschränkt oder wenn der Clip den Verallgemeinerer in einem Satz
-    ohne Einschränker selbst sagt."""
+    ohne Einschränker selbst sagt. „immer mehr“, „immer wieder“, „immer noch“, „wie immer“ verallgemeinern
+    nicht."""
     restrictors = phrase_hits(RESTRICTORS, clip_text.lower())
     if not restrictors or phrase_hits(RESTRICTORS, low_hook):
         return []
-    sentences = [x.lower() for x in _CLIP_SENTENCE.split(" ".join(clip_text.split())) if x.strip()]
-    hits = phrase_hits(GENERALIZERS, low_hook)
+    sentences = [_without_idioms(x.lower()) for x in text_sentences(clip_text)]
     out = []
-    for gen in [g for g in hits if not any(g != o and g in o for o in hits)]:
+    for gen in _phrase_spans(GENERALIZERS, _without_idioms(low_hook)):
         if any(phrase_hits([gen], x) and not phrase_hits(RESTRICTORS, x) for x in sentences):
             continue
         out.append((gen, restrictors[0]))
@@ -339,10 +448,15 @@ def hook_claim_check_v2(
             issues.append(f"Zahl '{h.raw}' ist im Clip unsicher erkannt und darf nicht in den Hook (am Audio prüfen)")
         elif not _covered(h, clip_mentions, low_words):
             issues.append(f"Zahl '{h.raw}'{_unit_label(h.unit)} steht so nicht im Clip")
+        elif _direction_conflict(h, clip_mentions):
+            issues.append(f"Zahl '{h.raw}': der Hook sagt mehr, als der Clip trägt (Richtung umgekehrt)")
     for word in unrecognized_number_words(hook_text):
         issues.append(f"Zahlwort '{word}' nicht erkannt, am Clip prüfen")
-    low_hook, low_clip = hook_text.lower(), clip_text.lower()
-    scope = _scope_issues(low_hook, clip_text)
+    for word in quantity_words(hook_text):
+        if not any(_same_stem(word.lower(), w) for w in low_words):
+            issues.append(f"Mengenwort '{word}' steht so nicht im Clip")
+    low_hook, low_clip = _without_idioms(hook_text.lower()), _without_idioms(clip_text.lower())
+    scope = _scope_issues(hook_text.lower(), clip_text)
     scoped = {gen for gen, _ in scope}
     for sup in SUPERLATIVES:
         if sup not in scoped and phrase_hits([sup], low_hook) and not phrase_hits([sup], low_clip):
@@ -353,28 +467,41 @@ def hook_claim_check_v2(
 
 
 UNCERTAIN_CONTEXT_WORDS = 3  # Zahl, Multiplikator, Einheit
+UNCERTAIN_WINDOW = 2  # unsicherer Multiplikator oder unsichere Einheit macht die Zahl bis zwei Wörter davor unsicher
+
+
+def _is_number_word(text: str) -> bool:
+    mentions = number_mentions(text)
+    return bool(mentions) and text.strip().startswith(mentions[0].raw)
 
 
 def uncertain_number_tokens(words: list[dict], threshold: float | None = None) -> list[str]:
-    """Zahlen, deren ASR-Sicherheit (``prob``) unter der Schwelle liegt: je Wort die Wortfolge ab der Zahl
+    """Zahlen, deren ASR-Sicherheit (``prob``) unter der Schwelle liegt: je Zahl die Wortfolge ab der Zahl
     (damit „40 Tausend Euro“ als 40.000 gelesen wird) und die Rohform allein.
 
-    Schwelle ist ``transcribe.LOW_CONF_THRESHOLD`` (dieselbe, die ``confidence_stats`` zählt). Wörter ohne
-    ``prob`` gelten als sicher."""
+    Unsicher ist eine Zahl auch, wenn ihr Multiplikator oder ihre Einheit im Fenster von zwei Wörtern
+    unsicher erkannt ist („40 Tausend“ mit unsicherem „Tausend“). Schwelle ist
+    ``transcribe.LOW_CONF_THRESHOLD``. Wörter ohne ``prob`` gelten als sicher."""
     if threshold is None:
         from .transcribe import LOW_CONF_THRESHOLD
 
         threshold = LOW_CONF_THRESHOLD
-    out: list[str] = []
+    texts = [str(w.get("text", "")) for w in words]
+    numbers: list[int] = []
     for i, w in enumerate(words):
         prob = w.get("prob")
         if prob is None or float(prob) >= threshold:
             continue
-        context = " ".join(str(x.get("text", "")) for x in words[i : i + UNCERTAIN_CONTEXT_WORDS])
-        mentions = number_mentions(context)
-        if not mentions or not context.startswith(mentions[0].raw):
-            continue
-        for tok in (context, str(w.get("text", ""))):
+        key = _word_key(texts[i])
+        if key in MULTIPLIERS or key in UNIT_WORDS or texts[i] in ("%", "€"):
+            for j in range(max(0, i - UNCERTAIN_WINDOW), min(len(words), i + UNCERTAIN_WINDOW + 1)):
+                if j != i and _word_key(texts[j]) not in MULTIPLIERS and _is_number_word(" ".join(texts[j : j + UNCERTAIN_CONTEXT_WORDS])):
+                    numbers.append(j)
+        elif _is_number_word(" ".join(texts[i : i + UNCERTAIN_CONTEXT_WORDS])):
+            numbers.append(i)
+    out: list[str] = []
+    for j in sorted(set(numbers)):
+        for tok in (" ".join(texts[j : j + UNCERTAIN_CONTEXT_WORDS]), texts[j]):
             if tok not in out and number_mentions(tok):
                 out.append(tok)
     return out
@@ -400,6 +527,9 @@ __all__ = [
     "number_values",
     "parse_number_word",
     "phrase_hits",
+    "quantity_words",
+    "starts_with_contrast",
+    "text_sentences",
     "uncertain_number_tokens",
     "unrecognized_number_words",
 ]

@@ -89,9 +89,12 @@ def test_no_bracket_across_a_speaker_change():
 
 
 def test_participle_and_infinitive_shapes():
-    for w in ("gemacht", "angefangen", "verkauft", "gegessen", "erzählt", "funktioniert"):
+    for w in (
+        "gemacht", "angefangen", "verkauft", "gegessen", "erzählt", "funktioniert", "vorbereitet", "überzeugt",
+        "unterschrieben", "anerkannt", "zubereitet", "bekommen", "verloren", "vergessen", "getan",
+    ):  # fmt: skip
         assert dach_nlp.is_participle(w), w
-    for w in ("Gemacht", "gegen", "gestern", "genau", "geht"):
+    for w in ("Gemacht", "gegen", "gestern", "genau", "geht", "insgesamt", "bestimmt", "bereit", "bekannt", "überhaupt", "derzeit"):
         assert not dach_nlp.is_participle(w), w
     for w in ("machen", "ändern", "sammeln"):
         assert dach_nlp.is_infinitive(w), w
@@ -155,3 +158,62 @@ def test_policy_v2_lists_are_the_lists_of_the_code():
 def test_policy_lists_feed_the_heuristic():
     left, right = split("Wir fangen morgen an.", 3)
     assert dach_nlp.bracket_heuristic(left, right, particles=("los",))["open"] is False
+
+
+# -- Nacharbeit AP3: Abkürzungen im Satz (N2) und Fehlalarme (N3) -----------------------------------
+
+OPEN_AT_CUT = [
+    ("Wir haben am 3. Oktober das Projekt", "gestartet."),
+    ("Wir haben mit Dr. Müller", "gesprochen."),
+    ("Wir haben z. B. das Team", "umgebaut."),
+    ("Ich bin gestern", "angekommen."),
+    ("Wir haben alles", "vorbereitet."),
+    ("Ich bin", "überzeugt."),
+    ("Er hat den Vertrag", "unterschrieben."),
+    ("Wir haben einen großen", "Fehler gemacht."),
+    ("Wir haben die Unterlagen", "bekommen."),
+    ("Ich habe den Schlüssel", "verloren."),
+    ("Wir haben das", "getan."),
+    ("Das hat bestimmt", "Gründe gehabt."),
+]
+# Sätze, die an der Grenze zu Ende sind. Davon darf die Heuristik keinen als offen melden.
+CLOSED_AT_CUT = [
+    ("Das ist teuer", "Und wir wachsen."),
+    ("Er hat recht", "Die Kunden warten."),
+    ("Als Gründer kennt man das Problem", "Jeder hat es."),
+    ("Damit sind wir am Ziel", "Jetzt kommt der zweite Teil."),
+    ("Das ist gut", "Wir haben gestern gesprochen."),
+    ("Das war ein Jahr", "mit besonderen Herausforderungen."),
+    ("Wir haben das gemacht", "Heute läuft es gut."),
+    ("Das ist insgesamt", "Ein gutes Ergebnis."),
+    ("Die Firma ist bekannt", "Viele kennen sie."),
+    ("Wir sind bereit", "Jetzt geht es los."),
+    ("Die Kunden sind zufrieden", "Wir verkaufen mehr."),
+    ("Ich war gestern", "in Wien und habe dort Kunden getroffen."),
+    ("Wir haben drei Standorte", "in Österreich und zwei in der Schweiz."),
+    ("Das Team ist klein", "aber wir schaffen viel."),
+    ("Wir sind ein kleiner Betrieb", "mit verschiedenen Kunden."),
+    ("Er ist Gründer", "und hat viel erlebt."),
+    ("Sie hat zwei Kinder", "Beide gehen zur Schule."),
+]
+
+
+def _cut(left: str, right: str) -> dict:
+    w = words(f"{left} {right}")
+    n = len(left.split())
+    return dach_nlp.bracket_heuristic(w[:n], w[n:])
+
+
+@pytest.mark.parametrize(("left", "right"), OPEN_AT_CUT, ids=[f"{a} | {b}" for a, b in OPEN_AT_CUT])
+def test_open_bracket_is_found(left, right):
+    assert _cut(left, right)["open"] is True
+
+
+@pytest.mark.parametrize(("left", "right"), CLOSED_AT_CUT, ids=[f"{a} | {b}" for a, b in CLOSED_AT_CUT])
+def test_closed_sentence_is_no_false_alarm(left, right):
+    assert _cut(left, right)["open"] is False
+
+
+def test_abbreviation_does_not_end_the_clause_for_signal_b():
+    assert _cut("Ich weiß, dass wir am 3. Oktober das Projekt", "starten.")["signal"] == "subordinate_clause"
+    assert _cut("Damit sind wir am Ziel", "Jetzt kommt mehr.")["open"] is False

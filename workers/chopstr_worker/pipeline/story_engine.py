@@ -378,10 +378,30 @@ def _sentence_rule(pol: editorial.Policy | None = None) -> str:
     return editorial.sentence_rule(pol) if pol is not None else "v1"
 
 
+def _cut_args(words: list[dict], pol: editorial.Policy | None = None) -> dict[str, Any]:
+    """Regel und Satzlängengrenze für Schnittentscheidungen, wie bei der Zerlegung: unter v2 mit
+    ``dach_nlp.resolve_sentence_rule`` (kaum Satzzeichen ergibt ``v1_fallback_no_punct``)."""
+    pol = pol or _active_policy()
+    rule = _sentence_rule(pol)
+    if rule == "v1" or pol is None:
+        return {"rule": rule}
+    max_s, max_words = editorial.sentence_limits(pol)
+    return {"rule": dach_nlp.resolve_sentence_rule(words, rule), "max_s": max_s, "max_words": max_words}
+
+
 def _verb_bracket_method(cfg: dict) -> str:
+    if not cfg["active"]:
+        return "off"
     if dach_nlp.nlp() is not None:
         return "spacy"
     return "heuristic" if cfg["fallback"] == "heuristic" else "off"
+
+
+def nlp_status_for(pol: editorial.Policy | None) -> str:
+    """Wie die Verbklammer unter dieser Richtlinie geprüft wird: ``spacy``, ``heuristic`` oder ``off``;
+    leer ohne Abschnitt ``verb_bracket`` (Fassung 1, dann bleibt der Bericht byte-gleich)."""
+    cfg = editorial.verb_bracket_settings(pol) if pol is not None else None
+    return _verb_bracket_method(cfg) if cfg is not None else ""
 
 
 def _verb_bracket_gate(words: list[dict], sents: list[Sentence], first: int, last: int) -> dict:
@@ -406,7 +426,7 @@ def _verb_bracket_gate(words: list[dict], sents: list[Sentence], first: int, las
             "method": "off",
         }
     _span, a, b = _span_words(words, sents, first, last)
-    rule = _sentence_rule(pol)
+    rule = _cut_args(words, pol)["rule"]
     problems = []
     for label, cut in (("Anfang", a), ("Ende", b + 1)):
         res = dach_nlp.bracket_open_at_cut(words, cut, rule=rule, fallback=cfg["fallback"], lists=cfg["lists"])
@@ -476,23 +496,24 @@ def _satzgrenzen_gate(words: list[dict], sents: list[Sentence], first: int, last
     dieselbe Entscheidung wie die Zerlegung (``dach_nlp.cut_boundary_kind``). Satzzeichen und
     Sprecherwechsel gelten (nicht nach Komma: Einwurf des Gegenübers), ein angenommener Pause-Kandidat
     gilt mit dem Hinweis „Grenze nur aus Pause"."""
-    rule = _sentence_rule()
-    if rule == "v1":
+    pol = _active_policy()
+    if _sentence_rule(pol) == "v1":
         return _satzgrenzen_gate_v1(words, sents, first, last)
+    args = _cut_args(words, pol)
     _span, a, b = _span_words(words, sents, first, last)
     if a > len(words) - 1 or b > len(words) - 1 or a > b:
         return {"passed": True, "detail": "Abschnitt nicht prüfbar"}
     probleme, nur_pause = [], []
     if a > 0:
-        kind = dach_nlp.cut_boundary_kind(words, a - 1, rule)
+        kind = dach_nlp.cut_boundary_kind(words, a - 1, **args)
         if kind == "none":
             probleme.append(f"fängt mitten im Satz an, davor steht \u201e{words[a - 1].get('text') or ''}\u201c")
-        elif kind == "pause_candidate":
+        elif kind in ("pause_candidate", "length_cap"):
             nur_pause.append("Anfang")
-    kind = dach_nlp.cut_boundary_kind(words, b, rule)
+    kind = dach_nlp.cut_boundary_kind(words, b, **args)
     if kind == "none":
         probleme.append(f"endet mitten im Satz auf \u201e{words[b].get('text') or ''}\u201c")
-    elif kind == "pause_candidate":
+    elif kind in ("pause_candidate", "length_cap"):
         nur_pause.append("Ende")
     if probleme:
         return {"passed": False, "detail": "; ".join(probleme)}
@@ -751,7 +772,10 @@ def kontext_verlaengern(
     # AP2 (nur mit implementation.sentence_rule): nie auf einem Satz enden, der mit einem Marker aus
     # ausstieg.abschwaechung_marker beginnt. Befund 6: genau dort endete die Heilung bisher.
     marker = _qualification_markers(pol) if editorial.never_end_on_qualification(pol) else ()
-    uebersprungen: list[int] = []
+    # AP2: geheilt heisst, die Tore des Endes und die Verbklammer bestehen. standalone gehoert nicht
+    # dazu, es beruht auf der Rubrik vor der Heilung und wird nach der Neubewertung frisch geprueft.
+    required = (*ENDE_TORE, "verb_bracket") if editorial.context_front(pol) is not None else None
+    skipped: list[int] = []
     ende0 = sents[last].end
     for ziel in range(last + 1, min(last + max_saetze, len(sents) - 1) + 1):
         gewonnen = sents[ziel].end - ende0
@@ -766,9 +790,10 @@ def kontext_verlaengern(
         if _length_reason(neu_dauer, mit_zugabe=True):
             break
         g = deterministic_gates(words, sents, first, ziel, rubric)
-        if all(bool(x.get("passed")) for x in g.values()):
+        relevant = g.values() if required is None else [g[k] for k in required if k in g]
+        if all(bool(x.get("passed")) for x in relevant):
             if marker and _starts_with_marker(sents[ziel].text, marker):
-                uebersprungen.append(ziel)
+                skipped.append(ziel)
                 continue
             return ziel, {
                 "saetze": ziel - last,
@@ -776,12 +801,12 @@ def kontext_verlaengern(
                 "behoben": kaputt,
                 "grund": "; ".join(str(gates[k].get("detail") or "") for k in kaputt),
             }
-    if uebersprungen:
+    if skipped:
         # Geheilt waere das Ende nur auf der Abschwaechung: verwerfen statt dort enden.
         return last, {
-            "verworfen": "ends_on_qualification",
-            "saetze": uebersprungen,
-            "grund": f"Heilung endete auf der Abschwächung „{sents[uebersprungen[0]].text.split()[0]}“",
+            "discarded": "ends_on_qualification",
+            "sentences": skipped,
+            "detail": f"Heilung endete auf der Abschwächung „{sents[skipped[0]].text.split()[0]}“",
         }
     return last, None
 
@@ -791,9 +816,29 @@ def _qualification_markers(pol: editorial.Policy) -> tuple[str, ...]:
 
 
 def _starts_with_marker(text: str, marker: tuple[str, ...]) -> bool:
-    """Beginnt der Satz mit einem Abschwächungsmarker (ganze Wörter, ohne Satzzeichen)?"""
-    toks = " ".join(t for t in (dach_nlp.core_token(x) for x in str(text or "").split()) if t)
-    return any(toks == m or toks.startswith(m + " ") for m in marker)
+    """Beginnt der Satz mit einem Abschwächungsmarker (ganze Wörter, ohne Satzzeichen)? Führende
+    Füllwörter zählen nicht („Äh, wobei …")."""
+    tokens = [t for t in (dach_nlp.core_token(x) for x in str(text or "").split()) if t]
+    while tokens and tokens[0] in dach_nlp.HARD_FILLERS:
+        tokens = tokens[1:]
+    joined = " ".join(tokens)
+    return any(joined == m or joined.startswith(m + " ") for m in marker)
+
+
+# Höflichkeitsform nach „Sie" am Satzanfang: Verb auf -en oder eine dieser Formen.
+_POLITE_VERB_FORMS = frozenset({"sind", "waren", "wären", "seid"})
+
+
+def _formal_address(words: list[dict], a: int) -> bool:
+    """„Sie haben …", „Sie können …" (förmliche Anrede) oder „Ihr …": kein Pronomen ohne Bezug."""
+    first_word = str(words[a].get("text") or "").strip()
+    token = dach_nlp.core_token(first_word)
+    if token == "ihr":
+        return True
+    if token != "sie" or not first_word[:1].isupper() or a + 1 >= len(words):
+        return False
+    following = dach_nlp.core_token(str(words[a + 1].get("text") or ""))
+    return following.endswith("en") or following in _POLITE_VERB_FORMS
 
 
 def start_defects(words: list[dict], sents: list[Sentence], idx: int, pol: editorial.Policy) -> list[str]:
@@ -805,16 +850,20 @@ def start_defects(words: list[dict], sents: list[Sentence], idx: int, pol: edito
     Pointen-Setup kommen mit AP4 und AP7."""
     a = sents[idx].word_range[0]
     einstieg = pol.einstieg
-    rule = _sentence_rule(pol)
+    args = _cut_args(words, pol)
     out: list[str] = []
-    if a > 0 and einstieg.get("nie_mitten_im_satz", True) and dach_nlp.cut_boundary_kind(words, a - 1, rule) == "none":
+    if a > 0 and einstieg.get("nie_mitten_im_satz", True) and dach_nlp.cut_boundary_kind(words, a - 1, **args) == "none":
         out.append(f"Anfang mitten im Satz, davor steht „{words[a - 1].get('text') or ''}“")
-    erstes = str(words[a].get("text") or "") if a < len(words) else ""
-    if einstieg.get("keine_pronomen_ohne_bezug") and dach_nlp.core_token(erstes) in set(einstieg.get("pronomen") or ()):
-        out.append(f"Pronomen ohne Bezug am Anfang („{erstes}“)")
+    first_word = str(words[a].get("text") or "") if a < len(words) else ""
+    if (
+        einstieg.get("keine_pronomen_ohne_bezug")
+        and dach_nlp.core_token(first_word) in set(einstieg.get("pronomen") or ())
+        and not _formal_address(words, a)
+    ):
+        out.append(f"Pronomen ohne Bezug am Anfang („{first_word}“)")
     cfg = editorial.verb_bracket_settings(pol)
     if a > 0 and cfg is not None and cfg["active"]:
-        res = dach_nlp.bracket_open_at_cut(words, a, rule=rule, fallback=cfg["fallback"], lists=cfg["lists"])
+        res = dach_nlp.bracket_open_at_cut(words, a, rule=args["rule"], fallback=cfg["fallback"], lists=cfg["lists"])
         if res["open"]:
             out.append(f"Verbklammer am Anfang: {res['detail']}")
     return out
@@ -833,28 +882,35 @@ def heal_start(
 
     Höchstens ``laenge.context_front_sentences`` Sätze und ``laenge.context_front_s`` Sekunden, beide
     Grenzen gelten, und die harte Obergrenze plus Zugabe gilt auch hier. Nur gegen einen benannten
-    Mangel aus ``start_defects``; ohne Mangel bleibt der Anfang. Zurück kommt der neue erste Satz und
-    eine Notiz: ``{"geheilt": True, ...}`` oder ``{"geheilt": False, "maengel": [...]}``, wenn der
-    Mangel innerhalb der Grenzen bleibt (der Aufrufer verwirft dann). Ohne AP2 (Fassung 1 oder
-    Schalter aus) ``(first, None)``. ``rubric`` bleibt unberührt; die Neubewertung macht der Aufrufer."""
+    Mangel aus ``start_defects``; ohne Mangel bleibt der Anfang. Ein Satz eines anderen Sprechers wird
+    nie vorangestellt (``einstieg.keine_gastgeberfrage``). Zurück kommt der neue erste Satz und eine
+    Notiz: ``{"healed": True, "sentences", "seconds", "defects"}`` oder ``{"healed": False, "defects"}``,
+    wenn der Mangel innerhalb der Grenzen bleibt (der Aufrufer stuft dann über das Tor ``standalone``
+    herab). Ohne AP2 (Fassung 1 oder Schalter aus) oder mit Grenze 0 ``(first, None)``. ``rubric``
+    bleibt unberührt; die Neubewertung macht der Aufrufer."""
     pol = pol or _active_policy()
     limits = editorial.context_front(pol) if pol is not None else None
     if limits is None or first <= 0:
         return first, None
-    maengel = start_defects(words, sents, first, pol)
-    if not maengel:
+    max_sentences, max_s = limits
+    if max_sentences <= 0 or max_s <= 0:
         return first, None
-    max_saetze, max_s = limits
-    start0 = sents[first].start
-    for ziel in range(first - 1, max(-1, first - max_saetze - 1), -1):
-        gewonnen = start0 - sents[ziel].start
-        if gewonnen > max_s:
+    defects = start_defects(words, sents, first, pol)
+    if not defects:
+        return first, None
+    same_speaker = bool(pol.einstieg.get("keine_gastgeberfrage"))
+    start = sents[first].start
+    for before in range(first - 1, max(-1, first - max_sentences - 1), -1):
+        gained = start - sents[before].start
+        if gained > max_s:
             break
-        if _length_reason(sents[last].end - sents[ziel].start, mit_zugabe=True) == "too_long":
+        if same_speaker and sents[before].speaker != sents[first].speaker:
             break
-        if not start_defects(words, sents, ziel, pol):
-            return ziel, {"geheilt": True, "saetze": first - ziel, "sekunden": round(gewonnen, 2), "behoben": maengel}
-    return first, {"geheilt": False, "maengel": maengel}
+        if _length_reason(sents[last].end - sents[before].start, mit_zugabe=True) == "too_long":
+            break
+        if not start_defects(words, sents, before, pol):
+            return before, {"healed": True, "sentences": first - before, "seconds": round(gained, 2), "defects": defects}
+    return first, {"healed": False, "defects": defects}
 
 
 def evaluate_span(
@@ -876,39 +932,39 @@ def evaluate_span(
     pol_ = editorial.load()
     # AP2 (Fassung 2 mit implementation.sentence_rule): erst den Anfang heilen, wie das Ende.
     ap2 = editorial.context_front(pol_) is not None
-    anfang = None
+    start_note = None
     if ap2:
-        first, anfang = heal_start(words, sents, first, last, r, pol_)
-        if anfang is not None and not anfang.get("geheilt"):
-            return {
-                "reason": "start_not_healed", "first_sent": first, "last_sent": last,
-                "duration_s": round(_duration(sents, first, last), 2), "detail": "; ".join(anfang["maengel"]),
-            }  # fmt: skip
+        # Nicht heilbar heisst nicht verwerfen: das Tor standalone reisst (unten), select_best verwirft
+        # wie bei jedem anderen Tor, und der Grund bleibt sichtbar.
+        first, start_note = heal_start(words, sents, first, last, r, pol_)
     # Erst das Ende heilen, dann die Laenge pruefen. Andersherum faellt ein Clip wegen einer Laenge
     # durch, die er nach der Heilung gar nicht mehr haette, oder er besteht mit einem Ende, das
     # mitten im Satz abbricht.
     last, zugabe = kontext_verlaengern(words, sents, first, last, r)
-    if zugabe is not None and zugabe.get("verworfen"):
+    if zugabe is not None and zugabe.get("discarded"):
         return {
-            "reason": str(zugabe["verworfen"]), "first_sent": first, "last_sent": last,
-            "duration_s": round(_duration(sents, first, last), 2), "detail": str(zugabe.get("grund") or ""),
+            "reason": str(zugabe["discarded"]), "first_sent": first, "last_sent": last,
+            "duration_s": round(_duration(sents, first, last), 2), "detail": str(zugabe.get("detail") or ""),
         }  # fmt: skip
-    if ap2 and (anfang is not None or zugabe is not None):
-        # Nach jeder Heilung genau eine Neubewertung: die Rubrik beschreibt sonst eine Spanne, die es
-        # nicht mehr gibt (RESEARCH-CLIPPING-KERN Abschnitt 2, weitere Befunde).
-        vorher = {
+    start_healed = bool(start_note and start_note.get("healed"))
+    heal_rounds = int(start_healed) + int(zugabe is not None)
+    if ap2 and heal_rounds:
+        # Nach der Heilung (vorn, hinten oder beides) genau eine Neubewertung: die Rubrik beschreibt
+        # sonst eine Spanne, die es nicht mehr gibt (RESEARCH-CLIPPING-KERN Abschnitt 2, weitere Befunde).
+        before = {
             "first_sent": int(r["first_sent"]), "last_sent": int(r["last_sent"]),
             "rubric_points": dict(r.get("rubric_points") or {}), "total": r.get("total"),
             "scores": {k: r.get(k) for k in SCORE_KEYS},
         }  # fmt: skip
-        neu = story_score.score(sents[first : last + 1], brief, llm)
-        neu.update(first_sent=first, last_sent=last, start=sents[first].start, end=sents[last].end)
-        if r.get("repair_failed"):
-            neu["repair_failed"] = True
-        neu["pre_heal_scores"] = vorher
-        r = neu
+        rescored = story_score.score(sents[first : last + 1], brief, llm)
+        rescored.update(first_sent=first, last_sent=last, start=sents[first].start, end=sents[last].end)
+        # Gilt die neue Spanne als nicht eigenständig, ist die Reparatur gescheitert, egal wie die
+        # Bewertung davor ausfiel.
+        rescored["repair_failed"] = not rescored.get("gate_passed", True)
+        rescored["pre_heal_scores"] = before
+        r = rescored
     dur = _duration(sents, first, last)
-    reason = _length_reason(dur, mit_zugabe=zugabe is not None or anfang is not None)
+    reason = _length_reason(dur, mit_zugabe=zugabe is not None or start_healed)
     if reason:
         return {
             "reason": reason + ("_after_repair" if (first, last) != (first0, last0) else ""),
@@ -939,6 +995,12 @@ def evaluate_span(
             struktur = "payoff_first"
     scores = {k: int(max(0, min(10, int(r.get(k, 0) or 0)))) for k in SCORE_KEYS}
     gates = deterministic_gates(words, sents, first, last, r)
+    if start_note is not None and not start_note.get("healed"):
+        gates["standalone"] = {
+            "passed": False,
+            "detail": "Anfang nicht heilbar: " + "; ".join(start_note["defects"]),
+            "reason": "start_not_healed",
+        }
     if zugabe is not None:
         r["kontext_zugabe"] = zugabe
     flags = later_qualifications(sents, first, last, llm)
@@ -982,9 +1044,10 @@ def evaluate_span(
     }
     if ap2:
         # Nur Fassung 2 mit AP2; unter Fassung 1 bleibt die Rubrik byte-gleich.
-        rubric["sentence_rule"] = _sentence_rule(pol_)
-        rubric["start_heal"] = anfang
+        rubric["sentence_rule"] = _cut_args(words, pol_)["rule"]
+        rubric["start_heal"] = start_note
         rubric["pre_heal_scores"] = r.get("pre_heal_scores")
+        rubric["heal_rounds"] = heal_rounds
     gate_passed = all(bool(g["passed"]) for g in gates.values())
     # Die Begründung nennt die Plattform der Clips (``analyze.clip_platform``); ohne sie das Briefing.
     platform = str(brief.get("clip_platform") or brief.get("platform") or "linkedin")
@@ -1087,8 +1150,13 @@ def run(
     # Fassung 1: Zerlegung wie vor AP2. Mit AP2 gilt die sentence_idx der Transkriptversion, damit Worker
     # und Web dieselben Saetze sehen; nur ohne sie wird nach der neuen Regel zerlegt.
     pol = _active_policy()
-    rule = _sentence_rule(pol)
-    sents = sentences_from_words(words) if rule == "v1" else (sentences_from_annotated(words) or sentences_from_words(words, rule=rule))
+    if _sentence_rule(pol) == "v1":
+        sents = sentences_from_words(words)
+    else:
+        args = _cut_args(words, pol)
+        sents = sentences_from_annotated(words) or sentences_from_words(
+            words, rule=args["rule"], max_s=args["max_s"], max_words=args["max_words"]
+        )
     chapters = chapterize(sents, CHAPTER_SECONDS)
     order = chapter_order(chapters, seeds_from_heat(heat_payload))
     report = DetectReport(
@@ -1099,9 +1167,7 @@ def run(
         provider=llm.provider,
         weights=weights,
     )
-    cfg = editorial.verb_bracket_settings(pol) if pol is not None else None
-    if cfg is not None:
-        report.nlp_status = _verb_bracket_method(cfg)
+    report.nlp_status = nlp_status_for(pol)
     raw: list[CandidateResult] = []
     seen: set[tuple[int, int]] = set()
     for done, (_i, chapter, _has_seed) in enumerate(order, start=1):
@@ -1160,6 +1226,7 @@ __all__ = [
     "deterministic_gates",
     "evaluate_span",
     "heal_start",
+    "nlp_status_for",
     "kontext_verlaengern",
     "start_defects",
     "later_qualifications",

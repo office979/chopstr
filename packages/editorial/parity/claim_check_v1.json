@@ -342,6 +342,111 @@
       "clip_text": "Wir hatten eine Million Euro Umsatz.",
       "uncertain_tokens": [],
       "expected_issues": []
+    },
+    {
+      "id": "geltungsbereich_abkuerzung_im_satz",
+      "note": "Satzzerlegung wie dach_nlp: „z. B.“ trennt nicht, Einschränker und Verallgemeinerer im selben Satz",
+      "hook": "Das gilt für alle",
+      "clip_text": "Bei uns z. B. gilt das für alle.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Geltungsbereich: 'für alle' im Hook, der Clip schränkt ein ('bei uns')"
+      ]
+    },
+    {
+      "id": "geltungsbereich_ordinal_im_satz",
+      "note": "Satzzerlegung wie dach_nlp: „3. Mai“ trennt nicht",
+      "hook": "Das gilt für alle",
+      "clip_text": "Bei uns, also am 3. Mai, galt das für alle.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Geltungsbereich: 'für alle' im Hook, der Clip schränkt ein ('bei uns')"
+      ]
+    },
+    {
+      "id": "immer_mehr_ist_kein_verallgemeinerer",
+      "note": "„immer mehr“ verallgemeinert nicht",
+      "hook": "Immer mehr Kunden",
+      "clip_text": "Bei uns kommen immer mehr Kunden.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "wie_immer_ist_keine_zuspitzung",
+      "note": "„wie immer“ ist keine Zuspitzung",
+      "hook": "Wie immer pünktlich",
+      "clip_text": "Wir waren pünktlich.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "mengenwort_ohne_ziffer",
+      "note": "„Millionen“ ohne Zahl und nicht im Clip ist ein Befund",
+      "hook": "Millionen Kunden",
+      "clip_text": "Wir haben viele Kunden.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Mengenwort 'Millionen' steht so nicht im Clip"
+      ]
+    },
+    {
+      "id": "mengenwort_im_clip",
+      "note": "Mengenwort, das der Clip selbst sagt, ist gedeckt",
+      "hook": "Millionen Kunden",
+      "clip_text": "Millionen Kunden nutzen das.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "dutzende",
+      "note": "„Dutzende“ ohne Zahl ist ein Befund",
+      "hook": "Dutzende Anfragen",
+      "clip_text": "Wir hatten einige Anfragen.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Mengenwort 'Dutzende' steht so nicht im Clip"
+      ]
+    },
+    {
+      "id": "ein_befund_fuer_jede_firma",
+      "note": "„für jede Firma“ ergibt einen Befund, nicht zwei",
+      "hook": "Das gilt für jede Firma",
+      "clip_text": "Bei uns gilt das.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Geltungsbereich: 'jede firma' im Hook, der Clip schränkt ein ('bei uns')"
+      ]
+    },
+    {
+      "id": "richtung_umgekehrt",
+      "note": "„Über 40 Prozent“ gegen „Fast 40 %“ ist ein Befund",
+      "hook": "Über 40 Prozent sparen",
+      "clip_text": "Fast 40 % sparen wir.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Zahl '40': der Hook sagt mehr, als der Clip trägt (Richtung umgekehrt)"
+      ]
+    },
+    {
+      "id": "richtung_gleich",
+      "note": "„Fast 40 Prozent“ gegen „fast 40 %“ ist gedeckt",
+      "hook": "Fast 40 Prozent",
+      "clip_text": "Wir sparen fast 40 % im Jahr.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "unsicherer_multiplikator",
+      "note": "Unsicherer Multiplikator macht die Zahl unsicher",
+      "hook": "40.000 Euro gespart",
+      "clip_text": "Rund 40 Tausend Euro gespart.",
+      "uncertain_tokens": [
+        "40 Tausend Euro",
+        "40"
+      ],
+      "expected_issues": [
+        "Zahl '40.000' ist im Clip unsicher erkannt und darf nicht in den Hook (am Audio prüfen)"
+      ]
     }
   ]
 }

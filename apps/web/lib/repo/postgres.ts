@@ -37,7 +37,7 @@ import type {
   WorkspaceMember,
   Zeitmarke,
 } from "@/lib/repo/types";
-import { sentencesFromWords } from "@/lib/transcript/sentences";
+import { sentenceRuleFromStats, sentencesFromWords } from "@/lib/transcript/sentences";
 import { buildRevision, isRevisionError } from "@/lib/candidates/revise";
 import { aspectFor } from "@/lib/clips/presets";
 import { adLabelFor, lintProfileFrom } from "@/lib/clips/render-demo";
@@ -840,10 +840,12 @@ export const postgresRepo: Repo = {
       const prevRows = await tx`select * from candidates where id = ${id}`;
       if (!prevRows.length) return null;
       const prev = toCandidate(prevRows[0] as Row);
-      const tr = await tx`select words from transcripts_current where source_id = ${prev.source_id}`;
+      const tr = await tx`select words, stats from transcripts_current where source_id = ${prev.source_id}`;
       if (!tr.length) throw new Error("Kein Transkript vorhanden");
       const words = jsonValue<TranscriptVersion["words"]>((tr[0] as Row).words, []);
-      const revision = buildRevision(prev, sentencesFromWords(words), input);
+      const stats = jsonValue<TranscriptVersion["stats"]>((tr[0] as Row).stats, {} as TranscriptVersion["stats"]);
+      const rule = sentenceRuleFromStats(stats);
+      const revision = buildRevision(prev, sentencesFromWords(words, rule), input, { words, rule });
       if (isRevisionError(revision)) throw new Error(revision.error);
       const rows = await tx`
         insert into candidates (

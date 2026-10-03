@@ -10,7 +10,7 @@ Vertragsversion: `candidates_v1`
 | Spalte | Inhalt |
 |---|---|
 | `id`, `source_id`, `version` | Version zählt pro Kandidat hoch, wenn Grenzen im Review geändert werden (neue Zeile mit gleicher `first_sent`-Herkunft in `rubric.parent_id`). |
-| `segments` | `[{ "start": 812.4, "end": 861.0, "role": "body" }]` in Abspielreihenfolge. Phase 2 liefert genau ein `body`-Segment; Teaser (`role: "teaser"`) kommen in Phase 3. |
+| `segments` | `[{ "start": 812.4, "end": 861.0, "role": "body" }]` in Abspielreihenfolge, Originalzeit. Ein `body`-Segment, davor optional ein Teaser (`role: "teaser"`, höchstens 6 s, ein Satz aus dem Body, `structure = payoff_first`, `rubric.teaser_satz`), wenn `compose.Composition.validate` ihn annimmt. `start_s`/`end_s` beschreiben nur den Body. |
 | `start_s`, `end_s` | Erstes Segment-Start, letztes Segment-Ende (Sekunden im Original). |
 | `first_sent`, `last_sent` | Satzindizes (aus `segment.sentences_from_words` über das aktuelle Transkript). |
 | `structure` | eine von `payoff_first`, `tension_first`, `hook_build_payoff`, `decision_story`, `how_to_list`, `loop`. |
@@ -18,8 +18,8 @@ Vertragsversion: `candidates_v1`
 | `gates` | siehe unten. |
 | `story_graph_flags` | Liste, siehe unten. |
 | `risk_flags` | Liste von Strings: `humor`, `sensitive_topic`, `claim`, `ad`, `heuristic_only`. |
-| `total` | gewichteter Score 0 bis 10 (`hook 0.30, payoff 0.25, specificity 0.20, tension 0.15, audience_fit 0.10`; Gewichte aus `brand_profiles.learned_weights` können überschreiben). |
-| `gate_passed` | alle Pflichtkriterien erfüllt. |
+| `total` | Gesamtwert auf der Skala der Richtlinie (`story_engine.policy_total`): `Policy.gesamtwert(rubric_points)` über sieben Kriterien zu je 0 bis 2, also nominal 0 bis 14, mal `(1 - laenge_abzug)`, danach Klang-Faktor (mit Heatmap bis 16,1 möglich). Kein Wert auf 0 bis 10. Die fünf alten Schlüssel in `rubric.scores` (0 bis 10) und die Gewichte aus `brand_profiles.learned_weights` gehen nicht in `total` ein. |
+| `gate_passed` | alle Pflichtkriterien erfüllt. `story_engine.select_best` verwirft jeden Kandidaten mit gerissenem Tor (Grund `gate` in `report.discarded`), deshalb schreibt der Worker nur Zeilen mit `gate_passed = true`. `false` entsteht nur durch eine Revision in der Web-App. |
 | `why` | ein Satz Klartext, z. B. „Kernaussage in 38 Sekunden vollständig, Einstieg mit klarer Gegenposition, keine spätere Relativierung gefunden, passt für LinkedIn.“ |
 | `model_id`, `prompt_version` | z. B. `eu.anthropic...` und `score_clip_v1`; Heuristik ohne Sprachmodell (Provider `local-heuristic`, nur Entwicklung und Demo): `model_id = "heuristic-v1"`, `prompt_version` bleibt gesetzt (der Heuristik-Provider liest den gerenderten Prompt), `risk_flags` enthält `heuristic_only`. |
 | `human_verdict` | `accepted`, `rejected`, `edited` oder null. `verdict_reason`, `verdict_by`, `verdict_at`. |
@@ -50,6 +50,23 @@ Vertragsversion: `candidates_v1`
   "parent_id": null
 }
 ```
+
+### Additive Rubrik-Schlüssel aus dem ClipCandidate (`clip_candidate_v1`)
+
+Vorgesehen für AP8, noch nicht verdrahtet: `clip_candidate.compact_for_rubric` liefert diese Schlüssel
+zusätzlich zur bestehenden Rubrik. Keiner der obigen Schlüssel ändert sich; wer sie nicht kennt,
+ignoriert sie. Inhalt und Null-Regeln stehen in `packages/schema/CLIP_CANDIDATE.md`.
+
+| Schlüssel | Inhalt |
+|---|---|
+| `versions` | `{ "contract": "clip_candidate_v1", "model_version", "prompt_version" (alle gepinnten Prompts), "policy_version" }` |
+| `decision` | `accept` oder `reject` |
+| `decision_reason` | Grund der Entscheidung, nie leer |
+| `quality_gate_results` | die fünf Tore wie in `gates` |
+| `editorial_subscores` | `{ "scale_max", "values" }` mit den sieben Kriterien der Richtlinie, nicht messbare Werte `null` |
+| `assessment_uncertainties` | Liste `{ "kind", "detail", "word_id", "text", "prob" }`, etwa unsicher erkannte Zahlen und Namen |
+| `removed_spans` | Entfernungen im Clip, heute leer |
+| `calibration` | `uncalibrated` |
 
 ## `gates`
 

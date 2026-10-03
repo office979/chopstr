@@ -180,7 +180,13 @@ def propose_moments(user: str) -> dict:
     bis ``gut_von_s``, und nie über ``gut_bis_s`` hinaus. Was ``hart_min_s`` nicht erreicht, wird
     nicht vorgeschlagen: kürzer ist als Clip unbrauchbar, und die Grundlage verbietet nur das
     Unterdrücken von Bewertungen, nicht das Zuschneiden eines Vorschlags.
+
+    Mit ``propose_moments_v2`` (Kapitel zwischen ``<chapter>`` und ``</chapter>``, AP5) gilt stattdessen
+    ``_propose_moments_v2``: deterministische Suche aus ``payoff_search`` statt der Anker.
     """
+    chapter = _chapter_block(user)
+    if chapter is not None:
+        return _propose_moments_v2(chapter)
     sents = parse_numbered(user)
     if not sents:
         return {"moments": []}
@@ -300,15 +306,32 @@ def _standalone(m: _Merkmale, p: editorial.Policy) -> float:
     Satzanfang, Rückverweis irgendwo im Text, Einleitungsfloskel, Frage eines anderen Sprechers.
     Ein Clip, der mit „Er ist ja offensichtlich …“ beginnt, verliert hier; „Krankschreibungen werden
     massiv missbraucht.“ verliert nichts.
+
+    Ab Fassung 2 (Abschnitt ``gates``) gilt für Pronomen und Rückverweis dieselbe Regel wie das Gate
+    (``editorial_gates.unresolved_pronoun`` und ``back_reference``); ist ein Gate dort abgeschaltet, gilt
+    für diesen Teil die Regel aus Fassung 1. Die Bildverweise aus ``REFERENCE_PHRASES`` zählen weiter.
     """
+    from .pipeline import editorial_gates
+
     ein = p.einstieg
     a = 1.0
     erstes_wort = re.sub(r"[^\wäöüß]", "", m.first_low.split()[0]) if m.first_low.split() else ""
-    if ein.get("keine_pronomen_ohne_bezug") and erstes_wort in {x.lower() for x in ein.get("pronomen", [])}:
+    pronomen = ein.get("keine_pronomen_ohne_bezug") and erstes_wort in {x.lower() for x in ein.get("pronomen", [])}
+    verweis = any(r in m.low for r in REFERENCE_PHRASES)
+    gates = editorial.gates_settings(p)
+    if gates is not None:
+        words, sents = editorial_gates.from_sentence_texts(m.sents)
+        last = len(sents) - 1
+        if gates["enabled"]["unresolved_pronoun"] and sents:
+            gate = editorial_gates.unresolved_pronoun(words, sents, 0, last, p)
+            pronomen = ein.get("keine_pronomen_ohne_bezug") and not gate["passed"]
+        if gates["enabled"]["back_reference"] and sents:
+            verweis = verweis or not editorial_gates.back_reference(words, sents, 0, last, p)["passed"]
+    if pronomen:
         a -= 0.40
     if m.first_low.startswith(CONTEXT_STARTS):
         a -= 0.35
-    if any(r in m.low for r in REFERENCE_PHRASES):
+    if verweis:
         a -= 0.25
     if ein.get("einleitungen_kappen") and any(f in m.first_low for f in ein.get("einleitungsfloskeln", [])):
         a -= 0.15
@@ -590,20 +613,26 @@ def write_hooks(user: str) -> dict:
     """Fünf Hook-Varianten aus Satzanfängen, erster Zahl und Kontrastmarker des Clips. Keine neuen Zahlen.
 
     Mit ``hooks_v2`` (Clip zwischen Begrenzern, Fassung 2, AP6a): keine eigenen Rahmungen, jede Variante ist
-    ein wörtlicher Auszug aus dem Clip (ganzer Satz oder bis zu einer gültigen Phrasengrenze, siehe
-    ``copy_engine.verbatim_excerpt``), möglichst je Muster ein anderer Satz. Mit ``hooks_v1`` wie bisher."""
+    ein ganzer Originalsatz aus dem Clip (mit ``hook.allow_partial_opening`` auch ein geschlossener Teilsatz,
+    siehe ``copy_engine.sentence_hook``), möglichst je Muster ein anderer Satz. Mit ``hooks_v1`` wie bisher."""
     open_at, close_at = user.find("<clip>"), user.rfind("</clip>")
     if open_at >= 0 and close_at > open_at:
         from .pipeline import copy_engine
 
         clip_v2 = user[open_at + len("<clip>") : close_at]
-        sents = [" ".join(t) for t in copy_engine.clip_sentences(clip_v2) if not copy_engine.is_meta_speech(" ".join(t))]
+        partial = copy_engine.allow_partial_opening()
+        sents = [
+            " ".join(t)
+            for i, t in enumerate(copy_engine.clip_sentences(clip_v2))
+            if not copy_engine.is_meta_speech(" ".join(t))
+            and (i == 0 or dach_nlp.core_token(t[0]) not in copy_engine.ANAPHORIC_STARTS)
+        ]
         excerpts = {}
         for x in sents or [clip_v2.strip() or "-"]:
             toks = x.split()
-            onscreen = copy_engine.verbatim_excerpt(toks, ONSCREEN_MAX_WORDS)
+            onscreen = copy_engine.sentence_hook(toks, ONSCREEN_MAX_WORDS, partial)
             if onscreen is not None:
-                excerpts[x] = (copy_engine.verbatim_excerpt(toks, SPOKEN_MAX_WORDS) or x, onscreen)
+                excerpts[x] = (copy_engine.sentence_hook(toks, SPOKEN_MAX_WORDS, partial) or x, onscreen)
         if not excerpts:
             first = sents[0] if sents else clip_v2.strip() or "-"
             excerpts[first] = (first, first)
@@ -690,8 +719,114 @@ def write_post_caption(user: str) -> dict:
     return {"text": text, "cta": cta}
 
 
+# -- AP5: propose_moments_v2 und episode_overview ----------------------------------------------------
+def _chapter_block(user: str) -> str | None:
+    """Kapiteltext zwischen ``<chapter>`` und ``</chapter>`` (Prompts ab ``propose_moments_v2``), sonst ``None``."""
+    open_at, close_at = user.find("<chapter>"), user.rfind("</chapter>")
+    if open_at < 0 or close_at <= open_at:
+        return None
+    return user[open_at + len("<chapter>") : close_at]
+
+
+def _timed(sents: list[dict]) -> list[dict]:
+    """Sätze mit geschätzten Zeiten (``WORDS_PER_SECOND``), weil der Prompt keine Zeiten enthält."""
+    out, t = [], 0.0
+    for s in sents:
+        end = t + estimate_seconds([s])
+        out.append({**s, "start": t, "end": end})
+        t = end
+    return out
+
+
+def _propose_moments_v2(chapter: str) -> dict:
+    """Vorschläge aus ``payoff_search.search_moments``: Payoff zuerst, Einstieg zuerst, Abgleich.
+
+    Zeiten sind aus der Wortzahl geschätzt. ``viewer_promise`` und ``central_idea`` kann die Heuristik
+    nicht formulieren, sie bleiben ``null``. Schwaches Material ergibt keinen Vorschlag."""
+    from .pipeline import payoff_search
+
+    sents = parse_numbered(chapter)
+    if not sents:
+        return {"moments": []}
+    found = payoff_search.search_moments(_timed(sents), policy())
+    moments = []
+    for prop in found["proposals"]:
+        span = [s for s in sents if prop["first_sent"] <= s["idx"] <= prop["last_sent"]]
+        reasons = [f"Payoff in Satz {prop['payoff_sent']} ({prop['payoff_type']})", f"Einstieg in Satz {prop['opening_sent']}"]
+        if prop["hook_type"]:
+            reasons.append(f"Hook-Typ {prop['hook_type']}")
+        reasons.append(f"Richtung {prop['direction']}")
+        reasons.append(f"geschätzt {round(estimate_seconds(span))} Sekunden")
+        moments.append(
+            {
+                "first_sent": prop["first_sent"],
+                "last_sent": prop["last_sent"],
+                "structure": _structure_for(span),
+                "why": "Heuristik ohne Sprachmodell: " + ", ".join(reasons) + ".",
+                "payoff_sent": prop["payoff_sent"],
+                "opening_sent": prop["opening_sent"],
+                "required_context_sents": prop["required_context_sents"],
+                "narrative_type": prop["narrative_type"],
+                "viewer_promise": None,
+                "central_idea": None,
+                "direction": prop["direction"],
+            }
+        )
+    return {"moments": moments}
+
+
+def episode_overview(user: str) -> dict:
+    """Übersicht eines Kapitels aus Markern, gekennzeichnet mit ``heuristic: true``.
+
+    Bekannt sind Sprecher (ohne Rolle), Behauptungen (Payoffs aus ``payoff_search.find_payoffs``),
+    Belege (``moment_typen.zahl``, „zum Beispiel“), Einwände (``moment_typen.konflikt``), Einschränkungen
+    (``ausstieg.abschwaechung_marker``) und Korrekturen (``search.hook_type_markers.self_correction``,
+    ``moment_typen.gestaendnis``). Unbekannt und deshalb ``null``: Themen, Rollen, Zusammenfassungen,
+    worauf sich ein Beleg, Einwand oder eine Korrektur bezieht, und die Abhängigkeitsketten."""
+    from .pipeline import payoff_search
+
+    chapter = _chapter_block(user)
+    sents = parse_numbered(user if chapter is None else chapter)
+    p = policy()
+    cfg = editorial.search_settings(p)
+    typen = {t.schluessel: t for t in p.moment_typen}
+    abschwaechung = [str(m).lower() for m in p.ausstieg.get("abschwaechung_marker") or ()]
+    korrektur = list(cfg["hook_type_markers"]["self_correction"]) if cfg else []
+    korrektur += list(typen["gestaendnis"].marker) if "gestaendnis" in typen else []
+    konflikt = typen["konflikt"].marker if "konflikt" in typen else ()
+
+    speakers: dict[str, list[int]] = {}
+    evidence, objections, limitations, corrections = [], [], [], []
+    for s in sents:
+        low = s["text"].lower()
+        speakers.setdefault(s["speaker"], []).append(s["idx"])
+        if ("zahl" in typen and typen["zahl"].trifft(low)) or "zum beispiel" in low:
+            evidence.append({"sent": s["idx"], "supports_sent": None})
+        if any(m in low for m in konflikt):
+            objections.append({"sent": s["idx"], "against_sent": None})
+        if any(re.search(rf"(?<!\w){re.escape(m)}(?!\w)", low) for m in abschwaechung):
+            limitations.append({"sent": s["idx"], "limits_sent": None})
+        if any(m in low for m in korrektur):
+            corrections.append({"sent": s["idx"], "corrects_sent": None})
+    claims = None
+    if cfg is not None and sents:
+        claims = [{"sent": h["payoff_sent"], "summary": None} for h in payoff_search.find_payoffs(_timed(sents), p)]
+    return {
+        "topics": None,
+        "speakers": [{"speaker": k, "role": None, "sents": v} for k, v in speakers.items()],
+        "claims": claims,
+        "evidence": evidence,
+        "objections": objections,
+        "limitations": limitations,
+        "corrections": corrections,
+        "dependencies": None,
+        "heuristic": True,
+    }
+
+
 HANDLERS = {
     "propose_moments": propose_moments,
+    "episode_overview": episode_overview,
     "score_clip": score_clip,
     "confirm_qualification": confirm_qualification,
     "write_hooks": write_hooks,
@@ -722,6 +857,7 @@ __all__ = [
     "answer",
     "clip_text_of",
     "confirm_qualification",
+    "episode_overview",
     "estimate_seconds",
     "parse_numbered",
     "policy",

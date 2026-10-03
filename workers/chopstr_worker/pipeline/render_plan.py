@@ -17,6 +17,7 @@ import hashlib
 import json
 from typing import Any
 
+from .. import editorial
 from . import captions_de, reframe
 
 CONTRACT = "render_plan_v1"
@@ -205,6 +206,8 @@ def build_plan(
     zeitmarken: list[dict] | None = None,
     effekte: list[dict] | None = None,
     musik: dict[str, Any] | None = None,
+    composition: dict[str, Any] | None = None,
+    policy: editorial.Policy | None = None,
 ) -> dict[str, Any]:
     """Baut den Plan. ``caption_preset`` ist das Basis-Preset (Name oder 1080x1920-Objekt), die Skalierung passiert hier.
     ``sources`` erwartet ``storage_key``, ``transcript_version``, ``hook_version``, ``candidate_id``.
@@ -212,7 +215,12 @@ def build_plan(
     ``caption_text_field`` (``text`` | ``text_norm``) wählt die Wortform der Captions (Schweizerdeutsch-Beta).
     ``zeitmarken`` sind die Bildausschnitt-Entscheidungen von Hand, in Quellzeit. Sie stecken zwar
     schon über die Einstellungen im Plan, stehen aber zusätzlich unverändert darin: nur so kann die
-    Oberfläche sagen, ob das gebaute Video noch zu den gesetzten Marken passt."""
+    Oberfläche sagen, ob das gebaute Video noch zu den gesetzten Marken passt.
+    ``composition`` ist das Ergebnis von ``trim_plan.build_composition`` (AP7): unter Fassung 2
+    (``policy`` oder die aktive) ist ``filler_cuts`` dann true, wenn die Komposition lokale Schnitte
+    hat (``local_cuts`` größer null). Unter Fassung 1 bleibt ``filler_cuts`` der übergebene Wert."""
+    if composition is not None and (policy if policy is not None else editorial.load()).version >= 2:
+        filler_cuts = int(composition.get("local_cuts") or 0) > 0
     aspect = aspect or aspect_for_platform(platform)
     out_w, out_h = output_size(aspect)
     fps = float(src_fps) if src_fps else DEFAULT_FPS

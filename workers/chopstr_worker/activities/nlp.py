@@ -60,9 +60,17 @@ def run(ctx: common.Context, source_id: str, asr_key: str | None = None, diar_ke
         asr_variant = str(asr_doc.get("variant") or src.get("asr_variant") or "de")
         ch = dialect["variant"] == "de-CH" or asr_variant == "de-CH"
         # Satzende-Regel aus der aktiven Richtlinie (AP2): v1 wie bisher, v2 nur mit implementation.sentence_rule.
-        sentence_rule = editorial.sentence_rule(editorial.load())
+        # Unter v2 mit kaum Satzzeichen gilt v1 (``v1_fallback_no_punct``, steht so in stats).
+        policy = editorial.load()
+        sentence_rule = dach_nlp.resolve_sentence_rule(words, editorial.sentence_rule(policy))
+        max_s, max_words = editorial.sentence_limits(policy)
         dach_nlp.annotate(
-            words, protected_terms=src.get("protected_terms") or [], dialect="de-CH" if ch else None, rule=sentence_rule
+            words,
+            protected_terms=src.get("protected_terms") or [],
+            dialect="de-CH" if ch else None,
+            rule=sentence_rule,
+            max_s=max_s,
+            max_words=max_words,
         )
         common.heartbeat("annotated")
 

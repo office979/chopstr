@@ -16,9 +16,11 @@ export interface Sentence {
  * packages/editorial/parity/sentence_end_v1.json hält Worker und Web gleich (tests/satzende.test.ts).
  * Regel v1: Satzzeichen (Abkürzungen, Ordinal- und Dezimalzahlen), jede Pause ab 0,7 s, Sprecherwechsel.
  * Regel v2: Satzzeichen zuerst (Auslassungspunkte zählen nicht), Sprecherwechsel ist Grenze, eine Pause
- * nur Grenzkandidat mit großgeschriebenem Folgewort und ohne offene Klammer. */
-export type SentenceRule = "v1" | "v2";
-export type SentenceEndKind = "punct" | "speaker_change" | "pause_candidate" | "end_of_text" | "none";
+ * nur Grenzkandidat mit großgeschriebenem Folgewort und ohne offene Klammer; ab 25 s oder 40 Wörtern
+ * die nächste Pause ohne offene Klammer, sonst die längste Pause bis zur doppelten Grenze.
+ * v1_fallback_no_punct: Regel v2 bei kaum Satzzeichen, entscheidet wie v1 mit der Längengrenze. */
+export type SentenceRule = "v1" | "v2" | "v1_fallback_no_punct";
+export type SentenceEndKind = "punct" | "speaker_change" | "pause_candidate" | "length_cap" | "end_of_text" | "none";
 
 export interface WordLike {
   text: string;
@@ -26,6 +28,11 @@ export interface WordLike {
   end: number;
   speaker?: string | null;
 }
+
+export const FALLBACK_NO_PUNCT = "v1_fallback_no_punct";
+export const MAX_SENTENCE_S = 25;
+export const MAX_SENTENCE_WORDS = 40;
+const WORDS_PER_PUNCT_MIN = 40;
 
 const ABBREVIATIONS = new Set([
   "z", "b", "z.b", "zb", "bzw", "ca", "usw", "etc", "vgl", "dr", "prof", "nr", "st", "mio", "mrd", "tsd",
@@ -68,29 +75,50 @@ const PARTICLE_SET = new Set(VERB_PARTICLES);
 const SUBORDINATOR_SET = new Set(SUBORDINATORS);
 const AUXILIARY_SET = new Set(AUXILIARY_FORMS);
 const PAUSE_OPEN_END_WORDS = new Set([
-  "ein", "eine", "einen", "einem", "einer", "eines", "des",
+  "ein", "eine", "einen", "einem", "einer", "eines", "des", "der", "dem", "den",
   "bei", "von", "zum", "zur", "für", "gegen", "ohne", "in", "im", "ins", "am", "ans", "beim", "vom",
-  "seit", "zwischen", "hinter", "neben", "wegen", "trotz", "aufs", "fürs",
+  "seit", "zwischen", "hinter", "neben", "wegen", "trotz", "aufs", "fürs", "bis",
   ...SUBORDINATORS,
+]);
+const NOT_PARTICIPLE = new Set([
+  "insgesamt", "bestimmt", "bereit", "bekannt", "gestern", "überhaupt", "derzeit", "beliebt", "verschieden",
 ]);
 const NOT_INFINITIVE = new Set([
   "einen", "keinen", "meinen", "deinen", "seinen", "ihren", "unseren", "euren", "diesen", "jenen",
   "welchen", "allen", "vielen", "wenigen", "anderen", "eben", "neben", "gegen", "wegen", "oben",
   "unten", "morgen", "denen", "deren", "ihnen", "seiten", "trotzdem", "zusammen", "dafür",
   "stattdessen", "indessen", "unterdessen", "währenddessen", "deswegen", "weswegen", "übrigen",
+  "gestern", "selten", "innen", "außen", "hinten", "vorn", "vorne", "drinnen", "draußen",
 ]);
 const DETERMINERS_E = new Set([
   "die", "eine", "keine", "meine", "deine", "seine", "ihre", "unsere", "eure", "diese", "jene", "welche",
   "alle", "viele", "manche", "einige", "beide",
 ]);
-const PARTICIPLE = /^(?:[a-zäöüß]*ge[a-zäöüß]{3,}(?:t|en)|(?:be|ver|er|ent|zer|emp|miss)[a-zäöüß]{3,}t|[a-zäöüß]{3,}iert)$/;
+const NEW_SENTENCE_STARTERS = new Set([
+  "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "und", "aber",
+  "oder", "denn", "doch", "jetzt", "dann", "heute", "jeder", "jede", "jedes", "ich", "du", "er", "sie",
+  "es", "wir", "man", "so", "also", "deshalb", "deswegen", "da", "hier", "dort", "was", "wer", "wie",
+  "wo", "warum", "seitdem", "danach", "außerdem", "trotzdem", "allerdings", "wobei", "nein", "ja",
+  "genau", "okay", "gut", "dieser", "diese", "dieses", "unser", "unsere", "mein", "meine", "kein",
+  "keine", "niemand", "alle", "viele",
+]);
+const PERSONAL_PRONOUNS = new Set(["ich", "du", "er", "sie", "es", "wir", "ihr", "man"]);
+const PARTICIPLE = new RegExp(
+  "^(?:" +
+    "[a-zäöüß]*ge[a-zäöüß]{3,}(?:t|en)" +
+    "|(?:vor|an|zu|auf|ab|aus|ein|nach|mit)?(?:be|ver|er|ent|zer|emp|miss)[a-zäöüß]{3,}(?:t|en)" +
+    "|(?:über|unter|wider|hinter|voll)[a-zäöüß]{3,}(?:t|en)" +
+    "|[a-zäöüß]{3,}iert" +
+    "|getan" +
+    ")$",
+);
 const INFINITIVE = /^[a-zäöüß]{2,}(?:en|ern|eln)$/;
 const VERB_LIKE = /^[a-zäöüß]{2,}(?:e|st|t|en|ern|eln|te|ten)$/;
 const TRAILING_CHARS = "\"'»«“”‘’)]}…";
 const CLOSERS = "\"'»«“”‘’)]}";
 const LEADING_CHARS = "\"'„»«“”‘’([{";
-const TERMINAL = [".", "!", "?"];
-const CLAUSE_PUNCT = [".", "!", "?", ",", ";", ":"];
+const OPEN_CLAUSE = [",", ";", ":"];
+const CLAUSE_END = [",", ";", ":", ".", "!", "?"];
 const ORDINAL = /^\d{1,3}\.$/;
 const MIN_PAUSE_S = 0.7;
 const BRACKET_MAX_WORDS = 40;
@@ -124,6 +152,10 @@ function wordText(w: WordLike): string {
   return String(w.text ?? "").trim();
 }
 
+function baseRule(rule: SentenceRule): "v1" | "v2" {
+  return rule === "v2" ? "v2" : "v1";
+}
+
 function isLowerChar(c: string): boolean {
   return c.length > 0 && c.toLowerCase() === c && c.toUpperCase() !== c;
 }
@@ -145,10 +177,10 @@ function isAbbreviation(text: string, rule: SentenceRule = "v1"): boolean {
   if (!t.endsWith(".")) return false;
   const base = t.slice(0, -1).toLowerCase().replace(/ /g, "");
   if (!base) return false;
-  const abbreviations = rule === "v1" ? ABBREVIATIONS : ABBREVIATIONS_V2;
+  const abbreviations = rule === "v2" ? ABBREVIATIONS_V2 : ABBREVIATIONS;
   if (abbreviations.has(base)) return true;
   const parts = base.split(".").filter(Boolean);
-  if (rule !== "v1" && parts.length < 2) return false;
+  if (rule === "v2" && parts.length < 2) return false;
   return parts.length > 0 && parts.every((p) => abbreviations.has(p) || p.length === 1);
 }
 
@@ -165,11 +197,25 @@ function hasTerminalPunct(text: string, rule: SentenceRule = "v2"): boolean {
   if (endsWithEllipsis(text)) return false;
   const stripped = stripTrailing(text);
   if (stripped.endsWith("!") || stripped.endsWith("?")) return true;
-  return stripped.endsWith(".") && !isOrdinal(stripped) && !isAbbreviation(stripped, rule);
+  return stripped.endsWith(".") && !isOrdinal(stripped) && !isAbbreviation(stripped, baseRule(rule));
+}
+
+function endsOpenClause(text: string): boolean {
+  return endsWithAny(rstripChars(text, CLOSERS), OPEN_CLAUSE);
+}
+
+function endsClause(text: string): boolean {
+  return endsWithAny(rstripChars(text, CLOSERS), CLAUSE_END);
+}
+
+function isNounLike(w: WordLike): boolean {
+  const t = wordText(w);
+  return isUpper(t) && !NEW_SENTENCE_STARTERS.has(coreToken(t));
 }
 
 export function isParticiple(text: string): boolean {
-  return isLower(text) && PARTICIPLE.test(coreToken(text));
+  const tok = coreToken(text);
+  return isLower(text) && !NOT_PARTICIPLE.has(tok) && PARTICIPLE.test(tok);
 }
 
 export function isInfinitive(text: string): boolean {
@@ -177,11 +223,17 @@ export function isInfinitive(text: string): boolean {
   return isLower(text) && !NOT_INFINITIVE.has(tok) && INFINITIVE.test(tok);
 }
 
-function clause<T extends WordLike>(words: T[], seps: string[]): T[] {
+function adjectiveBeforeNoun(seq: WordLike[], k: number): boolean {
+  if (k + 1 >= seq.length || endsClause(wordText(seq[k]))) return false;
+  const tok = coreToken(wordText(seq[k]));
+  return ["e", "en", "er", "es", "em"].some((e) => tok.endsWith(e)) && isNounLike(seq[k + 1]);
+}
+
+function clause<T extends WordLike>(words: T[], clauseLevel: boolean): T[] {
   let start = 0;
   for (let j = 0; j < words.length - 1; j += 1) {
     const t = wordText(words[j]);
-    if (endsWithAny(stripTrailing(t), seps) || endsWithAny(t, seps)) start = j + 1;
+    if (hasTerminalPunct(t) || (clauseLevel && endsOpenClause(t))) start = j + 1;
   }
   return words.slice(start);
 }
@@ -206,16 +258,17 @@ export function bracketHeuristic(leftWords: WordLike[], rightWords: WordLike[]):
   if (ls !== null && rs !== null && ls !== rs) return closed;
   if (hasTerminalPunct(wordText(lw))) return closed;
 
-  const verbLike = (w: WordLike): boolean => {
-    const t = wordText(w);
+  const verbLike = (seq: WordLike[], k: number): boolean => {
+    const t = wordText(seq[k]);
     const tok = coreToken(t);
-    if (DETERMINERS_E.has(tok)) return false;
+    if (DETERMINERS_E.has(tok) || adjectiveBeforeNoun(seq, k)) return false;
     return AUXILIARY_SET.has(tok) || isParticiple(t) || (isLower(t) && VERB_LIKE.test(tok));
   };
 
   const r0 = wordText(rw);
-  if (isLower(r0) && PARTICLE_SET.has(coreToken(r0)) && endsWithAny(rstripChars(r0, CLOSERS), CLAUSE_PUNCT)) {
-    if (clause(left, TERMINAL).some(verbLike)) {
+  if (isLower(r0) && PARTICLE_SET.has(coreToken(r0)) && endsWithAny(rstripChars(r0, CLOSERS), CLAUSE_END)) {
+    const sentence = clause(left, false);
+    if (sentence.some((_w, k) => verbLike(sentence, k))) {
       return {
         open: true,
         signal: "separable_particle",
@@ -225,46 +278,74 @@ export function bracketHeuristic(leftWords: WordLike[], rightWords: WordLike[]):
     }
   }
 
-  if (!wordText(lw).endsWith(",")) {
-    const part = clause(left, CLAUSE_PUNCT);
-    const conn = part.map((w) => coreToken(wordText(w))).find((tok) => SUBORDINATOR_SET.has(tok));
-    if (conn && !verbLike(lw)) {
-      return {
-        open: true,
-        signal: "subordinate_clause",
-        detail: `Nebensatz mit „${conn}“ ohne Verb am Ende`,
-        available: "heuristic",
-      };
+  if (!endsOpenClause(wordText(lw))) {
+    const part = clause(left, true);
+    const at = part.findIndex((w) => SUBORDINATOR_SET.has(coreToken(wordText(w))));
+    if (at >= 0) {
+      let verbAfter = false;
+      for (let k = at + 1; k < part.length; k += 1) if (verbLike(part, k)) verbAfter = true;
+      if (!verbAfter) {
+        return {
+          open: true,
+          signal: "subordinate_clause",
+          detail: `Nebensatz mit „${coreToken(wordText(part[at]))}“ ohne Verb am Ende`,
+          available: "heuristic",
+        };
+      }
     }
   }
 
-  const sentence = clause(left, TERMINAL);
+  if (isUpper(r0) && NEW_SENTENCE_STARTERS.has(coreToken(r0))) return closed;
+  const sentence = clause(left, false);
   let auxAt = -1;
   sentence.forEach((w, k) => {
     if (AUXILIARY_SET.has(coreToken(wordText(w)))) auxAt = k;
   });
-  if (auxAt >= 0) {
-    const tail = sentence.slice(auxAt + 1);
-    const isClosed =
-      tail.some((w) => isParticiple(wordText(w))) || (tail.length > 0 && isInfinitive(wordText(tail[tail.length - 1])));
-    if (!isClosed) {
-      for (const w of right.slice(0, RIGHT_SCAN_WORDS)) {
-        const t = wordText(w);
-        if (AUXILIARY_SET.has(coreToken(t))) break;
-        const final = endsWithAny(rstripChars(t, CLOSERS), CLAUSE_PUNCT);
-        if (isParticiple(t) || (isInfinitive(t) && final)) {
-          return {
-            open: true,
-            signal: "auxiliary_bracket",
-            detail: `„${wordText(sentence[auxAt])}“ und „${coreToken(t)}“ gehören zusammen`,
-            available: "heuristic",
-          };
-        }
-        if (endsWithAny(rstripChars(t, CLOSERS), TERMINAL)) break;
+  if (auxAt < 0) return closed;
+  const joined = [...sentence, ...right.slice(0, 1)];
+  let isClosed = false;
+  for (let k = auxAt + 1; k < sentence.length; k += 1) {
+    if (isParticiple(wordText(sentence[k])) && !adjectiveBeforeNoun(joined, k)) isClosed = true;
+  }
+  const lastK = sentence.length - 1;
+  if (sentence.length > auxAt + 1 && isInfinitive(wordText(sentence[lastK])) && !adjectiveBeforeNoun(joined, lastK)) {
+    isClosed = true;
+  }
+  if (isClosed) return closed;
+  const scan = right.slice(0, RIGHT_SCAN_WORDS);
+  for (let k = 0; k < scan.length; k += 1) {
+    const t = wordText(scan[k]);
+    const tok = coreToken(t);
+    if (AUXILIARY_SET.has(tok)) break;
+    if (PERSONAL_PRONOUNS.has(tok) && k + 1 < scan.length && verbLike(scan, k + 1)) break;
+    if (!adjectiveBeforeNoun(scan, k)) {
+      const final = endsWithAny(rstripChars(t, CLOSERS), CLAUSE_END);
+      if (isParticiple(t) || (isInfinitive(t) && final)) {
+        return {
+          open: true,
+          signal: "auxiliary_bracket",
+          detail: `„${wordText(sentence[auxAt])}“ und „${tok}“ gehören zusammen`,
+          available: "heuristic",
+        };
       }
     }
+    if (hasTerminalPunct(t)) break;
   }
   return closed;
+}
+
+/* Port von dach_nlp.resolve_sentence_rule: unter v2 mit weniger als einem Satzzeichen je 40 Wörtern
+ * gilt v1 (v1_fallback_no_punct). */
+export function resolveSentenceRule(words: WordLike[], rule: SentenceRule): SentenceRule {
+  if (rule !== "v2" || words.length === 0) return rule;
+  const punct = words.filter((w) => hasTerminalPunct(wordText(w))).length;
+  return punct * WORDS_PER_PUNCT_MIN >= words.length ? "v2" : FALLBACK_NO_PUNCT;
+}
+
+/* Die Satzregel einer Transkriptversion aus stats.sentence_rule; ohne Angabe v1 (Stand vor AP2). */
+export function sentenceRuleFromStats(stats: { sentence_rule?: string | null } | null | undefined): SentenceRule {
+  const rule = stats?.sentence_rule;
+  return rule === "v2" || rule === FALLBACK_NO_PUNCT ? rule : "v1";
 }
 
 function runningSentence<T extends WordLike>(words: T[], i: number, rule: SentenceRule): T[] {
@@ -273,31 +354,45 @@ function runningSentence<T extends WordLike>(words: T[], i: number, rule: Senten
   return words.slice(a, i + 1);
 }
 
-/* Komma, Semikolon oder Doppelpunkt am Wort: der Teilsatz geht weiter. */
-function endsOpenClause(text: string): boolean {
-  return endsWithAny(rstripChars(text, CLOSERS), [",", ";", ":"]);
+function endsOpen(sentence: WordLike[]): boolean {
+  const tok = coreToken(wordText(sentence[sentence.length - 1]));
+  if (!PAUSE_OPEN_END_WORDS.has(tok)) return false;
+  if (tok === "ein") {
+    return !sentence.slice(0, -1).some((w) => {
+      const t = wordText(w);
+      const c = coreToken(t);
+      return !AUXILIARY_SET.has(c) && !DETERMINERS_E.has(c) && isLower(t) && VERB_LIKE.test(c);
+    });
+  }
+  return true;
 }
 
 function pauseBoundaryAccepted(words: WordLike[], i: number, rule: SentenceRule): boolean {
-  if (!isUpper(wordText(words[i + 1]))) return false;
-  if (endsOpenClause(wordText(words[i])) || PAUSE_OPEN_END_WORDS.has(coreToken(wordText(words[i])))) return false;
+  if (!isUpper(wordText(words[i + 1])) || endsOpenClause(wordText(words[i]))) return false;
   const left = runningSentence(words, i, rule);
-  const right = words.slice(i + 1, i + 1 + RIGHT_SCAN_WORDS);
-  return !bracketHeuristic(left, right).open;
+  if (endsOpen(left)) return false;
+  return !bracketHeuristic(left, words.slice(i + 1, i + 1 + RIGHT_SCAN_WORDS)).open;
 }
 
-/* Port von dach_nlp.sentence_end_kind. */
-export function sentenceEndKind(
-  words: WordLike[],
-  i: number,
-  rule: SentenceRule = "v2",
-  minPauseS: number = MIN_PAUSE_S,
-): SentenceEndKind {
+function gap(words: WordLike[], j: number): number {
+  return Number(words[j + 1].start ?? 0) - Number(words[j].end ?? 0);
+}
+
+/* Port von dach_nlp._mag_title: „Mag." (Magister) unter v2 nur vor großgeschriebenem Wort, ohne Pause,
+ * ohne Sprecherwechsel und nicht nach einem Personalpronomen („Ich mag." bleibt Satzende). */
+function magTitle(words: WordLike[], i: number, minPauseS: number): boolean {
+  if (lstripChars(wordText(words[i]), LEADING_CHARS).toLowerCase() !== "mag." || i + 1 >= words.length) return false;
+  const nxt = words[i + 1];
+  if (!isUpper(wordText(nxt)) || gap(words, i) >= minPauseS) return false;
+  if (nxt.speaker !== undefined && nxt.speaker !== null && nxt.speaker !== words[i].speaker) return false;
+  return !(i > 0 && PERSONAL_PRONOUNS.has(coreToken(wordText(words[i - 1]))));
+}
+
+function baseKind(words: WordLike[], i: number, rule: "v1" | "v2", minPauseS: number): SentenceEndKind {
   const w = words[i];
   const text = wordText(w);
   const nxt = words[i + 1];
   if (!nxt) return "end_of_text";
-  const pause = Number(nxt.start ?? 0) - Number(w.end ?? 0);
   const speakerChange = nxt.speaker !== undefined && nxt.speaker !== null && nxt.speaker !== w.speaker;
   const stripped = stripTrailing(text);
   if (rule === "v2" && endsWithEllipsis(text)) {
@@ -306,18 +401,130 @@ export function sentenceEndKind(
     return "punct";
   } else if (stripped.endsWith(".")) {
     const nextText = wordText(nxt);
-    if (!(isOrdinal(stripped) || /^\d/.test(nextText) || isAbbreviation(stripped, rule))) return "punct";
+    const title = rule === "v2" && magTitle(words, i, minPauseS);
+    if (!(isOrdinal(stripped) || /^\d/.test(nextText) || isAbbreviation(stripped, rule) || title)) return "punct";
   }
   if (speakerChange) return "speaker_change";
-  if (pause >= minPauseS && (rule === "v1" || pauseBoundaryAccepted(words, i, rule))) return "pause_candidate";
+  if (gap(words, i) >= minPauseS && (rule === "v1" || pauseBoundaryAccepted(words, i, rule))) return "pause_candidate";
   return "none";
+}
+
+function tooLong(words: WordLike[], start: number, j: number, maxS: number, maxWords: number): boolean {
+  return j - start + 1 >= maxWords || Number(words[j].end ?? 0) - Number(words[start].start ?? 0) >= maxS;
+}
+
+function softCandidate(words: WordLike[], start: number, j: number, minPauseS: number): boolean {
+  if (gap(words, j) < minPauseS) return false;
+  const left = words.slice(Math.max(start, j - BRACKET_MAX_WORDS + 1), j + 1);
+  if (endsOpen(left)) return false;
+  return !bracketHeuristic(left, words.slice(j + 1, j + 1 + RIGHT_SCAN_WORDS)).open;
+}
+
+/* Python rundet mit round(x, 2) (Banker-Rundung nur bei exakten Hälften, die bei Lücken praktisch nicht vorkommen). */
+function round2(x: number): number {
+  return Math.round(x * 100) / 100;
+}
+
+function lengthBreaks(
+  words: WordLike[],
+  h: number,
+  stop: number,
+  minPauseS: number,
+  maxS: number,
+  maxWords: number,
+): Map<number, SentenceEndKind> {
+  const out = new Map<number, SentenceEndKind>();
+  let start = h;
+  while (start < stop) {
+    let cap = -1;
+    for (let c = start; c <= stop; c += 1) {
+      if (tooLong(words, start, c, maxS, maxWords)) {
+        cap = c;
+        break;
+      }
+    }
+    if (cap < 0 || cap >= stop) break;
+    let windowEnd = stop;
+    for (let e = cap; e <= stop; e += 1) {
+      if (tooLong(words, start, e, 2 * maxS, 2 * maxWords)) {
+        windowEnd = e;
+        break;
+      }
+    }
+    const last = Math.min(windowEnd, stop - 1);
+    let k = -1;
+    for (let j = cap; j <= last; j += 1) {
+      if (softCandidate(words, start, j, minPauseS)) {
+        k = j;
+        break;
+      }
+    }
+    if (k >= 0) {
+      out.set(k, "pause_candidate");
+    } else if (windowEnd >= stop) {
+      break;
+    } else {
+      k = cap;
+      for (let j = cap + 1; j <= last; j += 1) if (round2(gap(words, j)) > round2(gap(words, k))) k = j;
+      out.set(k, "length_cap");
+    }
+    start = k + 1;
+  }
+  return out;
+}
+
+export interface SentenceLimits {
+  maxS?: number;
+  maxWords?: number;
+  minPauseS?: number;
+}
+
+/* Port von dach_nlp.sentence_end_kinds: alle Wörter in einem Durchgang. */
+export function sentenceEndKinds(words: WordLike[], rule: SentenceRule = "v2", limits: SentenceLimits = {}): SentenceEndKind[] {
+  const minPauseS = limits.minPauseS ?? MIN_PAUSE_S;
+  const base = baseRule(rule);
+  const kinds = words.map((_w, i) => baseKind(words, i, base, minPauseS));
+  if (rule === "v1") return kinds;
+  const maxS = limits.maxS ?? MAX_SENTENCE_S;
+  const maxWords = limits.maxWords ?? MAX_SENTENCE_WORDS;
+  let h = 0;
+  for (let i = 0; i < kinds.length; i += 1) {
+    if (kinds[i] === "none") continue;
+    for (const [j, kind] of lengthBreaks(words, h, i, minPauseS, maxS, maxWords)) kinds[j] = kind;
+    h = i + 1;
+  }
+  return kinds;
+}
+
+/* Port von dach_nlp.sentence_end_kind. */
+export function sentenceEndKind(
+  words: WordLike[],
+  i: number,
+  rule: SentenceRule = "v2",
+  limits: SentenceLimits = {},
+): SentenceEndKind {
+  const minPauseS = limits.minPauseS ?? MIN_PAUSE_S;
+  const base = baseRule(rule);
+  const kind = baseKind(words, i, base, minPauseS);
+  if (rule === "v1" || kind !== "none") return kind;
+  let h = i;
+  while (h > 0 && baseKind(words, h - 1, base, minPauseS) === "none") h -= 1;
+  let stop = i + 1;
+  while (baseKind(words, stop, base, minPauseS) === "none") stop += 1;
+  const breaks = lengthBreaks(words, h, stop, minPauseS, limits.maxS ?? MAX_SENTENCE_S, limits.maxWords ?? MAX_SENTENCE_WORDS);
+  return breaks.get(i) ?? "none";
 }
 
 /* Port von dach_nlp.cut_boundary_kind: für Schnitte (Satzgrenzen-Tor). Unter v2 gilt ein Sprecherwechsel
  * nach Komma, Semikolon oder Doppelpunkt nicht als Satzende (Einwurf des Gegenübers mitten im Satz). */
-export function cutBoundaryKind(words: WordLike[], i: number, rule: SentenceRule = "v2"): SentenceEndKind {
-  const kind = sentenceEndKind(words, i, rule);
-  if (rule !== "v1" && kind === "speaker_change" && endsOpenClause(wordText(words[i]))) return "none";
+export function cutBoundaryKind(
+  words: WordLike[],
+  i: number,
+  rule: SentenceRule = "v2",
+  limits: SentenceLimits = {},
+): SentenceEndKind {
+  const kind = sentenceEndKind(words, i, rule, limits);
+  if (rule === "v2" && kind === "speaker_change" && endsOpenClause(wordText(words[i]))) return "none";
   return kind;
 }
 
@@ -329,45 +536,38 @@ function hasSentenceIdx(words: TranscriptWord[]): boolean {
   return words.length > 0 && words.every((w) => typeof w.sentence_idx === "number");
 }
 
-/* Sätze aus sentence_idx; ohne sentence_idx Rückfall auf die Satzende-Regel ``rule`` (Standard v1,
- * wie der Worker unter Fassung 1; v2 ist der Port der neuen Regel). */
+/* Sätze aus sentence_idx, fortlaufend ab 0 nummeriert wie segment.sentences_from_annotated im Worker;
+ * ohne sentence_idx Rückfall auf die Satzende-Regel ``rule`` (Standard v1 wie unter Fassung 1; die Regel
+ * der Transkriptversion liefert sentenceRuleFromStats). */
 export function sentencesFromWords(words: TranscriptWord[], rule: SentenceRule = "v1"): Sentence[] {
   const out: Sentence[] = [];
+  const push = (start: number, i: number) => {
+    const chunk = words.slice(start, i + 1);
+    out.push({
+      idx: out.length,
+      text: chunk.map((w) => w.text).join(" "),
+      start: chunk[0].start,
+      end: chunk[chunk.length - 1].end,
+      speaker: chunk[0].speaker,
+      word_range: [start, i],
+    });
+  };
   if (!hasSentenceIdx(words)) {
+    const kinds = sentenceEndKinds(words, rule);
     let start = 0;
     for (let i = 0; i < words.length; i += 1) {
-      if (!isSentenceEnd(words, i, rule)) continue;
-      const chunk = words.slice(start, i + 1);
-      out.push({
-        idx: out.length,
-        text: chunk.map((w) => w.text).join(" "),
-        start: chunk[0].start,
-        end: chunk[chunk.length - 1].end,
-        speaker: chunk[0].speaker,
-        word_range: [start, i],
-      });
+      if (kinds[i] === "none") continue;
+      push(start, i);
       start = i + 1;
     }
     return out;
   }
-  let current: Sentence | null = null;
-  words.forEach((w, i) => {
-    if (current && current.idx === w.sentence_idx) {
-      current.text += ` ${w.text}`;
-      current.end = w.end;
-      current.word_range[1] = i;
-      return;
-    }
-    current = {
-      idx: w.sentence_idx,
-      text: w.text,
-      start: w.start,
-      end: w.end,
-      speaker: w.speaker,
-      word_range: [i, i],
-    };
-    out.push(current);
-  });
+  let start = 0;
+  for (let i = 0; i < words.length; i += 1) {
+    if (i + 1 < words.length && words[i + 1].sentence_idx === words[i].sentence_idx) continue;
+    push(start, i);
+    start = i + 1;
+  }
   return out;
 }
 

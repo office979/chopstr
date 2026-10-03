@@ -42,7 +42,7 @@ import {
   seedWorkspace,
 } from "@/lib/repo/seed";
 import { currentSession } from "@/lib/session";
-import { sentencesFromWords } from "@/lib/transcript/sentences";
+import { sentenceRuleFromStats, sentencesFromWords } from "@/lib/transcript/sentences";
 import { buildRevision, isRevisionError } from "@/lib/candidates/revise";
 import { aspectFor } from "@/lib/clips/presets";
 import { PLATFORM_LABELS, RENDER_STAGE_LABELS } from "@/lib/clips/labels";
@@ -667,7 +667,8 @@ export const demoRepo: Repo = {
     if (!prev) return null;
     const transcript = await this.getCurrentTranscript(prev.source_id);
     if (!transcript) throw new Error("Kein Transkript vorhanden");
-    const revision = buildRevision(prev, sentencesFromWords(transcript.words), input);
+    const rule = sentenceRuleFromStats(transcript.stats);
+    const revision = buildRevision(prev, sentencesFromWords(transcript.words, rule), input, { words: transcript.words, rule });
     if (isRevisionError(revision)) throw new Error(revision.error);
     const { userId: actorId } = await currentSession();
     const created: Candidate = { ...revision, id: uuid(), created_at: nowIso() };

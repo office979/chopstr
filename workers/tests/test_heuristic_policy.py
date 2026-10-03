@@ -288,3 +288,52 @@ def test_vorschlaege_nennen_den_moment_typ_in_der_begruendung(policy):
     for m in moments:
         assert m["why"].startswith("Heuristik ohne Sprachmodell")
         assert "Sekunden" in m["why"]
+
+
+# -- Fassung 2: gleiche Pronomen- und Rückverweisregel wie das Gate (AP4) ----------------------------------
+@pytest.fixture
+def policy_v2(monkeypatch):
+    from chopstr_worker.pipeline import dach_nlp
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    monkeypatch.setattr(dach_nlp, "nlp", lambda: None)
+    editorial.clear_cache()
+    yield editorial.load()
+    editorial.clear_cache()
+
+
+GATE_FAELLE = [
+    PRONOMEN_START,  # Treffer
+    "Sie hat dann jede Schicht selbst mitgemacht.",  # Treffer
+    AUFSCHLAG,  # kein Treffer
+    "Es gibt bei uns keine Nachtschicht mehr.",  # „Es“ ist Platzhalter
+    "Sie können morgen selbst ausprobieren, wie gut es läuft, glauben Sie mir!",  # Höflichkeitsform
+    "Frau Brenner kam aus der Gastronomie, und sie hatte nie ein Lager gesehen.",  # Bezug im Satz
+    "Ich sehe das anders.",  # Rückverweis
+    "Das ist genau der Punkt.",  # Rückverweis
+]
+
+
+@pytest.mark.parametrize("satz", GATE_FAELLE)
+def test_v2_standalone_folgt_den_gates(policy_v2, satz):
+    from chopstr_worker.pipeline import editorial_gates
+
+    words, sents = editorial_gates.from_sentence_texts([{"speaker": "SPEAKER_00", "text": satz}])
+    pronomen = not editorial_gates.unresolved_pronoun(words, sents, 0, 0, policy_v2)["passed"]
+    verweis = not editorial_gates.back_reference(words, sents, 0, 0, policy_v2)["passed"]
+    m = heuristic_llm._merkmale([{"idx": 0, "speaker": "SPEAKER_00", "text": satz}], policy_v2)
+    erwartet = 1.0 - (0.40 if pronomen else 0.0) - (0.25 if verweis else 0.0)
+    assert heuristic_llm._standalone(m, policy_v2) == pytest.approx(erwartet)
+
+
+def test_v2_hoeflichkeitsform_kostet_nicht_mehr_v1_bleibt(policy, policy_v2):
+    satz = [{"idx": 0, "speaker": "SPEAKER_00", "text": "Sie können morgen selbst ausprobieren, wie gut es läuft, glauben Sie mir!"}]
+    v1 = editorial.load(1)
+    assert heuristic_llm._standalone(heuristic_llm._merkmale(satz, v1), v1) == pytest.approx(0.60)
+    assert heuristic_llm._standalone(heuristic_llm._merkmale(satz, policy_v2), policy_v2) == pytest.approx(1.0)
+
+
+def test_v2_pronomen_kostet_weiter(policy_v2):
+    mit_pronomen = heuristic_llm.score_clip(_clip(REFERENZ_MEDIAN_S, PRONOMEN_START))
+    mit_aufschlag = heuristic_llm.score_clip(_clip(REFERENZ_MEDIAN_S, AUFSCHLAG))
+    assert mit_pronomen["rubrik"]["standalone"] < mit_aufschlag["rubrik"]["standalone"] == policy_v2.skala_max

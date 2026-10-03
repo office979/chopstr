@@ -1,6 +1,8 @@
 /* Claim-Check: Spiegel von workers/chopstr_worker/pipeline/fidelity.hook_claim_check.
  * Ein Hook darf keine Zahlen oder Zuspitzungen enthalten, die im Clip nicht vorkommen (UWG: Irreführung). */
 
+import { sentenceEndKind } from "@/lib/transcript/sentences";
+
 export const SUPERLATIVES = ["beste", "einzige", "garantiert", "immer", "100 %", "100%", "sofort", "heilt", "nie wieder", "jeder"];
 
 export function hookClaimCheck(hookText: string, clipText: string): string[] {
@@ -50,11 +52,23 @@ export const RESTRICTORS = [
   "bei uns", "bei mir", "bei einem kunden", "bei einer kundin", "in unserem fall", "in meinem fall",
   "in unserem betrieb", "für uns", "damals",
 ];
+const IMMER_IDIOMS = ["immer mehr", "immer wieder", "immer noch", "wie immer"];
+const QUANTITY_STEMS = ["million", "milliard", "dutzend"];
+const DIRECTION_UP = ["über", "mehr als", "mindestens", "ab"];
+const DIRECTION_DOWN = ["fast", "knapp", "unter", "höchstens", "weniger als", "beinahe"];
 
 export interface NumberMention {
   raw: string;
   value: number;
   unit: string | null;
+  direction: "up" | "down" | null;
+}
+
+function directionBefore(text: string, start: number): "up" | "down" | null {
+  const before = text.slice(0, start).toLowerCase().split(/\s+/).filter(Boolean).slice(-2).join(" ");
+  for (const word of DIRECTION_UP) if (new RegExp(`(?<!${W})${escapeRe(word)}$`, "u").test(before)) return "up";
+  for (const word of DIRECTION_DOWN) if (new RegExp(`(?<!${W})${escapeRe(word)}$`, "u").test(before)) return "down";
+  return null;
 }
 
 const W = "[\\p{L}\\p{N}_]";
@@ -67,7 +81,6 @@ const MENTION = new RegExp(
 );
 const NEXT_TOKEN = /\s*(%|€|[^\s,;:!?()]+)/uy;
 const THOUSANDS = /^\d{1,3}(?:\.\d{3})+(?:,\d+)?$/;
-const CLIP_SENTENCE = /(?<=[.!?])\s+/u;
 
 const round6 = (x: number) => Math.round(x * 1e6) / 1e6;
 
@@ -146,7 +159,7 @@ export function numberMentions(text: string): NumberMention[] {
     const time = m.groups?.time;
     if (time) {
       const [h, mi] = time.split(/[:.]/);
-      out.push({ raw: time, value: Number(h) * 60 + Number(mi), unit: "time" });
+      out.push({ raw: time, value: Number(h) * 60 + Number(mi), unit: "time", direction: null });
       consumed = pos;
       continue;
     }
@@ -181,7 +194,7 @@ export function numberMentions(text: string): NumberMention[] {
       if (before.endsWith("€")) unit = "EUR";
       else if (before.toLowerCase().endsWith("chf")) unit = "CHF";
     }
-    out.push({ raw, value, unit });
+    out.push({ raw, value, unit, direction: directionBefore(text, start) });
     consumed = pos;
   }
   return out;
@@ -195,6 +208,25 @@ export function unrecognizedNumberWords(text: string): string[] {
     if (NUMBER_WORD_STEMS.some((p) => low.startsWith(p)) && NUMBER_WORD_PARTS.some((p) => low.includes(p))) out.push(m[0]);
   }
   return out;
+}
+
+export function quantityWords(text: string): string[] {
+  const out: string[] = [];
+  let prev = "";
+  for (const m of text.matchAll(/(?<![\p{L}\p{N}_])[\p{L}\p{N}]+(?![\p{L}\p{N}_])/gu)) {
+    const word = m[0];
+    const low = word.toLowerCase();
+    const isNumber = /\d/.test(prev) || parseNumberWord(prev) !== null || ARTICLE_ONE.has(prev);
+    if (QUANTITY_STEMS.some((q) => low.startsWith(q)) && !isNumber) out.push(word);
+    prev = low;
+  }
+  return out;
+}
+
+function directionConflict(h: NumberMention, clip: NumberMention[]): boolean {
+  if (h.direction === null) return false;
+  const same = clip.filter((c) => c.value === h.value && (h.unit === null || c.unit === h.unit || c.unit === null));
+  return same.length > 0 && same.every((c) => c.direction !== null && c.direction !== h.direction);
 }
 
 function sameStem(a: string, b: string): boolean {
@@ -219,6 +251,45 @@ function phraseHits(phrases: string[], low: string): string[] {
   return phrases.filter((p) => new RegExp(`(?<!${W})${escapeRe(p)}(?!${W})`, "u").test(low));
 }
 
+/* Überlappende Treffer zählen einmal, der längste gewinnt („für jede firma“). */
+function phraseSpans(phrases: string[], low: string): string[] {
+  const taken: [number, number][] = [];
+  const found = new Set<string>();
+  for (const p of [...phrases].sort((a, b) => b.length - a.length)) {
+    for (const m of low.matchAll(new RegExp(`(?<!${W})${escapeRe(p)}(?!${W})`, "gu"))) {
+      const s0 = m.index ?? 0;
+      const e = s0 + m[0].length;
+      if (taken.some(([a, b]) => s0 < b && a < e)) continue;
+      taken.push([s0, e]);
+      found.add(p);
+    }
+  }
+  return phrases.filter((p) => found.has(p));
+}
+
+function withoutIdioms(low: string): string {
+  let out = low;
+  for (const idiom of IMMER_IDIOMS) out = out.replace(new RegExp(`(?<!${W})${escapeRe(idiom)}(?!${W})`, "gu"), " ");
+  return out;
+}
+
+/* Sätze nach sentenceEndKind (Regel v2, nur Satzzeichen), wie fidelity.text_sentences. */
+export function textSentences(text: string): string[] {
+  const toks = text.split(/\s+/).filter(Boolean);
+  const words = toks.map((t) => ({ text: t, start: 0, end: 0 }));
+  const out: string[] = [];
+  let cur: string[] = [];
+  toks.forEach((t, i) => {
+    cur.push(t);
+    if (sentenceEndKind(words, i, "v2") !== "none") {
+      out.push(cur.join(" "));
+      cur = [];
+    }
+  });
+  if (cur.length) out.push(cur.join(" "));
+  return out;
+}
+
 /* Python: str.capitalize() senkt den Rest; .title() wäre falsch. */
 function unitLabel(unit: string | null): string {
   if (unit === null) return "";
@@ -231,16 +302,9 @@ function unitLabel(unit: string | null): string {
 function scopeIssues(lowHook: string, clipText: string): [string, string][] {
   const restrictors = phraseHits(RESTRICTORS, clipText.toLowerCase());
   if (!restrictors.length || phraseHits(RESTRICTORS, lowHook).length) return [];
-  const sentences = clipText
-    .split(/\s+/)
-    .filter(Boolean)
-    .join(" ")
-    .split(CLIP_SENTENCE)
-    .filter((x) => x.trim())
-    .map((x) => x.toLowerCase());
-  const hits = phraseHits(GENERALIZERS, lowHook);
+  const sentences = textSentences(clipText).map((x) => withoutIdioms(x.toLowerCase()));
   const out: [string, string][] = [];
-  for (const gen of hits.filter((g) => !hits.some((o) => o !== g && o.includes(g)))) {
+  for (const gen of phraseSpans(GENERALIZERS, withoutIdioms(lowHook))) {
     if (sentences.some((x) => phraseHits([gen], x).length && !phraseHits(RESTRICTORS, x).length)) continue;
     out.push([gen, restrictors[0] ?? ""]);
   }
@@ -257,12 +321,17 @@ export function hookClaimCheckV2(hookText: string, clipText: string, uncertainTo
       issues.push(`Zahl '${h.raw}' ist im Clip unsicher erkannt und darf nicht in den Hook (am Audio prüfen)`);
     } else if (!covered(h, clipMentions, lowWords)) {
       issues.push(`Zahl '${h.raw}'${unitLabel(h.unit)} steht so nicht im Clip`);
+    } else if (directionConflict(h, clipMentions)) {
+      issues.push(`Zahl '${h.raw}': der Hook sagt mehr, als der Clip trägt (Richtung umgekehrt)`);
     }
   }
   for (const word of unrecognizedNumberWords(hookText)) issues.push(`Zahlwort '${word}' nicht erkannt, am Clip prüfen`);
-  const lowHook = hookText.toLowerCase();
-  const lowClip = clipText.toLowerCase();
-  const scope = scopeIssues(lowHook, clipText);
+  for (const word of quantityWords(hookText)) {
+    if (![...lowWords].some((w) => sameStem(word.toLowerCase(), w))) issues.push(`Mengenwort '${word}' steht so nicht im Clip`);
+  }
+  const lowHook = withoutIdioms(hookText.toLowerCase());
+  const lowClip = withoutIdioms(clipText.toLowerCase());
+  const scope = scopeIssues(hookText.toLowerCase(), clipText);
   const scoped = new Set(scope.map(([g]) => g));
   for (const sup of SUPERLATIVES) {
     if (!scoped.has(sup) && phraseHits([sup], lowHook).length && !phraseHits([sup], lowClip).length) {

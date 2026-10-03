@@ -92,3 +92,23 @@ def test_lexical_overlap_matches_the_v1_formula():
     clip, later = "Werbung braucht man gar nicht.", "Das heißt aber nicht, dass Werbung überflüssig ist."
     lem = story_graph._lemmas(later)
     assert story_graph.lexical_overlap(clip, later) == len(story_graph._lemmas(clip) & lem) / len(lem)
+
+
+def test_v2_knows_the_swiss_spelling_and_moves_genauer_gesagt_to_contrast():
+    assert story_graph.find_marker("Ausser im Sommer rechnen wir nicht.", story_graph.CONTRAST_MARKERS_V2) == "ausser"
+    assert story_graph.find_marker("Ausserdem rechnen wir.", story_graph.CONTRAST_MARKERS_V2) is None
+    assert "genauer gesagt" not in story_graph.CORRECTION_MARKERS
+    sents = sents_of("Wir haben die Preise gesenkt.", "Genauer gesagt haben wir die Preise um zehn Prozent gesenkt.")
+    hits = story_graph.find_later_qualifications(sents, 0, 0, rule="v2")
+    assert [(h["marker"], h["kind"]) for h in hits] == [("genauer gesagt", "contrast")]
+    assert "ausser" not in story_graph.CONTRAST_MARKERS  # v1 unverändert
+
+
+@pytest.mark.parametrize(
+    "marker",
+    ["Ich muss mich korrigieren.", "Nein, Quatsch.", "Korrektur: so nicht.", "Ich meinte natürlich etwas anderes.", "Das war falsch."],
+)
+def test_v2_new_correction_markers(marker):
+    sents = sents_of("Werbung braucht man eigentlich gar nicht.", marker, "Werbung braucht man schon, nur weniger als früher.")
+    hits = story_graph.find_later_qualifications(sents, 0, 0, rule="v2")
+    assert [h["kind"] for h in hits if h["sentence_idx"] == 1] == ["correction"]

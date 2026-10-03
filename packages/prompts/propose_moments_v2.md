@@ -32,11 +32,17 @@ VORGEHEN
 5. Wähle Momente aus verschiedenen Themen und mit verschiedenen Funktionen, nicht mehrere Varianten
    derselben Aussage. Es gibt keine feste Anzahl. Verwerfen ist zulässig: lieber kein Moment als ein
    schwacher. Begrüßungen, Organisatorisches, Technikchecks und Sponsor-Reads sind keine Momente.
+6. Nicht vorschlagen: Momente, die eine nicht sichtbare Grafik voraussetzen, und Momente, die mitten in
+   einer Verbklammer, vor der Antwort oder vor einem „aber“ enden. Wird eine Aussage später im Kapitel
+   relativiert, korrigiert oder zurückgenommen, gehört das in den Moment oder der Moment entfällt. Gibt
+   der Sprecher eine fremde Position wieder, muss erkennbar bleiben, wessen Position es ist.
 
 ANTWORT je Moment (Satznummern aus den eckigen Klammern des Kapitels, nur aus diesem Kapitel):
 - first_sent, last_sent: erster und letzter Satz des Moments.
-- opening_sent: der Satz, mit dem der Moment einsetzt, zwischen first_sent und last_sent.
-- payoff_sent: der Satz, der das Versprechen einlöst, zwischen first_sent und last_sent.
+- opening_sent: der Satz, dessen Aussage die Erwartung eröffnet (der Einstieg); meist gleich first_sent,
+  sonst ein späterer Satz, wenn davor nur nötiger Kontext steht. Nie nach payoff_sent.
+- payoff_sent: der Satz, der das Versprechen einlöst, zwischen opening_sent und last_sent. Der Moment
+  darf nach dem Payoff weitergehen, solange derselbe Sprecher ihn ausführt.
 - required_context_sents: Sätze zwischen first_sent und last_sent, ohne die der Moment nicht
   verständlich ist (Definition, Bedingung, Sprecherzuordnung, Bezug eines Pronomens). Leer, wenn keine.
 - narrative_type: genau einer aus insight (Aussage, Erklärung, Beleg, Schlussfolgerung),
@@ -46,9 +52,10 @@ ANTWORT je Moment (Satznummern aus den eckigen Klammern des Kapitels, nur aus di
   how_to (Aufgabe, Vorgehen, Ergebnis oder Kriterium).
 - viewer_promise: welche Frage oder welches Versprechen der Einstieg eröffnet, in einem Satz.
 - central_idea: die zentrale Aussage des Moments mit ihren Bedingungen, in einem Satz.
-- direction: both, wenn Einstieg und Payoff in beiden Richtungen zusammenpassen; payoff_only, wenn der
-  Moment vom Payoff aus gefunden wurde und der Einstieg nur Kontext liefert; opening_only, wenn er vom
-  Einstieg aus gefunden wurde.
+- direction: wie du den Moment gefunden hast. both: vom Payoff rückwärts zu diesem Einstieg und vom
+  Einstieg vorwärts zu diesem Payoff, beide Wege führen zum selben Moment. payoff_only: nur vom Payoff
+  aus; der Einstieg liefert Kontext, verspricht aber nichts Eigenes. opening_only: nur vom Einstieg aus;
+  der Payoff ist die erste Stelle, die ihn einlöst.
 - structure: genau eine aus payoff_first, tension_first, hook_build_payoff, decision_story,
   how_to_list, loop.
 - why: ein Satz, warum ein Zuschauer ohne Vorwissen den Moment versteht und was der Payoff ist.

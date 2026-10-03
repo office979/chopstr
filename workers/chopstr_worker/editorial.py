@@ -65,7 +65,10 @@ V2_SWITCHES = (
 )
 # Schalter, deren Code gebaut ist und den Schalter liest. Jedes Arbeitspaket trägt seinen Schalter
 # ein, sobald der Code ihn liest; nur diese stehen in v2 auf true, alle anderen auf false.
-V2_IMPLEMENTED_SWITCHES = frozenset({"captions.word_bridge", "hook.native_spoken", "sentence_rule"})
+V2_IMPLEMENTED_SWITCHES = frozenset({
+    "captions.word_bridge", "hook.native_spoken", "search.payoff_first", "sentence_rule",
+    "trim.enabled",
+})  # fmt: skip
 # Regelabschnitte, die es nur in v2 gibt. rule_paths und die Herkunftsprüfung laufen zusätzlich über
 # sie, wenn der Abschnitt in den Daten steht; v1 hat sie nicht und bleibt unberührt.
 V2_RULE_SECTIONS = ("captions", "hook", "segmentation", "verb_bracket")
@@ -629,7 +632,9 @@ SEARCH_HOOK_TYPES = (
 )  # fmt: skip
 # Payoff-Arten, die über Wortmarker erkannt werden (search.payoff_markers). Ergebnis mit Zahl, Auflösung
 # nach Frage, Pointe nach Setup und Lachen erkennt payoff_search aus der Struktur.
-SEARCH_PAYOFF_MARKER_TYPES = ("rule", "consequence", "explanation", "lesson")
+SEARCH_PAYOFF_MARKER_TYPES = ("rule", "consequence", "explanation", "lesson", "emotional")
+# Wo Rückweg und Verlängerung enden (search.stop_markers).
+SEARCH_STOP_MARKER_TYPES = ("sponsor", "farewell", "topic_change")
 # Abschnitt search ist eine Regel der Fassung 2 und braucht Herkunft; Pins für AP5.
 V2_RULE_SECTIONS = (*V2_RULE_SECTIONS, "search")
 V2_PIN_CHANGES.update({"propose_moments": 2, "episode_overview": 1})
@@ -649,7 +654,7 @@ def search_settings(policy: Policy) -> dict[str, Any] | None:
     """Einstellungen der Suche aus ``search`` (AP5) oder ``None`` in Fassung 1 und ohne Abschnitt.
 
     Rückgabe ``{payoff_first, opening_first, chapter_overlap_s, max_llm_calls_per_source_hour,
-    payoff_markers, hook_type_markers, wired}``. ``payoff_search`` und der Heuristik-Provider lesen die
+    payoff_markers, hook_type_markers, hedge_markers, stop_markers, wired}``. ``payoff_search`` und der Heuristik-Provider lesen die
     Werte immer, sobald der Abschnitt da ist; ``wired`` ist ``implementation.search.payoff_first`` und
     sagt, ob ``story_engine.run`` die Suche schon nutzt (bis zur Verdrahtung false). Ein fehlender oder
     unbrauchbarer Wert scheitert laut."""
@@ -677,17 +682,24 @@ def search_settings(policy: Policy) -> dict[str, Any] | None:
         raise PolicyError(f"clip_policy_v{v}: search.chapter_overlap_s ab 0, search.max_llm_calls_per_source_hour ab 1.")
     settings["payoff_markers"] = _marker_table(raw.get("payoff_markers"), SEARCH_PAYOFF_MARKER_TYPES, "payoff_markers", v)
     settings["hook_type_markers"] = _marker_table(raw.get("hook_type_markers"), SEARCH_HOOK_TYPES, "hook_type_markers", v)
+    settings["stop_markers"] = _marker_table(raw.get("stop_markers"), SEARCH_STOP_MARKER_TYPES, "stop_markers", v)
+    hedges = raw.get("hedge_markers")
+    if not isinstance(hedges, list) or not hedges:
+        raise PolicyError(f"clip_policy_v{v}: search.hedge_markers braucht eine Wortliste.")
+    settings["hedge_markers"] = tuple(str(x).lower() for x in hedges if str(x).strip())
     settings["wired"] = _switch_value(policy.roh.get("implementation") or {}, SEARCH_SWITCH) is True
     return settings
 
 
-__all__ += ["SEARCH_HOOK_TYPES", "SEARCH_PAYOFF_MARKER_TYPES", "SEARCH_SWITCH", "search_settings"]
+__all__ += ["SEARCH_HOOK_TYPES", "SEARCH_PAYOFF_MARKER_TYPES", "SEARCH_STOP_MARKER_TYPES", "SEARCH_SWITCH", "search_settings"]
 
 
 # -- AP7: Kürzen innerhalb des Clips (Abschnitt ``trim``, nur Fassung 2) ----------------------------
 TRIM_SWITCH = "trim.enabled"
 # Der Abschnitt ``trim`` ist ein Regelabschnitt: jede Regel darin braucht eine Herkunft in ``origins``.
 V2_RULE_SECTIONS = (*V2_RULE_SECTIONS, "trim")
+# Modalpartikeln aus P3, die ``trim.removal.never_remove`` immer enthalten muss.
+TRIM_P3_MODAL_PARTICLES = ("halt", "eigentlich", "mal", "ja", "doch", "eben", "schon", "wohl")
 TRIM_PAUSE_CUES = {"dramatic_before": ("number", "negation", "contrast", "punchline"), "reaction_after": ("question", "laughter", "reaction_word")}
 
 
@@ -723,6 +735,7 @@ def trim_settings(policy: Policy) -> dict[str, Any] | None:
             "backchannel": removal["backchannel"],
             "restarts": removal["restarts"],
             "edge_markers": tuple(str(x).lower() for x in removal["edge_markers"]),
+            "organisation_markers_trim": tuple(str(x).lower() for x in removal["organisation_markers"]),
             "never_remove": tuple(str(x).lower() for x in removal["never_remove"]),
             "weak_summary": tuple(str(x).lower() for x in tail["weak_summary"]),
             "sales_call": tuple(str(x).lower() for x in tail["sales_call"]),
@@ -750,6 +763,12 @@ def trim_settings(policy: Policy) -> dict[str, Any] | None:
         unknown = [x for x in settings[key] if x not in allowed]
         if unknown:
             raise PolicyError(f"{name}: trim.pause_classes.{key} kennt {', '.join(unknown)} nicht.")
+        missing = [x for x in allowed if x not in settings[key]]
+        if missing:
+            raise PolicyError(f"{name}: trim.pause_classes.{key} darf {', '.join(missing)} nicht streichen (RK 7, Pausen).")
+    missing = [x for x in TRIM_P3_MODAL_PARTICLES if x not in settings["never_remove"]]
+    if missing:
+        raise PolicyError(f"{name}: trim.removal.never_remove darf {', '.join(missing)} nicht streichen (P3).")
     return settings
 
 
@@ -799,8 +818,9 @@ def block_mode_settings(policy: Policy, heuristic: bool | None = None) -> dict[s
     """Modus der Bewertung ab Fassung 2 (``bewertung.modus_v2``) oder ``None`` in Fassung 1 und ohne Wert.
 
     ``bewertung.modus`` (v1) bleibt unverändert. ``mode`` ist der Wert aus ``modus_v2``; ``effective_mode`` gilt
-    für den Lauf: mit ``heuristic=True`` und ``only_with_language_model`` bleibt es bei ``sortieren``, weil die
-    Werte der Heuristik unkalibriert sind (RESEARCH-CLIPPING-KERN Abschnitt 2 Nr. 11). ``discard_below`` und
+    für den Lauf: mit ``only_with_language_model`` gilt ``sperren`` nur bei ``heuristic=False``; mit Heuristik und
+    ohne Angabe (``None``) bleibt es bei ``sortieren`` (sichere Richtung), weil die Werte der Heuristik
+    unkalibriert sind (RESEARCH-CLIPPING-KERN Abschnitt 2 Nr. 11). ``discard_below`` und
     ``cut_from`` sind die Schwellen 7 und 10 aus ``bewertung``."""
     bewertung = policy.roh.get("bewertung") or {}
     if policy.version < 2 or "modus_v2" not in bewertung:
@@ -815,7 +835,7 @@ def block_mode_settings(policy: Policy, heuristic: bool | None = None) -> dict[s
     reason = str(bewertung.get("begruendung") or "").strip()
     if not reason:
         raise PolicyError(f"{name}: bewertung.begruendung fehlt.")
-    effective = "sortieren" if (heuristic and only_llm) else mode
+    effective = "sortieren" if (only_llm and heuristic is not False) else mode
     return {
         "mode": mode,
         "effective_mode": effective,

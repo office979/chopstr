@@ -19,6 +19,7 @@ dem Vertrag ``packages/schema/CANDIDATES.md`` (``candidates_v1``).
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields
@@ -26,7 +27,7 @@ from typing import Any
 
 from .. import editorial, prompts
 from ..providers_llm import LLM
-from . import compose, dach_nlp, fidelity, story_graph, story_score
+from . import compose, dach_nlp, editorial_gates, fidelity, payoff_search, story_graph, story_score, trim_plan
 from .segment import Sentence, chapterize, numbered, sentences_from_annotated, sentences_from_words
 
 CONTRACT = "candidates_v1"
@@ -37,6 +38,10 @@ CONTRACT = "candidates_v1"
 # Der Wert steckt im Idempotenz-Schluessel und erzwingt eine Neuberechnung. Ohne ihn
 # kaeme das alte Ergebnis aus dem Zwischenspeicher und die Aenderung waere unsichtbar.
 ENGINE_VERSION = "story_engine_v4"
+# v5 (nur Policy-Fassung 2): harte Gates vor dem Ranking (AP4), Payoff-Suche mit Abgleich und Budget (AP5),
+# Kürzung (AP7, nur mit trim.enabled) und ClipCandidates im Bericht (AP8). Unter Fassung 1 bleibt v4 im
+# Bericht und im Idempotenz-Schlüssel, damit vorhandene Ergebnisse gültig bleiben (Rollback).
+ENGINE_VERSION_V2 = "story_engine_v5"
 # Die Laengengrenzen stehen in der Richtlinie (packages/editorial/clip_policy_v1.yaml) und nur
 # dort. Hier standen frueher 12 und 90 Sekunden, waehrend die Richtlinie 18 und 70 als „hart"
 # fuehrte: zwei Wahrheiten, von denen die laxere gewann. So ist an BP CW ein Clip von 78 Sekunden
@@ -108,7 +113,10 @@ class CandidateResult:
 
 @dataclass
 class DetectReport:
-    """Ergebnis eines Laufs: Kandidaten plus Zähler und Verwerfungsgründe für Event-Payload und Storage."""
+    """Ergebnis eines Laufs: Kandidaten plus Zähler und Verwerfungsgründe für Event-Payload und Storage.
+
+    Die Felder ab ``engine`` gibt es nur unter Fassung 2; leer stehen sie nicht im JSON, damit der Bericht
+    unter Fassung 1 byte-gleich bleibt. Alte Berichte ohne sie bleiben lesbar."""
 
     candidates: list[CandidateResult] = field(default_factory=list)
     # Gefunden, aber nicht angeboten: gerissenes Tor, Ueberlappung oder ueber der Obergrenze. Die
@@ -126,6 +134,15 @@ class DetectReport:
     # Wie die Verbklammer geprüft wurde (AP3, nur Fassung 2): spacy, heuristic oder off. Leer heißt
     # Fassung 1; dann steht der Schlüssel nicht im JSON, damit v1 byte-gleich bleibt.
     nlp_status: str = ""
+    # Fassung 2: Engine-Version des Laufs (v5), Episodenübersichten je Kapitel (gecacht mit dem Bericht unter
+    # dem Idempotenz-Schlüssel der Kandidaten), Modellbudget, Verwerfungsquote je Gate, Abgleich der Suche
+    # und die vollständigen ClipCandidates (Vertrag clip_candidate_v1).
+    engine: str = ""
+    overviews: list[dict] = field(default_factory=list)
+    llm_budget: dict = field(default_factory=dict)
+    gate_rejections: dict = field(default_factory=dict)
+    search: dict = field(default_factory=dict)
+    clip_candidates: list[dict] = field(default_factory=list)
 
     @property
     def gate_passed(self) -> int:
@@ -134,7 +151,7 @@ class DetectReport:
     def to_json(self) -> dict[str, Any]:
         out = {
             "contract": CONTRACT,
-            "engine": ENGINE_VERSION,
+            "engine": self.engine or ENGINE_VERSION,
             "candidates": [c.to_row() for c in self.candidates],
             "discarded": self.discarded,
             "chapters": self.chapters,
@@ -147,6 +164,9 @@ class DetectReport:
         }
         if self.nlp_status:
             out["nlp_status"] = self.nlp_status
+        for key in ("overviews", "llm_budget", "gate_rejections", "search", "clip_candidates"):
+            if getattr(self, key):
+                out[key] = getattr(self, key)
         return out
 
     @classmethod
@@ -162,6 +182,12 @@ class DetectReport:
             provider=str(data.get("provider", "")),
             weights=dict(data.get("weights", {})),
             nlp_status=str(data.get("nlp_status", "") or ""),
+            engine=str(data.get("engine", "") or ""),
+            overviews=list(data.get("overviews") or []),
+            llm_budget=dict(data.get("llm_budget") or {}),
+            gate_rejections=dict(data.get("gate_rejections") or {}),
+            search=dict(data.get("search") or {}),
+            clip_candidates=list(data.get("clip_candidates") or []),
         )
 
 
@@ -404,6 +430,73 @@ def nlp_status_for(pol: editorial.Policy | None) -> str:
     return _verb_bracket_method(cfg) if cfg is not None else ""
 
 
+def engine_version(pol: editorial.Policy | None = None) -> str:
+    """``story_engine_v5`` unter Fassung 2, sonst ``story_engine_v4`` (Bericht und Idempotenz-Schlüssel)."""
+    pol = pol if pol is not None else _active_policy()
+    return ENGINE_VERSION_V2 if pol is not None and pol.version >= 2 else ENGINE_VERSION
+
+
+def gates_wired(pol: editorial.Policy | None) -> dict | None:
+    """Einstellungen der harten Gates, wenn ``implementation.gates.discard_hard`` an ist (AP4), sonst None."""
+    cfg = editorial.gates_settings(pol) if pol is not None else None
+    return cfg if cfg is not None and cfg["switch"] else None
+
+
+def search_wired(pol: editorial.Policy | None) -> dict | None:
+    """Einstellungen der Suche, wenn ``implementation.search.payoff_first`` an ist (AP5), sonst None."""
+    cfg = editorial.search_settings(pol) if pol is not None else None
+    return cfg if cfg is not None and cfg["wired"] else None
+
+
+def trim_wired(pol: editorial.Policy | None) -> dict | None:
+    """Einstellungen der Kürzung, wenn Regel und Schalter ``trim.enabled`` beide an sind (AP7), sonst None."""
+    cfg = editorial.trim_settings(pol) if pol is not None else None
+    return cfg if cfg is not None and cfg["enabled"] else None
+
+
+def marker_rule(pol: editorial.Policy | None = None) -> str:
+    """Abgleich der Kontrast- und Korrekturmarker in Sinntreue-Tor und Story-Graph: ``v2`` (Wortgrenzen,
+    „außer“ trifft nicht „außerdem“, Korrekturmarker) mit den harten Gates (AP4), sonst ``v1``."""
+    pol = pol if pol is not None else _active_policy()
+    return "v2" if gates_wired(pol) is not None else "v1"
+
+
+class LLMBudgetExceeded(RuntimeError):
+    """Das Budget ``search.max_llm_calls_per_source_hour`` ist aufgebraucht; kein weiterer Modellaufruf."""
+
+
+class BudgetLLM:
+    """Zählt Modellaufrufe (``structured``) und verweigert jeden weiteren, sobald ``limit`` erreicht ist.
+
+    Alles andere reicht er an das eigentliche LLM durch. Der Lauf bricht nicht ab: wer einen verweigerten
+    Aufruf bekommt, lässt den Schritt aus (Master-Prompt 27, keine unkontrollierten Modellaufrufe)."""
+
+    def __init__(self, llm: Any, limit: int):
+        self._llm = llm
+        self.limit = int(limit)
+        self.used = 0
+        self.refused = 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._llm, name)
+
+    def structured(self, *args: Any, **kwargs: Any) -> Any:
+        if self.used >= self.limit:
+            self.refused += 1
+            raise LLMBudgetExceeded(f"Modellbudget von {self.limit} Aufrufen aufgebraucht")
+        self.used += 1
+        return self._llm.structured(*args, **kwargs)
+
+
+def llm_budget_for(sents: list[Sentence], cfg: dict) -> int:
+    """Modellaufrufe für diese Quelle: ``max_llm_calls_per_source_hour`` mal Quelldauer in Stunden, aufgerundet.
+
+    Eine Quelle zählt mindestens wie ein Kapitel (``CHAPTER_SECONDS``): die Rechnung in der Policy geht von
+    Kapiteln aus, und ein Ausschnitt von 25 Sekunden braucht dieselben Schritte wie ein Kapitel."""
+    seconds = max((sents[-1].end - sents[0].start) if sents else 0.0, CHAPTER_SECONDS)
+    return max(1, math.ceil(float(cfg["max_llm_calls_per_source_hour"]) * seconds / 3600.0))
+
+
 def _verb_bracket_gate(words: list[dict], sents: list[Sentence], first: int, last: int) -> dict:
     """Verbklammer am Schnitt (AP3): Anfang (Wort vor dem Anfang gegen den ersten Satz) und Ende (letzter
     Satz gegen das Folgewort), jeweils über die Grenze hinweg.
@@ -460,7 +553,8 @@ def _fidelity_gate(words: list[dict], sents: list[Sentence], first: int, last: i
     greifen kann). Behalten wird der gesamte Kandidat; relevant ist nur ``ends_before_contrast``."""
     span, _a, b = _span_words(words, sents, first, last)
     tail = words[b + 1 : b + 1 + FIDELITY_TAIL_WORDS]
-    warnings = fidelity.check_cut(span + tail, [(0, len(span) - 1)]) if span else []
+    rule = marker_rule()
+    warnings = (fidelity.check_cut(span + tail, [(0, len(span) - 1)], rule=rule) if rule != "v1" else fidelity.check_cut(span + tail, [(0, len(span) - 1)])) if span else []
     contrast = next((w for w in warnings if w["type"] == "ends_before_contrast"), None)
     if contrast is None:
         return {"passed": True, "detail": "keine entfernte Verneinung oder Einschränkung"}
@@ -579,7 +673,8 @@ def deterministic_gates(words: list[dict], sents: list[Sentence], first: int, la
 
 def later_qualifications(sents: list[Sentence], first: int, last: int, llm: LLM) -> list[dict]:
     """Stufe 4: Heuristik-Treffer, jeder per LLM bestätigt. Ohne Urteil bleibt ``confirmed`` None."""
-    hits = story_graph.find_later_qualifications(sents, first, last)
+    rule = marker_rule()
+    hits = story_graph.find_later_qualifications(sents, first, last, rule=rule) if rule != "v1" else story_graph.find_later_qualifications(sents, first, last)
     if not hits:
         return []
     clip_text = " ".join(s.text for s in sents[first : last + 1])
@@ -744,6 +839,7 @@ def kontext_verlaengern(
     first: int,
     last: int,
     rubric: dict,
+    needs_fn: Callable[[int], dict[str, str]] | None = None,
 ) -> tuple[int, dict | None]:
     """Den Abschnitt nach hinten wachsen lassen, bis sein Ende nicht mehr kaputt ist.
 
@@ -756,10 +852,14 @@ def kontext_verlaengern(
     Auswahl verworfen. Es gibt keine Verlaengerung „einfach so".
 
     Zurueck kommt der neue letzte Satz und, falls verlaengert wurde, eine Notiz fuer die Rubrik.
+
+    ``needs_fn(letzter_satz)`` (AP4, harte Gates nach hinten heilbar) nennt zusätzliche Mängel des Endes als
+    ``{schluessel: detail}``; geheilt ist dann erst, wenn auch sie leer sind. Ohne ``needs_fn`` wie vorher.
     """
     gates = deterministic_gates(words, sents, first, last, rubric)
     kaputt = [k for k in ENDE_TORE if k in gates and not gates[k].get("passed")]
-    if not kaputt:
+    extra = needs_fn(last) if needs_fn is not None else {}
+    if not kaputt and not extra:
         return last, None
     try:
         pol = editorial.load()
@@ -791,15 +891,15 @@ def kontext_verlaengern(
             break
         g = deterministic_gates(words, sents, first, ziel, rubric)
         relevant = g.values() if required is None else [g[k] for k in required if k in g]
-        if all(bool(x.get("passed")) for x in relevant):
+        if all(bool(x.get("passed")) for x in relevant) and not (needs_fn is not None and needs_fn(ziel)):
             if marker and _starts_with_marker(sents[ziel].text, marker):
                 skipped.append(ziel)
                 continue
             return ziel, {
                 "saetze": ziel - last,
                 "sekunden": round(gewonnen, 2),
-                "behoben": kaputt,
-                "grund": "; ".join(str(gates[k].get("detail") or "") for k in kaputt),
+                "behoben": kaputt + [f"gate:{k}" for k in extra],
+                "grund": "; ".join([str(gates[k].get("detail") or "") for k in kaputt] + list(extra.values())),
             }
     if skipped:
         # Geheilt waere das Ende nur auf der Abschwaechung: verwerfen statt dort enden.
@@ -876,6 +976,7 @@ def heal_start(
     last: int,
     rubric: dict,
     pol: editorial.Policy | None = None,
+    defects_fn: Callable[[int], list[str]] | None = None,
 ) -> tuple[int, dict | None]:
     """Den Abschnitt nach vorn wachsen lassen, bis sein Anfang nicht mehr kaputt ist (Spiegel von
     ``kontext_verlaengern``).
@@ -887,7 +988,8 @@ def heal_start(
     Notiz: ``{"healed": True, "sentences", "seconds", "defects"}`` oder ``{"healed": False, "defects"}``,
     wenn der Mangel innerhalb der Grenzen bleibt (der Aufrufer stuft dann über das Tor ``standalone``
     herab). Ohne AP2 (Fassung 1 oder Schalter aus) oder mit Grenze 0 ``(first, None)``. ``rubric``
-    bleibt unberührt; die Neubewertung macht der Aufrufer."""
+    bleibt unberührt; die Neubewertung macht der Aufrufer. ``defects_fn(erster_satz)`` ersetzt
+    ``start_defects`` (AP4: Mängel aus den harten Gates, die nach vorn heilbar sind)."""
     pol = pol or _active_policy()
     limits = editorial.context_front(pol) if pol is not None else None
     if limits is None or first <= 0:
@@ -895,7 +997,11 @@ def heal_start(
     max_sentences, max_s = limits
     if max_sentences <= 0 or max_s <= 0:
         return first, None
-    defects = start_defects(words, sents, first, pol)
+    if defects_fn is None:
+        def defects_fn(i: int) -> list[str]:
+            return start_defects(words, sents, i, pol)
+
+    defects = defects_fn(first)
     if not defects:
         return first, None
     same_speaker = bool(pol.einstieg.get("keine_gastgeberfrage"))
@@ -908,9 +1014,135 @@ def heal_start(
             break
         if _length_reason(sents[last].end - sents[before].start, mit_zugabe=True) == "too_long":
             break
-        if not start_defects(words, sents, before, pol):
+        if not defects_fn(before):
             return before, {"healed": True, "sentences": first - before, "seconds": round(gained, 2), "defects": defects}
     return first, {"healed": False, "defects": defects}
+
+
+# -- Harte Gates (AP4) und Kürzung (AP7), nur Fassung 2 ---------------------------------------------
+
+GATE_CONTEXT_BEFORE = 2
+# Befunde aus ``fidelity.check_cut``, die eine Kürzung zurücksetzen (hohe Schwere, Bedeutung verändert).
+TRIM_RESET_FINDINGS = frozenset({"protected_removed", "negation_removed"})
+GATE_CONTEXT_AFTER = 2
+
+
+def _run_gates(words: list[dict], sents: list[Sentence], first: int, last: int, pol: editorial.Policy) -> dict:
+    return editorial_gates.run_gates(
+        words, sents, first, last, pol, context_before=GATE_CONTEXT_BEFORE, context_after=GATE_CONTEXT_AFTER
+    )
+
+
+def _failed_on(res: dict, side: str) -> dict[str, str]:
+    return {k: str(res["results"][k]["detail"]) for k in res["failed"] if res["results"][k].get("healable") == side}
+
+
+def heal_gates(
+    words: list[dict], sents: list[Sentence], first: int, last: int, rubric: dict, pol: editorial.Policy, res: dict
+) -> tuple[int, int, dict]:
+    """Heilbare Gate-Mängel zuerst heilen, bevor verworfen wird (AP4).
+
+    ``healable: front`` (Pronomen, Rückverweis, Antwort ohne Frage, Zitatrahmen davor, Grenzsatz davor) läuft
+    über ``heal_start`` mit den Gate-Mängeln als Prüfung, in denselben Grenzen (``laenge.context_front_*``,
+    kein anderer Sprecher vorn); ``healable: back`` (offene Frage, Vorverweis, Grenzsatz danach, Korrektur
+    in Reichweite) über ``kontext_verlaengern``. Zurück kommen neuer Anfang, neues Ende und je Seite eine
+    Notiz; ``{"back": {"discarded": ...}}`` heißt, die Heilung endete nur auf einer Abschwächung."""
+    notes: dict[str, Any] = {}
+    if "front" in res["healable"]:
+        def front_defects(i: int) -> list[str]:
+            healed = _run_gates(words, sents, i, last, pol)
+            return start_defects(words, sents, i, pol) + [f"{k}: {d}" for k, d in _failed_on(healed, "front").items()]
+
+        new_first, note = heal_start(words, sents, first, last, rubric, pol, defects_fn=front_defects)
+        if note is not None:
+            notes["front"] = note
+            first = new_first
+    if "back" in res["healable"]:
+        def back_defects(j: int) -> dict[str, str]:
+            return _failed_on(_run_gates(words, sents, first, j, pol), "back")
+
+        new_last, note = kontext_verlaengern(words, sents, first, last, rubric, needs_fn=back_defects)
+        if note is not None:
+            notes["back"] = note
+            if not note.get("discarded"):
+                last = new_last
+    return first, last, notes
+
+
+def _map_legacy_gates(gates: dict, res: dict) -> None:
+    """Den ersten Gate-Mangel je Ziel in ``standalone`` oder ``fidelity`` abbilden (``LEGACY_GATE``); die fünf
+    Schlüssel bleiben, ein schon gerissenes Tor behält seinen Grund."""
+    for key in res["failed"]:
+        target = editorial_gates.LEGACY_GATE.get(key)
+        if target and gates.get(target, {}).get("passed"):
+            gates[target] = {"passed": False, "detail": str(res["results"][key]["detail"]), "reason": f"gate:{key}"}
+
+
+def _instruction_check(sents: list[Sentence], first: int, last: int, res: dict, r: dict, proposal: dict) -> dict | None:
+    """Folgt die Modellantwort einer Anweisung aus dem Transkript? Nur wenn ``embedded_instruction`` markiert."""
+    flag = res["results"].get("embedded_instruction") or {}
+    quotes = [str(q) for q in flag.get("quotes") or []]
+    if not quotes:
+        return None
+    rest = " ".join(s.text for s in sents[first : last + 1] if s.text not in quotes)
+    answer = {
+        "suggested_title_card": r.get("suggested_title_card"), "why": r.get("why"), "proposal_why": proposal.get("why"),
+        "viewer_promise": proposal.get("viewer_promise"), "central_idea": proposal.get("central_idea"),
+    }  # fmt: skip
+    return editorial_gates.instruction_followed({k: v for k, v in answer.items() if isinstance(v, str) and v}, quotes, clip_text=rest)
+
+
+def _payoff_index(proposal: dict, first: int, last: int) -> int | None:
+    p = proposal.get("payoff_sent")
+    return p if isinstance(p, int) and not isinstance(p, bool) and first <= p <= last else None
+
+
+def trim_span(
+    words: list[dict],
+    sents: list[Sentence],
+    first: int,
+    last: int,
+    payoff_idx: int | None,
+    pol: editorial.Policy,
+    heat_payload: dict[str, Any] | None = None,
+) -> dict:
+    """Kürzung eines Kandidaten (AP7): Nachlauf nach dem Payoff kappen (``trim_plan.reward_end``), Komposition
+    bauen (``trim_plan.build_composition``) und das Ergebnis mit ``fidelity.check_cut`` prüfen.
+
+    ``applied`` false mit ``reason``, wenn die Komposition ungültig ist (E6, Dichte, Schutzbereich), ein Befund
+    ``protected_removed`` oder ``negation_removed`` (hoch) auftritt oder die Abspieldauer unter ``laenge.hart_min_s`` fiele: dann gilt die ungekürzte
+    Fassung. Sonst ``last`` (neues Ende), ``segments``, ``duration_s`` und ``removed_spans`` aus der Komposition."""
+    # Reihenfolge: erst das Ende kappen, dann die Komposition über das neue Ende, dann die Sinntreue über die
+    # ganze Spanne bis zum alten Ende (Indizes relativ zum Anfang): der gekappte Nachlauf ergibt dort höchstens
+    # protected_omitted (mittel); zurückgesetzt wird nur bei protected_removed oder negation_removed (hoch).
+    new_last, cut = trim_plan.reward_end(sents, first, last, payoff_idx, pol)
+    a, b0, b = sents[first].word_range[0], sents[last].word_range[1], sents[new_last].word_range[1]
+    comp = trim_plan.build_composition(words, a, b, None, pol, heat_payload=heat_payload)
+    kept = [(int(x) - a, int(y) - a) for x, y in comp["kept_word_ranges"]]
+    findings = fidelity.check_cut(words[a : b0 + 1], kept, rule="v2", policy=pol)
+    high = [f for f in findings if f.get("severity") == "high" and f.get("type") in TRIM_RESET_FINDINGS]
+    out: dict[str, Any] = {
+        "applied": False,
+        "reason": None,
+        "reward_end": cut,
+        "findings": findings,
+        "composition": {
+            "local_cuts": comp["local_cuts"], "semantic_splices": comp["semantic_splices"], "density": comp["density"],
+            "is_debate": comp["is_debate"], "valid": comp["valid"], "issues": comp["issues"],
+        },  # fmt: skip
+        "is_debate": bool(comp["is_debate"]),
+    }
+    if not comp["valid"]:
+        out["reason"] = "Komposition ungültig: " + "; ".join(comp["issues"])
+    elif high:
+        out["reason"] = "Sinntreue-Befund hoher Schwere: " + ", ".join(sorted({str(f["type"]) for f in high}))
+    elif comp["duration_s"] < pol.hart_min_s:
+        out["reason"] = f"gekürzt nur {comp['duration_s']:.1f} s, unter laenge.hart_min_s"
+    elif not comp["removed_spans"] and new_last == last:
+        out["reason"] = "nichts zu kürzen"
+    else:
+        out.update(applied=True, last=new_last, segments=comp["segments"], duration_s=comp["duration_s"], removed_spans=comp["removed_spans"])
+    return out
 
 
 def evaluate_span(
@@ -948,7 +1180,31 @@ def evaluate_span(
         }  # fmt: skip
     start_healed = bool(start_note and start_note.get("healed"))
     heal_rounds = int(start_healed) + int(zugabe is not None)
-    if ap2 and heal_rounds:
+    # AP4 (Fassung 2 mit implementation.gates.discard_hard): harte Gates nach den Heilungen aus AP2. Heilbare
+    # Mängel lösen zuerst eine Heilung aus, dann laufen die Gates erneut; verworfen wird erst in ``run``.
+    gcfg = gates_wired(pol_)
+    gate_run: dict | None = None
+    gate_heal: dict = {}
+    if gcfg is not None:
+        gate_run = _run_gates(words, sents, first, last, pol_)
+        # Unheilbare Treffer (``unhealable``) werden nicht geheilt: der Kandidat fällt ohnehin.
+        unhealable = gate_run.get("unhealable")
+        if unhealable is None:
+            unhealable = [k for k in gate_run["failed"] if not gate_run["results"][k].get("healable")]
+        if gate_run["failed"] and gate_run["healable"] and not unhealable:
+            first_g, last_g, gate_heal = heal_gates(words, sents, first, last, r, pol_, gate_run)
+            back = gate_heal.get("back") or {}
+            if back.get("discarded"):
+                return {
+                    "reason": str(back["discarded"]), "first_sent": first, "last_sent": last,
+                    "duration_s": round(_duration(sents, first, last), 2), "detail": str(back.get("detail") or ""),
+                }  # fmt: skip
+            if (first_g, last_g) != (first, last):
+                heal_rounds += int(first_g != first) + int(last_g != last)
+                first, last = first_g, last_g
+                gate_run = _run_gates(words, sents, first, last, pol_)
+    gate_healed = any(n.get("healed") or n.get("saetze") for n in gate_heal.values())
+    if (ap2 or gcfg is not None) and heal_rounds:
         # Nach der Heilung (vorn, hinten oder beides) genau eine Neubewertung: die Rubrik beschreibt
         # sonst eine Spanne, die es nicht mehr gibt (RESEARCH-CLIPPING-KERN Abschnitt 2, weitere Befunde).
         before = {
@@ -963,13 +1219,37 @@ def evaluate_span(
         rescored["repair_failed"] = not rescored.get("gate_passed", True)
         rescored["pre_heal_scores"] = before
         r = rescored
+    if gate_run is not None:
+        # Modellantwort gegen eingebettete Anweisungen prüfen (Master-Prompt 22): folgt sie ihr, wird verworfen.
+        followed = _instruction_check(sents, first, last, gate_run, r, proposal)
+        if followed is not None and not followed["passed"]:
+            return {
+                "reason": "instruction_followed", "first_sent": first, "last_sent": last,
+                "duration_s": round(_duration(sents, first, last), 2), "detail": followed["detail"],
+            }  # fmt: skip
     dur = _duration(sents, first, last)
-    reason = _length_reason(dur, mit_zugabe=zugabe is not None or start_healed)
+    reason = _length_reason(dur, mit_zugabe=zugabe is not None or start_healed or gate_healed)
     if reason:
         return {
             "reason": reason + ("_after_repair" if (first, last) != (first0, last0) else ""),
             "first_sent": first, "last_sent": last, "duration_s": round(dur, 2),
         }  # fmt: skip
+
+    # AP7 (Fassung 2, Regel und Schalter trim.enabled): Kürzung mit Sinntreue-Prüfung auf dem Ergebnis. Ein
+    # Befund hoher Schwere oder eine ungültige Komposition setzt auf die ungekürzte Fassung zurück.
+    trim: dict | None = None
+    if trim_wired(pol_) is not None:
+        trim = trim_span(words, sents, first, last, _payoff_index(proposal, first, last), pol_, heat_payload)
+        if trim["applied"] and trim["last"] != last and gate_run is not None:
+            after = _run_gates(words, sents, first, trim["last"], pol_)
+            new = [k for k in after["failed"] if k not in gate_run["failed"]]
+            if new:
+                trim.update(applied=False, reason="Kürzung am Ende reißt ein Gate: " + ", ".join(new))
+            else:
+                gate_run = after
+        if trim["applied"]:
+            last = trim["last"]
+            dur = _duration(sents, first, last)
 
     span = sents[first : last + 1]
     clip_text = " ".join(s.text for s in span)
@@ -980,8 +1260,11 @@ def evaluate_span(
     # schoebe das Vorziehen jeden Clip unbemerkt aus dem guten Fenster.
     segmente = [{"start": round(sents[first].start, 3), "end": round(sents[last].end, 3), "role": "body"}]
     struktur = str(proposal.get("structure") or "hook_build_payoff")
-    teaser_idx = teaser_satz(sents, first, last, pol_, heat_payload)
     abspiel_dauer = dur
+    if trim is not None and trim["applied"]:
+        segmente, abspiel_dauer = [dict(x) for x in trim["segments"]], float(trim["duration_s"])
+    # E6: in einer Debatte nie umordnen, also kein Teaser (mit der Kürzung aus AP7 geprüft).
+    teaser_idx = None if trim is not None and trim["is_debate"] else teaser_satz(sents, first, last, pol_, heat_payload)
     if teaser_idx is not None:
         t = sents[teaser_idx]
         comp = compose.with_teaser(compose.Composition.from_json(segmente), round(t.start, 3), round(t.end, 3))
@@ -1001,6 +1284,9 @@ def evaluate_span(
             "detail": "Anfang nicht heilbar: " + "; ".join(start_note["defects"]),
             "reason": "start_not_healed",
         }
+    if gate_run is not None and gate_run["decision"] == "rejected":
+        # Faltung in die fünf Tore nur, wenn wirklich verworfen wird (Regel und Schalter); „reported“ berichtet nur.
+        _map_legacy_gates(gates, gate_run)
     if zugabe is not None:
         r["kontext_zugabe"] = zugabe
     flags = later_qualifications(sents, first, last, llm)
@@ -1048,6 +1334,24 @@ def evaluate_span(
         rubric["start_heal"] = start_note
         rubric["pre_heal_scores"] = r.get("pre_heal_scores")
         rubric["heal_rounds"] = heal_rounds
+    if proposal.get("missing_v2_fields"):
+        # Vorschlag ohne die Felder aus propose_moments_v2: in der Auswahl abgewertet (select_best).
+        rubric["proposal_missing_v2_fields"] = list(proposal["missing_v2_fields"])
+    if gate_run is not None:
+        # AP4, additiv: alle Gate-Ergebnisse, die Entscheidung und die Heilungen. Die fünf Tore bleiben.
+        rubric["quality_gate_results"] = gate_run["results"]
+        rubric["quality_gate_decision"] = {
+            "decision": gate_run["decision"], "reason": gate_run["decision_reason"], "detail": gate_run["decision_detail"],
+            "failed": list(gate_run["failed"]), "flagged": list(gate_run["flagged"]), "discard_hard": gate_run["discard_hard"],
+            "unhealable": list(gate_run.get("unhealable") or []), "switch": gate_run.get("switch"),
+        }  # fmt: skip
+        rubric["gate_heal"] = gate_heal or None
+        rubric["heal_rounds"] = heal_rounds
+    if trim is not None:
+        # AP7, additiv: was gekürzt wurde (oder warum nicht) und die entfernten Stellen nach Master-Prompt 21.
+        rubric["trim"] = {k: trim[k] for k in ("applied", "reason", "reward_end", "findings", "composition")}
+        rubric["removed_spans"] = list(trim.get("removed_spans") or []) if trim["applied"] else []
+        rubric["composition"] = trim["composition"] if trim["applied"] else None
     gate_passed = all(bool(g["passed"]) for g in gates.values())
     # Die Begründung nennt die Plattform der Clips (``analyze.clip_platform``); ohne sie das Briefing.
     platform = str(brief.get("clip_platform") or brief.get("platform") or "linkedin")
@@ -1090,12 +1394,32 @@ def _ueberdeckung(a: CandidateResult, b: CandidateResult) -> float:
     return gemeinsamer_anteil(a.start_s, a.end_s, b.start_s, b.end_s)
 
 
-def select_best(cands: list[CandidateResult], limit: int = MAX_CANDIDATES) -> tuple[list[CandidateResult], list[dict]]:
-    """Beste nach Rubrik (Gate-Erfüllung vor Score), überlappende Spannen nur einmal, maximal ``limit``."""
-    ordered = sorted(cands, key=lambda c: (c.gate_passed, c.total, -c.start_s), reverse=True)
+def select_best(
+    cands: list[CandidateResult],
+    limit: int = MAX_CANDIDATES,
+    pol: editorial.Policy | None = None,
+    heuristic: bool = False,
+) -> tuple[list[CandidateResult], list[dict]]:
+    """Beste nach Rubrik (Gate-Erfüllung vor Score), überlappende Spannen nur einmal, maximal ``limit``.
+
+    Mit ``pol`` der Fassung 2 und den harten Gates (AP4) gilt ``editorial.block_mode_settings``: im Modus
+    ``sperren`` (nur mit Sprachmodell, mit Heuristik bleibt ``sortieren``) wird ein Kandidat, dessen Punkte
+    nach der Grundlage unter ``discard_below`` liegen, verworfen (Grund ``below_threshold``)."""
+    block = editorial.block_mode_settings(pol, heuristic=heuristic) if gates_wired(pol) is not None else None
+    # Ein Vorschlag im alten Format (``proposal_missing_v2_fields``, nur Fassung 2) rückt hinter jeden
+    # vollständigen; unter Fassung 1 fehlt der Schlüssel und die Reihenfolge bleibt wie bisher.
+    ordered = sorted(cands, key=lambda c: (c.gate_passed, not c.rubric.get("proposal_missing_v2_fields"), c.total, -c.start_s), reverse=True)
     kept: list[CandidateResult] = []
     dropped: list[dict] = []
     for c in ordered:
+        if block is not None and block["effective_mode"] == "sperren" and pol is not None:
+            points = pol.gesamtwert(c.rubric.get("rubric_points") or {}) if c.rubric.get("rubric_points") else 0.0
+            if points < float(block["discard_below"]):
+                dropped.append({
+                    "reason": "below_threshold", "first_sent": c.first_sent, "last_sent": c.last_sent, "total": c.total,
+                    "detail": f"{points:.1f} Punkte unter der Schwelle {block['discard_below']} (Modus sperren)",
+                })  # fmt: skip
+                continue
         # Ein gerissenes Tor ist kein Geschmacksurteil, sondern ein feststellbarer Fehler im
         # Schnitt: der Clip endet vor dem „aber", das ihm den Sinn gibt, er verweist auf etwas
         # Unsichtbares, oder er faengt mitten im Satz an. Bisher wirkte das nur auf die
@@ -1123,14 +1447,24 @@ def select_best(cands: list[CandidateResult], limit: int = MAX_CANDIDATES) -> tu
 
 
 def prompt_versions() -> list[str]:
-    """Die drei Prompt-Versionen der Engine (für Event-Payload und Idempotenz-Key), so wie die aktive
-    Policy sie pinnt. Eine neue Prompt-Datei ändert diese Liste erst, wenn eine Policy sie pinnt."""
+    """Die Prompt-Versionen, die die Engine tatsächlich nutzt (für Event-Payload und Idempotenz-Key), so wie
+    die aktive Policy sie pinnt. Eine neue Prompt-Datei ändert diese Liste erst, wenn eine Policy sie pinnt.
+
+    Fassung 2: ``propose_moments_v2`` nur mit ``implementation.search.payoff_first`` (sonst nutzt ``propose``
+    den Pin der Fassung 1, und genau der steht hier); mit dem Schalter zusätzlich ``episode_overview``."""
     pol = editorial.load()
-    return [
-        prompts.load_pinned("propose_moments", pol).prompt_version,
+    propose = prompts.load_pinned("propose_moments", pol)
+    wired = search_wired(pol) is not None
+    if propose.version >= 2 and not wired:
+        propose = prompts.load_pinned("propose_moments", editorial.load(1))
+    out = [
+        propose.prompt_version,
         prompts.load_pinned("score_clip", pol).prompt_version,
         prompts.load_pinned("story_graph_confirm", pol).prompt_version,
     ]
+    if wired:
+        out.append(prompts.load_pinned("episode_overview", pol).prompt_version)
+    return out
 
 
 def run(
@@ -1143,7 +1477,16 @@ def run(
     on_progress: ProgressFn | None = None,
     max_candidates: int = MAX_CANDIDATES,
 ) -> DetectReport:
-    """Alle vier Stufen. ``on_progress(done, total, n_candidates)`` wird nach jedem Kapitel aufgerufen."""
+    """Alle vier Stufen. ``on_progress(done, total, n_candidates)`` wird nach jedem Kapitel aufgerufen.
+
+    Fassung 2, je Schalter: mit ``implementation.search.payoff_first`` (AP5) überlappende Kapitel
+    (``search.chapter_overlap_s``), Episodenübersicht je Kapitel, ``propose`` mit Übersicht, Seeds und
+    Richtlinie, deterministische Vorschläge aus ``payoff_search.search_moments`` und Abgleich beider Quellen
+    über ``payoff_search.reconcile``; das Modellbudget ``search.max_llm_calls_per_source_hour`` wird gezählt
+    und durchgesetzt (kein Abbruch, nur keine weiteren Modellaufrufe, Hinweis in ``llm_budget``). Mit
+    ``implementation.gates.discard_hard`` (AP4) verlassen Gate-Verletzer die Liste vor ``select_best`` (Grund
+    ``gate:<schluessel>``, Quote je Gate in ``gate_rejections``). Unter Fassung 2 stehen die ClipCandidates im
+    Bericht (AP8) und ihre kompakte Teilmenge additiv in der Rubrik."""
     brief = dict(brief or {})
     brand = dict(brand or {})
     weights = dict(weights) if weights else resolve_weights(brand.get("learned_weights"))
@@ -1157,8 +1500,16 @@ def run(
         sents = sentences_from_annotated(words) or sentences_from_words(
             words, rule=args["rule"], max_s=args["max_s"], max_words=args["max_words"]
         )
-    chapters = chapterize(sents, CHAPTER_SECONDS)
-    order = chapter_order(chapters, seeds_from_heat(heat_payload))
+    search_cfg = search_wired(pol)
+    gate_cfg = gates_wired(pol)
+    heuristic = bool(getattr(llm, "is_heuristic", False))
+    if search_cfg is not None:
+        chapters = chapterize(sents, CHAPTER_SECONDS, search_cfg["chapter_overlap_s"])
+        llm = BudgetLLM(llm, llm_budget_for(sents, search_cfg))  # type: ignore[assignment]
+    else:
+        chapters = chapterize(sents, CHAPTER_SECONDS)
+    seeds = seeds_from_heat(heat_payload)
+    order = chapter_order(chapters, seeds)
     report = DetectReport(
         chapters=len(order),
         chapters_with_seeds=sum(1 for _i, _ch, has in order if has),
@@ -1168,19 +1519,36 @@ def run(
         weights=weights,
     )
     report.nlp_status = nlp_status_for(pol)
+    if pol is not None and pol.version >= 2:
+        report.engine = engine_version(pol)
     raw: list[CandidateResult] = []
+    gate_rejected: list[CandidateResult] = []
     seen: set[tuple[int, int]] = set()
+    proposed: set[tuple[int, int]] = set()
     for done, (_i, chapter, _has_seed) in enumerate(order, start=1):
-        moments = story_score.propose(chapter, brief, llm)[:MAX_PER_CHAPTER]
-        report.proposals += len(moments)
+        if search_cfg is not None:
+            moments = _propose_v2(chapter, brief, llm, pol, seeds, heat_payload, report)
+        else:
+            moments = story_score.propose(chapter, brief, llm)[:MAX_PER_CHAPTER]
+            report.proposals += len(moments)
         for m in moments:
             first, last = int(m["first_sent"]), int(m["last_sent"])
+            if search_cfg is not None:
+                # Überlappende Kapitel schlagen denselben Moment zweimal vor: nur einmal bewerten.
+                if (first, last) in proposed:
+                    report.discarded.append({"reason": "duplicate", "first_sent": first, "last_sent": last, "stage": "search"})
+                    continue
+                proposed.add((first, last))
             dur = _duration(sents, first, last)
             reason = _vorfilter_grund(sents, first, last)
             if reason:
                 report.discarded.append({"reason": reason, "first_sent": first, "last_sent": last, "duration_s": round(dur, 2)})
                 continue
-            out = evaluate_span(words, sents, m, brief, llm, weights, heat_payload)
+            try:
+                out = evaluate_span(words, sents, m, brief, llm, weights, heat_payload)
+            except LLMBudgetExceeded:
+                report.discarded.append({"reason": "llm_budget", "first_sent": first, "last_sent": last, "duration_s": round(dur, 2)})
+                continue
             if isinstance(out, dict):
                 report.discarded.append(out)
                 continue
@@ -1189,13 +1557,175 @@ def run(
                 report.discarded.append({"reason": "duplicate", "first_sent": key[0], "last_sent": key[1]})
                 continue
             seen.add(key)
+            if gate_cfg is not None:
+                decision = out.rubric.get("quality_gate_decision") or {}
+                if decision.get("decision") == "rejected":
+                    # AP4: harte Gates vor dem Ranking. Der Kandidat bleibt im Bericht (verworfen, mit Grund).
+                    report.discarded.append({
+                        "reason": str(decision.get("reason")), "first_sent": out.first_sent, "last_sent": out.last_sent,
+                        "total": out.total, "detail": str(decision.get("detail") or ""),
+                    })  # fmt: skip
+                    gate_rejected.append(out)
+                    continue
             raw.append(out)
         if on_progress:
             on_progress(done, len(order), len(raw))
-    report.candidates, dropped = select_best(raw, max_candidates)
-    report.verworfen = [c for c in raw if all(c is not k for k in report.candidates)]
+    if gate_cfg is not None:
+        report.candidates, dropped = select_best(raw, max_candidates, pol=pol, heuristic=heuristic)
+        report.gate_rejections = gate_rejection_rates([*raw, *gate_rejected])
+    else:
+        report.candidates, dropped = select_best(raw, max_candidates)
+    report.verworfen = [c for c in raw if all(c is not k for k in report.candidates)] + gate_rejected
     report.discarded.extend(dropped)
+    if isinstance(llm, BudgetLLM):
+        report.llm_budget = {
+            "limit": llm.limit, "used": llm.used, "refused": llm.refused, "exhausted": llm.refused > 0,
+            "per_source_hour": int(search_cfg["max_llm_calls_per_source_hour"]) if search_cfg else None,
+            "status": "budget_exhausted" if llm.refused else "ok",
+            "hinweis": (
+                f"Modellbudget von {llm.limit} Aufrufen erreicht; {llm.refused} weitere Aufrufe nicht ausgeführt, "
+                "betroffene Schritte ausgelassen (Grund llm_budget im Bericht)." if llm.refused else None
+            ),
+        }  # fmt: skip
+        if llm.refused:
+            # Kapitel mit Seeds liefen zuerst (chapter_order); was danach kam, bekam kein Modell mehr.
+            report.discarded.append({"reason": "budget_exhausted", "limit": llm.limit, "used": llm.used, "refused": llm.refused,
+                                     "detail": report.llm_budget["hinweis"]})  # fmt: skip
+    if pol is not None and pol.version >= 2:
+        attach_clip_candidates(report, words, sents, pol, brief)
     return report
+
+
+def gate_rejection_rates(evaluated: list[CandidateResult]) -> dict:
+    """Verwerfungsquote je Gate (AP4) über alle bewerteten Kandidaten: wie oft ein Gate riss (``failed``) und
+    wie oft es der Grund des Verwerfens war (``rejected``), Anteil an ``evaluated``."""
+    n = len(evaluated)
+    by_gate: dict[str, dict[str, Any]] = {}
+    for c in evaluated:
+        decision = c.rubric.get("quality_gate_decision") or {}
+        for key in decision.get("failed") or []:
+            entry = by_gate.setdefault(key, {"failed": 0, "rejected": 0})
+            entry["failed"] += 1
+        reason = str(decision.get("reason") or "")
+        if decision.get("decision") == "rejected" and reason.startswith("gate:"):
+            by_gate.setdefault(reason[5:], {"failed": 0, "rejected": 0})["rejected"] += 1
+    for entry in by_gate.values():
+        entry["quote"] = round(entry["rejected"] / n, 4) if n else 0.0
+    return {"evaluated": n, "by_gate": dict(sorted(by_gate.items()))}
+
+
+def attach_clip_candidates(
+    report: DetectReport, words: list[dict], sents: list[Sentence], pol: editorial.Policy, brief: dict[str, Any] | None
+) -> None:
+    """ClipCandidates des Laufs (AP8, nur Fassung 2): vollständig in ``report.clip_candidates``, die kompakte
+    Teilmenge (``clip_candidate.compact_for_rubric``) additiv in der Rubrik jedes Kandidaten. Mit der
+    Satzliste des Laufs, damit die Zerlegung dieselbe ist."""
+    from . import clip_candidate
+
+    try:
+        ccs = clip_candidate.from_report(report, words, pol, brief=brief, sents=sents)
+        data = [cc.to_dict() for cc in ccs]
+    except ValueError as exc:  # auch SchemaError: der Lauf bleibt gültig, der Verstoß steht im Bericht
+        report.discarded.append({"reason": "clip_candidate_error", "detail": str(exc)[:500]})
+        return
+    report.clip_candidates = data
+    for c, cc in zip([*report.candidates, *report.verworfen], ccs):
+        c.rubric.update(clip_candidate.compact_for_rubric(cc))
+
+
+def _search_why(prop: dict) -> str:
+    parts = [f"Payoff in Satz {prop['payoff_sent']}" + (f" ({prop['payoff_type']})" if prop.get("payoff_type") else "")]
+    parts.append(f"Einstieg in Satz {prop['opening_sent']}")
+    if prop.get("hook_type"):
+        parts.append(f"Hook-Typ {prop['hook_type']}")
+    parts.append(f"Richtung {prop['direction']}")
+    return "Deterministische Suche: " + ", ".join(parts) + "."
+
+
+def _propose_v2(
+    chapter: list[Sentence],
+    brief: dict[str, Any],
+    llm: Any,
+    pol: editorial.Policy,
+    seeds: list[float],
+    heat_payload: dict[str, Any] | None,
+    report: DetectReport,
+) -> list[dict]:
+    """Vorschläge eines Kapitels unter AP5: Episodenübersicht, Modellvorschläge mit Übersicht und Seeds,
+    deterministische Suche, Abgleich über ``payoff_search.reconcile``.
+
+    Die Modellvorschläge gehen als Einstiege mit ihrer Einlösung (``payoff_sent``, ohne Angabe der letzte
+    Satz) in den Abgleich, die Suche liefert die Payoff-Seite. Treffer derselben Aussage sind Dubletten;
+    einer bleibt, die anderen stehen im Bericht. Verworfene der Suche (``promise_unfulfilled``,
+    ``context_missing``, ``too_short``, ``no_opening``) stehen in ``discarded``. Ist das Budget aufgebraucht,
+    fallen Übersicht und Modellvorschläge weg; die Suche läuft ohne Modell weiter."""
+    stats = report.search.setdefault("chapters", [])
+    overview = None
+    try:
+        overview = story_score.overview(chapter, llm, pol)
+        report.overviews.append(overview)
+    except LLMBudgetExceeded:
+        report.discarded.append({"reason": "llm_budget", "stage": "overview", "first_sent": chapter[0].idx, "last_sent": chapter[-1].idx})
+    try:
+        model = story_score.propose(chapter, brief, llm, overview=overview, seeds=seeds, policy=pol)[:MAX_PER_CHAPTER]
+    except LLMBudgetExceeded:
+        model = []
+        report.discarded.append({"reason": "llm_budget", "stage": "propose", "first_sent": chapter[0].idx, "last_sent": chapter[-1].idx})
+    found = payoff_search.search_moments(chapter, pol, heat_payload)
+    payoff_first, duplicates = [], list(found.get("duplicates") or [])
+    for p in found["proposals"]:
+        same = next((x for x in payoff_first if int(x["payoff_sent"]) == int(p["payoff_sent"])), None)
+        if same is not None:
+            duplicates.append({"payoff_sent": int(p["payoff_sent"]), "kept": [same["first_sent"], same["last_sent"]],
+                               "dropped": [[p["first_sent"], p["last_sent"]]], "reason": "same_payoff"})  # fmt: skip
+            continue
+        payoff_first.append(p)
+    by_idx = {x.idx: x for x in chapter}
+    opening_first = []
+    for m in model:
+        pay = m.get("payoff_sent")
+        opening_first.append({
+            "opening_sent": int(m["first_sent"]), "first_sent": int(m["first_sent"]), "last_sent": int(m["last_sent"]),
+            "payoff_sent": int(pay) if isinstance(pay, int) and not isinstance(pay, bool) else int(m["last_sent"]),
+            "payoff_type": None, "hook_type": None, "required_context_sents": list(m.get("required_context_sents") or []),
+            "duration_s": round(by_idx[int(m["last_sent"])].end - by_idx[int(m["first_sent"])].start, 2),
+        })  # fmt: skip
+    res = payoff_search.reconcile(payoff_first, opening_first)
+    duplicates += res["duplicates"]
+    for d in [*found["rejected"], *res["rejected"]]:
+        report.discarded.append({**d, "stage": "search"})
+    for d in duplicates:
+        report.discarded.append({"reason": "duplicate_payoff", "stage": "search", "payoff_sent": d.get("payoff_sent"),
+                                 "kept": d.get("kept"), "dropped": d.get("dropped"), "detail": d.get("reason")})  # fmt: skip
+    by_model = {(int(m["first_sent"]), int(m["last_sent"])): m for m in model}
+    merged = []
+    for prop in res["proposals"]:
+        key = (int(prop["first_sent"]), int(prop["last_sent"]))
+        base = by_model.get(key)
+        source = "model" if base is not None else "search"
+        if base is None:
+            base = {"first_sent": key[0], "last_sent": key[1], "structure": "hook_build_payoff", "why": _search_why(prop), "prompt_version": None}
+        merged.append({
+            **base,
+            "payoff_sent": int(prop["payoff_sent"]),
+            "opening_sent": int(prop["opening_sent"]),
+            "required_context_sents": list(prop.get("required_context_sents") or []),
+            "narrative_type": base.get("narrative_type") or prop.get("narrative_type"),
+            "direction": prop["direction"],
+            "source": source,
+        })  # fmt: skip
+    rank = {d: n for n, d in enumerate(payoff_search.DIRECTIONS)}
+    merged.sort(key=lambda m: (bool(m.get("missing_v2_fields")), rank.get(m["direction"], len(rank)), m["source"] != "model", m["first_sent"]))
+    for m in merged[MAX_PER_CHAPTER:]:
+        report.discarded.append({"reason": "chapter_limit", "stage": "search", "first_sent": m["first_sent"], "last_sent": m["last_sent"]})
+    kept = sorted(merged[:MAX_PER_CHAPTER], key=lambda m: (m["first_sent"], m["last_sent"]))
+    report.proposals += len(model) + len(found["proposals"]) + len(found["rejected"])
+    stats.append({
+        "first_sent": chapter[0].idx, "last_sent": chapter[-1].idx, "model": len(model),
+        "search": len(found["proposals"]), "search_rejected": len(found["rejected"]) + len(res["rejected"]),
+        "duplicates": len(duplicates), "evaluated": len(kept), "overview": overview is not None,
+    })  # fmt: skip
+    return kept
 
 
 def detect(

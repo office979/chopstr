@@ -49,31 +49,26 @@ def test_provider_is_allowed_for_both_tiers_and_selected_by_env(monkeypatch):
     assert providers_llm.select_provider(Tenant(id="ws", tier="sovereign")) == "local-heuristic"
 
 
-def test_propose_is_deterministic_and_schema_conform(no_network, active_policy):
-    """Fassung 1: Anker, höchstens drei, ohne Überlappung. Fassung 2 pinnt propose_moments_v2 (AP5): Suche
-    aus payoff_search, keine feste Anzahl, Überlappung erlaubt (die Auswahl übernimmt story_engine)."""
+def test_propose_is_deterministic_and_schema_conform(no_network):
+    """Unter beiden Fassungen der Pfad vor AP5: Fassung 2 nutzt propose_moments_v2 erst mit dem Schalter
+    implementation.search.payoff_first (AP5, H1)."""
     llm = _llm()
     sents = segment.sentences_from_words(demo_words())
-    m1 = story_score.propose(sents, BRIEF, llm)
-    m2 = story_score.propose(sents, BRIEF, llm)
+    pol = unwired(editorial.load())
+    m1 = story_score.propose(sents, BRIEF, llm, policy=pol)
+    m2 = story_score.propose(sents, BRIEF, llm, policy=pol)
     assert m1 == m2
-    assert 1 <= len(m1) <= (3 if active_policy == 1 else len(sents))
+    assert 1 <= len(m1) <= 3
     valid = {s.idx for s in sents}
     spans = []
     for m in m1:
         assert m["first_sent"] in valid and m["last_sent"] in valid and m["first_sent"] <= m["last_sent"]
         assert m["structure"] in story_score.STRUCTURES
         assert m["why"].startswith("Heuristik ohne Sprachmodell")
-        assert m["prompt_version"] == f"propose_moments_v{active_policy}"
+        assert m["prompt_version"] == "propose_moments_v1"
         est = heuristic_llm.estimate_seconds([{"text": s.text} for s in sents[m["first_sent"] : m["last_sent"] + 1]])
-        assert 15.0 <= est <= (60.0 if active_policy == 1 else 70.0)
+        assert 15.0 <= est <= 60.0
         spans.append((m["first_sent"], m["last_sent"]))
-    if active_policy == 2:
-        for m in m1:
-            assert m["first_sent"] <= m["opening_sent"] <= m["payoff_sent"] <= m["last_sent"]
-            assert m["narrative_type"] in story_score.NARRATIVE_TYPES and m["direction"] in story_score.DIRECTIONS
-            assert m["viewer_promise"] is None and m["central_idea"] is None and "missing_v2_fields" not in m
-        return
     for a, b in spans:
         for c, d in spans:
             assert (a, b) == (c, d) or b < c or d < a  # keine Überlappung
@@ -119,7 +114,8 @@ def test_confirm_returns_no_verdict(no_network):
 
 def test_engine_with_heuristic_marks_results(no_network, active_policy):
     report = story_engine.run(demo_words(), BRIEF, {}, {"seeds": [2]}, _llm("sovereign"))
-    assert report.prompt_versions == [f"propose_moments_v{1 if active_policy == 1 else 2}", "score_clip_v2", "story_graph_confirm_v1"]
+    overview = ["episode_overview_v1"] if active_policy == 2 else []  # Fassung 2 mit verdrahteter Suche
+    assert report.prompt_versions == [f"propose_moments_v{1 if active_policy == 1 else 2}", "score_clip_v2", "story_graph_confirm_v1", *overview]
     assert report.provider == "local-heuristic" and report.model_id == "heuristic-v1"
     assert report.candidates, report.discarded
     for c in report.candidates:
@@ -172,6 +168,35 @@ def policy_v2(monkeypatch):
     editorial.clear_cache()
 
 
+def wired_v2() -> editorial.Policy:
+    """Fassung 2 mit eingeschaltetem implementation.search.payoff_first (wie nach der Verdrahtung)."""
+    import copy
+
+    base = editorial.load(2)
+    roh = copy.deepcopy(base.roh)
+    roh["implementation"]["search"]["payoff_first"] = True
+    return editorial.Policy(version=2, stand=base.stand, roh=roh)
+
+
+def unwired(pol: editorial.Policy) -> editorial.Policy:
+    """Fassung 2 mit ausgeschaltetem implementation.search.payoff_first (Rollback); Fassung 1 unverändert."""
+    import copy
+
+    if pol.version < 2:
+        return pol
+    roh = copy.deepcopy(pol.roh)
+    roh["implementation"]["search"]["payoff_first"] = False
+    return editorial.Policy(version=pol.version, stand=pol.stand, roh=roh)
+
+
+def test_v2_without_switch_proposes_like_v1(no_network):
+    """H1: Fassung 2 mit Schalter aus liefert dieselben Vorschläge wie Fassung 1 (Prompt v1, Anker)."""
+    sents = segment.sentences_from_words(demo_words())
+    v1 = story_score.propose(sents, BRIEF, _llm(), policy=editorial.load(1))
+    v2 = story_score.propose(sents, BRIEF, _llm(), policy=unwired(editorial.load(2)))
+    assert v1 == v2 and {m["prompt_version"] for m in v2} == {"propose_moments_v1"}
+
+
 def test_v2_prompt_is_parsed_and_uses_payoff_search(no_network, policy_v2):
     """Die Heuristik erkennt den Kapitelblock in Begrenzern; Übersicht, Seeds und Policy sind kein Transkript."""
     from chopstr_worker import prompts
@@ -190,8 +215,8 @@ def test_v2_prompt_is_parsed_and_uses_payoff_search(no_network, policy_v2):
         assert m["viewer_promise"] is None and m["central_idea"] is None
     kept, dropped = story_score.validate_moments_v2(out, valid)
     assert dropped == [] and len(kept) == len(out["moments"])
-    # Der Weg über story_score.propose kommt zum selben Ergebnis.
-    assert [(m["first_sent"], m["last_sent"]) for m in story_score.propose(sents, BRIEF, _llm())] == [
+    # Der Weg über story_score.propose (verdrahtet) kommt zum selben Ergebnis.
+    assert [(m["first_sent"], m["last_sent"]) for m in story_score.propose(sents, BRIEF, _llm(), policy=wired_v2())] == [
         (m["first_sent"], m["last_sent"]) for m in out["moments"]
     ]
 
@@ -210,7 +235,7 @@ def test_v2_weak_material_gives_no_moment(no_network, policy_v2):
 
     case = harness.load_case("weak_material")
     sents = segment.sentences_from_words(case["words"], rule="v2")
-    assert story_score.propose(sents, BRIEF, _llm()) == []
+    assert story_score.propose(sents, BRIEF, _llm(), policy=wired_v2()) == []
 
 
 def test_overview_marks_itself_and_leaves_unknowns_null(no_network, policy_v2):

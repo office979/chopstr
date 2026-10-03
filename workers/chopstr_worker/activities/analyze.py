@@ -19,6 +19,7 @@ durch ``run_detect_candidates`` laufen, hängt die Clip-Erzeugung an genau einer
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import time
 from datetime import UTC, datetime
@@ -174,7 +175,16 @@ def _load_heat(ctx: common.Context, src: dict) -> dict | None:
     return None
 
 
-def candidates_key_for(tv_id: str, tv_version: int, brief: dict, prompt_versions: list[str], provider: str, model: str, weights: dict) -> str:
+def candidates_key_for(
+    tv_id: str,
+    tv_version: int,
+    brief: dict,
+    prompt_versions: list[str],
+    provider: str,
+    model: str,
+    weights: dict,
+    heat: dict | None = None,
+) -> str:
     """Idempotenz-Key: Transkriptversion, Briefing, Prompt-Versionen, Provider/Modell, Gewichte,
     Engine UND redaktionelle Grundlage.
 
@@ -184,7 +194,10 @@ def candidates_key_for(tv_id: str, tv_version: int, brief: dict, prompt_versions
 
     Gemeint ist die aktive Fassung (``CHOPSTR_POLICY_VERSION``), nicht die Standardfassung, und die
     ``prompt_versions`` sind die gepinnten (``story_engine.prompt_versions``): ein Wechsel auf v2
-    oder ein neuer Pin ergibt einen neuen Schlüssel."""
+    oder ein neuer Pin ergibt einen neuen Schlüssel.
+
+    Ab Fassung 2 zusätzlich: ``story_engine_v5`` statt v4, ``SIGNALS_VERSION`` und ein Hash der Heatmap
+    (Seeds und ``audio_values``, AP9-Vorgriff): eine neue Heatmap ergibt einen neuen Schlüssel."""
     try:
         policy = editorial.policy_version()
     except Exception:  # ohne Richtlinie lieber weiterarbeiten als gar nicht
@@ -201,7 +214,19 @@ def candidates_key_for(tv_id: str, tv_version: int, brief: dict, prompt_versions
         "policy": policy,
         **extra,
     }
+    if extra:
+        params["engine"] = story_engine.ENGINE_VERSION_V2
+        params["signals"] = SIGNALS_VERSION
+        params["heat_sha256"] = heat_hash(heat)
     return storage.derived_key(f"transcript/{tv_id}", params, story_engine.CONTRACT, "json", prefix="candidates")
+
+
+def heat_hash(heat: dict | None) -> str | None:
+    """sha256 über Seeds und ``audio_values`` der Heatmap (die Teile, die die Engine liest), ``None`` ohne."""
+    if not heat:
+        return None
+    part = {"seeds": heat.get("seeds") or [], "audio_values": heat.get("audio_values") or [], "bin_s": heat.get("bin_s")}
+    return hashlib.sha256(json.dumps(part, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _policy_v2_key_params() -> dict[str, str]:
@@ -447,7 +472,7 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
                 "(BEDROCK_MODEL_ID, MISTRAL_MODEL oder SELFHOST_LLM_MODEL setzen, für Entwicklung LLM_PROVIDER=local-heuristic)"
             )
         versions = story_engine.prompt_versions()
-        key = candidates_key_for(tv_id, tv_version, brief, versions, llm.provider, model, weights)
+        key = candidates_key_for(tv_id, tv_version, brief, versions, llm.provider, model, weights, heat)
 
         cached = ctx.store.exists("derived", key)
         if cached:

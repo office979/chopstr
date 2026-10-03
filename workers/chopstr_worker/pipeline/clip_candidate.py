@@ -29,12 +29,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 from .. import editorial
-from . import compose, fidelity, segment, story_engine
+from . import compose, dach_nlp, fidelity, segment, story_engine
 from .segment import Sentence
 from .transcribe import LOW_CONF_THRESHOLD
 
@@ -47,12 +48,32 @@ UNCERTAINTY_KINDS = (
     "heuristic_only",
     "nlp_unavailable",
     "boundary_from_pause",
+    "boundary_from_length_cap",
     "boundary_confidence_missing",
     "story_graph_unconfirmed",
 )
 # Toleranz beim Zuordnen von Wörtern zu Segmenten: die Segmentgrenzen sind auf Millisekunden gerundet.
 WORD_EPS_S = 0.001
-PAUSE_MARKER = "nur aus Pause"
+# Arten mit Wortbezug: nur sie tragen word_id, text und prob.
+WORD_KINDS = frozenset({"low_confidence_number", "low_confidence_name"})
+# Großgeschrieben, aber kein Name: Anrede, Pronomen, Artikel, Funktionswörter (kleingeschrieben verglichen).
+NOT_NAMES = frozenset({
+    "sie", "ihr", "ihre", "ihren", "ihrem", "ihrer", "ihres", "ihnen", "du", "dich", "dir", "dein", "deine",
+    "ich", "mich", "mir", "mein", "meine", "wir", "uns", "unser", "unsere", "er", "es", "man", "euch", "euer",
+    "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "eines",
+    "und", "oder", "aber", "doch", "denn", "dass", "weil", "wenn", "als", "wie", "so", "also", "ja", "nein",
+    "nicht", "auch", "noch", "nur", "schon", "dann", "da", "hier", "dort", "jetzt", "heute", "mit", "von",
+    "bei", "zu", "in", "im", "an", "am", "auf", "für", "über", "unter", "nach", "vor", "aus", "um", "ohne",
+    "okay", "ok", "genau", "gut", "na", "äh", "ähm", "hm",
+})  # fmt: skip
+# Anreden und Titel: das Wort danach ist ein Name, auch am Satzanfang („Frau Meier hat …“).
+TITLES = frozenset({"frau", "herr", "herrn", "dr", "prof", "doktor", "professor", "professorin", "mag", "ing"})
+# Bruchzahlwörter zählen als Zahl (falsch erkannt ändern sie den Wert).
+FRACTION_WORDS = frozenset({
+    "halb", "halbe", "halben", "halber", "hälfte", "drittel", "viertel", "fünftel", "zehntel", "hundertstel",
+    "tausendstel", "anderthalb", "eineinhalb", "zweieinhalb", "dreiviertel",
+})  # fmt: skip
+SENTENCE_FINAL = (".", "!", "?", ":")
 
 # -- JSON-Schema -----------------------------------------------------------------------------------
 
@@ -243,8 +264,15 @@ def _check(value: Any, schema: dict[str, Any], path: str, root: dict[str, Any], 
         _check(value, _resolve(schema["$ref"], root), path, root, errors)
         return
     if "anyOf" in schema:
-        if not any(not _errors(value, sub, path, root) for sub in schema["anyOf"]):
+        branches = [_errors(value, sub, path, root) for sub in schema["anyOf"]]
+        if all(branches):
+            # Der Zweig, dessen Typ passt, mit den wenigsten Fehlern sagt, was wirklich fehlt.
+            best = min(branches, key=lambda errs: (any(e.startswith(f"{path}: Typ") for e in errs), len(errs)))
             errors.append(f"{path}: passt zu keiner erlaubten Form")
+            errors.extend(best)
+        return
+    if isinstance(value, float) and not math.isfinite(value):
+        errors.append(f"{path}: {value} ist keine endliche Zahl")
         return
     if "const" in schema and value != schema["const"]:
         errors.append(f"{path}: erwartet {schema['const']!r}, steht {value!r}")
@@ -288,22 +316,41 @@ def _errors(value: Any, schema: dict[str, Any], path: str, root: dict[str, Any])
 
 def validate(data: Any, schema: dict[str, Any] | None = None) -> list[str]:
     """Prüft ``data`` gegen das Schema (Standard ``SCHEMA``). Leere Liste heißt gültig."""
-    schema = schema or SCHEMA
+    own = schema is None or schema is SCHEMA
+    schema = SCHEMA if schema is None else schema
     errors = _errors(data, schema, "$", schema)
-    if not errors and isinstance(data, dict):
+    # Die Regeln über Felder hinweg gelten nur für den Vertrag selbst, nicht für ein fremdes Schema.
+    if own and not errors and isinstance(data, dict):
         errors += _semantic_errors(data)
     return errors
 
 
 def _semantic_errors(data: dict[str, Any]) -> list[str]:
-    """Was JSON-Schema nicht ausdrücken kann: Reihenfolge der Zeiten und Pflicht-Segmente."""
+    """Was JSON-Schema nicht ausdrücken kann: Felder, die nur gemeinsam gelten, Reihenfolge der Zeiten,
+    Pflicht-Segmente und Wortbezug der Unsicherheiten."""
     out: list[str] = []
     if data["decision"] == "accept" and not data["segments"]:
         out.append("$.segments: angenommener Kandidat ohne Segmente")
+    if (data["audience_context"] is None) != (data["audience_context_provenance"] is None):
+        out.append("$.audience_context: audience_context und audience_context_provenance nur gemeinsam gesetzt oder beide null")
     for i, seg in enumerate(data["segments"]):
         for a, b in (("source_in", "source_out"), ("output_in", "output_out")):
             if seg[a] is not None and seg[b] is not None and seg[b] < seg[a]:
                 out.append(f"$.segments[{i}]: {b} liegt vor {a}")
+        for src, dst in (("source_in", "output_in"), ("source_out", "output_out")):
+            if seg[src] is None and seg[dst] is not None:
+                out.append(f"$.segments[{i}]: {dst} ohne {src}")
+        if seg["speaker_id"] is not None and not seg["word_ids"]:
+            out.append(f"$.segments[{i}]: speaker_id ohne Wörter")
+    for i, r in enumerate(data["removed_spans"]):
+        if r["source_out"] <= r["source_in"]:
+            out.append(f"$.removed_spans[{i}]: source_out liegt nicht nach source_in")
+    for i, u in enumerate(data["assessment_uncertainties"]):
+        word_fields = [k for k in ("word_id", "text", "prob") if u[k] is not None]
+        if u["kind"] in WORD_KINDS and u["word_id"] is None:
+            out.append(f"$.assessment_uncertainties[{i}]: {u['kind']} ohne word_id")
+        if u["kind"] not in WORD_KINDS and word_fields:
+            out.append(f"$.assessment_uncertainties[{i}]: {', '.join(word_fields)} nur bei Wortbefunden")
     return out
 
 
@@ -330,6 +377,10 @@ class RemovedSpan:
     source_out: float
     removal_reason: str
     protected_context_check: dict[str, Any] | None = None
+
+
+# Felder einer entfernten Stelle im Vertrag; trim_plan liefert zusätzlich kind, word_ids und text.
+_REMOVED_FIELDS = tuple(f.name for f in fields(RemovedSpan))
 
 
 @dataclass
@@ -395,15 +446,13 @@ def sentences_for(words: list[dict], policy: editorial.Policy | None = None) -> 
     rule = editorial.sentence_rule(pol) if pol is not None else "v1"
     if rule == "v1":
         return segment.sentences_from_words(words)
-    cut_args = getattr(story_engine, "_cut_args", None)
-    args = cut_args(words, pol) if cut_args is not None else {"rule": rule}
-    return segment.sentences_from_annotated(words) or segment.sentences_from_words(words, **args)
+    return segment.sentences_from_annotated(words) or segment.sentences_from_words(words, **story_engine._cut_args(words, pol))
 
 
 def versions_for(policy: editorial.Policy, report: story_engine.DetectReport | None = None) -> dict[str, Any]:
     """Versionen eines Laufs: Engine, Richtlinie, alle gepinnten Prompts, Modell und NLP-Status."""
     return {
-        "engine": story_engine.ENGINE_VERSION,
+        "engine": (report.engine if report is not None and report.engine else story_engine.engine_version(policy)),
         "policy_version": editorial.policy_version(policy.version),
         "prompts": {name: f"{name}_v{v}" for name, v in sorted(policy.prompt_pins.items())},
         "model_id": report.model_id if report is not None else None,
@@ -412,24 +461,16 @@ def versions_for(policy: editorial.Policy, report: story_engine.DetectReport | N
 
 
 def output_timeline(segments: list[dict]) -> list[tuple[float, float]]:
-    """Ausgabezeit je Segment in Abspielreihenfolge: lückenlos ab 0, Länge wie in der Quelle.
-
-    Gibt es ``compose.output_timeline`` (AP7), rechnet sie. Sonst dieselbe Rechnung hier: Versatz =
-    Summe der vorherigen Segmentlängen wie in ``compose.remap_words``, auf Millisekunden gerundet."""
-    shared = getattr(compose, "output_timeline", None)
-    if shared is not None:
-        return [(float(e["output_in"]), float(e["output_out"])) for e in shared(compose.Composition.from_json(segments))]
-    out, offset = [], 0.0
-    for seg in segments:
-        length = float(seg["end"]) - float(seg["start"])
-        out.append((round(offset, 3), round(offset + length, 3)))
-        offset += length
-    return out
+    """Ausgabezeit je Segment in Abspielreihenfolge: lückenlos ab 0, Länge wie in der Quelle
+    (``compose.output_timeline``, dieselbe Rechnung wie ``compose.remap_words``)."""
+    return [(float(e["output_in"]), float(e["output_out"])) for e in compose.output_timeline(compose.Composition.from_json(segments))]
 
 
 def _prob(w: dict) -> float | None:
     """ASR-Sicherheit eines Wortes: ``prob`` (Transkript), sonst ``asr_confidence`` (Fixtures)."""
-    raw = w.get("prob", w.get("asr_confidence"))
+    raw = w.get("prob")
+    if raw is None:
+        raw = w.get("asr_confidence")
     return float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else None
 
 
@@ -462,22 +503,47 @@ def _payoff_sentence(sents: list[Sentence], first: int, last: int, evidence: str
     return next((i for i in range(first, last + 1) if needle in _norm(sents[i].text)), None)
 
 
+def _core(text: str) -> str:
+    return str(text).strip(".,;:!?\"'„“»«()")
+
+
 def _is_number(text: str) -> bool:
-    core = str(text).strip(".,;:!?\"'„“»«()")
-    return bool(fidelity.number_mentions(core)) or fidelity.parse_number_word(core.lower()) is not None
+    core = _core(text)
+    low = core.lower()
+    return bool(fidelity.number_mentions(core)) or fidelity.parse_number_word(low) is not None or low in FRACTION_WORDS
 
 
-def _is_name(text: str) -> bool:
-    core = str(text).strip(".,;:!?\"'„“»«()")
-    return bool(core[:1].isupper())
+def _sentence_initial(words: list[dict], i: int) -> bool:
+    """Erstes Wort eines Satzes: Anfang der Liste, nach Satzzeichen oder nach Sprecherwechsel."""
+    if i == 0:
+        return True
+    before = str(words[i - 1].get("text") or "").rstrip("\"'»«“”‘’)")
+    return before.endswith(SENTENCE_FINAL) or words[i - 1].get("speaker") != words[i].get("speaker")
+
+
+def _is_name(words: list[dict], i: int, names: frozenset[str]) -> bool:
+    """Möglicher Name: großgeschrieben, kein Funktionswort oder Pronomen. Am Satzanfang nur nach einem
+    Titel oder wenn das Wort in der bekannten Namensliste steht (Großschreibung sagt dort nichts)."""
+    core = _core(words[i].get("text") or "")
+    low = core.lower()
+    if not core[:1].isupper() or low in NOT_NAMES or low.rstrip(".") in TITLES:
+        return False
+    if low in names:
+        return True
+    after_title = i > 0 and _core(words[i - 1].get("text") or "").lower().rstrip(".") in TITLES
+    return after_title or not _sentence_initial(words, i)
 
 
 def _de(value: float) -> str:
     return f"{value:.2f}".replace(".", ",")
 
 
-def low_confidence_uncertainties(words: list[dict], word_ids: list[int]) -> list[dict[str, Any]]:
-    """Zahlen und Namen (großgeschriebene Wörter) im Clip mit ``prob`` unter ``LOW_CONF_THRESHOLD``."""
+def low_confidence_uncertainties(words: list[dict], word_ids: list[int], names: tuple[str, ...] | list[str] = ()) -> list[dict[str, Any]]:
+    """Zahlen (auch Bruchzahlwörter) und mögliche Namen im Clip mit ``prob`` unter ``LOW_CONF_THRESHOLD``.
+
+    Name heißt: großgeschrieben, kein Funktionswort oder Pronomen, nicht am Satzanfang, außer nach einem
+    Titel („Frau“, „Dr.“) oder wenn das Wort in ``names`` steht (etwa ``brand_vocab``)."""
+    known = frozenset(_core(n).lower() for n in names)
     out = []
     for i in sorted(set(word_ids)):
         prob = _prob(words[i])
@@ -486,7 +552,7 @@ def low_confidence_uncertainties(words: list[dict], word_ids: list[int]) -> list
         text = str(words[i].get("text") or "")
         if _is_number(text):
             kind, what = "low_confidence_number", "Zahl"
-        elif _is_name(text):
+        elif _is_name(words, i, known):
             kind, what = "low_confidence_name", "Name oder Begriff"
         else:
             continue
@@ -502,9 +568,54 @@ def _note(kind: str, detail: str) -> dict[str, Any]:
     return {"kind": kind, "detail": detail, "word_id": None, "text": None, "prob": None}
 
 
-def _candidate_id(source_asset_id: Any, source_version: Any, result: story_engine.CandidateResult) -> str:
-    key = json.dumps([source_asset_id, source_version, result.first_sent, result.last_sent, result.segments], sort_keys=True)
+def _candidate_id(source_asset_id: Any, source_version: Any, result: story_engine.CandidateResult, versions: dict[str, Any] | None = None) -> str:
+    """Deterministisch aus Quelle, Transkriptversion, Richtlinie, Engine, Satzspanne und Segmenten: derselbe
+    Schnitt unter einer anderen Fassung ist ein anderer Kandidat."""
+    versions = versions or {}
+    key = json.dumps(
+        [source_asset_id, source_version, versions.get("policy_version"), versions.get("engine") or story_engine.ENGINE_VERSION,
+         result.first_sent, result.last_sent, result.segments],
+        sort_keys=True,
+    )  # fmt: skip
     return "cc_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def _nlp_note(vb: dict[str, Any], nlp_status: str) -> str | None:
+    """Unterscheidet „laut Richtlinie aus“ von „spaCy fehlt“ (heuristisch oder gar nicht geprüft)."""
+    detail = str(vb.get("detail") or "")
+    method = vb.get("method") or nlp_status
+    if "laut Richtlinie" in detail:
+        return f"Verbklammer laut Richtlinie abgeschaltet, nicht geprüft: {detail}"
+    if method == "heuristic":
+        return f"spaCy-Modell fehlt, Verbklammer nur heuristisch geprüft: {detail or nlp_status}"
+    if vb.get("available") is False or method == "off":
+        return f"spaCy-Modell fehlt, Verbklammer nicht geprüft: {detail or nlp_status}"
+    return None
+
+
+def _boundary_notes(words: list[dict], segs: list[ClipSegment], policy: editorial.Policy) -> list[tuple[str, str]]:
+    """Schnittkanten ohne Satzzeichen oder Sprecherwechsel, aus derselben Grenzart wie die Zerlegung
+    (``dach_nlp.cut_boundary_kind``): nur aus einer Pause (``pause_candidate``) oder aus der
+    Satzlängengrenze (``length_cap``)."""
+    cut_args = getattr(story_engine, "_cut_args", None)
+    args = cut_args(words, policy) if cut_args is not None else {"rule": editorial.sentence_rule(policy)}
+    found: dict[str, list[str]] = {"pause_candidate": [], "length_cap": []}
+    for seg in segs:
+        if not seg.word_ids:
+            continue
+        a, b = seg.word_ids[0], seg.word_ids[-1]
+        edges = [("Anfang", a - 1)] if a > 0 else []
+        edges.append(("Ende", b))
+        for label, i in edges:
+            kind = dach_nlp.cut_boundary_kind(words, i, **args)
+            if kind in found:
+                found[kind].append(f"{label} {seg.segment_id} bei {_de(float(words[i]['end']))} s")
+    out = []
+    if found["pause_candidate"]:
+        out.append(("boundary_from_pause", f"Satzgrenze ohne Satzzeichen, nur aus einer Pause abgeleitet (Regel {args['rule']}): {', '.join(found['pause_candidate'])}"))
+    if found["length_cap"]:
+        out.append(("boundary_from_length_cap", f"Satzgrenze aus der Satzlängengrenze, nicht aus Satzzeichen (Regel {args['rule']}): {', '.join(found['length_cap'])}"))
+    return out
 
 
 def _reject_reason(result: story_engine.CandidateResult) -> str:
@@ -534,6 +645,8 @@ def from_result(
     bestanden heißt ``accept`` mit ``why`` als Grund, sonst ``reject`` mit den gerissenen Toren.
     ``alternatives`` kennt nur der Aufrufer, der die Auswahl gesehen hat (``from_report``); ohne sie
     bleibt ``alternatives_considered`` ``None``."""
+    # Der Kandidat beginnt mit seinem ersten Satz; seine Segmente dürfen später beginnen (AP7 kürzt Füllwörter
+    # am Rand) und müssen nicht auf Satz- oder Wortgrenzen liegen.
     if not (0 <= result.first_sent <= result.last_sent < len(sents)) or abs(sents[result.first_sent].start - result.start_s) > 0.01:
         raise ValueError("Die Satzliste passt nicht zum Kandidaten (andere Zerlegung als im Lauf?)")
     source = dict(source or {})
@@ -545,10 +658,13 @@ def from_result(
     for n, (seg, (out_in, out_out)) in enumerate(zip(result.segments, output_timeline(result.segments)), start=1):
         ids = _word_ids_in(words, float(seg["start"]), float(seg["end"]))
         speakers = {words[i].get("speaker") for i in ids}
+        # Schnittgrenze ist die Segmentgrenze; liegt sie auf der Grenze des ersten oder letzten Wortes, gilt
+        # dessen Zeit (keine erfundene Genauigkeit), sonst die tatsächliche Schnittzeit aus der Komposition.
+        cut_in, cut_out = float(seg["start"]), float(seg["end"])
         segs.append(ClipSegment(
             segment_id=f"s{n}",
-            source_in=float(words[ids[0]]["start"]) if ids else None,
-            source_out=float(words[ids[-1]]["end"]) if ids else None,
+            source_in=(float(words[ids[0]]["start"]) if abs(float(words[ids[0]]["start"]) - cut_in) <= WORD_EPS_S else cut_in) if ids else None,
+            source_out=(float(words[ids[-1]]["end"]) if abs(float(words[ids[-1]]["end"]) - cut_out) <= WORD_EPS_S else cut_out) if ids else None,
             output_in=out_in if ids else None,
             output_out=out_out if ids else None,
             speaker_id=str(next(iter(speakers))) if len(speakers) == 1 and None not in speakers else None,
@@ -601,14 +717,11 @@ def from_result(
     heuristic = "heuristic_only" in result.risk_flags
     if heuristic:
         uncertainties.append(_note("heuristic_only", "Bewertung ohne Sprachmodell (Heuristik): Werte unkalibriert, Humor, Sensitivität und Relativierungen ungeprüft."))
-    vb = result.gates.get("verb_bracket") or {}
-    nlp_status = str(versions.get("nlp_status") or "")
-    if vb.get("available") is False or vb.get("method") in ("heuristic", "off") or nlp_status in ("heuristic", "off"):
-        uncertainties.append(_note("nlp_unavailable", f"spaCy-Modell nicht verfügbar, Verbklammer {'nur heuristisch' if vb.get('available') else 'nicht'} geprüft: {vb.get('detail') or nlp_status}"))
-    sb = str((result.gates.get("sentence_boundaries") or {}).get("detail") or "")
-    if PAUSE_MARKER in sb:
-        rule = rubric.get("sentence_rule") or "v2"
-        uncertainties.append(_note("boundary_from_pause", f"Satzgrenze ohne Satzzeichen, nur aus einer Pause abgeleitet (Regel {rule}): {sb}"))
+    nlp_note = _nlp_note(result.gates.get("verb_bracket") or {}, str(versions.get("nlp_status") or ""))
+    if nlp_note:
+        uncertainties.append(_note("nlp_unavailable", nlp_note))
+    for kind, detail in _boundary_notes(words, segs, policy):
+        uncertainties.append(_note(kind, detail))
     if any(s.boundary_confidence is None for s in segs):
         uncertainties.append(_note("boundary_confidence_missing", "Keine Angabe zur Sicherheit der Schnittkanten (kommt mit AP10b), Wortgrenzen aus der Transkription."))
     if any(f.get("confirmed") is None for f in result.story_graph_flags):
@@ -620,11 +733,11 @@ def from_result(
         decision_reason = result.why if decision == "accept" and result.why else _reject_reason(result)
 
     audience = str(brief.get("audience") or "").strip() or None
-    objective = str(brief.get("objective") or brief.get("wanted") or "").strip() or None
+    objective = str(brief.get("objective") or "").strip() or None
     sid = source.get("id")
     sver = source.get("version")
     return ClipCandidate(
-        candidate_id=_candidate_id(sid, sver, result),
+        candidate_id=_candidate_id(sid, sver, result, versions),
         source_asset_id=str(sid) if sid is not None else None,
         source_version=sver if isinstance(sver, (int, str)) and not isinstance(sver, bool) else None,
         objective=objective,
@@ -638,10 +751,11 @@ def from_result(
         required_context_spans=context,
         payoff_source_span=_span(words, sents, payoff_idx, payoff_idx, "Satz mit dem Beleg der Rubrik für payoff") if payoff_idx is not None else None,
         segments=segs,
-        removed_spans=[],
+        removed_spans=[RemovedSpan(**{k: r[k] for k in _REMOVED_FIELDS if k in r}) for r in rubric.get("removed_spans") or []],
         meaning_dependencies=dependencies,
         unresolved_questions=questions,
-        quality_gate_results=json.loads(json.dumps(result.gates)),
+        # Die fünf Tore und, unter Fassung 2 mit den harten Gates (AP4), deren Einzelergebnisse.
+        quality_gate_results=json.loads(json.dumps({**(rubric.get("quality_gate_results") or {}), **result.gates})),
         editorial_subscores={
             "scale_max": int(policy.skala_max),
             "values": {str(k): (float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None) for k, v in (rubric.get("rubric_points") or {}).items()},
@@ -672,8 +786,11 @@ def from_report(
     Laufs. Grund und Alternativen kommen aus ``report.discarded`` (``gate``, ``overlap``, ``limit``)."""
     sents = sents if sents is not None else sentences_for(words, policy)
     versions = versions_for(policy, report)
-    reasons = {(d.get("first_sent"), d.get("last_sent")): d for d in report.discarded if d.get("reason") in ("gate", "overlap", "limit")}
-    ids = {id(c): _candidate_id((source or {}).get("id"), (source or {}).get("version"), c) for c in [*report.candidates, *report.verworfen]}
+    reasons = {
+        (d.get("first_sent"), d.get("last_sent")): d for d in report.discarded
+        if d.get("reason") in ("gate", "overlap", "limit", "below_threshold") or str(d.get("reason") or "").startswith("gate:")
+    }  # fmt: skip
+    ids = {id(c): _candidate_id((source or {}).get("id"), (source or {}).get("version"), c, versions) for c in [*report.candidates, *report.verworfen]}
 
     def alt(c: story_engine.CandidateResult, reason: str) -> dict[str, Any]:
         return {"candidate_id": ids[id(c)], "first_sent": c.first_sent, "last_sent": c.last_sent, "total": c.total, "reason": reason}
@@ -689,8 +806,15 @@ def from_report(
         out.append(from_result(c, words, sents, source, versions, policy, brief, decision="accept", alternatives=alts))
     for v in report.verworfen:
         d = reasons.get((v.first_sent, v.last_sent), {})
+        reason = str(d.get("reason") or "")
+        if reason.startswith("gate:"):
+            why = f"Verworfen vor dem Ranking, hartes Gate {reason[5:]}: {d.get('detail') or _reject_reason(v)}"
+            alts = [alt(c, "angeboten statt dieses Kandidaten") for c in report.candidates if overlaps(c, v)]
+            out.append(from_result(v, words, sents, source, versions, policy, brief, decision="reject", decision_reason=why, alternatives=alts))
+            continue
         why = {
             "gate": _reject_reason(v),
+            "below_threshold": f"Verworfen im Modus sperren: {d.get('detail') or 'unter der Schwelle'}",
             "overlap": f"Verworfen, überdeckt einen besser bewerteten Kandidaten zu mindestens {story_engine.OVERLAP_SUPPRESS_ANTEIL:.0%}",
             "limit": "Verworfen, über der Obergrenze der Kandidatenzahl",
         }.get(str(d.get("reason")), _reject_reason(v))

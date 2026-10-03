@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from .. import editorial, prompts
@@ -301,13 +302,19 @@ def propose(
 ) -> list[dict]:
     """Momente eines Kapitels nach dem gepinnten ``propose_moments``.
 
-    Version 1: wie vor AP5 (``overview``, ``seeds`` und ``policy`` bleiben ungenutzt). Version 2: zusätzlich
+    Version 2 gilt nur, wenn die Policy sie pinnt UND die Suche verdrahtet ist
+    (``implementation.search.payoff_first``, ``editorial.search_settings(pol)["wired"]``): dann zusätzlich
     Policy-Text mit Moment-Typen und Längenfenster, Episodenübersicht (aus ``overview``), Seeds als Sätze
-    mit Sekunde und das Kapitel in Begrenzern; die Antwort wird mit ``validate_moments_v2`` geprüft."""
+    mit Sekunde und das Kapitel in Begrenzern; die Antwort wird mit ``validate_moments_v2`` geprüft. Sonst,
+    auch unter Fassung 2 mit Schalter aus, der Pfad vor AP5 mit ``propose_moments_v1`` (``overview``,
+    ``seeds`` und ``policy`` bleiben ungenutzt); das ist der Rollback."""
     pol = policy or editorial.load()
     p = prompts.load_pinned("propose_moments", pol)
     if p.version >= 2:
-        return _propose_v2(p, chapter, brief, llm, overview, seeds, pol)
+        search = editorial.search_settings(pol)
+        if search is not None and search["wired"]:
+            return _propose_v2(p, chapter, brief, llm, overview, seeds, pol)
+        p = prompts.load_pinned("propose_moments", editorial.load(1))  # Pin der Fassung 1
     user = p.render(
         audience=brief.get("audience"),
         wanted=brief.get("wanted"),
@@ -326,8 +333,10 @@ def propose(
 
 
 def propose_policy_text(pol: editorial.Policy) -> str:
-    """``Policy.als_prompt_text`` plus Moment-Typen mit Schlüssel und das harte Längenfenster (für v2)."""
-    lines = [pol.als_prompt_text(), ""]
+    """Kennung der Grundlage, ``Policy.als_prompt_text``, Moment-Typen mit Schlüssel und das harte
+    Längenfenster (für v2). Die erste Zeile „GRUNDLAGE: clip_policy_vN“ liest der Heuristik-Provider, damit
+    er dieselbe Fassung nutzt wie der Aufrufer."""
+    lines = [f"GRUNDLAGE: {editorial.policy_version(pol.version)}", pol.als_prompt_text(), ""]
     lines.append(
         f"LÄNGENFENSTER: gut zwischen {pol.gut_von_s:.0f} und {pol.gut_bis_s:.0f} s, "
         f"nie unter {pol.hart_min_s:.0f} s und nie über {pol.hart_max_s:.0f} s."
@@ -348,6 +357,15 @@ def seed_lines(chapter: list[Sentence], seeds: list[float] | None) -> str | None
     return "\n".join(out) or None
 
 
+_DELIMITER = re.compile(r"<(/?)(chapter|seeds|episode_overview)>", re.IGNORECASE)
+
+
+def mask_delimiters(text: str | None) -> str | None:
+    """Begrenzer der v2-Prompts im Transkript oder in der Übersicht unschädlich machen: „</chapter>“ wird
+    „[/chapter]“, damit Daten den Datenblock nicht vorzeitig schließen."""
+    return None if text is None else _DELIMITER.sub(lambda m: f"[{m.group(1)}{m.group(2)}]", text)
+
+
 def _sent_no(value: Any, valid: set[int]) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value in valid else None
 
@@ -357,10 +375,12 @@ def validate_moments_v2(out: dict[str, Any], valid_idx: set[int]) -> tuple[list[
 
     Ein Moment fällt weg, wenn eine Pflicht aus PROPOSE_SCHEMA fehlt, ein Wert nicht im Schema liegt,
     eine Satznummer außerhalb des Kapitels liegt oder ``opening_sent``, ``payoff_sent`` oder ein
-    Kontextsatz nicht zwischen ``first_sent`` und ``last_sent`` steht. Fehlen nur Felder, die erst v2
-    verlangt, bleibt der Moment als Antwort im Format von v1 erhalten (Rückwärtskompatibilität): die
-    Felder stehen auf ``null`` (Kontext leer) und ``missing_v2_fields`` nennt sie. Rückgabe: gültige
-    Momente und Verworfene mit Grund."""
+    Kontextsatz nicht zwischen ``first_sent`` und ``last_sent`` steht oder der Einstieg nach dem Payoff
+    liegt. Fehlen nur Felder, die erst v2 verlangt, bleibt der Moment als Antwort im Format von v1 erhalten
+    (Rückwärtskompatibilität): die Felder stehen auf ``null`` (Kontext leer) und ``missing_v2_fields`` nennt
+    sie. Ist ``required_context_sents`` null, gilt der Kontext als unbekannt (leer, ``context_unknown``).
+    Vollständige Momente stehen vor unvollständigen (``story_engine`` nimmt je Kapitel die ersten).
+    Rückgabe: gültige Momente und Verworfene mit Grund."""
     v1_required = PROPOSE_SCHEMA["properties"]["moments"]["items"]["required"]
     v2_only = [k for k in PROPOSE_SCHEMA_V2["properties"]["moments"]["items"]["required"] if k not in v1_required]
     kept, dropped = [], []
@@ -376,6 +396,9 @@ def validate_moments_v2(out: dict[str, Any], valid_idx: set[int]) -> tuple[list[
             absent = [k for k in v2_only if k not in m]
             for k in absent:
                 m[k] = [] if k == "required_context_sents" else None
+            if m["required_context_sents"] is None:
+                m["required_context_sents"] = []
+                m["context_unknown"] = True
             first, last = _sent_no(m["first_sent"], valid_idx), _sent_no(m["last_sent"], valid_idx)
             inner = {k: m[k] for k in ("opening_sent", "payoff_sent") if k not in absent}
             context = m["required_context_sents"]
@@ -383,6 +406,8 @@ def validate_moments_v2(out: dict[str, Any], valid_idx: set[int]) -> tuple[list[
                 reason = "Satznummer außerhalb des Kapitels"
             elif first > last or not all(first <= v <= last for v in inner.values()):
                 reason = "Einstieg oder Payoff außerhalb des Moments"
+            elif len(inner) == 2 and inner["opening_sent"] > inner["payoff_sent"]:
+                reason = "Einstieg nach dem Payoff"
             elif not isinstance(context, list) or any(_sent_no(c, valid_idx) is None for c in context):
                 reason = "Kontextsatz außerhalb des Kapitels"
             elif not all(first <= c <= last for c in context):
@@ -401,6 +426,7 @@ def validate_moments_v2(out: dict[str, Any], valid_idx: set[int]) -> tuple[list[
             dropped.append({"moment": m, "reason": reason})
         else:
             kept.append(m)
+    kept.sort(key=lambda m: bool(m.get("missing_v2_fields")))  # stabil: vollständige zuerst
     return kept, dropped
 
 
@@ -419,14 +445,21 @@ def _propose_v2(
         exclude=brief.get("exclude"),
         platform=brief.get("platform", "linkedin"),
         policy=propose_policy_text(pol),
-        episode_overview=json.dumps(overview, ensure_ascii=False, sort_keys=True) if overview else None,
-        seeds=seed_lines(chapter, seeds),
-        chapter_numbered=numbered(chapter),
+        episode_overview=mask_delimiters(json.dumps(overview, ensure_ascii=False, sort_keys=True)) if overview else None,
+        seeds=mask_delimiters(seed_lines(chapter, seeds)),
+        chapter_numbered=mask_delimiters(numbered(chapter)),
     )
     out = llm.structured(system_prompt(), user, PROPOSE_SCHEMA_V2, p.tool or "propose_moments", p.prompt_version, job_type="llm_propose")
     moments, dropped = validate_moments_v2(out, {s.idx for s in chapter})
     for d in dropped:
         log.info("Vorschlag aus %s verworfen: %s", p.prompt_version, d["reason"])
+    incomplete = sum(1 for m in moments if m.get("missing_v2_fields"))
+    unknown = sum(1 for m in moments if m.get("context_unknown"))
+    if incomplete or unknown:
+        log.warning(
+            "%s: %d von %d Vorschlägen ohne v2-Felder, %d mit unbekanntem Kontext (abgewertet, nach hinten sortiert)",
+            p.prompt_version, incomplete, len(moments), unknown,
+        )  # fmt: skip
     for m in moments:
         m["prompt_version"] = p.prompt_version
     return moments
@@ -470,7 +503,7 @@ def overview(chapter: list[Sentence], llm: LLM, policy: editorial.Policy | None 
     Prompt nicht; dort scheitert der Aufruf laut (``PolicyError``)."""
     pol = policy or editorial.load()
     p = prompts.load_pinned("episode_overview", pol)
-    user = p.render(chapter_numbered=numbered(chapter))
+    user = p.render(chapter_numbered=mask_delimiters(numbered(chapter)))
     out = llm.structured(system_prompt(), user, OVERVIEW_SCHEMA, p.tool or "episode_overview", p.prompt_version, job_type="llm_overview")
     clean = validate_overview(out, {s.idx for s in chapter})
     clean["first_sent"] = chapter[0].idx if chapter else None

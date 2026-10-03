@@ -220,7 +220,7 @@ def test_case_2_condition_is_protected_by_trim_plan():
     w = _with_word(words_of("conditional_recommendation"), 14, "äh", 5.68, 5.78)  # „nur, äh wenn“
     w = _with_word(w, 60, "äh", 21.6, 21.8)  # „vor Ort. äh Im Büro“
     r = _trim("conditional_recommendation", w)
-    removed_text = [x["text"] for x in r["removed_spans"]]
+    removed_text = [x["protected_context_check"]["detail"]["text"] for x in r["removed_spans"]]
     assert removed_text == ["äh"] and r["removed_spans"][0]["source_in"] > 21.54
     harness.assert_protected_spans_kept(c, r["removed_spans"])
     kept = {i for a, b in r["kept_word_ranges"] for i in range(a, b + 1)}
@@ -284,11 +284,17 @@ def test_case_9_setup_and_payoff_stay():
 
 
 def _run_gates(cid: str, a: int, b: int) -> dict:
+    import copy
+
     from chopstr_worker.pipeline import editorial_gates
 
     w = words_of(cid)
     sents = segment.sentences_from_words(w, rule=rule())
-    return editorial_gates.run_gates(w, sents, sentence_containing(sents, a), sentence_containing(sents, b), editorial.load())
+    pol = editorial.load()
+    raw = copy.deepcopy(pol.roh)
+    raw["implementation"]["gates"]["discard_hard"] = True  # verworfen wird nur mit Regel und Schalter
+    pol = editorial.Policy(version=pol.version, stand=pol.stand, roh=raw)
+    return editorial_gates.run_gates(w, sents, sentence_containing(sents, a), sentence_containing(sents, b), pol)
 
 
 def _rejected_variant(cid: str, reason: str) -> dict:
@@ -387,15 +393,151 @@ def test_case_11_weak_material_payoff_search_proposes_nothing(policy_v2):
 
 def test_case_12_near_duplicates_reconcile_reports_the_duplicate(policy_v2):
     """Fall 12: beide Spannen führen zur selben Aussage (gleicher payoff_sent); reconcile meldet die
-    Dublette, genau eine überlebt."""
+    Dublette (``same_payoff``), genau eine überlebt. Die Verlängerung nach dem Payoff hängt den Schlusssatz
+    („Außerdem …“, keine Einschränkung) an beide Spannen; jede Spanne des Falls steckt zu mindestens 90 Prozent
+    in einer gemeldeten Spanne. Weitere Payoffs, die nach dem Verlängern dieselbe Spanne ergeben, stehen als
+    ``same_span`` in ``duplicates``."""
     from chopstr_worker.pipeline import payoff_search
 
     c = CASES["near_duplicate_candidates"]
     sents = segment.sentences_from_words(words_of("near_duplicate_candidates"), rule=rule())
     res = payoff_search.search_moments(sents, policy_v2)
-    assert len(res["duplicates"]) == 1 and res["duplicates"][0]["reason"] == "same_payoff"
+    same_payoff = [d for d in res["duplicates"] if d["reason"] == "same_payoff"]
+    assert len(same_payoff) == 1 and set(same_payoff[0]) == {"payoff_sent", "kept", "dropped", "reason"}
+    assert all(set(d) == {"payoff_sent", "kept", "dropped", "reason"} for d in res["duplicates"])
     word_range = {s.idx: s.word_range for s in sents}
-    dropped = [[word_range[a][0], word_range[b][1]] for a, b in res["duplicates"][0]["dropped"]]
-    kept = [[word_range[p["first_sent"]][0], word_range[p["last_sent"]][1]] for p in res["proposals"]]
-    assert {tuple(s["word_range"]) for s in c["expected"]["near_duplicate_candidates"]["spans"]} == {tuple(kept[0]), tuple(dropped[0])}
+
+    def words(span):
+        return (word_range[span[0]][0], word_range[span[1]][1])
+
+    reported = [words(same_payoff[0]["kept"]), *(words(d) for d in same_payoff[0]["dropped"])]
+    kept = [list(words((p["first_sent"], p["last_sent"]))) for p in res["proposals"]]
+    for ref in c["expected"]["near_duplicate_candidates"]["spans"]:
+        a, b = ref["word_range"]
+        assert any(max(0, min(b, y) - max(a, x) + 1) / (b - a + 1) >= 0.9 and x == a for x, y in reported), ref["id"]
     harness.assert_single_survivor(c, kept)
+
+
+# -- Verdrahtung: Fälle über story_engine.run (Policy-Kopie mit implementation.gates.discard_hard und
+# implementation.search.payoff_first) ---------------------------------------------------------------------
+
+
+@pytest.fixture
+def wired_v2(monkeypatch, tmp_path):
+    """Kopie der Richtlinie mit eingeschalteten harten Gates und Suche (die Policy selbst bleibt unverändert)."""
+    import shutil
+
+    import yaml
+
+    for path in editorial.policy_dir().glob("clip_policy_v*.yaml"):
+        shutil.copy(path, tmp_path)
+    target = tmp_path / "clip_policy_v2.yaml"
+    data = yaml.safe_load(target.read_text(encoding="utf-8"))
+    data["implementation"]["gates"]["discard_hard"] = True
+    data["implementation"]["search"]["payoff_first"] = True
+    target.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path))
+    editorial.clear_cache()
+    yield editorial.load()
+    editorial.clear_cache()
+
+
+def _heuristic():
+    from chopstr_worker import config, providers_llm
+    from chopstr_worker.providers_llm import LLM
+    from chopstr_worker.residency import Tenant
+
+    return LLM(Tenant(id="ws", tier="standard"), provider=providers_llm.HEURISTIC_PROVIDER, s=config.settings())
+
+
+def _run_case(cid: str, spans: list[tuple[int, int]] | None, monkeypatch) -> tuple[story_engine.DetectReport, list[dict]]:
+    """``story_engine.run`` auf dem Fall. Mit ``spans`` (Wortbereiche) sind genau das die Vorschläge des Modells,
+    die deterministische Suche schweigt; ohne ``spans`` laufen Heuristik und Suche wie im Betrieb."""
+    from chopstr_worker.pipeline import payoff_search, story_score
+
+    w = words_of(cid)
+    if spans is not None:
+        sents = story_engine.sentences_from_annotated(w) or segment.sentences_from_words(w, rule=rule())
+        moments = [
+            {"first_sent": sentence_containing(sents, a), "last_sent": sentence_containing(sents, b), "structure": "hook_build_payoff", "why": "Fall"}
+            for a, b in spans
+        ]  # fmt: skip
+        monkeypatch.setattr(story_score, "propose", lambda *a, **kw: [dict(m) for m in moments])
+        monkeypatch.setattr(
+            payoff_search, "search_moments",
+            lambda *a, **kw: {"proposals": [], "rejected": [], "duplicates": [], "payoffs": [], "openings": []},
+        )  # fmt: skip
+    report = story_engine.run(w, {"platform": "linkedin"}, {}, None, _heuristic())
+    offered = [cc for cc in report.clip_candidates if cc["decision"] == "accept"]
+    return report, offered
+
+
+# Falsche Schnitte aus demselben Material (wie in den Modulnachweisen oben) und der richtige Schnitt (letzter).
+RUN_CASES = {
+    "conditional_recommendation": [(26, 40), (0, 40), (8, 66), (0, 66)],
+    "later_self_correction": [(0, 21), (0, 39), (0, 47)],
+    "reported_position": [(8, 23), (8, 28), (24, 55), (29, 55), (0, 55)],
+    "unresolved_pronoun": [(36, 81), (11, 81)],
+    "speaker_turn_attribution": [(25, 54), (8, 54), (0, 24), (0, 54)],
+    "instruction_in_transcript": [(0, 68)],
+}
+RUN_PARAMS = [
+    pytest.param(cid, span, n == len(spans) - 1, id=f"{cid}:{span[0]}-{span[1]}")
+    for cid, spans in sorted(RUN_CASES.items())
+    for n, span in enumerate(spans)
+]
+
+
+@pytest.mark.parametrize(("cid", "span", "right"), RUN_PARAMS)
+def test_run_offers_only_cuts_that_respect_the_case(cid, span, right, wired_v2, monkeypatch):
+    """Fälle 2, 3, 4, 5, 10, 14 über ``story_engine.run``, je ein Vorschlag: der richtige Schnitt wird angeboten,
+    ein falscher ist verworfen (Gate, Länge) oder so geheilt, dass er den Fall respektiert."""
+    report, offered = _run_case(cid, [span], monkeypatch)
+    if right:
+        assert offered, report.discarded
+    for cc in offered:
+        harness.assert_clip_respects_case(CASES[cid], cc["segments"])
+    assert report.engine == "story_engine_v5"
+
+
+def test_run_case_14_instruction_is_flagged_not_followed(wired_v2, monkeypatch):
+    report, offered = _run_case("instruction_in_transcript", [(0, 68)], monkeypatch)
+    (c,) = report.candidates
+    assert c.rubric["quality_gate_results"]["embedded_instruction"]["flagged"] is True
+    assert not [d for d in report.discarded if d["reason"] == "instruction_followed"]
+    harness.assert_instruction_ignored(CASES["instruction_in_transcript"], [c.why, c.rubric.get("suggested_title_card") or ""])
+
+
+def test_run_case_11_weak_material_offers_nothing(wired_v2, monkeypatch):
+    report, offered = _run_case("weak_material", None, monkeypatch)
+    assert offered == [] and report.candidates == []
+
+
+def test_run_case_12_near_duplicates_leave_one_survivor(wired_v2, monkeypatch):
+    report, offered = _run_case("near_duplicate_candidates", None, monkeypatch)
+    ranges = [[min(ids), max(ids)] for ids in ([i for s in cc["segments"] for i in s["word_ids"]] for cc in offered) if ids]
+    harness.assert_single_survivor(CASES["near_duplicate_candidates"], ranges)
+
+
+# -- Befund 6 unter Fassung 2 mit den harten Gates: „außerdem“ ist kein „außer“ -----------------------------
+
+
+def test_story_graph_does_not_read_ausserdem_as_ausser_under_v2(wired_v2):
+    from chopstr_worker.pipeline import story_graph
+
+    c = CASES["near_duplicate_candidates"]
+    span = c["expected"]["near_duplicate_candidates"]["spans"][0]["word_range"]
+    ergaenzung = c["expected"]["not_a_qualification_word_range"]
+    sents = segment.sentences_from_words(words_of("near_duplicate_candidates"), rule=rule())
+    assert story_engine.marker_rule() == "v2"
+    hits = story_graph.find_later_qualifications(
+        sents, sentence_containing(sents, span[0]), sentence_containing(sents, span[1]), rule=story_engine.marker_rule()
+    )
+    assert [h for h in hits if h["sentence_idx"] == sentence_containing(sents, ergaenzung[0])] == []
+
+
+def test_fidelity_gate_does_not_read_ausserdem_as_contrast_under_v2(wired_v2):
+    c = CASES["near_duplicate_candidates"]
+    a, b = c["expected"]["near_duplicate_candidates"]["spans"][0]["word_range"]
+    w = words_of("near_duplicate_candidates")
+    assert story_engine._fidelity_gate(w, [span_sentence(w, a, b)], 0, 0)["passed"] is True

@@ -532,12 +532,15 @@ trim:
       "grüß gott", "servus", "moin", "guten morgen", "guten tag", "guten abend", "tschüss",
       "bis zum nächsten mal", "auf wiedersehen", "danke fürs zuhören",
     ]
-    # Modalpartikeln werden nie entfernt (P3, CON-005).
-    never_remove: [halt, eigentlich, mal, ja, doch, eben, schon, wohl]
+    # Organisatorisches am Rand, zusätzlich zu ausschluss.organisations_marker (nur für das Kürzen).
+    organisation_markers: ["bevor wir anfangen", "kurz zur technik", "hört ihr mich", "hörst du mich", "sind wir live", "läuft die aufnahme"]
+    # Modalpartikeln werden im Satz nie entfernt (P3, CON-005; eh und fei aus dach_nlp.MODAL_PARTICLES).
+    never_remove: [halt, eigentlich, mal, ja, doch, eben, schon, wohl, eh, fei]
   # Nachlauf nach dem Payoff, der gekappt wird; nie eine Einschränkung oder Bedingung.
   reward_end:
     weak_summary: ["also zusammengefasst", "zusammengefasst", "kurz gesagt", "alles in allem", "unterm strich", "wie gesagt"]
-    sales_call: ["link in der bio", "abonniert", "abonnier", "folgt mir", "folg mir", "jetzt buchen", "schreibt mir", "rabattcode", "kostenloses erstgespräch"]
+    # Nur mit Imperativ oder Anrede in der zweiten Person ein Verkaufsaufruf (trim_plan._is_sales_call).
+    sales_call: ["link in der bio", "abonniert den kanal", "abonniere", "folgt mir", "folg mir", "jetzt buchen", "schreibt mir", "schreib mir", "meldet euch", "melde dich", "rabattcode", "kostenloses erstgespräch"]
     farewell: ["tschüss", "ciao", "bis zum nächsten mal", "bis bald", "danke fürs zuhören", "auf wiedersehen", "macht es gut", "machts gut"]
     # Anteil der Inhaltswörter eines Satzes, die schon im Payoff stehen, ab dem er als wiederholte Pointe gilt.
     repeat_overlap: 0.6
@@ -548,30 +551,49 @@ trim:
 # Vorschläge entstehen vom Payoff rückwärts zum Einstieg und vom Einstieg vorwärts zur Einlösung; weiter
 # gehen nur Vorschläge, bei denen beides zusammenpasst (Master-Prompt 7). Gelesen von
 # chopstr_worker/pipeline/payoff_search.py (deterministische Suche, auch für den Heuristik-Provider) über
-# editorial.search_settings. In story_engine.run wirkt die Suche erst mit implementation.search.payoff_first;
-# bis zur Verdrahtung steht der Schalter auf false. Rollback: Schalter false und prompts.propose_moments 1.
+# editorial.search_settings. In story_engine.run wirkt die Suche mit implementation.search.payoff_first
+# (Kapitelüberlappung, Episodenübersicht, Seeds, Abgleich, Budget). Rollback: Schalter false.
 search:
   # Suche vom Payoff rückwärts zum frühesten Einstieg, der die Einstiegsprüfung besteht.
   payoff_first: true
   # Gegenrichtung: starke Einstiege finden und prüfen, ob das Material einlöst (sonst promise_unfulfilled).
   opening_first: true
   # Überlappung benachbarter Kapitel in Sekunden, damit ein Moment an der Kapitelgrenze nicht zerfällt
-  # (segment.chapterize, Verdrahtung später).
+  # (segment.chapterize, gelesen von story_engine.run).
   chapter_overlap_s: 30
   # Höchstzahl Modellaufrufe je Stunde Quellmaterial (Übersicht, Vorschlag, Bewertung, Gegenprüfung).
-  # Rechnung: Kapitel von 240 s mit 30 s Überlappung ergeben etwa 17 Kapitel je Stunde; je Kapitel eine
-  # Übersicht, ein Vorschlag und höchstens vier Kandidaten mit Bewertung und einer Reparaturrunde sind
-  # 17 mal 10, also 170; 200 lässt Raum für die Gegenprüfung späterer Einschränkungen.
-  max_llm_calls_per_source_hour: 200
+  # Rechnung: Kapitel von 240 s mit 30 s Überlappung ergeben etwa 17 Kapitel je Stunde. Je Kapitel eine
+  # Übersicht und ein Vorschlag (2), höchstens vier Kandidaten mit je bis zu vier Bewertungen (erste
+  # Bewertung, zwei Reparaturrunden, eine Neubewertung nach dem Heilen des Anfangs) und einer
+  # Gegenprüfung einer späteren Einschränkung (je 5, zusammen 20): 22 je Kapitel, 17 mal 22 sind 374;
+  # 400 ist die Obergrenze. Erschöpfung: Kapitel laufen in der Reihenfolge von story_engine.chapter_order
+  # (Kapitel mit Seed zuerst); ist das Budget erschöpft, bekommen die übrigen Kapitel keinen Modellaufruf
+  # mehr, und der Report nennt sie (budget_exhausted mit den übersprungenen Kapiteln). Durchsetzung im
+  # Lauf mit der Verdrahtung in story_engine.run.
+  max_llm_calls_per_source_hour: 400
   # Woran ein Payoff im Text erkennbar ist (payoff_search.find_payoffs). Kleingeschrieben, als ganze Wörter
   # im kleingeschriebenen Satz. Ergebnis mit Zahl kommt aus moment_typen.zahl, Merksatz zusätzlich aus
   # moment_typen.merksatz; Auflösung nach Frage, Pointe nach Setup und Lachen erkennt der Code aus der
-  # Struktur. consequence und explanation brauchen den Satz davor als Kontext.
+  # Struktur. consequence und explanation brauchen den Satz davor als Kontext. rule, consequence und
+  # explanation zählen nur am Satz- oder Teilsatzanfang (nach Komma, Doppelpunkt, „und“, „aber“ oder einem
+  # Artikel), lesson und emotional überall; danach muss ein Nomen oder eine Zahl folgen (emotional: ein
+  # Satz mit mindestens vier Wörtern).
   payoff_markers:
     rule: ["die regel ist", "faustregel", "das prinzip", "merk dir", "der wichtigste rat", "mein rat ist"]
     consequence: ["deshalb", "deswegen", "darum", "daher", "und dadurch"]
     explanation: ["das heißt", "heißt das", "der grund ist", "der grund war", "der eigentliche grund", "das liegt daran"]
-    lesson: ["gelernt", "seitdem", "seither", "die lehre daraus"]
+    lesson: ["gelernt", "seitdem", "seither", "die lehre daraus", "im nachhinein", "rückblickend"]
+    # Emotionale Auflösung (Master-Prompt 7): der Sprecher ordnet ein, was ein Moment mit ihm gemacht hat.
+    emotional: ["heute weiß ich", "das hat mich", "bis heute", "seit diesem tag"]
+  # Heckenwörter: ein Satz damit trägt keine Behauptung und ist kein Payoff (Füllgespräch).
+  hedge_markers: ["halt", "irgendwie", "ne", "keine ahnung", "ich weiß nicht", "weiß nicht", "oder so"]
+  # Wo die Suche endet: Rückweg und Verlängerung gehen nicht über einen Satz mit diesen Markern hinaus,
+  # und ein solcher Satz ist weder Payoff noch Einstieg (zusätzlich ausschluss.organisations_marker und
+  # an ein Modell gerichtete Sätze, editorial_gates.embedded_instruction und meta_speech).
+  stop_markers:
+    sponsor: ["werbepause", "sponsor", "gesponsert", "präsentiert von", "rabattcode", "mit dem code", "werbung in eigener sache", "kurze werbung"]
+    farewell: ["tschüss", "ciao", "auf wiedersehen", "bis zum nächsten mal", "danke fürs zuhören", "danke für das gespräch", "bis bald"]
+    topic_change: ["zurück zum thema", "anderes thema", "nächstes thema", "kommen wir zu", "nächste frage", "themenwechsel"]
   # Marker der Hook-Typen aus Master-Prompt Abschnitt 9 (payoff_search.find_openings). Ein Treffer macht einen
   # Satz zum Einstiegskandidaten (ganze Wörter, kleingeschrieben); ob das Material einlöst, prüft
   # payoff_search.forward_payoff.
@@ -581,7 +603,7 @@ search:
     result_with_open_cause: ["trotzdem gestiegen", "stieg trotzdem", "trotzdem mehr", "obwohl wir weniger"]
     scene_with_stakes: ["damals", "zwei tage vor", "am letzten tag", "kurz vor dem", "mitten in der"]
     decision_rule: ["nur wenn", "nur, wenn", "nur dann", "wir nehmen nur", "der wichtigste rat", "mein rat ist"]
-    demonstration: ["hier siehst du", "hier sehen sie", "schau mal hier", "ich zeig dir", "ich zeige ihnen"]
+    demonstration: ["hier siehst du", "hier sehen sie", "schau mal hier", "ich zeig dir", "ich zeige ihnen", "ich zeig ihnen"]
     self_correction: ["ich dachte lange", "ich dachte immer", "ich lag falsch", "ich habe mich geirrt", "ich hab mich geirrt"]
     recognizable_problem: ["kennst du das", "kennen sie das", "du bekommst ständig", "das problem ist", "fast niemand"]
     perspective_shift: ["das problem war nicht", "das problem ist nicht", "es geht nicht um", "der punkt ist nicht"]
@@ -635,11 +657,11 @@ implementation:
   gates:
     discard_hard: false       # AP4: harte Gates vor dem Ranking verwerfen statt sortieren
   search:
-    payoff_first: false       # AP5: Suche vom Payoff rückwärts zum Einstieg
+    payoff_first: true        # AP5: Suche vom Payoff rückwärts zum Einstieg (gebaut, story_engine.run liest search)
   hook:
     native_spoken: true       # AP6a: gesprochener Einstieg als Originalstelle, Auswahl v2 (gebaut)
   trim:
-    enabled: false            # AP7: Remove- und Keep-Logik mit Mehrsegment-Komposition
+    enabled: true             # AP7: Remove- und Keep-Logik (gebaut); wirksam erst mit der Regel trim.enabled, die bis zum Blindvergleich false bleibt
   cut:
     padding: false            # AP10b: Vor- und Nachlauf an Wortgrenzen
   captions:
@@ -742,6 +764,7 @@ origins:
   trim.removal.backchannel: {origin: R, source: "Master-Prompt Abschnitt 13; Plan AP7 (Rückmeldungen des Gegenübers); Fall speaker_turn_attribution (einsilbige Antwort zwischen zwei Fragen bleibt)"}
   trim.removal.restarts: {origin: R, source: "Master-Prompt Abschnitt 13 (abgebrochene Ansätze mit Neustart)"}
   trim.removal.edge_markers: {origin: H, source: "Wortliste ohne Messung; Master-Prompt Abschnitt 12 und 13 (Begrüßung, Organisatorisches); Master-Prompt Abschnitt 17 (Beispiel „danke erstmal für die Einladung“)"}
+  trim.removal.organisation_markers: {origin: H, source: "Wortliste ohne Messung; Master-Prompt Abschnitt 13 (Organisatorisches); Review AP7 L7"}
   trim.removal.never_remove: {origin: R, source: "Entscheidung P3 (Modalpartikeln bleiben, CON-005); RK 7, Zeile „Füllwörter“ (Modalpartikel nie automatisch, „eigentlich“ ist Kontrastsignal)"}
   trim.reward_end.weak_summary: {origin: H, source: "Wortliste ohne Messung; Master-Prompt Abschnitt 12 (keine schwache Zusammenfassung)"}
   trim.reward_end.sales_call: {origin: H, source: "Wortliste ohne Messung; Master-Prompt Abschnitt 12 (kein unpassender Verkaufsaufruf)"}
@@ -750,11 +773,16 @@ origins:
   search.payoff_first: {origin: H, source: "Master-Prompt Abschnitt 7 (zuerst Payoffs suchen, dann rückwärts zum Einstieg); RK 3, Absatz nach der Tabelle (Spotify: mit vollständigen Gedanken starten und enden, F); Übertrag auf Clips nicht gemessen"}
   search.opening_first: {origin: H, source: "Master-Prompt Abschnitt 7 (Gegenrichtung: starke Einstiege finden und prüfen, ob das Material einlöst) und Abschnitt 9; nicht gemessen"}
   search.chapter_overlap_s: {origin: H, source: "RK 6, letzter Absatz (ClipsAI-JP: Themenwechsel-Erkennung plus LLM mit überlappendem Chunking); Wert 30 s nicht gemessen"}
-  search.max_llm_calls_per_source_hour: {origin: R, source: "Master-Prompt Abschnitt 27 (Kosten und Laufzeit geprüft, keine unkontrollierten Modellaufrufe); Wert aus Kapitelrechnung, nicht gemessen"}
+  search.max_llm_calls_per_source_hour: {origin: R, source: "Master-Prompt Abschnitt 27 (Kosten und Laufzeit geprüft, keine unkontrollierten Modellaufrufe); Wert aus Kapitelrechnung (17 Kapitel je Stunde, 22 Aufrufe je Kapitel), nicht gemessen"}
   search.payoff_markers.rule: {origin: H, source: "Master-Prompt Abschnitt 7 (anwendbares Vorgehen als Payoff); RK 3, Zeile „Processing Fluency“; Wortliste ohne Messung"}
   search.payoff_markers.consequence: {origin: H, source: "Master-Prompt Abschnitt 6 (Abhängigkeit Behauptung, Begründung, Schlussfolgerung) und Abschnitt 7; Wortliste ohne Messung"}
   search.payoff_markers.explanation: {origin: H, source: "Master-Prompt Abschnitt 7 (Erklärung als Payoff); Wortliste ohne Messung"}
   search.payoff_markers.lesson: {origin: H, source: "Master-Prompt Abschnitt 7 und 11 (Erkenntnis-Clip endet auf der Schlussfolgerung); Wortliste ohne Messung"}
+  search.payoff_markers.emotional: {origin: H, source: "Master-Prompt Abschnitt 7 (emotionale Auflösung als Payoff); Wortliste ohne Messung"}
+  search.hedge_markers: {origin: H, source: "Review AP5 (Füllgespräch ohne Organisationsmarker ergab Payoffs); Master-Prompt Abschnitt 7 (Verwerfen zulässig); Wortliste ohne Messung"}
+  search.stop_markers.sponsor: {origin: H, source: "Master-Prompt Abschnitt 6 und 12 (Sponsor-Reads und Verkaufsaufrufe sind Gesprächsballast); propose_moments_v1 (keine Sponsor-Reads); Wortliste ohne Messung"}
+  search.stop_markers.farewell: {origin: H, source: "ausschluss.begruessung_und_abschied (Masterclass 10.4); Master-Prompt Abschnitt 12 (natürlicher Abschluss); Wortliste ohne Messung"}
+  search.stop_markers.topic_change: {origin: H, source: "RK 6, letzter Absatz (ClipsAI-JP: Themenwechsel-Erkennung); Master-Prompt Abschnitt 12 (kein Neustart); Wortliste ohne Messung"}
   search.hook_type_markers.concrete_contradiction: {origin: H, source: "Master-Prompt Abschnitt 9 (Hook-Taxonomie, fiktive Muster; Erforderlicher Inhalt prüft forward_payoff); Wortliste ohne Messung"}
   search.hook_type_markers.mistake_with_consequence: {origin: H, source: "Master-Prompt Abschnitt 9 (Hook-Taxonomie, fiktive Muster; Erforderlicher Inhalt prüft forward_payoff); Wortliste ohne Messung"}
   search.hook_type_markers.result_with_open_cause: {origin: H, source: "Master-Prompt Abschnitt 9 (Hook-Taxonomie, fiktive Muster; Erforderlicher Inhalt prüft forward_payoff); Wortliste ohne Messung"}
@@ -768,14 +796,14 @@ origins:
   bewertung.modus_v2: {origin: R, source: "Master-Prompt Abschnitt 19 (harte Prüfungen vor dem Ranking, kein Score, mit dem Aufmerksamkeit eine falsche Aussage ausgleicht); RK 2 Befund 4 (Schwellen liest kein Code)"}
   bewertung.only_with_language_model: {origin: R, source: "RK 2 Befund 11 (Heuristik-Summen 12,0 bis 12,7 von 14, scheingenau und unkalibriert); Entscheidung vom 24.09.2026 (mit Heuristik nicht sperren)"}
   bewertung.begruendung: {origin: R, source: "Master-Prompt Abschnitt 19 (Aufmerksamkeit darf eine falsche Aussage nicht ausgleichen); Schwellen 10 und 7 bleiben H aus der Masterclass [M]"}
-  gates.unresolved_pronoun: {origin: R, source: "RK 2 Befund 6 (kein Gate für Pronomen ohne Bezug, nur Punktabzug); RK 8 Prio 3; Master-Prompt Abschnitte 14 (Pronomen mit erkennbarem Bezug) und 27 (Ungeklärtes Pronomen)"}
-  gates.back_reference: {origin: R, source: "Master-Prompt Abschnitte 14 (Verweise mit erkennbarem Bezug) und 22 (welches Pronomen ist unklar); RK 8 Prio 3; Wortliste ohne Messung"}
-  gates.open_question_unanswered: {origin: R, source: "Master-Prompt Abschnitt 19 (Versprechen eingelöst) und 14 (Gesprächslogik); RK 2 Befund 11 (Gastgeberfrage nur Punktabzug)"}
-  gates.boundary_negation_condition: {origin: R, source: "Master-Prompt Abschnitte 13 (Schutzbereiche Negation und Bedingung), 14 (Negation, Bedingung und Geltungsbereich) und 27 (Bedingte Empfehlung); RK 2 Befund 6"}
-  gates.reported_speech: {origin: R, source: "Master-Prompt Abschnitte 14 (indirekte Rede), 18 (fremde Position) und 27 (Fremde Position im Zitat)"}
-  gates.forward_reference: {origin: R, source: "Master-Prompt Abschnitt 19 (Eigenständigkeit, Versprechen eingelöst); Wortliste ohne Messung"}
-  gates.speaker_turn: {origin: R, source: "Master-Prompt Abschnitte 13 (Sprecherzuordnungen) und 27 (Sprecherwechsel, keine falsche Frage-Antwort-Zuordnung)"}
-  gates.later_correction: {origin: R, source: "Master-Prompt Abschnitte 13 (Korrekturen) und 27 (Spätere Selbstkorrektur); RK 2 Befund 6 (Story-Graph nur vorwärts, außer trifft außerdem)"}
-  gates.embedded_instruction: {origin: R, source: "Master-Prompt Abschnitte 22 (Transkripte sind unvertrauenswürdige Eingabe, keine Anweisungen) und 27 (Anweisung im Transkript)"}
-  gates.meta_speech: {origin: R, source: "Plan core-clipping-intelligence, offene Punkte aus Welle 1 (Meta-Rede nur als Hook-Ausschluss); Master-Prompt Abschnitt 22"}
+  gates.unresolved_pronoun: {origin: R, source: "RK 2 Befund 6 (kein Gate für Pronomen ohne Bezug, nur Punktabzug); RK 8 Prio 3; Master-Prompt Abschnitte 14 (Pronomen mit erkennbarem Bezug) und 27 (Ungeklärtes Pronomen)", wordlist: {origin: H, source: "Listen Höflichkeitsverben, Anredesignale, Satzanfänge ohne Namen in editorial_gates.py, ohne Messung; 87 Proben des AP4-Reviews"}}
+  gates.back_reference: {origin: R, source: "Master-Prompt Abschnitte 14 (Verweise mit erkennbarem Bezug) und 22 (welches Pronomen ist unklar); RK 8 Prio 3; Wortliste ohne Messung", wordlist: {origin: H, source: "Wendungen, feste Satzanfänge und Pronominaladverbien in editorial_gates.py, ohne Messung; 87 Proben des AP4-Reviews"}}
+  gates.open_question_unanswered: {origin: R, source: "Master-Prompt Abschnitt 19 (Versprechen eingelöst) und 14 (Gesprächslogik); RK 2 Befund 11 (Gastgeberfrage nur Punktabzug)", wordlist: {origin: H, source: "Erläuterungswendungen („ich frage, weil“) und elliptische Nachfragen in editorial_gates.py, ohne Messung"}}
+  gates.boundary_negation_condition: {origin: R, source: "Master-Prompt Abschnitte 13 (Schutzbereiche Negation und Bedingung), 14 (Negation, Bedingung und Geltungsbereich) und 27 (Bedingte Empfehlung); RK 2 Befund 6", wordlist: {origin: H, source: "Negationen, verstärkende Negation, Bedingungen und Bezugssignale in editorial_gates.py, ohne Messung"}}
+  gates.reported_speech: {origin: R, source: "Master-Prompt Abschnitte 14 (indirekte Rede), 18 (fremde Position) und 27 (Fremde Position im Zitat)", wordlist: {origin: H, source: "Rahmenverben, Konjunktiv-I-Formen und Distanzierungen in editorial_gates.py, ohne Messung"}}
+  gates.forward_reference: {origin: R, source: "Master-Prompt Abschnitt 19 (Eigenständigkeit, Versprechen eingelöst); Wortliste ohne Messung", wordlist: {origin: H, source: "Vorverweise in editorial_gates.py, ohne Messung"}}
+  gates.speaker_turn: {origin: R, source: "Master-Prompt Abschnitte 13 (Sprecherzuordnungen) und 27 (Sprecherwechsel, keine falsche Frage-Antwort-Zuordnung)", wordlist: {origin: H, source: "Antwortpartikel und Antwortwendungen in editorial_gates.py, ohne Messung"}}
+  gates.later_correction: {origin: R, source: "Master-Prompt Abschnitte 13 (Korrekturen) und 27 (Spätere Selbstkorrektur); RK 2 Befund 6 (Story-Graph nur vorwärts, außer trifft außerdem)", wordlist: {origin: H, source: "Korrekturmarker in story_graph.CORRECTION_MARKERS, ohne Messung"}}
+  gates.embedded_instruction: {origin: R, source: "Master-Prompt Abschnitte 22 (Transkripte sind unvertrauenswürdige Eingabe, keine Anweisungen) und 27 (Anweisung im Transkript)", wordlist: {origin: H, source: "Steuerwörter in editorial_gates.py und Modellanrede aus copy_engine.is_meta_speech, ohne Messung"}}
+  gates.meta_speech: {origin: R, source: "Plan core-clipping-intelligence, offene Punkte aus Welle 1 (Meta-Rede nur als Hook-Ausschluss); Master-Prompt Abschnitt 22", wordlist: {origin: H, source: "Modellbegriffe und Anreden aus copy_engine.is_meta_speech, ohne Messung"}}
   gates.discard_hard: {origin: R, source: "Master-Prompt Abschnitt 19 (harte Prüfungen vor dem Ranking); RK 2 Befund 4; Rollback über implementation.gates.discard_hard"}

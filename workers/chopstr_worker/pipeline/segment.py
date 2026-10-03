@@ -133,18 +133,29 @@ def candidate_windows(sents: list[Sentence], min_len=12.0, max_len=90.0, stride=
     return cands
 
 
-def chapterize(sents: list[Sentence], chunk_seconds=240.0) -> list[list[Sentence]]:
-    """Grobe Kapitel (~4 Min) für den ersten LLM-Durchlauf."""
+def chapterize(sents: list[Sentence], chunk_seconds=240.0, overlap_s: float = 0.0) -> list[list[Sentence]]:
+    """Grobe Kapitel (~4 Min) für den ersten LLM-Durchlauf.
+
+    ``overlap_s`` (Fassung 2: ``search.chapter_overlap_s``, AP5): jedes folgende Kapitel beginnt zusätzlich
+    mit den Sätzen des vorigen, die in dessen letzten ``overlap_s`` Sekunden beginnen, damit ein Moment an
+    der Kapitelgrenze nicht zerfällt. Ein Kapitel wiederholt nie das ganze vorige. Mit 0 (Standard) wie
+    vor AP5."""
     chapters: list[list[Sentence]] = []
     cur: list[Sentence] = []
     t0: float | None = None
+    fresh = 0  # Sätze im aktuellen Kapitel, die nicht aus der Überlappung stammen
     for s in sents:
         t0 = s.start if t0 is None else t0
         cur.append(s)
+        fresh += 1
         if s.end - t0 >= chunk_seconds:
             chapters.append(cur)
-            cur, t0 = [], None
-    if cur:
+            carry = [x for x in cur if overlap_s > 0 and x.start >= s.end - overlap_s]
+            if len(carry) == len(cur):
+                carry = carry[1:]
+            cur, fresh = list(carry), 0
+            t0 = carry[0].start if carry else None
+    if cur and fresh:
         chapters.append(cur)
     return chapters
 

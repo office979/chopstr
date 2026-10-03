@@ -604,6 +604,20 @@ def run_render_pack(ctx: common.Context, candidate_id: str, destination: str) ->
     return clip_id
 
 
+def candidate_composition(cand: dict, segments: list[dict]) -> dict | None:
+    """Die Komposition aus der Kürzung des Kandidaten (AP7, ``rubric.composition``), solange der Clip noch
+    genau diese Segmente schneidet. Hat die Web-Revision die Grenzen geändert (dann ein Segment, Kürzungen
+    entfallen), gilt sie nicht mehr; ``render_plan.build_plan`` setzt ``filler_cuts`` nur mit ihr."""
+    comp = (cand.get("rubric") or {}).get("composition")
+    if not isinstance(comp, dict):
+        return None
+    try:
+        own = render_plan.normalize_segments(cand.get("segments") or [])
+    except Exception:  # unlesbare Altzeile: ohne Komposition rendern
+        return None
+    return comp if own == segments else None
+
+
 def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, extra: dict, clip: dict, destination: str, t0: float) -> None:
     s = ctx.settings
     conn = ctx.conn
@@ -753,6 +767,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         zeitmarken=zeitmarken,
         effekte=effekte_liste,
         musik=musik_dict,
+        composition=candidate_composition(cand, segments),
     )
     try:
         decision_log.record_reframe_strategy(

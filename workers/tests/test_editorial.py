@@ -529,6 +529,14 @@ def test_v2_pins_match_v1_and_switches_match_implementation(v2_raw):
         assert value is (path in editorial.V2_IMPLEMENTED_SWITCHES), path
 
 
+def test_trim_switch_is_registered_but_the_rule_stays_off(v2_raw):
+    """AP7 verdrahtet: der Code liest den Schalter (registriert und true), die Regel trim.enabled bleibt bis
+    zum Blindvergleich false; wirksam ist die Kürzung nur mit beiden (``trim_settings`` ``enabled``)."""
+    assert "trim.enabled" in editorial.V2_IMPLEMENTED_SWITCHES
+    assert v2_raw["implementation"]["trim"]["enabled"] is True and v2_raw["trim"]["enabled"] is False
+    assert editorial.trim_settings(editorial.load(2))["enabled"] is False
+
+
 def test_v2_rules_are_a_copy_of_v1(v2_raw):
     """Jede v1-Regel steht unverändert in v2 und der Prompt-Text ist gleich; v2 darf Abschnitte und
     Schlüssel ergänzen (Arbeitspakete). Anders sind nur Kopf, neue Abschnitte, neue Schlüssel und die

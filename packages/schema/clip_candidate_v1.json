@@ -502,6 +502,7 @@
             "heuristic_only",
             "nlp_unavailable",
             "boundary_from_pause",
+            "boundary_from_length_cap",
             "boundary_confidence_missing",
             "story_graph_unconfirmed"
           ]

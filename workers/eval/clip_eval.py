@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import statistics
 import sys
 from pathlib import Path
 from typing import Any
@@ -377,7 +378,7 @@ def zusammenfassung(zeilen: list[dict]) -> dict[str, Any]:
         "rueckverweis_unklar": sum(1 for x in g if x["beginnt_mit_rueckverweis"] is None),
         "verneinung_am_rand_anteil": round(sum(1 for x in g if x["verneinung_am_rand"] is True) / n, 3),
         "sauber_anteil": round(sum(1 for x in g if sauber(x)) / n, 3),
-        "laenge_median_s": laengen[n // 2],
+        "laenge_median_s": round(statistics.median(laengen), 2),
         "laenge_min_s": laengen[0],
         "laenge_max_s": laengen[-1],
     }

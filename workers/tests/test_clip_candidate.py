@@ -148,7 +148,8 @@ def test_audience_only_from_the_brief(version):
     with_brief = _run("demo")[2][0]
     assert with_brief.audience_context == BRIEF["audience"]
     assert with_brief.audience_context_provenance == "explicit"
-    assert with_brief.objective == BRIEF["wanted"]
+    assert with_brief.objective is None  # wanted ist kein Kommunikationsziel
+    assert _run("demo", brief={**BRIEF, "objective": "Vertrauen in Preise"})[2][0].objective == "Vertrauen in Preise"
     without = _run("demo", brief={})[2][0]
     assert without.audience_context is None and without.audience_context_provenance is None
     assert without.objective is None
@@ -241,13 +242,20 @@ def test_speaker_is_null_when_the_segment_has_two_speakers(version):
 
 def test_pause_boundary_and_unconfirmed_story_graph_are_uncertain(version):
     words, sents, result = _demo_candidate()
-    gates = {**result.gates, "sentence_boundaries": {"passed": True, "detail": "Start und Ende an Satzgrenzen, Grenze nur aus Pause (Ende)"}}
+    words = copy.deepcopy(words)
+    plain = _from(words, sents, result)
+    assert not {"boundary_from_pause", "boundary_from_length_cap"} & {u["kind"] for u in plain.assessment_uncertainties}
+    # Letztes Wort ohne Satzzeichen: das Ende ist nur noch durch die Pause von 0,8 s eine Grenze.
+    last_id = plain.segments[-1].word_ids[-1]
+    words[last_id]["text"] = str(words[last_id]["text"]).rstrip(".!?")
     later = min(result.last_sent + 1, len(sents) - 1)
     flag = {"sentence_idx": later, "seconds_after": 1.0, "marker": "das heißt aber nicht", "text": sents[later].text,
             "overlap": 0.3, "confirmed": None, "reason": "", "repair": "extend", "suggestion": "Clip verlängern"}  # fmt: skip
-    cc = _from(words, sents, dataclasses.replace(result, gates=gates, story_graph_flags=[flag]))
+    cc = _from(words, sents, dataclasses.replace(result, story_graph_flags=[flag]))
     kinds = [u["kind"] for u in cc.assessment_uncertainties]
     assert "boundary_from_pause" in kinds and "story_graph_unconfirmed" in kinds
+    pause = next(u for u in cc.assessment_uncertainties if u["kind"] == "boundary_from_pause")
+    assert "Ende s1" in pause["detail"] and pause["word_id"] is None
     dep = cc.meaning_dependencies[0]
     assert dep["kind"] == "later_qualification" and dep["sentence_idx"] == later
     assert dep["source_in"] == float(words[sents[later].word_range[0]]["start"])
@@ -335,3 +343,102 @@ def test_adapter_does_not_touch_the_candidate(version):
 def test_low_confidence_detail_keeps_the_word_as_transcribed():
     out = clip_candidate.low_confidence_uncertainties([{"text": "40.000", "prob": 0.46}], [0])
     assert out[0]["detail"] == "Zahl „40.000“ unsicher erkannt (Sicherheit 0,46 unter 0,50), am Audio prüfen"
+
+
+def test_length_cap_boundary_is_its_own_kind(version, monkeypatch):
+    words, sents, result = _demo_candidate()
+    real = dach_nlp.cut_boundary_kind
+    last_id = _from(words, sents, result).segments[-1].word_ids[-1]
+    monkeypatch.setattr(dach_nlp, "cut_boundary_kind", lambda w, i, **kw: "length_cap" if i == last_id else real(w, i, **kw))
+    kinds = [u["kind"] for u in _from(words, sents, result).assessment_uncertainties]
+    assert "boundary_from_length_cap" in kinds and "boundary_from_pause" not in kinds
+
+
+def test_nlp_note_separates_off_from_missing():
+    note = clip_candidate._nlp_note
+    assert note({"passed": True, "detail": "Verbklammer laut Richtlinie nicht geprüft", "available": False, "method": "off"}, "off").startswith("Verbklammer laut Richtlinie abgeschaltet")
+    assert note({"available": True, "method": "heuristic", "detail": "x"}, "heuristic").startswith("spaCy-Modell fehlt, Verbklammer nur heuristisch")
+    assert note({"available": False, "detail": "spaCy fehlt"}, "").startswith("spaCy-Modell fehlt, Verbklammer nicht geprüft")
+    assert note({"available": True, "method": "spacy", "detail": "ok"}, "spacy") is None
+
+
+def test_name_detection_skips_function_words_and_sentence_starts():
+    def w(text, prob=0.2, speaker="A"):
+        return {"text": text, "prob": prob, "speaker": speaker}
+
+    words = [w("Wir"), w("haben"), w("Sie"), w("gefragt."), w("Huber"), w("kam"), w("mit"), w("Frau"), w("Meier"),
+             w("und"), w("Pichler."), w("Hälfte"), w("halb"), w("Ok.", speaker="B"), w("Gruber", speaker="A")]  # fmt: skip
+    found = {(u["kind"], u["text"]) for u in clip_candidate.low_confidence_uncertainties(words, list(range(len(words))))}
+    assert found == {("low_confidence_name", "Meier"), ("low_confidence_name", "Pichler."),
+                     ("low_confidence_number", "Hälfte"), ("low_confidence_number", "halb")}  # fmt: skip
+    known = clip_candidate.low_confidence_uncertainties(words, list(range(len(words))), names=["Huber", "gruber"])
+    assert {u["text"] for u in known if u["kind"] == "low_confidence_name"} == {"Huber", "Meier", "Pichler.", "Gruber"}
+
+
+def test_prob_none_falls_back_to_asr_confidence():
+    out = clip_candidate.low_confidence_uncertainties([{"text": "x"}, {"text": "40.000", "prob": None, "asr_confidence": 0.3}], [1])
+    assert out[0]["prob"] == 0.3
+
+
+def test_candidate_id_depends_on_policy_and_engine(version):
+    words, sents, result = _demo_candidate()
+    pol = editorial.load()
+    base = clip_candidate.versions_for(pol)
+    ids = {
+        clip_candidate.from_result(result, words, sents, {"id": "demo"}, v, pol, BRIEF).candidate_id
+        for v in (base, {**base, "policy_version": "clip_policy_v9"}, {**base, "engine": "story_engine_v99"})
+    }
+    assert len(ids) == 3
+
+
+def test_semantic_rules(version):
+    data = _run("demo")[2][0].to_dict()
+    seg = data["segments"][0]
+    cases = (
+        ({**data, "audience_context_provenance": None}, "nur gemeinsam"),
+        ({**data, "audience_context": None}, "nur gemeinsam"),
+        ({**data, "segments": [{**seg, "source_in": None}]}, "output_in ohne source_in"),
+        ({**data, "segments": [{**seg, "word_ids": [], "source_in": None, "source_out": None, "output_in": None, "output_out": None}]}, "speaker_id ohne Wörter"),
+        ({**data, "removed_spans": [{"source_in": 2.0, "source_out": 2.0, "removal_reason": "Pause", "protected_context_check": None}]}, "nicht nach source_in"),
+        ({**data, "segments": [{**seg, "output_out": float("nan")}]}, "keine endliche Zahl"),
+        ({**data, "assessment_uncertainties": [{"kind": "heuristic_only", "detail": "x", "word_id": 3, "text": None, "prob": None}]}, "nur bei Wortbefunden"),
+        ({**data, "assessment_uncertainties": [{"kind": "low_confidence_number", "detail": "x", "word_id": None, "text": "40", "prob": 0.2}]}, "ohne word_id"),
+        ({**data, "opening_source_span": {**data["opening_source_span"], "word_range": [1]}}, "word_range: 1 Einträge"),
+    )  # fmt: skip
+    for broken, message in cases:
+        with pytest.raises(SchemaError, match=message):
+            ClipCandidate.from_dict(broken)
+
+
+def test_semantic_rules_only_apply_to_the_contract_schema(version):
+    data = _run("demo")[2][0].to_dict()
+    assert clip_candidate.validate({**data, "audience_context": None}, {"type": "object"}) == []
+    assert clip_candidate.validate({**data, "audience_context": None}) != []
+
+
+def test_segments_off_sentence_and_word_boundaries_are_accepted(version):
+    """AP7 schneidet Füllwörter am Rand und kürzt Pausen auf die halbe Zielpause: Segmente beginnen dann nach
+    dem Satzanfang und enden zwischen zwei Wörtern. source_in und source_out sind die tatsächlichen
+    Schnittgrenzen, word_ids die ganz enthaltenen Wörter; die Ausgabe-Timeline bleibt lückenlos."""
+    words, sents, result = _demo_candidate()
+    a, b = sents[result.first_sent].word_range[0], sents[result.last_sent].word_range[1]
+    mid = sents[result.first_sent].word_range[1]  # Pause zwischen den ersten beiden Sätzen
+    assert result.last_sent > result.first_sent
+    cut_a = round(float(words[a + 1]["start"]) - 0.04, 3)  # erstes Wort weggeschnitten, Schnitt in der Pause davor
+    cut_mid = round(float(words[mid]["end"]) + 0.01, 3)  # Pause hinter dem Wort halbiert
+    restart = round(float(words[mid + 1]["start"]) - 0.01, 3)
+    segments = [
+        {"start": cut_a, "end": cut_mid, "role": "body"},
+        {"start": restart, "end": round(float(words[b]["end"]), 3), "role": "body"},
+    ]
+    removed = [{"source_in": cut_mid, "source_out": restart, "removal_reason": "technical_pause", "protected_context_check": None,
+                "kind": "local", "word_ids": [], "text": ""}]  # fmt: skip
+    cc = _from(words, sents, dataclasses.replace(result, segments=segments, rubric={**result.rubric, "removed_spans": removed}))
+    data = cc.to_dict()
+    s1, s2 = data["segments"]
+    assert s1["source_in"] == cut_a and s1["source_out"] == cut_mid and s2["source_in"] == restart
+    assert s1["word_ids"][0] == a + 1 and s1["word_ids"][-1] == mid and s2["word_ids"][0] == mid + 1
+    assert s1["output_in"] == 0.0 and s2["output_in"] == s1["output_out"]
+    for seg in data["segments"]:
+        assert seg["output_out"] - seg["output_in"] == pytest.approx(seg["source_out"] - seg["source_in"], abs=2e-3)
+    assert data["removed_spans"] == [{"source_in": cut_mid, "source_out": restart, "removal_reason": "technical_pause", "protected_context_check": None}]

@@ -1,22 +1,22 @@
 """Blindvergleich alt gegen neu (AP11): Policy-Fassung 1 gegen 2 auf demselben Material.
 
-    .venv/bin/python -m eval.blind_compare --out blind/            # Läufe, Paare, Raster, Schlüssel
+    .venv/bin/python -m eval.blind_compare --out blind/            # Läufe, Bögen, Quellen, Raster, Schlüssel
     .venv/bin/python -m eval.blind_compare --auswerten blind/      # Auswertung nach dem Bewerten
 
 Ablauf und Raster stehen in ``eval/README.md``. Kurz:
 
-1. ``story_engine.run`` läuft je Quelle einmal mit ``CHOPSTR_POLICY_VERSION=1`` und einmal mit ``2``,
-   mit demselben Provider (Standard ``local-heuristic``), demselben Brief und derselben Obergrenze
-   ``--k``. Je Quelle wird die Ausgabemenge auf die kleinere der beiden gekürzt (Top-k nach ``total``),
-   damit Qualität bei gleicher Menge verglichen wird; der Überhang steht im Schlüssel.
-2. Paare: Rang i von v1 gegen Rang i von v2. Reihenfolge der Paare und Seite A oder B je Paar sind
-   zufällig mit festem Seed (``--seed``). ``bewertung.json`` enthält keine Versionskennung, die
-   Zuordnung steht getrennt in ``schluessel.json``.
-3. Bewertet wird mit dem Raster ``raster.json`` (Anker 0 bis 4, Master-Prompt Abschnitte 19 und 26).
-4. ``--auswerten`` liest die ausgefüllte Bewertung, den Schlüssel und ``lauf.json`` und schreibt
-   ``bericht.md``: Mittel je Kriterium, Präferenz, Verwerfungsquote je Grund und Version, Modellaufrufe
-   und Laufzeit je Quellstunde (am Provider gezählt), editorial_v1-Bestehensquote je Version und,
-   getrennt, die einzelnen Schalter (Auswahl, Hooks, Kürzung, Kombination).
+1. ``story_engine.run`` läuft je Quelle mit ``CHOPSTR_POLICY_VERSION=1`` und ``2``, mit demselben
+   Provider (Standard ``local-heuristic``), demselben Brief und derselben Obergrenze ``--k``. Je Quelle
+   zählen die besten n Kandidaten beider Fassungen, n ist die kleinere Ausgabemenge; der Überhang steht
+   im Schlüssel.
+2. Paare innerhalb einer Quelle nach größter Überdeckung (``--paarung ueberdeckung``, Standard) oder nach
+   Rang. Reihenfolge und Seite A oder B sind zufällig mit festem Seed (``--seed``).
+3. Zwei Bögen ohne Versionskennung: ``bewertung.json`` bewertet nur den Clip (ohne Hook),
+   ``hooks_bewertung.json`` die Hooks in eigenen Paaren. ``quellen.json`` enthält je Quelle das
+   Transkript oder plus/minus fünf Sätze um beide Clips eines Paares, für beide Seiten gleich, und bei
+   Datenbankquellen den Medienverweis. Die Zuordnung steht getrennt in ``schluessel.json``.
+4. Das Erfolgskriterium wird beim Erzeugen festgelegt (Plan Abschnitt 8 Punkt 5) und steht im
+   Schlüssel; ``--auswerten`` urteilt danach: Erfüllt, Nicht erfüllt oder Nicht bewertet.
 
 Die Schalter-Varianten entstehen über eine Kopie der Richtlinie mit geänderten Schaltern in
 ``implementation`` (``EDITORIAL_DIR`` zeigt für die Dauer des Laufs darauf). Eigene Overrides:
@@ -32,37 +32,78 @@ import contextlib
 import copy
 import dataclasses
 import json
+import math
 import os
 import random
+import re
 import shutil
+import statistics
 import sys
 import tempfile
 import time
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 from chopstr_worker import config, editorial, providers_llm
-from chopstr_worker.pipeline import clip_candidate, copy_de, copy_engine, story_engine
+from chopstr_worker.pipeline import clip_candidate, copy_de, copy_engine, segment, story_engine
 from chopstr_worker.providers_llm import LLM
 from chopstr_worker.residency import Tenant
 
-RATING_SHEET = "blind_compare_raster_v1"
+RATING_SHEET = "blind_compare_raster_v2"
 DEFAULT_SEED = 1729
 DEFAULT_K = 5
 DEFAULT_BRIEF: dict[str, Any] = {"platform": "linkedin"}
 OVERRIDES_ENV = "CHOPSTR_BLIND_OVERRIDES"
 NOTE = "beobachtend, kein A/B-Test, kein Viralitätsmaß"
 PREFERENCES = ("A", "B", "gleich")
-FILES = {"sheet": "bewertung.json", "key": "schluessel.json", "rubric": "raster.json", "run": "lauf.json", "report": "bericht.md"}
+PAIRINGS = ("ueberdeckung", "rang")
+CONTEXT_SENTENCES = 5
+FULL_TRANSCRIPT_MAX_SENTENCES = 40
+VERDICTS = ("Erfüllt", "Nicht erfüllt", "Nicht bewertet")
+FILES = {
+    "sheet": "bewertung.json",
+    "hook_sheet": "hooks_bewertung.json",
+    "sources": "quellen.json",
+    "key": "schluessel.json",
+    "rubric": "raster.json",
+    "run": "lauf.json",
+    "report": "bericht.md",
+}
+# Grenzen der Stil-Leck-Prüfung: ab hier können Bewertende Clips oder Hooks einer Fassung zuordnen.
+LEAK_SHARE_DIFF = 0.25
+LEAK_PREFIX_SHARE = 0.5
+LEAK_PREFIX_OTHER = 0.2
+LEAK_SEGMENT_DIFF = 0.5
+LEAK_LENGTH_RATIO = 0.25
 
-# Raster (Master-Prompt 19: Anker 0 bis 4; 26: die acht Kriterien des Blindvergleichs). Höher ist
-# immer besser, auch bei Duplikaten und Nacharbeit.
+# Gründe aus ``DetectReport.discarded`` (story_engine, payoff_search, editorial_gates) auf Deutsch.
+REASON_LABELS = {
+    "gate": "Tor",
+    "overlap": "Überdeckung",
+    "limit": "Obergrenze",
+    "duplicate": "Dublette",
+    "too_short": "zu kurz",
+    "too_long": "zu lang",
+    "too_short_after_repair": "zu kurz nach Reparatur",
+    "too_long_after_repair": "zu lang nach Reparatur",
+    "start_not_healed": "Anfang nicht heilbar",
+    "ends_on_qualification": "endet auf Abschwächung",
+    "promise_unfulfilled": "Versprechen nicht eingelöst",
+    "context_missing": "Kontext fehlt",
+    "same_payoff": "gleicher Payoff",
+    "no_opening": "kein Einstieg",
+    "instruction_followed": "Anweisung befolgt",
+}
+
+ANCHORS_TEXT = "0 nicht vorhanden oder kritisch verletzt, 1 schwach, 2 brauchbar, 3 stark und begründet, 4 besonders überzeugend"
+
+# Raster für den Clip (Master-Prompt 19: Anker 0 bis 4; 26: die acht Kriterien). Höher ist immer besser.
 CRITERIA: dict[str, dict[str, Any]] = {
     "quellentreue": {
         "titel": "Quellentreue",
-        "frage": "Gibt der Clip wieder, was die Quelle sagt, ohne Sinnumkehr, ohne verlorene Bedingung oder Einschränkung, ohne falsche Zuordnung?",
+        "frage": "Gibt der Clip wieder, was die Quelle sagt, ohne Sinnumkehr, ohne verlorene Bedingung oder Einschränkung, ohne falsche Zuordnung? Mit dem Kontext aus quellen.json prüfen.",
         "anker": {
             "0": "Sinn verkehrt oder verfälscht: Verneinung, Bedingung oder Einschränkung fehlt, Aussage falsch zugeordnet",
             "1": "schwach: Aussage zugespitzt, eine Einschränkung nur angedeutet",
@@ -117,7 +158,7 @@ CRITERIA: dict[str, dict[str, Any]] = {
     },
     "natuerlichkeit": {
         "titel": "Natürlichkeit",
-        "frage": "Klingt der Schnitt natürlich (Sprachfluss, Atem, Pausen, keine hörbaren Sprünge)? Am Audio der Quelle mit den angegebenen Zeiten prüfen.",
+        "frage": "Klingt der Schnitt natürlich (Sprachfluss, Atem, Pausen, keine hörbaren Sprünge)? Am Audio der Quelle mit den Zeiten unter segmente prüfen.",
         "anker": {
             "0": "abgeschnittene Wörter oder hörbare Sprünge",
             "1": "auffällige Schnitte",
@@ -139,13 +180,61 @@ CRITERIA: dict[str, dict[str, Any]] = {
     },
     "manuelle_nacharbeit": {
         "titel": "Manuelle Nacharbeit",
-        "frage": "Wie viel müsste die Redaktion ändern, bevor sie den Clip veröffentlicht?",
+        "frage": "Wie viel müsste die Redaktion am Schnitt ändern, bevor sie den Clip veröffentlicht (ohne Hook)?",
         "anker": {
             "0": "unbrauchbar, müsste neu geschnitten werden",
-            "1": "viel Nacharbeit (Grenzen, Kontext, Hook)",
+            "1": "viel Nacharbeit (Grenzen, Kontext)",
             "2": "mittlere Nacharbeit",
             "3": "kleine Korrektur",
             "4": "ohne Änderung veröffentlichbar",
+        },
+    },
+}
+
+# Raster für die Hooks (eigener Bogen, damit der Hook-Stil die Clip-Bewertung nicht verrät).
+HOOK_CRITERIA: dict[str, dict[str, Any]] = {
+    "deckung": {
+        "titel": "Deckung durch den Clip",
+        "frage": "Behauptet der Hook nicht mehr, als der Clip sagt (Zahlen, Geltungsbereich, Zuspitzung)?",
+        "anker": {
+            "0": "behauptet etwas, das der Clip nicht sagt, oder verfälscht eine Zahl",
+            "1": "spitzt deutlich zu",
+            "2": "gedeckt, aber unscharf",
+            "3": "gedeckt und genau",
+            "4": "wörtlich gedeckt und genau",
+        },
+    },
+    "klarheit": {
+        "titel": "Klarheit",
+        "frage": "Versteht man den Hook beim ersten Lesen oder Hören?",
+        "anker": {
+            "0": "unverständlich oder Bruchstück",
+            "1": "nur mit Mühe verständlich",
+            "2": "verständlich",
+            "3": "klar",
+            "4": "sofort klar und konkret",
+        },
+    },
+    "einstieg": {
+        "titel": "Einstieg in den Clip",
+        "frage": "Führt der Hook in den Clip, ohne das Ende vorwegzunehmen oder etwas anderes zu versprechen?",
+        "anker": {
+            "0": "verspricht etwas anderes als der Clip",
+            "1": "passt nur lose",
+            "2": "passt",
+            "3": "führt gut in den Clip",
+            "4": "führt in den Clip und macht den Kern erwartbar",
+        },
+    },
+    "ton": {
+        "titel": "Ton",
+        "frage": "Klingt der Hook natürlich, ohne Floskel und ohne Übertreibung? Kein Overlay-Text ist eine zulässige Entscheidung.",
+        "anker": {
+            "0": "Floskel oder reißerisch",
+            "1": "formelhaft",
+            "2": "unauffällig",
+            "3": "natürlich",
+            "4": "natürlich und eigenständig",
         },
     },
 }
@@ -156,7 +245,7 @@ SWITCH_GROUPS: dict[str, tuple[str, ...]] = {
     "hooks": ("hook.native_spoken",),
     "kuerzung": ("trim.enabled",),
 }
-GROUP_TITLES = {"auswahl": "Auswahl", "hooks": "Hooks", "kuerzung": "Kürzung", "kombination": "Kombination"}
+GROUP_TITLES = {"basis": "Basis", "auswahl": "Auswahl", "hooks": "Hooks", "kuerzung": "Kürzung", "kombination": "Kombination", "override": "Override"}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -240,7 +329,7 @@ def policy_variant(variant: Variant) -> Iterator[editorial.Policy]:
 
 def _with_prob(words: list[dict]) -> list[dict]:
     """Fixtures nennen die ASR-Sicherheit ``asr_confidence``; Hooks und Claim-Check lesen ``prob``."""
-    return [{**w, "prob": w["asr_confidence"]} if "prob" not in w and "asr_confidence" in w else dict(w) for w in words]
+    return [{**w, "prob": w["asr_confidence"]} if w.get("prob") is None and "asr_confidence" in w else dict(w) for w in words]
 
 
 def fixture_sources() -> list[dict[str, Any]]:
@@ -248,14 +337,14 @@ def fixture_sources() -> list[dict[str, Any]]:
     from tests.editorial_v1 import harness
     from tests.transcript_fixtures import demo_words
 
-    out = [{"name": "demo_script", "words": demo_words(), "case": None}]
+    out = [{"name": "demo_script", "words": demo_words(), "case": None, "medien": None}]
     for case in harness.load_cases():
-        out.append({"name": f"fall_{case['id']}", "words": _with_prob(case["words"]), "case": case})
+        out.append({"name": f"fall_{case['id']}", "words": _with_prob(case["words"]), "case": case, "medien": None})
     return out
 
 
 def transcript_sources(folder: str) -> list[dict[str, Any]]:
-    """``*.json`` aus einem Ordner: eine Wortliste oder ``{"words": [...]}``."""
+    """``*.json`` aus einem Ordner: eine Wortliste oder ``{"words": [...], "medien": ...}``."""
     path = Path(folder)
     if not path.is_dir():
         raise SystemExit(f"Transkript-Ordner {folder} gibt es nicht.")
@@ -265,12 +354,16 @@ def transcript_sources(folder: str) -> list[dict[str, Any]]:
         words = data if isinstance(data, list) else data.get("words")
         if not isinstance(words, list) or not words:
             raise SystemExit(f"{file.name}: keine Wortliste gefunden.")
-        out.append({"name": file.stem, "words": _with_prob(words), "case": None})
+        medien = None if isinstance(data, list) else data.get("medien")
+        out.append({"name": file.stem, "words": _with_prob(words), "case": None, "medien": medien})
     return out
 
 
+SQL_MEDIA = "select storage_key, title from sources where id = %s"
+
+
 def database_sources(source_ids: list[str]) -> list[dict[str, Any]]:
-    """Neueste Transkriptversion je Quelle aus Postgres (nur mit ``DATABASE_URL``)."""
+    """Neueste Transkriptversion je Quelle aus Postgres (nur mit ``DATABASE_URL``), mit Medienverweis."""
     if not source_ids:
         return []
     if not os.environ.get("DATABASE_URL"):
@@ -280,7 +373,12 @@ def database_sources(source_ids: list[str]) -> list[dict[str, Any]]:
 
     conn = db.connect()
     try:
-        return [{"name": f"quelle_{sid}", "words": clip_eval.load_words(conn, sid), "case": None} for sid in source_ids]
+        out = []
+        for sid in source_ids:
+            row = db.fetch_one(conn, SQL_MEDIA, (sid,))
+            medien = {"quelle_id": sid, "storage_key": row[0], "titel": row[1]} if row else {"quelle_id": sid}
+            out.append({"name": f"quelle_{sid}", "words": clip_eval.load_words(conn, sid), "case": None, "medien": medien})
+        return out
     finally:
         conn.close()
 
@@ -292,6 +390,12 @@ def source_hours(words: list[dict]) -> float:
 
 
 # -- Läufe -----------------------------------------------------------------------------------------
+
+
+def reason_label(code: str) -> str:
+    """Deutsche Bezeichnung mit Code in Klammern, etwa „Überdeckung (overlap)“."""
+    label = REASON_LABELS.get(code)
+    return f"{label} ({code})" if label else f"unbekannter Grund ({code})"
 
 
 def rejection_rates(discarded: list[dict], proposals: int) -> dict[str, dict[str, float | int]]:
@@ -342,28 +446,95 @@ def case_result(case: dict, offered: list[dict], rows: dict[str, dict], hooks: d
     return {"bestanden": not reasons, "gruende": reasons}
 
 
-def _hook(llm: LLM, cc: dict, words: list[dict], settings: config.Settings) -> dict[str, Any]:
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+
+def _norm(text: str) -> str:
+    return " ".join(re.sub(r"[^\wäöüß ]", " ", str(text or "").lower()).split())
+
+
+def whole_sentence(hook: str, clip_text: str) -> bool:
+    """Ist der gesprochene Hook ein ganzer Satz des Clips (wörtlich, von Satzanfang bis Satzende)?"""
+    target = _norm(hook)
+    return bool(target) and any(_norm(s) == target for s in _SENTENCE_SPLIT.split(clip_text))
+
+
+def _hook(llm: Any, cc: dict, words: list[dict], settings: config.Settings, platform: str) -> dict[str, Any]:
     clip_words = [words[i] for s in cc["segments"] for i in s["word_ids"]]
     text = " ".join(s["verbatim_text"] for s in cc["segments"])
-    res = copy_engine.write_copy(llm, text, copy_de.BrandProfile(), platforms=("linkedin",), s=settings, words=clip_words)
-    return {"gesprochen": res.spoken_hook, "text": res.onscreen_hook, "befunde": len(res.claim_issues)}
+    brand = copy_de.BrandProfile(platform=platform)
+    res = copy_engine.write_copy(llm, text, brand, platforms=(platform,), s=settings, words=clip_words)
+    return {
+        "gesprochen": res.spoken_hook,
+        "text": res.onscreen_hook,
+        "muster": res.pattern,
+        "befunde": len(res.claim_issues),
+        "ganzer_satz": whole_sentence(res.spoken_hook, text),
+    }
 
 
-def run_variant(variant: Variant, source: dict[str, Any], brief: dict[str, Any], provider: str, k: int) -> dict[str, Any]:
-    """Ein Lauf von ``story_engine.run`` plus Hooks je angebotenem Kandidaten, mit gezählten Modellaufrufen."""
+LLMFactory = Callable[[str, config.Settings, Callable[[dict], None]], Any]
+
+
+def _default_llm(provider: str, settings: config.Settings, sink: Callable[[dict], None]) -> LLM:
+    return LLM(Tenant(id="blind-compare", tier="standard"), provider=provider, s=settings, cost_sink=sink)
+
+
+def _reject_text(discarded: dict | None) -> str | None:
+    """Grund für einen von ``select_best`` verworfenen Kandidaten; ``None`` überlässt das Tor dem Adapter."""
+    code = str((discarded or {}).get("reason") or "")
+    if code == "overlap":
+        return f"Verworfen: {reason_label(code)}, ein besser bewerteter Kandidat überdeckt diesen"
+    if code == "limit":
+        return f"Verworfen: {reason_label(code)} der Kandidatenzahl"
+    return None
+
+
+def run_variant(
+    variant: Variant, source: dict[str, Any], brief: dict[str, Any], provider: str, k: int, llm_factory: LLMFactory | None = None
+) -> dict[str, Any]:
+    """Ein Lauf von ``story_engine.run`` plus Hooks je angebotenem Kandidaten, mit gezählten Modellaufrufen.
+
+    Ergebnis und ClipCandidate gehören über ``(first_sent, last_sent)`` zusammen; jeder ClipCandidate
+    entsteht aus genau seinem Ergebnis."""
     calls: list[dict] = []
+    platform = str(brief.get("platform") or "linkedin")
     settings = dataclasses.replace(config.settings(), languagetool_url="")
     with policy_variant(variant) as pol:
-        llm = LLM(Tenant(id="blind-compare", tier="standard"), provider=provider, s=settings, cost_sink=calls.append)
+        llm = (llm_factory or _default_llm)(provider, settings, calls.append)
         words = copy.deepcopy(source["words"])
         started = time.perf_counter()
         report = story_engine.run(words, dict(brief), {}, None, llm, max_candidates=k)
-        ccs = [c.to_dict() for c in clip_candidate.from_report(report, words, pol, source={"id": source["name"]}, brief=brief)]
-        offered = [c for c in ccs if c["decision"] == "accept"]
-        hooks = {c["candidate_id"]: _hook(llm, c, words, settings) for c in offered}
+        sents = clip_candidate.sentences_for(words, pol)
+        versions = clip_candidate.versions_for(pol, report)
+        dropped = {(d.get("first_sent"), d.get("last_sent")): d for d in report.discarded if d.get("reason") in ("gate", "overlap", "limit")}
+        entries: dict[tuple[int, int], tuple[story_engine.CandidateResult, dict]] = {}
+        for result, decision in [*((c, "accept") for c in report.candidates), *((v, "reject") for v in report.verworfen)]:
+            span = (result.first_sent, result.last_sent)
+            reason = None if decision == "accept" else _reject_text(dropped.get(span))
+            cc = clip_candidate.from_result(result, words, sents, {"id": source["name"]}, versions, pol, brief, decision=decision, decision_reason=reason)
+            entries[span] = (result, cc.to_dict())
+        offered_spans = [(c.first_sent, c.last_sent) for c in report.candidates]
+        hooks = {span: _hook(llm, entries[span][1], words, settings, platform) for span in offered_spans}
         runtime = time.perf_counter() - started
-    rows = {c["candidate_id"]: r.to_row() for c, r in zip(ccs, [*report.candidates, *report.verworfen])}
-    ranked = sorted(offered, key=lambda c: (-float(rows[c["candidate_id"]]["total"]), float(rows[c["candidate_id"]]["start_s"])))
+    ranked = sorted(offered_spans, key=lambda s: (-float(entries[s][0].total), float(entries[s][0].start_s)))
+    rows = {entries[s][1]["candidate_id"]: entries[s][0].to_row() for s in entries}
+    by_id_hooks = {entries[s][1]["candidate_id"]: hooks[s] for s in offered_spans}
+    offered = [entries[s][1] for s in offered_spans]
+    angeboten = []
+    for span in ranked:
+        result, cc = entries[span]
+        angeboten.append({
+            "candidate_id": cc["candidate_id"],
+            "first_sent": span[0], "last_sent": span[1],
+            "start_s": result.start_s, "end_s": result.end_s,
+            "total": result.total,
+            "segmente": [{"von_s": s["source_in"], "bis_s": s["source_out"], "rolle": s["editorial_role"]} for s in cc["segments"]],
+            "text": " ".join(s["verbatim_text"] for s in cc["segments"]),
+            "dauer_s": round(sum((s["output_out"] or 0) - (s["output_in"] or 0) for s in cc["segments"]), 2),
+            "hook": hooks[span],
+        })  # fmt: skip
+    hook_list = list(hooks.values())
     return {
         "variante": variant.name,
         "fassung": variant.version,
@@ -376,104 +547,263 @@ def run_variant(variant: Variant, source: dict[str, Any], brief: dict[str, Any],
         "modellaufrufe": len(calls),
         "modellaufrufe_je_prompt": dict(sorted(Counter(str(c.get("prompt")) for c in calls).items())),
         "laufzeit_s": round(runtime, 4),
-        "hooks_mit_befund": sum(1 for h in hooks.values() if h["befunde"]),
-        "editorial_v1": case_result(source["case"], offered, rows, hooks) if source.get("case") else None,
-        "angeboten": [
-            {
-                "candidate_id": c["candidate_id"],
-                "total": rows[c["candidate_id"]]["total"],
-                "segmente": [{"von_s": s["source_in"], "bis_s": s["source_out"], "rolle": s["editorial_role"]} for s in c["segments"]],
-                "text": " ".join(s["verbatim_text"] for s in c["segments"]),
-                "dauer_s": round(sum((s["output_out"] or 0) - (s["output_in"] or 0) for s in c["segments"]), 2),
-                "hook": hooks[c["candidate_id"]],
-            }
-            for c in ranked
-        ],
-        "clip_candidates": ccs,
+        "hooks": {
+            "gesamt": len(hook_list),
+            "native": sum(1 for h in hook_list if h["muster"] == copy_engine.NATIVE_PATTERN),
+            "ohne_overlay": sum(1 for h in hook_list if not str(h["text"] or "").strip()),
+            "ganzer_satz": sum(1 for h in hook_list if h["ganzer_satz"]),
+            "mit_befund": sum(1 for h in hook_list if h["befunde"]),
+        },
+        "editorial_v1": case_result(source["case"], offered, rows, by_id_hooks) if source.get("case") else None,
+        "angeboten": angeboten,
+        "clip_candidates": [entries[s][1] for s in entries],
     }
 
 
 # -- Paare -----------------------------------------------------------------------------------------
 
 
-def _side(clip: dict[str, Any], output_label: str) -> dict[str, Any]:
-    """Was die Bewertenden sehen: Text, Zeiten, Hook. Keine Version, kein Score, keine Begründung."""
-    return {
-        "ausgabe": output_label,
-        "text": clip["text"],
-        "segmente": clip["segmente"],
-        "dauer_s": clip["dauer_s"],
-        "hook_gesprochen": clip["hook"]["gesprochen"],
-        "hook_text": clip["hook"]["text"],
-    }
+def _overlap(a: dict, b: dict) -> float:
+    return story_engine.gemeinsamer_anteil(float(a["start_s"]), float(a["end_s"]), float(b["start_s"]), float(b["end_s"]))
 
 
-def make_pairs(runs: dict[str, dict[str, dict]], seed: int, left: str = "v1", right: str = "v2") -> tuple[dict, dict]:
-    """Bewertungsbogen und Schlüssel für ``left`` gegen ``right`` bei gleicher Ausgabemenge je Quelle."""
+def match_pairs(a: list[dict], b: list[dict], pairing: str) -> list[tuple[int, int, float]]:
+    """Paare aus zwei gleich langen Listen (je nach Rang sortiert): nach Rang oder nach größter Überdeckung
+    (gierig, bei Gleichstand der bessere Rang)."""
+    if pairing not in PAIRINGS:
+        raise SystemExit(f"--paarung {pairing!r}: erlaubt sind {', '.join(PAIRINGS)}.")
+    if pairing == "rang":
+        return [(i, i, round(_overlap(a[i], b[i]), 3)) for i in range(len(a))]
+    options = sorted(((_overlap(x, y), -(i + j), i, j) for i, x in enumerate(a) for j, y in enumerate(b)), reverse=True)
+    used_a, used_b, out = set(), set(), []
+    for ov, _rank, i, j in options:
+        if i in used_a or j in used_b:
+            continue
+        used_a.add(i)
+        used_b.add(j)
+        out.append((i, j, round(ov, 3)))
+    return sorted(out)
+
+
+def _clip_side(clip: dict, output_label: str) -> dict[str, Any]:
+    """Was die Bewertenden vom Clip sehen: Text und Zeiten. Kein Hook, keine Version, kein Score."""
+    return {"ausgabe": output_label, "text": clip["text"], "segmente": clip["segmente"], "dauer_s": clip["dauer_s"]}
+
+
+def _hook_side(clip: dict) -> dict[str, Any]:
+    text = str(clip["hook"]["text"] or "").strip()
+    return {"hook_gesprochen": clip["hook"]["gesprochen"], "hook_text": text or None, "clip_text": clip["text"]}
+
+
+def make_pairs(
+    runs: dict[str, dict[str, dict]], seed: int, left: str = "v1", right: str = "v2", pairing: str = "ueberdeckung",
+    sentences: dict[str, list[segment.Sentence]] | None = None,
+) -> tuple[dict, dict, dict]:  # fmt: skip
+    """Clip-Bogen, Hook-Bogen und Schlüssel für ``left`` gegen ``right`` bei gleicher Ausgabemenge je Quelle.
+
+    ``sentences`` (Quelle zu neutraler Satzliste) setzt je Paar den Kontextbereich plus/minus
+    ``CONTEXT_SENTENCES`` Sätze um beide Clips; ohne sie bleibt ``kontext`` beim Quellnamen."""
     rng = random.Random(seed)
-    pairs, surplus, labels = [], [], {}
+    neutral = {name: f"Q{i:02d}" for i, name in enumerate(sorted(runs), start=1)}
+    pairs, surplus = [], []
     for name in sorted(runs):
         a, b = runs[name][left]["angeboten"], runs[name][right]["angeboten"]
         n = min(len(a), len(b))
         flip = rng.random() < 0.5
-        labels[name] = {left: f"{name}/{2 if flip else 1}", right: f"{name}/{1 if flip else 2}"}
-        for rank in range(n):
-            pairs.append({"quelle": name, "rang": rank + 1, left: a[rank], right: b[rank]})
+        labels = {left: f"{neutral[name]}/{2 if flip else 1}", right: f"{neutral[name]}/{1 if flip else 2}"}
+        for i, j, ov in match_pairs(a[:n], b[:n], pairing):
+            pairs.append({"quelle": name, "labels": labels, "rang": {left: i + 1, right: j + 1}, "ueberdeckung": ov, left: a[i], right: b[j]})
         for version, clips in ((left, a), (right, b)):
             surplus += [{"quelle": name, "version": version, "rang": r + 1, "candidate_id": c["candidate_id"]} for r, c in enumerate(clips[n:], start=n)]
-    rng.shuffle(pairs)
+    for p in pairs:
+        p["kontext"] = _context_range(sentences.get(p["quelle"]) if sentences else None, p[left], p[right], neutral[p["quelle"]])
+
+    clip_order = list(pairs)
+    rng.shuffle(clip_order)
     sheet_pairs, key_pairs = [], {}
-    for i, p in enumerate(pairs, start=1):
+    for i, p in enumerate(clip_order, start=1):
         pid = f"P{i:03d}"
-        a_is_left = rng.random() < 0.5
-        side = {"A": left if a_is_left else right, "B": right if a_is_left else left}
+        side = _sides(rng, left, right)
         sheet_pairs.append({
-            "paar_id": pid,
-            "quelle": p["quelle"],
-            "A": _side(p[side["A"]], labels[p["quelle"]][side["A"]]),
-            "B": _side(p[side["B"]], labels[p["quelle"]][side["B"]]),
+            "paar_id": pid, "quelle": neutral[p["quelle"]], "kontext": p["kontext"],
+            "A": _clip_side(p[side["A"]], p["labels"][side["A"]]), "B": _clip_side(p[side["B"]], p["labels"][side["B"]]),
             "bewertung": {"A": dict.fromkeys(CRITERIA), "B": dict.fromkeys(CRITERIA), "praeferenz": None, "notiz": ""},
         })  # fmt: skip
-        key_pairs[pid] = {
-            "A": side["A"], "B": side["B"], "quelle": p["quelle"], "rang": p["rang"],
-            "candidate_A": p[side["A"]]["candidate_id"], "candidate_B": p[side["B"]]["candidate_id"],
-        }  # fmt: skip
+        key_pairs[pid] = _key_entry(p, side, neutral)
+
+    hook_order = list(pairs)
+    rng.shuffle(hook_order)
+    hook_pairs, key_hooks = [], {}
+    for i, p in enumerate(hook_order, start=1):
+        pid = f"H{i:03d}"
+        side = _sides(rng, left, right)
+        hook_pairs.append({
+            "paar_id": pid, "quelle": neutral[p["quelle"]],
+            "A": _hook_side(p[side["A"]]), "B": _hook_side(p[side["B"]]),
+            "bewertung": {"A": dict.fromkeys(HOOK_CRITERIA), "B": dict.fromkeys(HOOK_CRITERIA), "praeferenz": None, "notiz": ""},
+        })  # fmt: skip
+        key_hooks[pid] = _key_entry(p, side, neutral)
+
     sheet = {
         "raster": RATING_SHEET,
-        "hinweis": "Je Paar beide Seiten nach raster.json bewerten (0 bis 4, leer heißt nicht bewertet), dann praeferenz: A, B oder gleich. Die Herkunft der Clips ist verborgen.",
+        "hinweis": "Je Paar beide Clips nach raster.json (kriterien) bewerten, 0 bis 4, leer heißt nicht bewertet; dann praeferenz A, B oder gleich. Den Kontext unter kontext in quellen.json lesen. Die Herkunft der Clips ist verborgen.",
         "paare": sheet_pairs,
     }
-    key = {"raster": RATING_SHEET, "seed": seed, "links": left, "rechts": right, "paare": key_pairs, "nicht_gepaart": surplus}
-    return sheet, key
+    hook_sheet = {
+        "raster": RATING_SHEET,
+        "hinweis": "Je Paar beide Hooks nach raster.json (hook_kriterien) bewerten, 0 bis 4; hook_text null heißt kein Overlay-Text. Getrennt vom Clip-Bogen bewerten, am besten von anderen Personen.",
+        "paare": hook_pairs,
+    }
+    key = {
+        "raster": RATING_SHEET, "seed": seed, "links": left, "rechts": right, "paarung": pairing,
+        "quellen": {v: k for k, v in neutral.items()}, "paare": key_pairs, "hook_paare": key_hooks, "nicht_gepaart": surplus,
+    }  # fmt: skip
+    return sheet, hook_sheet, key
+
+
+def _sides(rng: random.Random, left: str, right: str) -> dict[str, str]:
+    a_is_left = rng.random() < 0.5
+    return {"A": left if a_is_left else right, "B": right if a_is_left else left}
+
+
+def _key_entry(p: dict, side: dict[str, str], neutral: dict[str, str]) -> dict[str, Any]:
+    return {
+        "A": side["A"], "B": side["B"], "quelle": p["quelle"], "quelle_neutral": neutral[p["quelle"]],
+        "rang_A": p["rang"][side["A"]], "rang_B": p["rang"][side["B"]], "ueberdeckung": p["ueberdeckung"],
+        "candidate_A": p[side["A"]]["candidate_id"], "candidate_B": p[side["B"]]["candidate_id"],
+    }  # fmt: skip
+
+
+def _context_range(sents: list[segment.Sentence] | None, a: dict, b: dict, neutral: str) -> dict[str, Any]:
+    """Satzbereich plus/minus ``CONTEXT_SENTENCES`` um beide Clips, für beide Seiten gleich."""
+    if not sents:
+        return {"quelle": neutral, "saetze": None}
+    t0 = min(float(s["von_s"]) for c in (a, b) for s in c["segmente"] if s["von_s"] is not None)
+    t1 = max(float(s["bis_s"]) for c in (a, b) for s in c["segmente"] if s["bis_s"] is not None)
+    inside = [s.idx for s in sents if s.end > t0 and s.start < t1]
+    first, last = (min(inside), max(inside)) if inside else (0, len(sents) - 1)
+    return {"quelle": neutral, "saetze": [max(0, first - CONTEXT_SENTENCES), min(len(sents) - 1, last + CONTEXT_SENTENCES)]}
+
+
+def neutral_sentences(words: list[dict]) -> list[segment.Sentence]:
+    """Satzliste für den Kontext, unabhängig von der Fassung (Zerlegung vor AP2), für beide Seiten gleich."""
+    return segment.sentences_from_words(words)
+
+
+def sources_document(sources: list[dict], sentences: dict[str, list[segment.Sentence]], key: dict, sheet: dict) -> dict[str, Any]:
+    """``quellen.json``: kurze Quellen ganz, lange nur die Kontextbereiche der Paare; Medienverweis."""
+    by_neutral = dict(key["quellen"])
+    needed: dict[str, set[int]] = {}
+    for p in sheet["paare"]:
+        rng_ = p["kontext"]["saetze"]
+        if rng_:
+            needed.setdefault(p["quelle"], set()).update(range(rng_[0], rng_[1] + 1))
+    media = {s["name"]: s.get("medien") for s in sources}
+    out = {}
+    for neutral, name in sorted(by_neutral.items()):
+        sents = sentences.get(name) or []
+        full = len(sents) <= FULL_TRANSCRIPT_MAX_SENTENCES
+        keep = range(len(sents)) if full else sorted(needed.get(neutral, set()))
+        out[neutral] = {
+            "umfang": "ganzes Transkript" if full else f"plus/minus {CONTEXT_SENTENCES} Sätze um die Clips",
+            "medien": media.get(name),
+            "saetze": [
+                {"nr": s.idx, "von_s": round(s.start, 2), "bis_s": round(s.end, 2), "sprecher": s.speaker, "text": s.text}
+                for s in (sents[i] for i in keep)
+            ],
+        }
+    return {"raster": RATING_SHEET, "hinweis": "Kontext für beide Seiten gleich; nr ist die Satznummer, auf die kontext.saetze im Bogen verweist.", "quellen": out}
+
+
+def _prefix(text: str | None, n: int = 3) -> str:
+    return " ".join(_norm(text or "").split()[:n])
+
+
+def style_leak(runs: dict[str, dict[str, dict]], key: dict) -> dict[str, Any]:
+    """Merkmale je Fassung auf dem bewerteten Material und Warnungen, wenn sie die Fassung verraten."""
+    left, right = key["links"], key["rechts"]
+    clips: dict[str, list[dict]] = {left: [], right: []}
+    for entry in key["paare"].values():
+        for side in ("A", "B"):
+            version = entry[side]
+            clip = next(c for c in runs[entry["quelle"]][version]["angeboten"] if c["candidate_id"] == entry[f"candidate_{side}"])
+            clips[version].append(clip)
+    features: dict[str, dict[str, Any]] = {}
+    for version, items in clips.items():
+        n = len(items)
+        spoken = Counter(_prefix(c["hook"]["gesprochen"]) for c in items)
+        overlay = Counter(_prefix(c["hook"]["text"]) for c in items if str(c["hook"]["text"] or "").strip())
+        features[version] = {
+            "n": n,
+            "segmente_mittel": round(statistics.fmean(len(c["segmente"]) for c in items), 2) if n else None,
+            "teaser_anteil": round(sum(1 for c in items if any(s["rolle"] == "teaser" for s in c["segmente"])) / n, 3) if n else None,
+            "dauer_mittel_s": round(statistics.fmean(c["dauer_s"] for c in items), 2) if n else None,
+            "dauer_median_s": round(statistics.median(c["dauer_s"] for c in items), 2) if n else None,
+            "ohne_overlay_anteil": round(sum(1 for c in items if not str(c["hook"]["text"] or "").strip()) / n, 3) if n else None,
+            "praefix_gesprochen": {p: round(k / n, 3) for p, k in spoken.most_common(3)} if n else {},
+            "praefix_overlay": {p: round(k / n, 3) for p, k in overlay.most_common(3)} if n else {},
+        }
+    warnings: list[str] = []
+    a, b = features[left], features[right]
+    if a["n"] and b["n"]:
+        for field_, title in (("teaser_anteil", "Clip-Bogen, Anteil mit Teaser"), ("ohne_overlay_anteil", "Hook-Bogen, Anteil ohne Overlay-Text")):
+            if abs(a[field_] - b[field_]) > LEAK_SHARE_DIFF:
+                warnings.append(f"{title}: {left} {_pct(a[field_])}, {right} {_pct(b[field_])}")
+        if abs(a["segmente_mittel"] - b["segmente_mittel"]) > LEAK_SEGMENT_DIFF:
+            warnings.append(f"Clip-Bogen, Segmente je Clip im Mittel: {left} {_num(a['segmente_mittel'])}, {right} {_num(b['segmente_mittel'])}")
+        longer = max(a["dauer_mittel_s"], b["dauer_mittel_s"])
+        if longer and abs(a["dauer_mittel_s"] - b["dauer_mittel_s"]) / longer > LEAK_LENGTH_RATIO:
+            warnings.append(f"Clip-Bogen, Dauer im Mittel: {left} {_num(a['dauer_mittel_s'], 1)} s, {right} {_num(b['dauer_mittel_s'], 1)} s")
+        for field_, title in (("praefix_gesprochen", "Hook-Bogen, gesprochener Hook"), ("praefix_overlay", "Hook-Bogen, Overlay-Text")):
+            for mine, other, me, them in ((a, b, left, right), (b, a, right, left)):
+                for prefix, share in mine[field_].items():
+                    if prefix and share >= LEAK_PREFIX_SHARE and other[field_].get(prefix, 0.0) < LEAK_PREFIX_OTHER:
+                        warnings.append(f"{title} beginnt mit „{prefix}“: {me} {_pct(share)}, {them} {_pct(other[field_].get(prefix, 0.0))}")
+    return {"merkmale": features, "warnungen": warnings, "wenige_paare": min(a["n"], b["n"]) < 8}
 
 
 def rubric_template() -> dict[str, Any]:
     return {
         "raster": RATING_SHEET,
-        "skala": "0 nicht vorhanden oder kritisch verletzt, 1 schwach, 2 brauchbar, 3 stark und begründet, 4 besonders überzeugend",
+        "skala": ANCHORS_TEXT,
         "regeln": [
             "Hohe Werte brauchen einen Bezug zur Quelle; im Zweifel den niedrigeren Anker wählen.",
             "Die Herkunft der Clips ist verborgen; nicht versuchen, sie zu erraten.",
-            "Natürlichkeit am Audio der Quelle mit den Zeiten unter segmente prüfen.",
+            "Quellentreue mit dem Kontext aus quellen.json prüfen, Natürlichkeit am Audio der Quelle.",
             "Duplikate innerhalb derselben Angabe unter ausgabe beurteilen.",
+            "Clips und Hooks getrennt bewerten: der Clip-Bogen zeigt keine Hooks.",
         ],
         "kriterien": CRITERIA,
+        "hook_kriterien": HOOK_CRITERIA,
         "praeferenz": list(PREFERENCES),
         "hinweis": f"Ergebnis {NOTE}.",
     }
 
 
+def success_criterion(tolerance: float) -> dict[str, Any]:
+    """Vorab festgelegt (Plan Abschnitt 8 Punkt 5); steht beim Erzeugen im Schlüssel."""
+    return {
+        "quelle": "Plan Abschnitt 8 Punkt 5",
+        "kriterien": ["quellentreue", "eigenstaendigkeit"],
+        "toleranz": tolerance,
+        "regel": "Erfüllt, wenn bei gleicher Ausgabemenge das Mittel der neuen Fassung in Quellentreue und Eigenständigkeit nicht unter dem Mittel der alten minus Toleranz liegt; die Verwerfungsquote wird berichtet.",
+    }
+
+
 def generate(sources: list[dict], out_dir: str | Path, seed: int = DEFAULT_SEED, k: int = DEFAULT_K, provider: str = providers_llm.HEURISTIC_PROVIDER,
-             brief: dict[str, Any] | None = None, switches: bool = True, overrides: dict[str, bool] | None = None) -> dict[str, Path]:  # fmt: skip
-    """Alle Läufe, Paare, Raster und Schlüssel; schreibt die Dateien aus ``FILES`` (ohne Bericht)."""
+             brief: dict[str, Any] | None = None, switches: bool = True, overrides: dict[str, bool] | None = None,
+             pairing: str = "ueberdeckung", tolerance: float = 0.0, llm_factory: LLMFactory | None = None) -> dict[str, Path]:  # fmt: skip
+    """Alle Läufe, Bögen, Quellen, Raster und Schlüssel; schreibt die Dateien aus ``FILES`` (ohne Bericht)."""
+    if pairing not in PAIRINGS:
+        raise SystemExit(f"--paarung {pairing!r}: erlaubt sind {', '.join(PAIRINGS)}.")
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     brief = dict(DEFAULT_BRIEF if brief is None else brief)
     variants = [*BASE_VARIANTS, *(switch_variants(overrides) if switches else [])]
-    runs: dict[str, dict[str, dict]] = {}
-    for src in sources:
-        runs[src["name"]] = {v.name: run_variant(v, src, brief, provider, k) for v in variants}
-    sheet, key = make_pairs(runs, seed)
+    runs = {src["name"]: {v.name: run_variant(v, src, brief, provider, k, llm_factory) for v in variants} for src in sources}
+    sentences = {src["name"]: neutral_sentences(src["words"]) for src in sources}
+    sheet, hook_sheet, key = make_pairs(runs, seed, pairing=pairing, sentences=sentences)
+    key["erfolgskriterium"] = success_criterion(tolerance)
     run_doc = {
         "hinweis": f"Nicht an die Bewertenden geben (enthält die Versionen). Ergebnis {NOTE}.",
         "provider": provider,
@@ -481,10 +811,13 @@ def generate(sources: list[dict], out_dir: str | Path, seed: int = DEFAULT_SEED,
         "brief": brief,
         "varianten": [{"name": v.name, "fassung": v.version, "gruppe": v.group, "schalter": dict(v.overrides)} for v in variants],
         "gebaute_schalter": sorted(editorial.V2_IMPLEMENTED_SWITCHES),
+        "stil_leck": style_leak(runs, key),
         "quellen": runs,
     }
+    docs = {"sheet": sheet, "hook_sheet": hook_sheet, "sources": sources_document(sources, sentences, key, sheet),
+            "key": key, "rubric": rubric_template(), "run": run_doc}  # fmt: skip
     paths = {}
-    for kind, doc in (("sheet", sheet), ("key", key), ("rubric", rubric_template()), ("run", run_doc)):
+    for kind, doc in docs.items():
         paths[kind] = out / FILES[kind]
         paths[kind].write_text(json.dumps(doc, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     return paths
@@ -493,39 +826,94 @@ def generate(sources: list[dict], out_dir: str | Path, seed: int = DEFAULT_SEED,
 # -- Auswertung ------------------------------------------------------------------------------------
 
 
-def _mean(values: list[float]) -> float | None:
-    return round(sum(values) / len(values), 2) if values else None
+def sign_test(wins_a: int, wins_b: int) -> float | None:
+    """Zweiseitiger exakter Vorzeichentest (Gleichstände zählen nicht); ``None`` ohne Entscheidung."""
+    n = wins_a + wins_b
+    if n == 0:
+        return None
+    tail = sum(math.comb(n, i) for i in range(min(wins_a, wins_b) + 1)) / 2**n
+    return round(min(1.0, 2 * tail), 4)
+
+
+def _read_sheet(sheet: dict, key_pairs: dict, criteria: dict, versions: tuple[str, str], what: str) -> dict[str, Any]:
+    """Werte je Fassung und Kriterium sowie Präferenzen aus einem Bogen, mit klaren Fehlermeldungen."""
+    scores: dict[str, dict[str, list[float]]] = {v: {c: [] for c in criteria} for v in versions}
+    preference = Counter({v: 0 for v in versions} | {"gleich": 0, "offen": 0})
+    rated = 0
+    for pair in sheet["paare"]:
+        pid = pair.get("paar_id")
+        if pid not in key_pairs:
+            raise SystemExit(f"{what} {pid}: paar_id fehlt im Schlüssel (schluessel.json passt nicht zum Bogen).")
+        mapping = key_pairs[pid]
+        rating = pair.get("bewertung") or {}
+        any_value = False
+        for side in ("A", "B"):
+            for crit, value in (rating.get(side) or {}).items():
+                if crit not in criteria:
+                    raise SystemExit(f"{what} {pid} {side}: unbekanntes Kriterium {crit!r}, erlaubt sind {', '.join(criteria)}.")
+                if value is None:
+                    continue
+                if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 4:
+                    raise SystemExit(f"{what} {pid} {side}.{crit}: {value!r} ist kein Wert 0 bis 4.")
+                scores[mapping[side]][crit].append(float(value))
+                any_value = True
+        pref = rating.get("praeferenz")
+        if pref not in (*PREFERENCES, None):
+            raise SystemExit(f"{what} {pid}: praeferenz {pref!r}, erlaubt sind A, B, gleich oder leer.")
+        if pref is not None and not any_value:
+            raise SystemExit(f"{what} {pid}: Präferenz ohne Bewertung der Kriterien; erst die Kriterien bewerten.")
+        rated += int(any_value)
+        preference[mapping[pref] if pref in ("A", "B") else ("gleich" if pref == "gleich" else "offen")] += 1
+    return {
+        "mittel": {v: {c: round(statistics.fmean(x), 2) if x else None for c, x in crits.items()} for v, crits in scores.items()},
+        "streuung": {v: {c: round(statistics.stdev(x), 2) if len(x) > 1 else None for c, x in crits.items()} for v, crits in scores.items()},
+        "anzahl": {v: {c: len(x) for c, x in crits.items()} for v, crits in scores.items()},
+        "praeferenz": dict(preference),
+        "vorzeichentest_p": sign_test(preference[versions[0]], preference[versions[1]]),
+        "paare": len(sheet["paare"]),
+        "bewertete_paare": rated,
+    }
+
+
+def verdict(criterion: dict[str, Any], clip: dict[str, Any], versions: tuple[str, str]) -> dict[str, Any]:
+    """Urteil nach dem vorab festgelegten Kriterium: Erfüllt, Nicht erfüllt oder Nicht bewertet."""
+    old, new = versions
+    rows = []
+    for crit in criterion["kriterien"]:
+        a, b = clip["mittel"][old][crit], clip["mittel"][new][crit]
+        ok = None if a is None or b is None else b >= a - float(criterion["toleranz"])
+        rows.append({"kriterium": crit, old: a, new: b, "erfuellt": ok})
+    if any(r["erfuellt"] is None for r in rows):
+        result = "Nicht bewertet"
+    else:
+        result = "Erfüllt" if all(r["erfuellt"] for r in rows) else "Nicht erfüllt"
+    return {"urteil": result, "zeilen": rows}
 
 
 def evaluate(out_dir: str | Path) -> dict[str, Any]:
-    """Liest Bewertung, Schlüssel und Lauf und rechnet alle Kennzahlen des Berichts."""
+    """Liest Bögen, Schlüssel und Lauf und rechnet alle Kennzahlen des Berichts."""
     out = Path(out_dir)
-    sheet = json.loads((out / FILES["sheet"]).read_text(encoding="utf-8"))
-    key = json.loads((out / FILES["key"]).read_text(encoding="utf-8"))
-    run_doc = json.loads((out / FILES["run"]).read_text(encoding="utf-8"))
+
+    def load(kind: str) -> dict:
+        path = out / FILES[kind]
+        if not path.is_file():
+            raise SystemExit(f"{path} fehlt.")
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    key, run_doc = load("key"), load("run")
     versions = (key["links"], key["rechts"])
-    scores: dict[str, dict[str, list[float]]] = {v: {c: [] for c in CRITERIA} for v in versions}
-    preference = Counter({v: 0 for v in versions} | {"gleich": 0, "offen": 0})
-    for pair in sheet["paare"]:
-        mapping = key["paare"][pair["paar_id"]]
-        rating = pair.get("bewertung") or {}
-        for side in ("A", "B"):
-            for crit, value in (rating.get(side) or {}).items():
-                if value is None:
-                    continue
-                if crit not in CRITERIA or not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 4:
-                    raise SystemExit(f"{pair['paar_id']} {side}.{crit}: {value!r} ist kein Wert 0 bis 4.")
-                scores[mapping[side]][crit].append(float(value))
-        pref = rating.get("praeferenz")
-        if pref not in (*PREFERENCES, None):
-            raise SystemExit(f"{pair['paar_id']}: praeferenz {pref!r}, erlaubt sind A, B, gleich oder leer.")
-        preference[mapping[pref] if pref in ("A", "B") else ("gleich" if pref == "gleich" else "offen")] += 1
+    clip = _read_sheet(load("sheet"), key["paare"], CRITERIA, versions, "Clip-Bogen")
+    hook_path = out / FILES["hook_sheet"]
+    hook = _read_sheet(load("hook_sheet"), key.get("hook_paare", {}), HOOK_CRITERIA, versions, "Hook-Bogen") if hook_path.is_file() else None
 
     per_variant: dict[str, dict[str, Any]] = {}
-    for runs in run_doc["quellen"].values():
+    for name_src, runs in run_doc["quellen"].items():
         for name, r in runs.items():
-            agg = per_variant.setdefault(name, {"vorschlaege": 0, "verworfen": Counter(), "verworfen_gesamt": 0, "angeboten": 0, "modellaufrufe": 0,
-                                                "laufzeit_s": 0.0, "stunden": 0.0, "hooks_mit_befund": 0, "faelle": 0, "bestanden": 0})  # fmt: skip
+            agg = per_variant.setdefault(name, {
+                "vorschlaege": 0, "verworfen": Counter(), "verworfen_gesamt": 0, "angeboten": 0, "modellaufrufe": 0,
+                "laufzeit_s": 0.0, "stunden": 0.0, "hooks": Counter(), "faelle": 0, "bestanden": 0,
+                "ohne_vorschlag": [], "ohne_kandidat": [],
+            })  # fmt: skip
             agg["vorschlaege"] += r["vorschlaege"]
             agg["verworfen_gesamt"] += r["verworfen_gesamt"]
             for reason, v in r["verworfen"].items():
@@ -534,28 +922,35 @@ def evaluate(out_dir: str | Path) -> dict[str, Any]:
             agg["modellaufrufe"] += r["modellaufrufe"]
             agg["laufzeit_s"] += r["laufzeit_s"]
             agg["stunden"] += r["quelle_stunden"]
-            agg["hooks_mit_befund"] += r["hooks_mit_befund"]
+            agg["hooks"].update(r["hooks"])
+            if not r["vorschlaege"]:
+                agg["ohne_vorschlag"].append(name_src)
+            if not r["angeboten"]:
+                agg["ohne_kandidat"].append(name_src)
             if r["editorial_v1"] is not None:
                 agg["faelle"] += 1
                 agg["bestanden"] += int(r["editorial_v1"]["bestanden"])
     for agg in per_variant.values():
         props, hours = agg["vorschlaege"], agg["stunden"]
         agg["verworfen"] = {r: {"anzahl": n, "quote": round(n / props, 4) if props else 0.0} for r, n in sorted(agg["verworfen"].items())}
+        agg["hooks"] = dict(agg["hooks"])
         agg["verwerfungsquote"] = round(agg["verworfen_gesamt"] / props, 4) if props else 0.0
         agg["modellaufrufe_je_stunde"] = round(agg["modellaufrufe"] / hours, 1) if hours else None
         agg["laufzeit_s_je_stunde"] = round(agg["laufzeit_s"] / hours, 1) if hours else None
         agg["bestehensquote"] = round(agg["bestanden"] / agg["faelle"], 4) if agg["faelle"] else None
+    criterion = key.get("erfolgskriterium") or success_criterion(0.0)
     return {
         "versionen": list(versions),
-        "paare": len(sheet["paare"]),
-        "bewertete_paare": sum(1 for p in sheet["paare"] if any(v is not None for s in ("A", "B") for v in ((p.get("bewertung") or {}).get(s) or {}).values())),
+        "paarung": key.get("paarung", "rang"),
+        "clip": clip,
+        "hook": hook,
+        "erfolgskriterium": criterion,
+        "urteil": verdict(criterion, clip, versions),
         "nicht_gepaart": key["nicht_gepaart"],
-        "mittel": {v: {c: _mean(vals) for c, vals in crits.items()} for v, crits in scores.items()},
-        "anzahl": {v: {c: len(vals) for c, vals in crits.items()} for v, crits in scores.items()},
-        "praeferenz": dict(preference),
         "varianten": per_variant,
         "varianten_info": {v["name"]: v for v in run_doc["varianten"]},
         "gebaute_schalter": run_doc["gebaute_schalter"],
+        "stil_leck": run_doc.get("stil_leck") or {"merkmale": {}, "warnungen": [], "wenige_paare": True},
         "provider": run_doc["provider"],
         "k": run_doc["k"],
         "quellen": len(run_doc["quellen"]),
@@ -577,39 +972,102 @@ def _pct(value: float | None) -> str:
     return "keine Daten" if value is None else f"{value * 100:.1f} %".replace(".", ",")
 
 
+def _share(part: int, whole: int) -> str:
+    return f"{part} von {whole} ({_pct(part / whole)})" if whole else "keine"
+
+
+def _rating_table(res: dict, criteria: dict, left: str, right: str) -> list[str]:
+    lines = [f"| Kriterium | {left}: Mittel (Streuung, n) | {right}: Mittel (Streuung, n) |", "|---|---|---|"]
+    for crit, spec in criteria.items():
+        cells = [
+            f"{_num(res['mittel'][v][crit])} ({_num(res['streuung'][v][crit]) if res['streuung'][v][crit] is not None else 'keine'}, n = {res['anzahl'][v][crit]})"
+            for v in (left, right)
+        ]
+        lines.append(f"| {spec['titel']} | {cells[0]} | {cells[1]} |")
+    pref = res["praeferenz"]
+    p = res["vorzeichentest_p"]
+    lines += [
+        "",
+        f"Präferenz: {left} {pref.get(left, 0)}, {right} {pref.get(right, 0)}, gleich {pref.get('gleich', 0)}, offen {pref.get('offen', 0)}. "
+        + (f"Vorzeichentest (zweiseitig, ohne Gleichstände): p = {_num(p, 3)}." if p is not None else "Vorzeichentest: keine entschiedenen Paare."),
+    ]
+    return lines
+
+
 def report_markdown(result: dict[str, Any]) -> str:
     """Bericht ohne Gedankenstriche; Werte mit Dezimalkomma."""
     left, right = result["versionen"]
     var = result["varianten"]
-    lines = [
-        f"# Blindvergleich {left} gegen {right}",
+    lines = [f"# Blindvergleich {left} gegen {right}", "", f"Hinweis: {NOTE}. Das Material ist klein; Unterschiede sind Beobachtungen, keine Belege.", ""]
+
+    lines += ["## Quellen ohne Vorschlag und ohne Kandidat", "", f"| | {left} | {right} |", "|---|---|---|"]
+    for field_, title in (("ohne_vorschlag", "ohne Vorschlag (Stufe 2 liefert nichts)"), ("ohne_kandidat", "ohne angebotenen Kandidaten")):
+        cells = [f"{len(var[v][field_])}: {', '.join(var[v][field_]) or 'keine'}" for v in (left, right)]
+        lines.append(f"| {title} | {cells[0]} | {cells[1]} |")
+
+    crit = result["erfolgskriterium"]
+    lines += ["", "## Erfolgskriterium (vorab festgelegt)", "", f"{crit['regel']} Toleranz: {_num(float(crit['toleranz']))}. Quelle: {crit['quelle']}.", ""]
+    for row in result["urteil"]["zeilen"]:
+        state = "nicht bewertet" if row["erfuellt"] is None else ("erfüllt" if row["erfuellt"] else "nicht erfüllt")
+        lines.append(f"* {CRITERIA[row['kriterium']]['titel']}: {left} {_num(row[left])}, {right} {_num(row[right])}, {state}")
+    lines += [
+        f"* Verwerfungsquote: {left} {_pct(var[left]['verwerfungsquote'])}, {right} {_pct(var[right]['verwerfungsquote'])}",
         "",
-        f"Hinweis: {NOTE}. Das Material ist klein; Unterschiede sind Beobachtungen, keine Belege.",
+        f"**Urteil: {result['urteil']['urteil']}**",
         "",
         "## Material und Ausgabemenge",
         "",
-        f"* Quellen: {result['quellen']}, Provider: {result['provider']}, Obergrenze k: {result['k']}",
-        f"* Paare bei gleicher Ausgabemenge: {result['paare']}, davon bewertet: {result['bewertete_paare']}",
+        f"* Quellen: {result['quellen']}, Provider: {result['provider']}, Obergrenze k: {result['k']}, Paarung: {result['paarung']}",
+        f"* Clip-Paare bei gleicher Ausgabemenge: {result['clip']['paare']}, davon bewertet: {result['clip']['bewertete_paare']}",
         f"* Nicht gepaart (Überhang einer Version): {len(result['nicht_gepaart'])}",
-    ]
+    ]  # fmt: skip
     for item in result["nicht_gepaart"]:
         lines.append(f"  * {item['quelle']}: {item['version']} Rang {item['rang']}")
-    lines += ["", "## Redaktionelle Bewertung (blind, Anker 0 bis 4)", "", f"| Kriterium | {left} | {right} |", "|---|---|---|"]
-    for crit, spec in CRITERIA.items():
-        cells = [f"{_num(result['mittel'][v][crit])} (n = {result['anzahl'][v][crit]})" for v in (left, right)]
-        lines.append(f"| {spec['titel']} | {cells[0]} | {cells[1]} |")
-    pref = result["praeferenz"]
-    lines += ["", f"Präferenz: {left} {pref.get(left, 0)}, {right} {pref.get(right, 0)}, gleich {pref.get('gleich', 0)}, offen {pref.get('offen', 0)}.", ""]
+
+    leak = result["stil_leck"]
+    lines += ["", "## Stil-Leck-Prüfung", "", "Merkmale der bewerteten Clips und Hooks je Fassung. Weichen sie deutlich ab, können Bewertende die Fassung erkennen.", "",
+              f"| Merkmal | {left} | {right} |", "|---|---|---|"]  # fmt: skip
+    feats = leak["merkmale"]
+    if feats:
+        for field_, title, fmt in (
+            ("n", "bewertete Clips", str),
+            ("segmente_mittel", "Segmente je Clip (Mittel)", _num),
+            ("teaser_anteil", "Anteil mit Teaser", _pct),
+            ("dauer_mittel_s", "Dauer Mittel (s)", lambda x: _num(x, 1)),
+            ("dauer_median_s", "Dauer Median (s)", lambda x: _num(x, 1)),
+            ("ohne_overlay_anteil", "Hooks ohne Overlay-Text", _pct),
+        ):
+            lines.append(f"| {title} | {fmt(feats[left][field_]) if feats[left][field_] is not None else 'keine'} | {fmt(feats[right][field_]) if feats[right][field_] is not None else 'keine'} |")
+        for field_, title in (("praefix_gesprochen", "häufigster Anfang gesprochener Hook"), ("praefix_overlay", "häufigster Anfang Overlay-Text")):
+            cells = []
+            for v in (left, right):
+                top = next(iter(feats[v][field_].items()), None)
+                cells.append(f"„{top[0]}“ {_pct(top[1])}" if top else "keiner")
+            lines.append(f"| {title} | {cells[0]} | {cells[1]} |")
+    lines.append("")
+    if leak["warnungen"]:
+        lines += ["**Warnung: Die Verblindung ist gefährdet.**", ""] + [f"* {w}" for w in leak["warnungen"]]
+        if any(w.startswith("Hook-Bogen") for w in leak["warnungen"]):
+            lines += ["", "Im Hook-Bogen ist der Stil Teil des Bewerteten; erkennbare Fassungen machen die Hook-Präferenz unsicher. "
+                          "Der Clip-Bogen zeigt keine Hooks und ist davon nicht betroffen."]  # fmt: skip
+    else:
+        lines.append("Keine deutliche Abweichung gefunden.")
+    if leak.get("wenige_paare"):
+        lines += ["", "Weniger als acht Paare je Fassung: die Prüfung ist nur ein grober Hinweis."]
+
+    lines += ["", "## Clips (blind, ohne Hook, Anker 0 bis 4)", ""] + _rating_table(result["clip"], CRITERIA, left, right)
+    lines += ["", "## Hooks (eigener Bogen, Anker 0 bis 4)", ""]
+    lines += _rating_table(result["hook"], HOOK_CRITERIA, left, right) if result["hook"] else ["Kein Hook-Bogen vorhanden."]
 
     reasons = sorted({r for v in (left, right) for r in var[v]["verworfen"]})
-    lines += ["## Verwerfungsquote je Grund und Version", "", "Anteil an allen Vorschlägen der Stufe 2 (`DetectReport.proposals`).", "",
+    lines += ["", "## Verwerfungsquote je Grund und Version", "", "Anteil an allen Vorschlägen der Stufe 2 (`DetectReport.proposals`).", "",
               f"| Grund | {left} | {right} |", "|---|---|---|"]  # fmt: skip
     for reason in reasons:
         cells = []
         for v in (left, right):
             entry = var[v]["verworfen"].get(reason)
             cells.append(f"{entry['anzahl']} ({_pct(entry['quote'])})" if entry else "0")
-        lines.append(f"| {reason} | {cells[0]} | {cells[1]} |")
+        lines.append(f"| {reason_label(reason)} | {cells[0]} | {cells[1]} |")
     lines.append(f"| gesamt | {var[left]['verworfen_gesamt']} von {var[left]['vorschlaege']} ({_pct(var[left]['verwerfungsquote'])}) "
                  f"| {var[right]['verworfen_gesamt']} von {var[right]['vorschlaege']} ({_pct(var[right]['verwerfungsquote'])}) |")  # fmt: skip
 
@@ -635,19 +1093,25 @@ def report_markdown(result: dict[str, Any]) -> str:
     switch_rows = [n for n, info in result["varianten_info"].items() if info["gruppe"]]
     if switch_rows:
         lines += ["", "## Einzelne Schalter (Auswahl, Hooks, Kürzung, Kombination)", "",
-                  "Fassung 2, Basis: alle Gruppenschalter aus. Ein Schalter ohne Code (nicht gebaut) ändert nichts; seine Zeile entspricht dann der Basis.", "",
-                  "| Variante | Schalter an | gebaut | Kandidaten | Verwerfungsquote | Modellaufrufe je Quellstunde | Hooks mit Befund | editorial_v1 |",
-                  "|---|---|---|---|---|---|---|---|"]  # fmt: skip
+                  "Fassung 2, Basis: alle Gruppenschalter aus. Hook-Kennzahlen je angebotenem Kandidaten.", "",
+                  "| Variante | Schalter an (gebaut) | Kandidaten | Verwerfungsquote | Modellaufrufe je Quellstunde | Hooks native | ohne Overlay | ganzer Satz | mit Claim-Befund | editorial_v1 |",
+                  "|---|---|---|---|---|---|---|---|---|---|"]  # fmt: skip
         for name in switch_rows:
             info, agg = result["varianten_info"][name], var[name]
             on = [s for s, value in info["schalter"].items() if value]
-            title = GROUP_TITLES.get(info["gruppe"], info["gruppe"].capitalize())
-            built_cell = "keiner" if not on else ", ".join(f"{s} {'ja' if s in built else 'nein'}" for s in on)
-            lines.append(f"| {title} | {', '.join(on) or 'keiner'} | {built_cell} | {agg['angeboten']} | {_pct(agg['verwerfungsquote'])} "
-                         f"| {_num(agg['modellaufrufe_je_stunde'], 1)} | {agg['hooks_mit_befund']} | {agg['bestanden']} von {agg['faelle']} |")  # fmt: skip
+            title = GROUP_TITLES.get(info["gruppe"], str(info["gruppe"]))
+            switches = ", ".join(f"{s} ({'ja' if s in built else 'nein'})" for s in on) or "keiner"
+            h = agg["hooks"]
+            total = int(h.get("gesamt", 0))
+            lines.append(
+                f"| {title} | {switches} | {agg['angeboten']} | {_pct(agg['verwerfungsquote'])} | {_num(agg['modellaufrufe_je_stunde'], 1)} "
+                f"| {_share(int(h.get('native', 0)), total)} | {_share(int(h.get('ohne_overlay', 0)), total)} | {_share(int(h.get('ganzer_satz', 0)), total)} "
+                f"| {_share(int(h.get('mit_befund', 0)), total)} | {agg['bestanden']} von {agg['faelle']} |"
+            )  # fmt: skip
 
     lines += ["", "## Grenzen der Aussage", "",
               f"* {NOTE[0].upper() + NOTE[1:]}. Organische Veröffentlichungen sind kein A/B-Test.",
+              "* Streuung und Vorzeichentest beschreiben nur dieses Material; bei wenigen Paaren ist jeder Unterschied unsicher.",
               "* Mit dem Heuristik-Provider sind alle Werte unkalibriert; belastbar wird der Vergleich erst mit einem echten Provider und echtem Material.",
               "* Laufzeit hängt von der Maschine ab; nur innerhalb eines Laufs vergleichbar.",
               "* Negative und gleiche Ergebnisse werden wie positive berichtet."]  # fmt: skip
@@ -662,17 +1126,19 @@ def _short(text: str, limit: int = 120) -> str:
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description="Blindvergleich Policy-Fassung 1 gegen 2 (AP11).")
     mode = ap.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--out", help="Ordner für Bewertungsbogen, Raster, Schlüssel und Lauf")
-    mode.add_argument("--auswerten", help="Ordner eines früheren Laufs mit ausgefüllter bewertung.json")
+    mode.add_argument("--out", help="Ordner für Bögen, Quellen, Raster, Schlüssel und Lauf")
+    mode.add_argument("--auswerten", help="Ordner eines früheren Laufs mit ausgefüllten Bögen")
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED, help=f"Zufallsseed für Reihenfolge und A/B, Standard {DEFAULT_SEED}")
     ap.add_argument("--k", type=int, default=DEFAULT_K, help=f"Obergrenze der Kandidaten je Quelle und Version, Standard {DEFAULT_K}")
+    ap.add_argument("--paarung", choices=PAIRINGS, default="ueberdeckung", help="Paare nach größter Überdeckung (Standard) oder nach Rang")
+    ap.add_argument("--toleranz", type=float, default=0.0, help="Toleranz des Erfolgskriteriums in Ankerpunkten, Standard 0")
     ap.add_argument("--provider", default=providers_llm.HEURISTIC_PROVIDER, help="LLM-Provider für beide Versionen, Standard local-heuristic")
-    ap.add_argument("--transkripte", help="Ordner mit Transkript-JSON (Wortliste oder {\"words\": [...]})")
+    ap.add_argument("--transkripte", help="Ordner mit Transkript-JSON (Wortliste oder {\"words\": [...], \"medien\": ...})")
     ap.add_argument("--quelle", action="append", default=[], help="UUID einer Quelle aus der Datenbank (braucht DATABASE_URL), mehrfach")
     ap.add_argument("--ohne-fixtures", action="store_true", help="Demo-Skript und editorial_v1 nicht verwenden")
     ap.add_argument("--ohne-schalter", action="store_true", help="keine Schalter-Varianten rechnen")
     ap.add_argument("--override", action="append", default=[], help=f"zusätzliche Variante: Schalter pfad=true|false, mehrfach; auch {OVERRIDES_ENV}")
-    ap.add_argument("--brief", help="Brief als JSON-Datei (gleich für beide Versionen)")
+    ap.add_argument("--brief", help="Brief als JSON-Datei (gleich für beide Versionen, platform steuert die Hooks)")
     ap.add_argument("--bericht", help="Pfad des Berichts, Standard <ordner>/bericht.md")
     args = ap.parse_args(argv)
 
@@ -693,11 +1159,10 @@ def main(argv: list[str] | None = None) -> None:
     brief = json.loads(Path(args.brief).read_text(encoding="utf-8")) if args.brief else None
     overrides = parse_overrides(args.override, os.environ.get(OVERRIDES_ENV))
     paths = generate(sources, args.out, seed=args.seed, k=args.k, provider=args.provider, brief=brief,
-                     switches=not args.ohne_schalter, overrides=overrides)  # fmt: skip
+                     switches=not args.ohne_schalter, overrides=overrides, pairing=args.paarung, tolerance=args.toleranz)  # fmt: skip
     print(f"{len(sources)} Quellen gerechnet.")
-    print(f"Bewertungsbogen (an die Bewertenden): {paths['sheet']}")
-    print(f"Raster: {paths['rubric']}")
-    print(f"Schlüssel und Lauf (nicht weitergeben): {paths['key']}, {paths['run']}")
+    print(f"An die Bewertenden: {paths['sheet']}, {paths['hook_sheet']}, {paths['sources']}, {paths['rubric']}")
+    print(f"Nicht weitergeben: {paths['key']}, {paths['run']}")
     print(f"Nach dem Bewerten: python -m eval.blind_compare --auswerten {args.out}")
 
 

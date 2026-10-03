@@ -120,7 +120,8 @@ def test_active_policy_version_is_part_of_the_cache_key(fake_db, fake_context, s
     analyze.run_detect_candidates(fake_context, source)
     fin = fake_db.events_for("detect_candidates")[-1]["payload"]
     assert fin["key"] != key_v1 and fin["cached"] is False
-    assert fin["prompt_versions"] == ["propose_moments_v2", "score_clip_v2", "story_graph_confirm_v1"]
+    # Fassung 2 mit implementation.search.payoff_first: der tatsächlich genutzte Vorschlags-Prompt und die Übersicht.
+    assert fin["prompt_versions"] == ["propose_moments_v2", "score_clip_v2", "story_graph_confirm_v1", "episode_overview_v1"]
     assert fake_db.candidates
     assert {c["rubric"]["policy_version"] for c in fake_db.candidates} == {"clip_policy_v2"}
 
@@ -625,4 +626,67 @@ def test_cache_key_under_v2_follows_policy_content_and_nlp_status(monkeypatch, t
     editorial.clear_cache()
     monkeypatch.setattr(dach_nlp, "nlp", lambda: object())
     assert analyze.candidates_key_for(*args) != key
+    editorial.clear_cache()
+
+
+# -- AP9-Vorgriff: Heatmap und Signale im Schlüssel, nur unter Fassung 2 ---------------------------------
+
+
+def _key(heat):
+    return analyze.candidates_key_for("tv1", 1, BRIEF, ["propose_moments_v1"], "local-heuristic", "heuristic-v1", {"hook": 1.0}, heat)
+
+
+def test_cache_key_under_v1_ignores_the_heatmap(monkeypatch):
+    from chopstr_worker import editorial
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "1")
+    editorial.clear_cache()
+    base = analyze.candidates_key_for("tv1", 1, BRIEF, ["propose_moments_v1"], "local-heuristic", "heuristic-v1", {"hook": 1.0})
+    assert _key(None) == base
+    assert _key({"seeds": [3], "audio_values": [0.1]}) == base, "unter v1 bleibt der Schlüssel unverändert"
+    editorial.clear_cache()
+
+
+def test_cache_key_under_v2_contains_heatmap_hash_signals_and_engine_v5(monkeypatch):
+    from chopstr_worker import editorial, storage
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    editorial.clear_cache()
+    seen = []
+    real = storage.derived_key
+
+    def spy(base, params, *a, **kw):
+        seen.append(params)
+        return real(base, params, *a, **kw)
+
+    monkeypatch.setattr(storage, "derived_key", spy)
+    a = _key({"seeds": [3], "audio_values": [0.1, 0.2]})
+    b = _key({"seeds": [4], "audio_values": [0.1, 0.2]})
+    c = _key({"seeds": [3], "audio_values": [0.1, 0.3]})
+    assert len({a, b, c}) == 3, "andere Seeds oder anderer Audioanteil ergeben einen anderen Schlüssel"
+    assert _key({"seeds": [3], "audio_values": [0.1, 0.2]}) == a
+    params = seen[0]
+    assert params["engine"] == story_engine.ENGINE_VERSION_V2 == "story_engine_v5"
+    assert params["signals"] == analyze.SIGNALS_VERSION
+    assert params["heat_sha256"] == analyze.heat_hash({"seeds": [3], "audio_values": [0.1, 0.2]})
+    assert "policy_sha256" in params and "nlp_status" in params
+    assert _key(None) != a and seen[-1]["heat_sha256"] is None
+    editorial.clear_cache()
+
+
+def test_v1_report_keeps_engine_v4_and_v2_reports_v5(fake_db, fake_context, source, monkeypatch):
+    from chopstr_worker import editorial
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "1")
+    editorial.clear_cache()
+    analyze.run_detect_candidates(fake_context, source)
+    key = fake_db.events_for("detect_candidates")[-1]["payload"]["key"]
+    assert fake_context.store.get_json("derived", key)["engine"] == "story_engine_v4"
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    editorial.clear_cache()
+    analyze.run_detect_candidates(fake_context, source)
+    key = fake_db.events_for("detect_candidates")[-1]["payload"]["key"]
+    data = fake_context.store.get_json("derived", key)
+    assert data["engine"] == "story_engine_v5"
+    assert data["clip_candidates"] and all(cc["contract"] == "clip_candidate_v1" for cc in data["clip_candidates"])
     editorial.clear_cache()

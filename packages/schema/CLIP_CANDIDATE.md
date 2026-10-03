@@ -22,17 +22,22 @@ Stand: Der Adapter ist gebaut, aber noch nicht in `DetectReport` verdrahtet. Gep
   bis es eine externe Prüfung gibt.
 * Ohne Ergebnisdaten gibt es keine Kalibrierung: `calibration` ist `uncalibrated`, für die Heuristik
   und für ein Sprachmodell. `calibrated` ist für später reserviert.
-* Alle Werte sind JSON-Typen. `ClipCandidate.from_dict(cc.to_dict()) == cc`.
+* Alle Werte sind JSON-Typen, Zahlen endlich (kein NaN, kein Unendlich). `ClipCandidate.from_dict(cc.to_dict()) == cc`.
+* Regeln über Felder hinweg (`clip_candidate.validate`, nur gegen dieses Schema): `audience_context` und
+  `audience_context_provenance` sind beide gesetzt oder beide null; `output_in`/`output_out` nur mit
+  `source_in`/`source_out`; `speaker_id` nur bei einem Segment mit Wörtern; eine entfernte Stelle endet
+  nach ihrem Anfang; `word_id`, `text`, `prob` nur bei Wortbefunden, dort `word_id` Pflicht; ein
+  angenommener Kandidat hat Segmente.
 
 ## Felder
 
 | Feld | Typ | Herkunft | Null-Regel |
 |---|---|---|---|
 | `contract` | `"clip_candidate_v1"` | fest | nie null |
-| `candidate_id` | Text | `cc_` plus SHA-256 aus Quelle, Transkriptversion, Satzspanne und Segmenten; deterministisch | nie null |
+| `candidate_id` | Text | `cc_` plus SHA-256 aus Quelle, Transkriptversion, Richtlinie (`policy_version`), Engine (`story_engine.ENGINE_VERSION`), Satzspanne und Segmenten; deterministisch, derselbe Schnitt unter einer anderen Fassung hat eine andere ID | nie null |
 | `source_asset_id` | Text | Aufrufer (`source.id`, die Quelle) | null ohne Angabe |
 | `source_version` | Zahl oder Text | Aufrufer (`source.version`, die Transkriptversion) | null ohne Angabe |
-| `objective` | Text | Brief: `objective`, sonst `wanted` (gewünschte Momente) | null, wenn der Brief nichts sagt |
+| `objective` | Text | nur Brief `objective` (Kommunikationsziel); `wanted` (gewünschte Momente) ist kein Ziel und zählt nicht | null ohne `brief.objective` |
 | `audience_context` | Text | nur Brief `audience` | null ohne Brief-Angabe; nie geraten |
 | `audience_context_provenance` | `explicit` oder null | `explicit`, wenn `audience_context` aus dem Brief kommt | null, wenn `audience_context` null ist |
 | `central_idea` | Text | kein Stufenergebnis liefert sie heute | heute immer null |
@@ -56,7 +61,7 @@ Stand: Der Adapter ist gebaut, aber noch nicht in `DetectReport` verdrahtet. Gep
 | `prompt_version` | Objekt | alle gepinnten Prompts der Richtlinie, Name zu `name_vN` | nie null |
 | `policy_version` | Text | `clip_policy_v1` oder `clip_policy_v2` | nie null |
 | `externally_verified` | null | keine externe Prüfung | immer null |
-| `calibration` | `uncalibrated` | keine Ergebnisdaten | immer `uncalibrated` |
+| `calibration` | `uncalibrated` oder `calibrated` | keine Ergebnisdaten | heute immer `uncalibrated`; `calibrated` ist reserviert für eine Prognose, die an Ergebnisdaten geeicht ist |
 
 ### Spanne
 
@@ -91,16 +96,17 @@ Heute nicht befüllt (AP7).
 
 | `kind` | Wann |
 |---|---|
-| `low_confidence_number` | Zahl im Clip mit `prob` unter `transcribe.LOW_CONF_THRESHOLD` (0,5); Testfall 6, am Audio prüfen |
-| `low_confidence_name` | großgeschriebenes Wort (Name oder Begriff) im Clip mit `prob` unter der Schwelle |
+| `low_confidence_number` | Zahl im Clip mit `prob` unter `transcribe.LOW_CONF_THRESHOLD` (0,5), auch Zahl- und Bruchzahlwörter („vierzig“, „Hälfte“, „anderthalb“); Testfall 6, am Audio prüfen |
+| `low_confidence_name` | möglicher Name mit `prob` unter der Schwelle: großgeschrieben, kein Funktionswort, Pronomen oder Anrede („Sie“), nicht am Satzanfang; am Satzanfang nur nach einem Titel („Frau“, „Dr.“) oder wenn das Wort in der bekannten Namensliste steht (`names`, etwa `brand_vocab`) |
 | `heuristic_only` | Bewertung ohne Sprachmodell; Humor, Sensitivität und Relativierungen ungeprüft |
-| `nlp_unavailable` | spaCy fehlt: Verbklammer nur heuristisch oder gar nicht geprüft (Tor `verb_bracket`, `DetectReport.nlp_status`) |
-| `boundary_from_pause` | Tor `sentence_boundaries` meldet „Grenze nur aus Pause“ (Regel v2, `rubric.sentence_rule`) |
+| `nlp_unavailable` | Verbklammer nicht mit spaCy geprüft (Tor `verb_bracket`, `DetectReport.nlp_status`); `detail` unterscheidet „laut Richtlinie abgeschaltet“ von „spaCy-Modell fehlt“ (heuristisch oder gar nicht geprüft) |
+| `boundary_from_pause` | eine Schnittkante ist nur durch eine Pause eine Satzgrenze (`dach_nlp.cut_boundary_kind` ergibt `pause_candidate`, dieselbe Regel wie Zerlegung und Tor) |
+| `boundary_from_length_cap` | eine Schnittkante stammt aus der Satzlängengrenze von Regel v2 (`length_cap`), nicht aus Satzzeichen |
 | `boundary_confidence_missing` | ein Segment hat keine `boundary_confidence` |
 | `story_graph_unconfirmed` | eine spätere Relativierung ist gefunden, aber nicht bestätigt (`confirmed = null`) |
 
-Die ASR-Sicherheit kommt aus `prob` (Transkript); Testfixtures nennen sie `asr_confidence`, das gilt
-gleichwertig. Ein Wort ohne Angabe gilt nicht als unsicher.
+Die ASR-Sicherheit kommt aus `prob` (Transkript); fehlt `prob` oder ist es null, gilt `asr_confidence`
+(so heißt das Feld in den Testfixtures). Ein Wort ohne beide Angaben gilt nicht als unsicher.
 
 ## Kompakte Teilmenge für `candidates.rubric`
 

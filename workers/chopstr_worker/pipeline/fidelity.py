@@ -12,9 +12,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from . import dach_nlp
 from .dach_nlp import NEGATIONS
+
+if TYPE_CHECKING:
+    from ..editorial import Policy
 
 QUALIFIERS = {
     "nur", "außer", "ausser", "meistens", "oft", "manchmal", "teilweise", "eventuell", "vielleicht",
@@ -22,6 +26,8 @@ QUALIFIERS = {
     "eigentlich", "zumindest", "höchstens", "mindestens",
 }  # fmt: skip
 CONTRAST_STARTS = ("aber", "allerdings", "jedoch", "wobei", "trotzdem", "andererseits", "außer")
+# Regel v2 (AP4): zusätzlich die Schreibung ohne ß (Schweiz).
+CONTRAST_STARTS_V2 = (*CONTRAST_STARTS, "ausser")
 MAX_JOIN_GAP_S = 20.0  # Segmente mit größerem Abstand im Original = „zusammengesetzte Aussage"
 
 
@@ -35,19 +41,21 @@ def starts_with_contrast(tail: str, rule: str = "v1") -> bool:
     if rule != "v2":
         return tail.startswith(CONTRAST_STARTS)
     first = next((t for t in (dach_nlp.core_token(x) for x in tail.split()) if t), "")
-    return first in CONTRAST_STARTS
+    return first in CONTRAST_STARTS_V2
 
 
 def check_cut(
-    original_words: list[dict], kept_ranges: list[tuple[int, int]], rule: str = "v1", policy=None
+    original_words: list[dict], kept_ranges: list[tuple[int, int]], rule: str = "v1", policy: Policy | None = None
 ) -> list[dict]:
     """original_words: Wortliste des Kandidaten; kept_ranges: behaltene Wortindex-Bereiche (inklusiv).
 
     ``rule`` betrifft nur ``ends_before_contrast``: ``v2`` gleicht ``CONTRAST_STARTS`` an Wortgrenzen ab.
 
-    Mit ``policy`` der Fassung 2 (Abschnitt ``trim``, AP7) zusätzlich ``protected_removed`` (hoch): ein
-    Wort eines Schutzbereichs aus ``trim_plan.protected_spans`` fehlt. Ohne ``policy`` oder unter
-    Fassung 1 bleibt die Prüfung wie vorher."""
+    Mit ``policy`` der Fassung 2 (Abschnitt ``trim``, AP7) zusätzlich aus
+    ``trim_plan.protected_cut_findings``: ``protected_removed`` (hoch), wenn ein Schutzbereich teilweise
+    fehlt oder ein ganzer Satz mit Negation, Bedingung, Einschränkung, Korrektur oder Vergleich wegfällt,
+    der sich auf das Behaltene bezieht; ``protected_omitted`` (mittel, Prüfhinweis), wenn ein ganzer Satz
+    ohne erkennbaren Bezug wegfällt. Ohne ``policy`` oder unter Fassung 1 bleibt die Prüfung wie vorher."""
     warnings = []
     kept: set[int] = set()
     for a, b in kept_ranges:
@@ -76,13 +84,15 @@ def check_cut(
         from . import trim_plan
 
         if editorial.trim_settings(policy) is not None:
-            hit = [
-                {"type": p["type"], "word_range": p["word_range"], "text": p["text"]}
-                for p in trim_plan.protected_spans(original_words, policy)
-                if any(i not in kept for i in range(p["word_range"][0], p["word_range"][1] + 1))
-            ]
-            if hit:
-                warnings.append({"type": "protected_removed", "severity": "high", "detail": hit})
+            found = trim_plan.protected_cut_findings(original_words, kept, policy)
+            for kind, severity in (("protected_removed", "high"), ("protected_omitted", "medium")):
+                hit = [
+                    {"type": f["type"], "word_range": f["word_range"], "text": f["text"], "mode": f["mode"]}
+                    for f in found
+                    if f["severity"] == severity
+                ]
+                if hit:
+                    warnings.append({"type": kind, "severity": severity, "detail": hit})
     return warnings
 
 
@@ -514,6 +524,7 @@ def number_values(texts: list[str] | tuple[str, ...]) -> set[float]:
 
 __all__ = [
     "CONTRAST_STARTS",
+    "CONTRAST_STARTS_V2",
     "GENERALIZERS",
     "MAX_JOIN_GAP_S",
     "QUALIFIERS",

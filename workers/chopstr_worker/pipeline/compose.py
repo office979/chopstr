@@ -50,10 +50,17 @@ class Composition:
     def from_json(cls, data: list[dict]) -> Composition:
         return cls([Segment(float(d["start"]), float(d["end"]), d.get("role", "body")) for d in data])
 
-    def validate(self, words: list[dict], max_splices: int | None = None, debate_no_reorder: bool = False) -> list[str]:
+    def validate(
+        self,
+        words: list[dict],
+        max_splices: int | None = None,
+        debate_no_reorder: bool = False,
+        forced_semantic: set[int] | None = None,
+    ) -> list[str]:
         """Trust-Regeln aus E6. ``max_splices`` (Policy v2, ``trim.max_semantic_splices``) zählt nur
-        semantische Splices (``splice_kinds``); ``debate_no_reorder`` verbietet in einer Debatte
-        (``is_debate``) Teaser und Umstellung. Ohne beide Angaben gilt das Verhalten vor AP7."""
+        semantische Splices (``splice_kinds``, ``forced_semantic`` wie dort); ``debate_no_reorder``
+        verbietet in einer Debatte (``is_debate``) Teaser und Umstellung. Ohne diese Angaben gilt das
+        Verhalten vor AP7."""
         issues = []
         teasers = [s for s in self.segments if s.role == "teaser"]
         body = [s for s in self.segments if s.role == "body"]
@@ -73,7 +80,7 @@ class Composition:
             if body_sorted != body:
                 issues.append("Body-Segmente sind umsortiert: nur mit ausdrücklicher Freigabe")
         if max_splices is not None:
-            n = splice_kinds(self, words).count("semantic")
+            n = splice_kinds(self, words, forced_semantic).count("semantic")
             if n > max_splices:
                 issues.append(f"Zu viele Splices ({n} statt höchstens {max_splices} Verbindungen nicht benachbarter Sätze, E6)")
         if debate_no_reorder and body and words:
@@ -132,8 +139,8 @@ def remap_words(words: list[dict], comp: Composition, by_midpoint: bool = False)
 # -- AP7: Splice-Zählung, Debattenregel, Ausgabetimeline ----------------------------------------------
 
 # Kurzer Einwurf des Gegenübers, dessen Entfernung keinen Satz neu verknüpft („Okay.“, „Genau.“).
-BACKCHANNEL_MAX_WORDS = 2
-_BACKCHANNEL_TOKENS = frozenset(dach_nlp.BACKCHANNEL) | frozenset(dach_nlp.HARD_FILLERS)
+BACKCHANNEL_MAX_WORDS = 3  # „Ja, ja, klar.“
+_BACKCHANNEL_TOKENS = frozenset(dach_nlp.BACKCHANNEL) | frozenset(dach_nlp.HARD_FILLERS) | {"aha", "ah", "oh"}
 _CLOSERS = "\"'»«“”‘’)]}"
 
 
@@ -162,13 +169,14 @@ def _is_backchannel_run(words: list[dict], ids: list[int]) -> bool:
     return len(spk) == 1 and before is not None and before not in spk
 
 
-def splice_kinds(comp: Composition, words: list[dict]) -> list[str]:
+def splice_kinds(comp: Composition, words: list[dict], forced_semantic: set[int] | None = None) -> list[str]:
     """Art jeder Naht zwischen aufeinanderfolgenden Body-Segmenten in Abspielreihenfolge.
 
     ``semantic``: die Naht verbindet nicht benachbarte Sätze, das heißt zwischen den Segmenten fällt
-    ein Satzende weg (oder der Body ist umgestellt); ein entfernter kurzer Einwurf des Gegenübers
-    (höchstens zwei Rückmeldewörter) zählt nicht. ``local``: innerhalb einer Passage wurde nur eine
-    Pause gekürzt oder ein Füllwort, ein Einwurf oder ein abgebrochener Ansatz entfernt."""
+    ein Satzende weg, der Body ist umgestellt oder ein entferntes Wort steht in ``forced_semantic``
+    (redaktionell weggelassen, ``keep_decisions`` in ``trim_plan.build_composition``; immer semantisch).
+    ``local``: innerhalb einer Passage wurde nur eine Pause gekürzt oder etwas ohne Inhalt entfernt;
+    eine Naht über reine Füll- oder Rückmeldewörter („Äh.“, „Okay.“) ist immer lokal."""
     body = [s for s in comp.segments if s.role != "teaser"]
     kinds: list[str] = []
     for prev, nxt in zip(body, body[1:]):
@@ -176,15 +184,22 @@ def splice_kinds(comp: Composition, words: list[dict]) -> list[str]:
             kinds.append("semantic")
             continue
         between = [i for i, w in enumerate(words) if prev.end < (float(w["start"]) + float(w["end"])) / 2.0 < nxt.start]
+        if forced_semantic and any(i in forced_semantic for i in between):
+            kinds.append("semantic")
+            continue
+        if all(dach_nlp.core_token(str(words[i]["text"])) in _BACKCHANNEL_TOKENS for i in between):
+            kinds.append("local")
+            continue
         ends = any(_ends_sentence(str(words[i]["text"])) for i in between)
         kinds.append("semantic" if ends and not _is_backchannel_run(words, between) else "local")
     return kinds
 
 
 def is_debate(words: list[dict], first: int, last: int) -> bool:
-    """Debatte im Body (Wörter ``first`` bis ``last``, inklusiv): mindestens zwei Sprecher und
-    mindestens zwei Wechsel zwischen ihren Redebeiträgen. Kurze Einwürfe (``_is_backchannel_run``)
-    zählen nicht als Beitrag; eine Frage mit Antwort ist ein Wechsel und noch keine Debatte."""
+    """Debatte im Body (Wörter ``first`` bis ``last``, inklusiv): mindestens zwei Sprecher mit eigener
+    Aussage und mindestens zwei Wechsel zwischen ihren Redebeiträgen. Kurze Einwürfe
+    (``_is_backchannel_run``) zählen nicht als Beitrag. Wer nur fragt, debattiert nicht: Frage, Antwort
+    und Nachfrage sind ein Interview, keine Debatte."""
     runs: list[tuple[object, list[int]]] = []
     for i in range(max(0, first), min(len(words) - 1, last) + 1):
         spk = words[i].get("speaker")
@@ -192,9 +207,13 @@ def is_debate(words: list[dict], first: int, last: int) -> bool:
             runs[-1][1].append(i)
         else:
             runs.append((spk, [i]))
-    turns = [spk for spk, ids in runs if spk is not None and not _is_backchannel_run(words, ids)]
-    merged = [s for k, s in enumerate(turns) if k == 0 or s != turns[k - 1]]
-    return len(set(merged)) >= 2 and len(merged) - 1 >= 2
+    turns = [(spk, ids) for spk, ids in runs if spk is not None and not _is_backchannel_run(words, ids)]
+    merged = [s for k, (s, _ids) in enumerate(turns) if k == 0 or s != turns[k - 1][0]]
+    stating = {
+        spk for spk, ids in turns
+        if not str(words[ids[-1]]["text"]).strip().rstrip(_CLOSERS).endswith("?")
+    }  # fmt: skip
+    return len(stating) >= 2 and len(merged) - 1 >= 2
 
 
 def output_timeline(comp: Composition) -> list[dict]:

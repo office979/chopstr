@@ -114,7 +114,9 @@ def test_new_prompt_file_does_not_switch_the_path(prompts_copy, monkeypatch, pol
     assert prompts.load("score_clip").version == 99  # ungepinnt nähme sie die neue Datei
     assert prompts.load_pinned("score_clip").version == 2
     propose = "propose_moments_v2" if policy_version == "2" else "propose_moments_v1"  # AP5: Pin in Fassung 2
-    assert story_engine.prompt_versions() == before == [propose, "score_clip_v2", "story_graph_confirm_v1"]
+    # Fassung 2 mit implementation.search.payoff_first nutzt zusätzlich die Episodenübersicht.
+    overview = ["episode_overview_v1"] if policy_version == "2" else []
+    assert story_engine.prompt_versions() == before == [propose, "score_clip_v2", "story_graph_confirm_v1", *overview]
     editorial.clear_cache()
 
 

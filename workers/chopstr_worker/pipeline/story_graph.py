@@ -23,11 +23,16 @@ CONTRAST_MARKERS = (
     "um das einzuordnen", "nicht falsch verstehen", "das gilt nicht", "in unserem fall",
     "bei uns war das", "das ist aber die ausnahme", "das gilt nur", "mit einer einschränkung",
 )  # fmt: skip
-# Korrekturmarker (AP4, nur Regel v2): der Sprecher nimmt eine eigene Aussage zurück.
+# Korrekturmarker (AP4, nur Regel v2): der Sprecher nimmt eine eigene Aussage zurück. Wortliste ohne Messung
+# (Herkunft H, origins.gates.later_correction.wordlist).
 CORRECTION_MARKERS = (
-    "ich korrigiere mich", "das stimmt so nicht", "ich hab mich vertan", "ich habe mich vertan",
-    "nein, falsch", "genauer gesagt", "um das richtigzustellen", "muss ich korrigieren",
+    "ich korrigiere mich", "ich muss mich korrigieren", "muss ich korrigieren", "das stimmt so nicht",
+    "stimmt gar nicht", "das stimmt nöd", "das war falsch", "ich hab mich vertan", "ich habe mich vertan",
+    "nein, falsch", "nein, quatsch", "korrektur", "ich meinte", "ich meine natürlich", "um das richtigzustellen",
 )  # fmt: skip
+# Unter Regel v2 zusätzlich als Einschränkung (keine Korrektur): „genauer gesagt“ präzisiert; „ausser“ ist die
+# Schreibung ohne ß (Schweiz).
+CONTRAST_MARKERS_V2 = (*CONTRAST_MARKERS, "ausser", "genauer gesagt")
 LOOKAHEAD_S = 60.0
 MIN_OVERLAP = 0.15
 
@@ -93,7 +98,7 @@ def _find_later_qualifications_v2(sents: list[Sentence], clip_first: int, clip_l
         marker = find_marker(s.text, CORRECTION_MARKERS)
         kind = "correction"
         if marker is None:
-            marker, kind = find_marker(s.text, CONTRAST_MARKERS), "contrast"
+            marker, kind = find_marker(s.text, CONTRAST_MARKERS_V2), "contrast"
         if not marker:
             continue
         text = s.text
@@ -174,6 +179,7 @@ def claims_in(text: str) -> list[str]:
 __all__ = [
     "CONFIRM_SCHEMA",
     "CONTRAST_MARKERS",
+    "CONTRAST_MARKERS_V2",
     "CORRECTION_MARKERS",
     "build_confirm_prompt",
     "claims_in",

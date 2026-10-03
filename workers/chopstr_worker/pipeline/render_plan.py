@@ -199,7 +199,7 @@ def build_plan(
     onscreen_hook: str | None = None,
     hook_overlay: bool | None = None,
     audio_preset: str = "master",
-    filler_cuts: bool = False,
+    filler_cuts: bool | None = None,
     caption_font: str | None = None,
     brand: dict[str, Any] | None = None,
     caption_text_field: str | None = None,
@@ -218,9 +218,18 @@ def build_plan(
     Oberfläche sagen, ob das gebaute Video noch zu den gesetzten Marken passt.
     ``composition`` ist das Ergebnis von ``trim_plan.build_composition`` (AP7): unter Fassung 2
     (``policy`` oder die aktive) ist ``filler_cuts`` dann true, wenn die Komposition lokale Schnitte
-    hat (``local_cuts`` größer null). Unter Fassung 1 bleibt ``filler_cuts`` der übergebene Wert."""
+    hat (``local_cuts`` größer null). Unter Fassung 1 bleibt ``filler_cuts`` der übergebene Wert (ohne Angabe
+    false). Überschreibt die Komposition einen ausdrücklich übergebenen anderen Wert, steht das als
+    ``filler_cuts_note`` im Plan."""
+    note = None
     if composition is not None and (policy if policy is not None else editorial.load()).version >= 2:
-        filler_cuts = int(composition.get("local_cuts") or 0) > 0
+        from_comp = int(composition.get("local_cuts") or 0) > 0
+        if filler_cuts is not None and bool(filler_cuts) != from_comp:
+            note = (
+                f"filler_cuts {'true' if filler_cuts else 'false'} übergeben, aus der Komposition "
+                f"{'true' if from_comp else 'false'} gesetzt (local_cuts {int(composition.get('local_cuts') or 0)})"
+            )
+        filler_cuts = from_comp
     aspect = aspect or aspect_for_platform(platform)
     out_w, out_h = output_size(aspect)
     fps = float(src_fps) if src_fps else DEFAULT_FPS
@@ -265,6 +274,8 @@ def build_plan(
         },
         "versions": plan_versions(),
     }
+    if note:
+        plan["filler_cuts_note"] = note
     json.dumps(plan)  # muss serialisierbar sein, sonst hier scheitern statt beim DB-Schreiben
     return plan
 

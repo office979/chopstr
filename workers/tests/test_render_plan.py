@@ -206,6 +206,16 @@ def test_filler_cuts_follow_the_composition_under_v2():
     assert _plan("linkedin", composition={"local_cuts": 0, "semantic_splices": 1}, policy=v2)["filler_cuts"] is False
 
 
+def test_overridden_explicit_filler_cuts_leaves_a_note():
+    from chopstr_worker import editorial
+
+    v2 = editorial.load(2)
+    plan = _plan("linkedin", composition={"local_cuts": 2}, policy=v2, filler_cuts=False)
+    assert plan["filler_cuts"] is True and "aus der Komposition true gesetzt" in plan["filler_cuts_note"]
+    assert "filler_cuts_note" not in _plan("linkedin", composition={"local_cuts": 2}, policy=v2, filler_cuts=True)
+    assert "filler_cuts_note" not in _plan("linkedin", composition={"local_cuts": 2}, policy=v2)
+
+
 def test_filler_cuts_and_hash_unchanged_under_v1(monkeypatch):
     from chopstr_worker import editorial
 

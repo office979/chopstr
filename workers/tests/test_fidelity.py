@@ -256,3 +256,9 @@ def test_starts_with_contrast_rule_switch():
     assert fidelity.starts_with_contrast("außerdem sprechen wir") is True
     assert fidelity.starts_with_contrast("außerdem sprechen wir", "v2") is False
     assert fidelity.starts_with_contrast("„aber das", "v2") is True
+
+
+def test_v2_knows_the_swiss_spelling_of_ausser():
+    assert fidelity.starts_with_contrast("ausser im sommer", "v2") is True
+    assert fidelity.starts_with_contrast("ausserdem im sommer", "v2") is False
+    assert "ausser" not in fidelity.CONTRAST_STARTS  # v1 unverändert

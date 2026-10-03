@@ -186,7 +186,7 @@ def propose_moments(user: str) -> dict:
     """
     chapter = _chapter_block(user)
     if chapter is not None:
-        return _propose_moments_v2(chapter)
+        return _propose_moments_v2(chapter, _prompt_policy(user))
     sents = parse_numbered(user)
     if not sents:
         return {"moments": []}
@@ -728,6 +728,20 @@ def _chapter_block(user: str) -> str | None:
     return user[open_at + len("<chapter>") : close_at]
 
 
+_GRUNDLAGE = re.compile(r"^GRUNDLAGE: clip_policy_v(\d+)\s*$", re.MULTILINE)
+
+
+def _prompt_policy(user: str) -> editorial.Policy:
+    """Die Fassung, die der Aufrufer in den Prompt geschrieben hat (``story_score.propose_policy_text``),
+    sonst die aktive."""
+    m = _GRUNDLAGE.search(user)
+    return editorial.load(int(m.group(1))) if m else policy()
+
+
+def _word(low: str, marker: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(marker)}(?!\w)", low) is not None
+
+
 def _timed(sents: list[dict]) -> list[dict]:
     """Sätze mit geschätzten Zeiten (``WORDS_PER_SECOND``), weil der Prompt keine Zeiten enthält."""
     out, t = [], 0.0
@@ -738,17 +752,19 @@ def _timed(sents: list[dict]) -> list[dict]:
     return out
 
 
-def _propose_moments_v2(chapter: str) -> dict:
+def _propose_moments_v2(chapter: str, pol: editorial.Policy) -> dict:
     """Vorschläge aus ``payoff_search.search_moments``: Payoff zuerst, Einstieg zuerst, Abgleich.
 
-    Zeiten sind aus der Wortzahl geschätzt. ``viewer_promise`` und ``central_idea`` kann die Heuristik
-    nicht formulieren, sie bleiben ``null``. Schwaches Material ergibt keinen Vorschlag."""
+    Diesen Prompt rendert ``story_score.propose`` nur bei verdrahteter Suche
+    (``implementation.search.payoff_first``); der Schalter ist damit schon geprüft. Zeiten sind aus der
+    Wortzahl geschätzt. ``viewer_promise`` und ``central_idea`` kann die Heuristik nicht formulieren, sie
+    bleiben ``null``. Schwaches Material ergibt keinen Vorschlag."""
     from .pipeline import payoff_search
 
     sents = parse_numbered(chapter)
     if not sents:
         return {"moments": []}
-    found = payoff_search.search_moments(_timed(sents), policy())
+    found = payoff_search.search_moments(_timed(sents), pol)
     moments = []
     for prop in found["proposals"]:
         span = [s for s in sents if prop["first_sent"] <= s["idx"] <= prop["last_sent"]]
@@ -800,13 +816,13 @@ def episode_overview(user: str) -> dict:
     for s in sents:
         low = s["text"].lower()
         speakers.setdefault(s["speaker"], []).append(s["idx"])
-        if ("zahl" in typen and typen["zahl"].trifft(low)) or "zum beispiel" in low:
+        if ("zahl" in typen and typen["zahl"].trifft(low)) or _word(low, "zum beispiel"):
             evidence.append({"sent": s["idx"], "supports_sent": None})
-        if any(m in low for m in konflikt):
+        if any(_word(low, m) for m in konflikt):
             objections.append({"sent": s["idx"], "against_sent": None})
-        if any(re.search(rf"(?<!\w){re.escape(m)}(?!\w)", low) for m in abschwaechung):
+        if any(_word(low, m) for m in abschwaechung):
             limitations.append({"sent": s["idx"], "limits_sent": None})
-        if any(m in low for m in korrektur):
+        if any(_word(low, m) for m in korrektur):
             corrections.append({"sent": s["idx"], "corrects_sent": None})
     claims = None
     if cfg is not None and sents:

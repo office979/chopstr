@@ -72,3 +72,38 @@ def test_sentences_from_annotated_without_index_returns_nothing():
     words[1]["sentence_idx"] = 0
     assert segment.sentences_from_annotated(words) == []
     assert segment.sentences_from_annotated([]) == []
+
+
+# -- AP5: Kapitelüberlappung ----------------------------------------------------------------------
+
+
+def _five_second_sentences(n: int) -> list[segment.Sentence]:
+    return [segment.Sentence(i, f"Satz {i}.", i * 5.0, i * 5.0 + 4.5, "S0", (i, i)) for i in range(n)]
+
+
+def test_chapterize_without_overlap_is_unchanged():
+    sents = _five_second_sentences(20)
+    assert segment.chapterize(sents, 30) == segment.chapterize(sents, 30, overlap_s=0.0)
+    assert sum(len(c) for c in segment.chapterize(sents, 30)) == 20
+
+
+def test_chapterize_overlap_repeats_the_tail_of_the_previous_chapter():
+    sents = _five_second_sentences(20)
+    plain = segment.chapterize(sents, 30)
+    over = segment.chapterize(sents, 30, overlap_s=10.0)
+    # Jedes Kapitel ab dem zweiten beginnt mit den Sätzen, die in den letzten 10 s des vorigen beginnen.
+    for prev, cur in zip(over, over[1:]):
+        tail = [s for s in prev if s.start >= prev[-1].end - 10.0]
+        assert cur[: len(tail)] == tail and len(tail) < len(prev)
+    # Jeder Satz kommt vor, keiner fällt weg, und das letzte Kapitel enthält neue Sätze.
+    assert {s.idx for c in over for s in c} == set(range(20))
+    assert over[-1][-1].idx == 19 and len(over) >= len(plain)
+
+
+def test_chapterize_overlap_never_repeats_a_whole_chapter():
+    """Längere Überlappung als ein Kapitel: das folgende Kapitel wiederholt nie das ganze vorige."""
+    sents = _five_second_sentences(8)
+    over = segment.chapterize(sents, 10, overlap_s=100.0)
+    for prev, cur in zip(over, over[1:]):
+        assert [s.idx for s in cur[: len(prev)]] != [s.idx for s in prev]
+    assert {s.idx for c in over for s in c} == set(range(8))

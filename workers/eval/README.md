@@ -118,7 +118,8 @@ Für eine belastbare Aussage fehlen zwei Dinge, und beide kann nur die Redaktion
 `--policy-version 1` oder `2` setzt `CHOPSTR_POLICY_VERSION` für die Messung der Schnittgrenzen; ohne
 Angabe gilt die aktive Fassung. Die gemessene Richtlinie steht im Ergebnis unter `richtlinie`. Unter
 Fassung 2 kommt `grenze_nur_aus_pause` je Vorschlag und `grenze_nur_aus_pause_anteil` in der
-Zusammenfassung dazu: Grenzen ohne Satzzeichen, nur aus einer Pause abgeleitet. Die Vorschläge selbst
+Zusammenfassung dazu: Grenzen ohne Satzzeichen, nur aus einer Pause abgeleitet. Der Median der Länge ist
+bei gerader Anzahl das Mittel der beiden mittleren Werte. Die Vorschläge selbst
 kommen aus der Datenbank; wer beide Fassungen vergleichen will, lässt die Analyse je Fassung laufen
 oder nimmt den Blindvergleich.
 
@@ -129,8 +130,10 @@ Ergebnis ist beobachtend, kein A/B-Test, kein Viralitätsmaß.
 
 ### Ablauf
 
-1. Vorab festhalten: Erfolgskriterium (Fassung 2 ist in Quellentreue und Eigenständigkeit nicht
-   schlechter, Plan Abschnitt 8 Punkt 5), Mindestverbesserung und Auswertungsplan. Erst danach rechnen.
+1. Vorab festlegen: Erfolgskriterium, Mindestverbesserung und Auswertungsplan. Das Werkzeug schreibt
+   das Kriterium aus Plan Abschnitt 8 Punkt 5 beim Erzeugen in den Schlüssel (Fassung 2 ist in
+   Quellentreue und Eigenständigkeit nicht schlechter als Fassung 1, abzüglich `--toleranz`, Standard 0;
+   die Verwerfungsquote wird berichtet). Nach dem Bewerten wird es nicht mehr geändert.
 2. Rechnen:
 
    ```bash
@@ -142,31 +145,38 @@ Ergebnis ist beobachtend, kein A/B-Test, kein Viralitätsmaß.
    Je Quelle läuft `story_engine.run` mit Fassung 1 und mit Fassung 2, mit demselben Provider
    (`--provider`, Standard `local-heuristic`), demselben Brief (`--brief`) und derselben Obergrenze
    (`--k`, Standard 5). Für jeden angebotenen Kandidaten entsteht der Hook wie im Produkt
-   (`copy_engine.write_copy`, ohne LanguageTool). Je Quelle wird die Ausgabemenge auf die kleinere der
-   beiden gekürzt (Top-k nach Gesamtwert); der Überhang steht im Schlüssel unter `nicht_gepaart`.
+   (`copy_engine.write_copy` für `brief.platform`, ohne LanguageTool). Je Quelle zählen die besten n
+   Kandidaten beider Fassungen, n ist die kleinere Ausgabemenge; der Überhang steht im Schlüssel unter
+   `nicht_gepaart`. Gepaart wird innerhalb einer Quelle nach größter Überdeckung (`--paarung
+   ueberdeckung`, Standard) oder nach Rang (`--paarung rang`).
 3. Dateien im Ordner:
 
    | Datei | Für wen | Inhalt |
    |---|---|---|
-   | `bewertung.json` | Bewertende | Paare `A` und `B` mit Text, Zeiten, Hook und `ausgabe` (welche Clips aus derselben Ausgabe stammen); keine Version, kein Score, keine Begründung |
-   | `raster.json` | Bewertende | Kriterien mit Ankern 0 bis 4 |
-   | `schluessel.json` | nur Auswertung | Zuordnung `A`/`B` zu Fassung, Seed, Überhang |
-   | `lauf.json` | nur Auswertung | je Quelle und Variante: Vorschläge, Verwerfungen je Grund, Modellaufrufe, Laufzeit, editorial_v1-Ergebnis, ClipCandidates |
+   | `bewertung.json` | Bewertende | Clip-Paare `A` und `B`: Text, Zeiten, Dauer, `ausgabe` (welche Clips aus derselben Ausgabe stammen), `kontext` (Satzbereich in `quellen.json`). Kein Hook, keine Version, kein Score, keine Begründung; Quellen heißen `Q01`, `Q02` … |
+   | `hooks_bewertung.json` | Bewertende, am besten andere Personen | Hook-Paare in eigener Reihenfolge und eigener A/B-Zuordnung: gesprochener Hook, Overlay-Text (`null` heißt keiner), Clip-Text zum Abgleich |
+   | `quellen.json` | Bewertende | je Quelle das Transkript (bis 40 Sätze) oder plus/minus 5 Sätze um beide Clips jedes Paares, für beide Seiten gleich; bei Datenbankquellen der Medienverweis (`storage_key`) |
+   | `raster.json` | Bewertende | Kriterien für Clips und Hooks mit Ankern 0 bis 4 |
+   | `schluessel.json` | nur Auswertung | Zuordnung `A`/`B` zu Fassung für beide Bögen, echte Quellnamen, Seed, Paarung, Überhang, Erfolgskriterium |
+   | `lauf.json` | nur Auswertung | je Quelle und Variante: Vorschläge, Verwerfungen je Grund, Modellaufrufe, Laufzeit, Hook-Kennzahlen, editorial_v1-Ergebnis, ClipCandidates; dazu die Stil-Leck-Prüfung |
 
    Reihenfolge der Paare und Seite A oder B sind zufällig mit festem Seed (`--seed`, Standard 1729);
    derselbe Seed ergibt dieselben Dateien. `schluessel.json` und `lauf.json` nicht an die Bewertenden
    geben.
 4. Bewerten: je Paar beide Seiten nach dem Raster (ganze Zahlen 0 bis 4, leer heißt nicht bewertet),
-   dann `praeferenz` `A`, `B` oder `gleich`. Natürlichkeit am Audio der Quelle mit den Zeiten prüfen.
-   Bewertende kennen die Herkunft nicht und erraten sie nicht.
+   dann `praeferenz` `A`, `B` oder `gleich`; eine Präferenz ohne Kriterienwerte gilt als Fehler.
+   Quellentreue mit `quellen.json`, Natürlichkeit am Audio der Quelle prüfen. Clips und Hooks getrennt
+   bewerten, damit der Stil eines Hooks die Clip-Bewertung nicht verrät.
 5. Auswerten: `.venv/bin/python -m eval.blind_compare --auswerten blind/` schreibt `blind/bericht.md`.
+   Fehlt ein Paar im Schlüssel, steht ein unbekanntes Kriterium oder ein Wert außerhalb 0 bis 4 im
+   Bogen, bricht die Auswertung mit einer Meldung ab, die das Paar nennt.
 
 ### Raster (Master-Prompt Abschnitte 19 und 26)
 
 Anker für alle Kriterien: 0 nicht vorhanden oder kritisch verletzt, 1 schwach, 2 brauchbar, 3 stark
 und begründet, 4 besonders überzeugend. Höher ist immer besser.
 
-| Kriterium | Frage |
+| Clip-Kriterium | Frage |
 |---|---|
 | Quellentreue | Gibt der Clip wieder, was die Quelle sagt, ohne Sinnumkehr, verlorene Bedingung oder falsche Zuordnung? |
 | Eigenständigkeit | Versteht man den Clip ohne Vorwissen? |
@@ -175,24 +185,41 @@ und begründet, 4 besonders überzeugend. Höher ist immer besser.
 | Abschluss | Endet der Clip mit eingelöstem Versprechen? |
 | Natürlichkeit | Klingt der Schnitt natürlich (Sprachfluss, Atem, Pausen)? |
 | Duplikate | Wiederholt der Clip einen anderen Clip derselben Ausgabe? |
-| Manuelle Nacharbeit | Wie viel müsste die Redaktion ändern, bevor sie veröffentlicht? |
+| Manuelle Nacharbeit | Wie viel müsste die Redaktion am Schnitt ändern, bevor sie veröffentlicht? |
+
+| Hook-Kriterium | Frage |
+|---|---|
+| Deckung durch den Clip | Behauptet der Hook nicht mehr, als der Clip sagt? |
+| Klarheit | Versteht man den Hook beim ersten Lesen oder Hören? |
+| Einstieg in den Clip | Führt der Hook in den Clip, ohne etwas anderes zu versprechen? |
+| Ton | Klingt der Hook natürlich, ohne Floskel und Übertreibung? |
 
 Die Anker je Kriterium stehen in `raster.json`.
 
 ### Bericht
 
-`bericht.md` enthält: Mittel je Kriterium und Fassung (mit Anzahl), Präferenz, Verwerfungsquote je
-Grund und Fassung (Anteil an allen Vorschlägen der Stufe 2), Modellaufrufe und Laufzeit je
+`bericht.md` beginnt mit den Quellen ohne Vorschlag und ohne angebotenen Kandidaten je Fassung und dem
+Urteil zum vorab festgelegten Erfolgskriterium (Erfüllt, Nicht erfüllt oder Nicht bewertet). Danach:
+Material und Ausgabemenge, Stil-Leck-Prüfung, Clip- und Hook-Bewertung (Mittel, Streuung und Anzahl je
+Kriterium, Präferenz mit zweiseitigem Vorzeichentest), Verwerfungsquote je Grund und Fassung (deutsche
+Bezeichnung mit Code, Anteil an allen Vorschlägen der Stufe 2), Modellaufrufe und Laufzeit je
 Quellstunde (jeder strukturierte Aufruf am Provider gezählt, auch Hooks), editorial_v1-Bestehensquote
 je Fassung und Fall (geprüft mit `tests/editorial_v1/harness.py`) und getrennt die einzelnen Schalter.
 
+Stil-Leck-Prüfung: Segmente je Clip, Anteil mit Teaser, Dauer, Anteil der Hooks ohne Overlay-Text und
+die häufigsten Hook-Anfänge je Fassung. Weicht ein Merkmal deutlich ab (Anteile um mehr als 25
+Prozentpunkte, Dauer um mehr als 25 Prozent, ein Hook-Anfang bei mindestens der Hälfte einer Fassung
+und unter 20 Prozent der anderen), warnt der Bericht: Bewertende könnten die Fassung erkennen.
+
 Schalter: Fassung 2 mit allen Gruppenschaltern aus (Basis), je eine Gruppe an (Auswahl:
 `gates.discard_hard`, `search.payoff_first`; Hooks: `hook.native_spoken`; Kürzung: `trim.enabled`)
-und alle zusammen (Kombination). Die Varianten entstehen über eine Kopie der Richtlinie mit geänderten
-Schaltern, auf die `EDITORIAL_DIR` für die Dauer des Laufs zeigt. Eigene Overrides:
-`--override trim.enabled=true` (mehrfach) oder `CHOPSTR_BLIND_OVERRIDES="trim.enabled=true,cut.padding=false"`.
-Ein Schalter ohne Code ändert nichts; der Bericht weist aus, welche gebaut sind
-(`editorial.V2_IMPLEMENTED_SWITCHES`). `--ohne-schalter` rechnet nur Fassung 1 und 2.
+und alle zusammen (Kombination), je mit Kandidaten, Verwerfungsquote, Modellaufrufen und den
+Hook-Kennzahlen (Anteil native, ohne Overlay, gesprochener Hook als ganzer Satz, mit Claim-Befund). Die
+Varianten entstehen über eine Kopie der Richtlinie mit geänderten Schaltern, auf die `EDITORIAL_DIR`
+für die Dauer des Laufs zeigt. Eigene Overrides: `--override trim.enabled=true` (mehrfach) oder
+`CHOPSTR_BLIND_OVERRIDES="trim.enabled=true,cut.padding=false"`. Ob ein Schalter laut
+`editorial.V2_IMPLEMENTED_SWITCHES` gebaut ist, steht in Klammern. `--ohne-schalter` rechnet nur
+Fassung 1 und 2.
 
 ### Was der Vergleich nicht leistet
 

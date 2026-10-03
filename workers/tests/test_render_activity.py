@@ -275,3 +275,35 @@ def test_render_under_policy_v1_passes_no_order_and_no_words(fake_db, fake_conte
     calls = _spy_write_copy(monkeypatch)
     act_render.run_render_pack(fake_context, project["cid"], "tiktok")
     assert calls == [{"pattern_order": None, "words": None}]
+
+
+# -- AP7: Komposition des Kandidaten an den Render-Plan ------------------------------------------------
+
+
+def test_candidate_composition_only_while_the_clip_cuts_the_same_segments():
+    from chopstr_worker.activities import render as render_activity
+
+    segs = [{"start": 1.0, "end": 5.0, "role": "body"}, {"start": 5.6, "end": 9.0, "role": "body"}]
+    comp = {"local_cuts": 1, "semantic_splices": 0, "density": 0.95, "is_debate": False, "valid": True, "issues": []}
+    cand = {"segments": segs, "rubric": {"composition": comp}}
+    assert render_activity.candidate_composition(cand, [dict(s) for s in segs]) == comp
+    # Die Web-Revision hat die Grenzen geändert (ein Segment): die Kürzung gilt nicht mehr.
+    assert render_activity.candidate_composition(cand, [{"start": 1.0, "end": 9.0, "role": "body"}]) is None
+    assert render_activity.candidate_composition({"segments": segs, "rubric": {}}, segs) is None
+
+
+@requires_ffmpeg
+@pytest.mark.parametrize(("version", "expected"), [("2", True), ("1", False)])
+def test_filler_cuts_follow_the_candidate_composition(fake_db, fake_context, project, monkeypatch, version, expected):
+    """Unter Fassung 2 setzt die Komposition aus der Kürzung (local_cuts) filler_cuts im Plan; unter Fassung 1
+    bleibt der Wert wie bisher (false)."""
+    from chopstr_worker import editorial
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", version)
+    editorial.clear_cache()
+    fake_db.candidates[0]["rubric"]["composition"] = {"local_cuts": 1, "semantic_splices": 0, "valid": True}
+    try:
+        clip_id = act_render.run_render_pack(fake_context, project["cid"], "tiktok")
+    finally:
+        editorial.clear_cache()
+    assert fake_db.clips[clip_id]["render_plan"]["filler_cuts"] is expected

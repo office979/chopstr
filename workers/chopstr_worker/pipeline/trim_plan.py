@@ -1,20 +1,36 @@
 """Remove- und Keep-Logik mit Mehrsegment-Komposition (AP7, Policy v2, Abschnitt ``trim``).
 
-Ballast raus, Bedeutung bleibt (Master-Prompt Abschnitte 12, 13, 15, 16, 18). Der Baustein ist noch
-nicht in ``story_engine`` verdrahtet; er liest seine Werte über ``editorial.trim_settings`` auch bei
-ausgeschaltetem Schalter ``implementation.trim.enabled``.
+Ballast raus, Bedeutung bleibt (Master-Prompt Abschnitte 12, 13, 15, 16, 18). Die Werte kommen aus
+``editorial.trim_settings``; wirksam in der Kandidatensuche erst, wenn die Regel ``trim.enabled`` und
+der Schalter ``implementation.trim.enabled`` beide an sind.
 
 * ``protected_spans``: Schutzbereiche (Negation, Bedingung, Einschränkung, Vergleichsmaßstab, zeitliche
-  Einordnung, Unsicherheit, Definition, Sprecherzuordnung, Korrektur), je ein Wort Rand. In einem
-  Schutzbereich wird nichts entfernt und keine Pause gekürzt.
+  Einordnung, Unsicherheit, Definition, Sprecherzuordnung, Korrektur). ``lock_range`` ist Auslöser plus
+  je ein Wort Rand, nie über den eigenen Satz und Sprecherbeitrag hinaus: darin wird kein Füllwort
+  entfernt. ``word_range`` reicht bei Bedingung, Vergleich, Definition, Zuordnung und Korrektur bis
+  zum Satzende: das gilt für Pausen, semantische Schnitte und ``fidelity.check_cut``.
+* ``protected_cut_findings``: was ein Schnitt an Schutzbereichen anrichtet. Teilweise entfernt (hoch),
+  ganzer Satz weggelassen, der sich auf das Behaltene bezieht (hoch), ganzer Satz ohne Bezug (mittel,
+  Prüfhinweis). Füll- und Rückmeldewörter zählen dabei nicht als Inhalt.
 * ``classify_pauses``: Pausenklassen ``technical``, ``orientation``, ``dramatic``, ``reaction``,
   ``demonstration``. Nur ``technical`` wird gekürzt, und nie auf null (``trim.pause_target_s``).
 * ``removal_candidates``: harte Füllwörter (P3), Einwürfe des Gegenübers, abgebrochene Ansätze mit
-  Neustart, Begrüßung und Organisatorisches am Rand. Modalpartikeln nie.
+  Neustart, Begrüßung und Organisatorisches am Rand. Modalpartikeln im Satz nie.
 * ``reward_end``: kappt den Nachlauf nach dem Payoff, nie eine Einschränkung oder Bedingung.
 * ``build_composition``: baut über ``compose.from_keep_ranges`` die Komposition, zählt semantische
   Splices und lokale Schnitte getrennt, prüft E6 und ``zusammenhang.mindest_dichte`` und listet die
-  entfernten Stellen im Format aus Master-Prompt Abschnitt 21 (``removed_spans``).
+  entfernten Stellen im ``ClipCandidate``-Format (``removed_spans``, Master-Prompt Abschnitt 21).
+
+Verdrahtung (``story_engine``), in dieser Reihenfolge:
+
+1. ``new_last, gekappt = reward_end(sents, first, last, payoff_idx, policy)``.
+2. ``a, b = sents[first].word_range[0], sents[new_last].word_range[1]``;
+   ``res = build_composition(words, a, b, None, policy, heat_payload=...)`` mit dem neuen Ende.
+3. ``fidelity.check_cut(words[a:last_word + 1], [(x - a, y - a) for x, y in res["kept_word_ranges"]],
+   rule="v2", policy=policy)``; ``last_word`` ist das alte Ende, damit der gekappte Nachlauf mitgeprüft
+   wird (ganz weggelassene Sätze ohne Bezug sind nur ein Prüfhinweis).
+4. Ein Befund hoher Schwere oder ``res["valid"]`` false: ungekürzte Fassung behalten, Grund protokollieren.
+5. Einen Teaser nur, wenn ``res["is_debate"]`` false ist (E6).
 
 Wortlisten: Einträge mit ``text``, ``start``, ``end`` und ``speaker``; die Funktionen ändern sie nicht.
 Alle Wortbereiche sind inklusiv.
@@ -35,30 +51,38 @@ PROTECTED_TYPES = (
 )  # fmt: skip
 PAUSE_CLASSES = ("technical", "orientation", "dramatic", "reaction", "demonstration")
 
-# Auslöser je Schutztyp, kleingeschrieben, mehrteilige Wendungen mit Leerzeichen. ``qualifier`` kommt
-# aus ``fidelity.QUALIFIERS`` plus den einschränkenden Anschlüssen.
-NEGATION_TRIGGERS = frozenset(dach_nlp.NEGATIONS) | {"nein"}
+# Auslöser je Schutztyp, kleingeschrieben, mehrteilige Wendungen mit Leerzeichen. „noch“ ist im
+# Trim-Pfad keine Negation („Ich hole mir noch einen Kaffee“); „weder … noch“ trägt „weder“.
+NEGATION_TRIGGERS = (frozenset(dach_nlp.NEGATIONS) - {"noch"}) | {"nein"}
 CONDITION_TRIGGERS = (
     "wenn", "falls", "sofern", "solange", "vorausgesetzt", "es sei denn", "unter der bedingung", "nur dann",
 )  # fmt: skip
-QUALIFIER_TRIGGERS = tuple(sorted(fidelity.QUALIFIERS)) + ("wobei", "allerdings", "jedoch", "abgesehen davon")
+QUALIFIER_TRIGGERS = tuple(sorted(fidelity.QUALIFIERS)) + (
+    "wobei", "allerdings", "jedoch", "abgesehen davon", "bloß", "lediglich", "ausschließlich", "allein",
+    "erst", "zwar", "trotzdem", "dennoch", "aber",
+)  # fmt: skip
 COMPARISON_TRIGGERS = (
     "im vergleich", "verglichen mit", "gegenüber", "im gegensatz zu", "statt", "anstatt", "mehr als",
     "weniger als", "doppelt so", "halb so", "als früher", "als vorher",
 )  # fmt: skip
 TEMPORAL_TRIGGERS = (
     "damals", "früher", "heute", "inzwischen", "mittlerweile", "seitdem", "seit", "vorher", "bisher",
-    "anfangs", "zurzeit", "aktuell", "derzeit", "momentan", "letztes jahr", "letzten jahr", "dieses jahr",
-    "im ersten quartal", "am anfang", "bis jetzt", "im moment",
+    "anfangs", "zurzeit", "aktuell", "derzeit", "momentan", "gestern", "vorgestern", "letztes jahr",
+    "letzten jahr", "letzte woche", "letzten monat", "letzten sommer", "letzten winter", "dieses jahr",
+    "diese woche", "nächstes jahr", "nächste woche", "nächsten monat", "im ersten quartal", "am anfang",
+    "bis jetzt", "im moment",
 )  # fmt: skip
+# „vor zwei Jahren“, „vor 3 Monaten“: Zahl oder Zahlwort zwischen „vor“ und der Zeiteinheit.
+TEMPORAL_UNITS = frozenset({"jahren", "jahr", "monaten", "wochen", "tagen", "jahrzehnten"})
 UNCERTAINTY_TRIGGERS = (
-    "wahrscheinlich", "vielleicht", "vermutlich", "eventuell", "möglicherweise", "ich glaube", "ich glaub", "ich denke",
-    "ich schätze", "ungefähr", "etwa", "circa", "ca", "schätzungsweise", "angeblich", "anscheinend",
-    "keine ahnung", "weiß nicht", "nicht sicher",
+    "wahrscheinlich", "vielleicht", "vermutlich", "eventuell", "möglicherweise", "ich glaube", "ich glaub",
+    "ich denke", "ich schätze", "ungefähr", "etwa", "circa", "ca", "schätzungsweise", "angeblich",
+    "anscheinend", "keine ahnung", "weiß nicht", "nicht sicher",
 )  # fmt: skip
+# „heißt“ allein ist ein Name („Mein Hund heißt Bello“), nur „das heißt“ und „heißt, dass“ definieren.
 DEFINITION_TRIGGERS = (
-    "das heißt", "heißt", "bedeutet", "meine ich", "gemeint", "verstehe ich", "versteht man", "nennt man",
-    "nennen wir", "definiert", "im sinne von", "sprich",
+    "das heißt", "heißt dass", "bedeutet", "damit meine ich", "gemeint ist", "verstehe ich unter",
+    "versteht man", "nennt man", "nennen wir", "definiert", "im sinne von", "sprich",
 )  # fmt: skip
 ATTRIBUTION_TRIGGERS = (
     "sagt", "sagte", "sagten", "gesagt", "meint", "meinte", "meinten", "laut", "zufolge", "behauptet",
@@ -84,17 +108,42 @@ TRIGGERS: dict[str, tuple[str, ...]] = {
 CLAUSE_TYPES = frozenset({"condition", "comparison_baseline", "definition", "attribution", "correction"})
 CLAUSE_MAX_WORDS = 20
 MARGIN_WORDS = 1  # „je ein Wort Rand“
+# Typen, die eine Aussage daneben verändern. Fehlt ein ganzer Satz mit einem davon, der sich auf das
+# Behaltene bezieht, ist das ein Befund hoher Schwere; sonst nur ein Prüfhinweis.
+MODIFYING_TYPES = frozenset({"negation", "condition", "qualifier", "correction", "comparison_baseline"})
+# Satzanfänge, mit denen ein Satz an den Satz davor anschließt.
+RELATION_STARTS = frozenset(
+    {"das", "dies", "diese", "dieser", "dieses", "dabei", "damit", "davon", "dafür", "dann", "danach", "es",
+     "doch", "nur", "bloß", "zwar", "außer", "sondern", "wenn", "falls", "sofern", "aber", "allerdings",
+     "jedoch", "wobei", "trotzdem", "dennoch", "andererseits", "nicht", "kein", "keine"}
+)  # fmt: skip
 
 # Stellen, vor denen eine Pause dramaturgisch ist (RK 7, Zeile „Pausen“).
-CONTRAST_WORDS = tuple(fidelity.CONTRAST_STARTS) + ("sondern", "dennoch", "stattdessen")
+CONTRAST_WORDS = tuple(fidelity.CONTRAST_STARTS) + ("sondern", "dennoch", "stattdessen", "zwar")
+# Nur am Satzanfang Kontrast („Doch dann kam der Anruf“, „Nur der Kunde hat nicht bezahlt“).
+CONTRAST_SENTENCE_START = frozenset({"doch", "nur", "bloß"})
 # Rückmeldewörter des Gegenübers (``dach_nlp.BACKCHANNEL``) und Zögerlaute.
 BACKCHANNEL_TOKENS = frozenset(dach_nlp.BACKCHANNEL) | frozenset(dach_nlp.HARD_FILLERS) | {"aha", "ah", "oh"}
 RESTART_MAX_WORDS = 3
 RESTART_BROKEN_SCAN = 5
-# Funktionale Wiederholung („Nein, nein.“, „Ja, ja.“) ist kein abgebrochener Ansatz.
-FUNCTIONAL_REPEAT = NEGATION_TRIGGERS | {"ja", "doch", "sehr", "ganz"}
+# Ein einzelnes Wort ist kein Neustart, wenn es Artikel, Relativ- oder Fragepronomen ist („Die, die
+# das gemacht haben“, „Wer, wer hat das entschieden?“).
+NOT_A_RESTART_WORD = frozenset(
+    {"der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "eines", "wer",
+     "wen", "wem", "wessen", "was", "warum", "wieso", "weshalb", "wie", "wo", "wann", "woher", "wohin",
+     "welche", "welcher", "welches", "welchen", "welchem"}
+)  # fmt: skip
+# Folgt auf die Wiederholung ein Verstärker, ist es Betonung („Wir haben, wir haben wirklich …“).
+INTENSIFIERS = frozenset({"wirklich", "so", "total", "echt", "ganz", "sehr", "absolut", "richtig", "extrem"})
+# Funktionale Wiederholung („Nein, nein.“, „Viel, viel besser“) ist kein abgebrochener Ansatz.
+FUNCTIONAL_REPEAT = NEGATION_TRIGGERS | {"ja", "doch", "sehr", "ganz", "viel", "immer", "wirklich", "so"}
 # Einschränkungstypen, die ``reward_end`` nie kappt.
 QUALIFYING_TYPES = frozenset({"negation", "condition", "qualifier", "uncertainty", "correction", "comparison_baseline"})
+# Verkaufsaufruf: Imperativ in der zweiten Person oder Anrede in der zweiten Person.
+SECOND_PERSON = frozenset(
+    {"ihr", "euch", "euer", "eure", "euren", "eurem", "du", "dir", "dich", "dein", "deine", "deinen", "deinem"}
+)  # fmt: skip
+IMPERATIVE_PARTNERS = frozenset({"mir", "uns", "euch", "jetzt", "doch", "gerne", "gern", "direkt", "sofort"})
 REPEAT_MIN_TOKEN_LEN = 4
 VISUAL_MIN_OVERLAP_S = 0.5
 EPS = 1e-6
@@ -143,6 +192,23 @@ def _is_question(text: str) -> bool:
     return str(text).strip().rstrip(_CLOSERS).endswith("?")
 
 
+def is_hard_filler(w: Mapping[str, Any]) -> bool:
+    """Hartes Füllwort nach P3, am Rohtext geprüft: eine Abkürzung in Großbuchstaben („EM“, „KI“) ist
+    nie eins, und ein Zögerlaut mit Fragezeichen („Hm?“) ist eine Rückfrage."""
+    text = _text(w)
+    letters = re.sub(r"[^\wäöüÄÖÜß]", "", text)
+    if len(letters) >= 2 and letters.isupper():
+        return False
+    if _is_question(text):
+        return False
+    return dach_nlp.core_token(text) in dach_nlp.HARD_FILLERS
+
+
+def _is_contentless(w: Mapping[str, Any]) -> bool:
+    """Füll- oder Rückmeldewort ohne Inhalt („äh“, „okay“, „genau“)."""
+    return is_hard_filler(w) or (_tok(w) in BACKCHANNEL_TOKENS and not _is_question(_text(w)))
+
+
 def _phrase_positions(tokens: Sequence[str], phrase: str) -> list[tuple[int, int]]:
     parts = [dach_nlp.core_token(p) for p in phrase.split()]
     parts = [p for p in parts if p]
@@ -166,47 +232,133 @@ def _sentence_ranges(words: Sequence[Mapping[str, Any]], pol: editorial.Policy) 
     return out
 
 
-def _clause_end(words: Sequence[Mapping[str, Any]], b: int) -> int:
-    """Letztes Wort des Satzes ab ``b``: Satzzeichen oder Sprecherwechsel, höchstens ``CLAUSE_MAX_WORDS``."""
+def _unit_bounds(words: Sequence[Mapping[str, Any]], sentences: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Je Wort der eigene Satz, geschnitten mit dem eigenen Sprecherbeitrag."""
+    out: list[tuple[int, int]] = [(0, 0)] * len(words)
+    for a, b in sentences:
+        for i in range(a, b + 1):
+            lo = i
+            while lo > a and words[lo - 1].get("speaker") == words[i].get("speaker"):
+                lo -= 1
+            hi = i
+            while hi < b and words[hi + 1].get("speaker") == words[i].get("speaker"):
+                hi += 1
+            out[i] = (lo, hi)
+    return out
+
+
+def _clause_end(words: Sequence[Mapping[str, Any]], b: int, hi: int) -> int:
+    """Letztes Wort des Satzes ab ``b``: Satzzeichen, Satz- oder Beitragsende, höchstens ``CLAUSE_MAX_WORDS``."""
     k = b
-    limit = min(len(words) - 1, b + CLAUSE_MAX_WORDS)
-    while k < limit and not _ends_sentence(_text(words[k])) and words[k + 1].get("speaker") == words[k].get("speaker"):
+    limit = min(hi, b + CLAUSE_MAX_WORDS)
+    while k < limit and not _ends_sentence(_text(words[k])):
         k += 1
     return k
 
 
-def _overlaps(a: tuple[int, int], b: tuple[int, int]) -> bool:
+def _overlaps(a: Sequence[int], b: Sequence[int]) -> bool:
     return a[0] <= b[1] and b[0] <= a[1]
+
+
+def _is_number_token(text: str) -> bool:
+    return any(ch.isdigit() for ch in text) or fidelity.parse_number_word(dach_nlp.core_token(text)) is not None
 
 
 # -- Schutzbereiche --------------------------------------------------------------------------------
 
 
-def protected_spans(words: Sequence[Mapping[str, Any]], policy: editorial.Policy | None = None) -> list[dict]:
-    """Schutzbereiche je Typ aus ``PROTECTED_TYPES`` mit je einem Wort Rand.
-
-    Rückgabe sortiert nach Wortbereich: ``{type, word_range: [a, b], trigger: [a, b], text}``. Bedingung,
-    Vergleichsmaßstab, Definition, Sprecherzuordnung und Korrektur reichen bis zum Satzende (eine
-    Bedingung ist mehr als ihr „wenn“), die übrigen Typen umfassen ihr Auslösewort. Einschränkungen
-    kommen aus ``fidelity.QUALIFIERS`` plus „wobei“, „allerdings“, „jedoch“."""
-    _policy_settings(policy)
-    tokens = [_tok(w) for w in words]
-    seen: set[tuple[str, int, int]] = set()
-    out: list[dict] = []
-    last = len(words) - 1
+def _trigger_hits(tokens: Sequence[str], words: Sequence[Mapping[str, Any]]) -> list[tuple[str, int, int]]:
+    """Auslöser je Typ; Wendungen werden über harte Füllwörter hinweg erkannt („heißt äh dass“)."""
+    hits: list[tuple[str, int, int]] = []
+    keep = [i for i, w in enumerate(words) if not is_hard_filler(w)]
+    dense = [tokens[i] for i in keep]
     for kind in PROTECTED_TYPES:
         for phrase in TRIGGERS[kind]:
-            for ta, tb in _phrase_positions(tokens, phrase):
-                end = _clause_end(words, tb) if kind in CLAUSE_TYPES else tb
-                a, b = max(0, ta - MARGIN_WORDS), min(last, end + MARGIN_WORDS)
-                if (kind, a, b) in seen:
-                    continue
-                seen.add((kind, a, b))
-                out.append({
-                    "type": kind, "word_range": [a, b], "trigger": [ta, tb],
-                    "text": " ".join(_text(w) for w in words[ta : tb + 1]),
-                })  # fmt: skip
+            hits += [(kind, keep[a], keep[b]) for a, b in _phrase_positions(dense, phrase)]
+    for i in range(len(tokens) - 2):  # „vor zwei Jahren“
+        if tokens[i] == "vor" and _is_number_token(_text(words[i + 1])) and tokens[i + 2] in TEMPORAL_UNITS:
+            hits.append(("temporal", i, i + 2))
+    return hits
+
+
+def protected_spans(words: Sequence[Mapping[str, Any]], policy: editorial.Policy | None = None) -> list[dict]:
+    """Schutzbereiche je Typ aus ``PROTECTED_TYPES``.
+
+    Rückgabe sortiert: ``{type, word_range: [a, b], lock_range: [a, b], trigger: [a, b], text}``.
+    ``lock_range`` ist der Auslöser mit je einem Wort Rand, ``word_range`` reicht bei Bedingung,
+    Vergleichsmaßstab, Definition, Sprecherzuordnung und Korrektur bis zum Satzende. Beide bleiben im
+    eigenen Satz und im eigenen Sprecherbeitrag. Einschränkungen kommen aus ``fidelity.QUALIFIERS``
+    plus den einschränkenden Anschlüssen (wobei, bloß, lediglich, zwar, trotzdem, aber, …)."""
+    pol, _cfg = _policy_settings(policy)
+    tokens = [_tok(w) for w in words]
+    bounds = _unit_bounds(words, _sentence_ranges(words, pol))
+    seen: set[tuple[str, int, int]] = set()
+    out: list[dict] = []
+    for kind, ta, tb in _trigger_hits(tokens, words):
+        lo, hi = bounds[ta][0], bounds[tb][1]
+        end = _clause_end(words, tb, hi) if kind in CLAUSE_TYPES else tb
+        a, b = max(lo, ta - MARGIN_WORDS), min(hi, end + MARGIN_WORDS)
+        if (kind, a, b) in seen:
+            continue
+        seen.add((kind, a, b))
+        out.append({
+            "type": kind, "word_range": [a, b],
+            "lock_range": [max(lo, ta - MARGIN_WORDS), min(hi, tb + MARGIN_WORDS)], "trigger": [ta, tb],
+            "text": " ".join(_text(w) for w in words[ta : tb + 1]),
+        })  # fmt: skip
     return sorted(out, key=lambda p: (p["word_range"][0], p["word_range"][1], PROTECTED_TYPES.index(p["type"])))
+
+
+def _relates(words: Sequence[Mapping[str, Any]], sent: tuple[int, int], kept: set[int], sentences: list[tuple[int, int]]) -> bool:
+    """Bezieht sich ein ganz weggelassener Satz auf das Behaltene? Er grenzt an einen behaltenen Satz und
+    beginnt mit einem Anschluss („Das“, „Aber“, „Trotzdem“, „Wenn“) oder teilt ein Inhaltswort mit ihm."""
+    k = sentences.index(sent)
+    neighbours = [sentences[j] for j in (k - 1, k + 1) if 0 <= j < len(sentences)]
+    kept_neighbours = [s for s in neighbours if any(i in kept for i in range(s[0], s[1] + 1))]
+    if not kept_neighbours:
+        return False
+    if _tok(words[sent[0]]) in RELATION_STARTS:
+        return True
+    mine = {_tok(words[i]) for i in range(sent[0], sent[1] + 1) if len(_tok(words[i])) >= REPEAT_MIN_TOKEN_LEN}
+    return any(
+        mine & {_tok(words[i]) for i in range(s[0], s[1] + 1) if len(_tok(words[i])) >= REPEAT_MIN_TOKEN_LEN}
+        for s in kept_neighbours
+    )
+
+
+def protected_cut_findings(
+    words: Sequence[Mapping[str, Any]], kept: set[int], policy: editorial.Policy | None = None
+) -> list[dict]:
+    """Was ein Schnitt (behaltene Wortindizes ``kept``) an Schutzbereichen anrichtet.
+
+    Je betroffenem Schutzbereich ``{type, word_range, text, severity, mode}``:
+
+    * ``partial`` (hoch): Inhaltswörter des Bereichs fehlen, andere oder der Rest seines Satzes bleiben;
+    * ``omitted_related`` (hoch): der ganze Satz fehlt, der Typ verändert eine Aussage (Negation,
+      Bedingung, Einschränkung, Korrektur, Vergleich) und der Satz bezieht sich auf das Behaltene;
+    * ``omitted`` (mittel): der ganze Satz fehlt ohne erkennbaren Bezug, ein Prüfhinweis.
+
+    Füll- und Rückmeldewörter zählen nicht als Inhalt; ihr Fehlen berührt keinen Schutzbereich."""
+    pol, _cfg = _policy_settings(policy)
+    sentences = _sentence_ranges(words, pol)
+    sent_of = {i: s for s in sentences for i in range(s[0], s[1] + 1)}
+    out: list[dict] = []
+    for p in protected_spans(words, pol):
+        a, b = p["word_range"]
+        content = [i for i in range(a, b + 1) if not _is_contentless(words[i])]
+        removed = [i for i in content if i not in kept]
+        if not removed:
+            continue
+        sent = sent_of[p["trigger"][0]]
+        sentence_content = [i for i in range(sent[0], sent[1] + 1) if not _is_contentless(words[i])]
+        if any(i in kept for i in content) or any(i in kept for i in sentence_content):
+            severity, mode = "high", "partial"
+        elif p["type"] in MODIFYING_TYPES and _relates(words, sent, kept, sentences):
+            severity, mode = "high", "omitted_related"
+        else:
+            severity, mode = "medium", "omitted"
+        out.append({"type": p["type"], "word_range": [a, b], "text": p["text"], "severity": severity, "mode": mode})
+    return out
 
 
 # -- Pausenklassen ---------------------------------------------------------------------------------
@@ -261,13 +413,6 @@ def _punchlines(
     return out
 
 
-def _is_number(w: Mapping[str, Any]) -> bool:
-    text = _text(w)
-    if any(ch.isdigit() for ch in text):
-        return True
-    return fidelity.parse_number_word(_tok(w)) is not None
-
-
 def classify_pauses(
     words: Sequence[Mapping[str, Any]],
     heat_payload: Mapping[str, Any] | None = None,
@@ -281,9 +426,11 @@ def classify_pauses(
     * ``demonstration``: ein Bildereignis (``visual_events``, wie in den Fixtures) fällt in die Lücke;
     * ``dramatic``: Pause vor oder in einer Pointe (Satz, nach dem gelacht oder reagiert wird);
     * ``reaction``: Pause nach der Pointe, nach einer Frage, vor einem Reaktionswort oder mit Lachen;
-    * ``dramatic``: Pause vor einer Zahl, einer Negation oder einem Kontrastwort;
+    * ``dramatic``: Pause vor einer Zahl, einer Negation oder einem Kontrastwort („Doch“, „Nur“ und
+      „Bloß“ am Satzanfang);
     * lange Stille ab ``trim.long_silence_s``: im laufenden Satz ``dramatic`` (Innehalten), sonst
       ``demonstration`` (mögliche Demonstration ohne Sprache);
+    * Pause im Satz ab ``orientation_min_s``: ``dramatic`` (Innehalten, nie technisch);
     * ``orientation``: an einer Satzgrenze ab ``orientation_min_s`` oder vor einem Gliederungswort;
     * sonst ``technical``. Nur diese Klasse wird gekürzt.
 
@@ -296,16 +443,15 @@ def classify_pauses(
     punch = _punchlines(words, sentences, heat_payload, cfg)
     punch_inner = {i: cue for a, b, cue in punch for i in range(a - 1, b)}  # Lücke nach Wort i
     punch_after = {b: cue for _a, b, cue in punch}
-    dramatic_before = set(cfg["dramatic_before"])
-    reaction_after = set(cfg["reaction_after"])
     events = [e for e in (visual_events or []) if e.get("start") is not None and e.get("end") is not None]
+    ctx = {"ends": ends, "punch_inner": punch_inner, "punch_after": punch_after, "events": events, "heat": heat_payload}
     out: list[dict] = []
     for i in range(len(words) - 1):
         g = _gap(words, i)
         if g <= float(cfg["pause_target_s"]) + EPS:
             continue
         t0, t1 = float(words[i]["end"]), float(words[i + 1]["start"])
-        cls, reason = _pause_class(words, i, g, t0, t1, ends, punch_inner, punch_after, events, heat_payload, cfg, dramatic_before, reaction_after)
+        cls, reason = _pause_class(words, i, g, t0, t1, ctx, cfg)
         out.append({
             "after_word": i, "start": round(t0, 3), "end": round(t1, 3), "duration": round(g, 3),
             "class": cls, "reason": reason,
@@ -319,41 +465,40 @@ def _pause_class(
     g: float,
     t0: float,
     t1: float,
-    ends: set[int],
-    punch_inner: dict[int, str],
-    punch_after: dict[int, str],
-    events: list[Mapping[str, Any]],
-    heat_payload: Mapping[str, Any] | None,
+    ctx: Mapping[str, Any],
     cfg: Mapping[str, Any],
-    dramatic_before: set[str],
-    reaction_after: set[str],
 ) -> tuple[str, str]:
     prev, nxt = words[i], words[i + 1]
-    for e in events:
+    dramatic_before, reaction_after = set(cfg["dramatic_before"]), set(cfg["reaction_after"])
+    ends = ctx["ends"]
+    for e in ctx["events"]:
         overlap = min(t1, float(e["end"])) - max(t0, float(e["start"]))
         if overlap >= min(VISUAL_MIN_OVERLAP_S, 0.5 * g):
             return "demonstration", f"Bildereignis ohne Sprache ({e.get('type') or 'visual'})"
-    if "punchline" in dramatic_before and i in punch_inner:
-        return "dramatic", f"Pause vor der Pointe ({punch_inner[i]} danach)"
-    if i in punch_after and ({"laughter", "reaction_word"} & reaction_after):
-        return "reaction", f"Reaktion auf die Pointe ({punch_after[i]})"
+    if "punchline" in dramatic_before and i in ctx["punch_inner"]:
+        return "dramatic", f"Pause vor der Pointe ({ctx['punch_inner'][i]} danach)"
+    if i in ctx["punch_after"] and ({"laughter", "reaction_word"} & reaction_after):
+        return "reaction", f"Reaktion auf die Pointe ({ctx['punch_after'][i]})"
     if "question" in reaction_after and _is_question(_text(prev)):
         return "reaction", "Pause nach einer Frage"
     if "reaction_word" in reaction_after and _is_reaction_word(words, i + 1, prev.get("speaker"), cfg):
         return "reaction", f"Pause vor dem Reaktionswort „{_text(nxt)}“"
-    if "laughter" in reaction_after and _laughter_in(heat_payload, t0, t1):
+    if "laughter" in reaction_after and _laughter_in(ctx["heat"], t0, t1):
         return "reaction", "Lachen in der Pause"
     tok = _tok(nxt)
-    if "number" in dramatic_before and _is_number(nxt):
+    if "number" in dramatic_before and _is_number_token(_text(nxt)):
         return "dramatic", f"Pause vor der Zahl „{_text(nxt)}“"
     if "negation" in dramatic_before and tok in NEGATION_TRIGGERS:
         return "dramatic", f"Pause vor der Negation „{_text(nxt)}“"
-    if "contrast" in dramatic_before and tok in CONTRAST_WORDS:
+    if "contrast" in dramatic_before and (tok in CONTRAST_WORDS or (i in ends and tok in CONTRAST_SENTENCE_START)):
         return "dramatic", f"Pause vor dem Kontrastwort „{_text(nxt)}“"
+    in_sentence = i not in ends and nxt.get("speaker") == prev.get("speaker")
     if g >= float(cfg["long_silence_s"]):
-        if i not in ends and nxt.get("speaker") == prev.get("speaker"):
+        if in_sentence:
             return "dramatic", f"lange Stille im Satz ({g:.1f} s), Innehalten"
         return "demonstration", f"lange Stille ohne Sprache ({g:.1f} s), mögliche Demonstration"
+    if in_sentence and g >= float(cfg["orientation_min_s"]):
+        return "dramatic", f"Pause im Satz ({g:.1f} s), Innehalten"
     if i in ends:
         head = _norm(" ".join(_text(w) for w in words[i + 1 : i + 5]))
         if g >= float(cfg["orientation_min_s"]):
@@ -378,125 +523,184 @@ def _speaker_runs(words: Sequence[Mapping[str, Any]]) -> list[tuple[int, int]]:
 
 def _backchannels(words: Sequence[Mapping[str, Any]]) -> list[tuple[int, int]]:
     """Kurzer Einwurf (höchstens ``compose.BACKCHANNEL_MAX_WORDS`` Rückmeldewörter) eines Sprechers
-    mitten im Beitrag eines anderen. Keiner, wenn der Beitrag davor eine Frage ist: dann ist das eine
-    Antwort, auch wenn sie einsilbig ist („Ja.“ zwischen zwei Fragen)."""
+    mitten im Beitrag eines anderen. Keiner, wenn der Beitrag davor mit einem Satzende schließt: nach
+    einer Frage ist es eine Antwort (auch einsilbig, „Klar.“ zwischen zwei Fragen), nach einer Aussage
+    eine Bestätigung („Genau.“ nach „Du meinst also, …“). Eine Rückfrage („Hm?“) bleibt immer."""
     runs = _speaker_runs(words)
     out = []
     for k in range(1, len(runs) - 1):
         a, b = runs[k]
-        prev_a, prev_b = runs[k - 1]
+        _prev_a, prev_b = runs[k - 1]
         nxt_a, _nxt_b = runs[k + 1]
         spk, other = words[a].get("speaker"), words[prev_b].get("speaker")
         if spk is None or other is None or words[nxt_a].get("speaker") != other:
             continue
         if b - a + 1 > compose.BACKCHANNEL_MAX_WORDS:
             continue
-        if not all(_tok(words[i]) in BACKCHANNEL_TOKENS for i in range(a, b + 1)):
+        if not all(_tok(words[i]) in BACKCHANNEL_TOKENS and not _is_question(_text(words[i])) for i in range(a, b + 1)):
             continue
-        if _is_question(_text(words[prev_b])):
-            continue  # Antwort auf eine Frage
+        if _ends_sentence(_text(words[prev_b])):
+            continue  # Antwort oder Bestätigung
         out.append((a, b))
     return out
 
 
-def _restarts(words: Sequence[Mapping[str, Any]], sentences: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """Abgebrochener Ansatz mit Neustart am Satzanfang: dieselben ein bis drei Wörter noch einmal
-    („Wir haben, äh, wir haben das …“) oder ein abgebrochenes Wort, nach dem der Satz neu beginnt
-    („Wir hab- wir haben …“). Entfernt wird der erste Ansatz samt Zögerlauten dazwischen."""
+def _restarts(
+    words: Sequence[Mapping[str, Any]], sentences: list[tuple[int, int]], cfg: Mapping[str, Any]
+) -> list[tuple[int, int]]:
+    """Abgebrochener Ansatz mit Neustart am Satzanfang. Entfernt wird der erste Ansatz samt Zögerlauten.
+
+    Neustart nur mit Trennung zwischen den Ansätzen: hartes Füllwort, abgebrochenes Wort („hab-“) oder
+    Pause über ``trim.pause_target_s``; Auslassungspunkte nur, wenn mindestens zwei Wörter des Ansatzes
+    wiederkehren („Der Grund war… der Preis.“ ist eine Pointe). Kein Neustart: ein einzelnes Wort, das
+    Artikel, Relativ- oder Fragepronomen ist („Die, die …“, „Wer, wer …“); funktionale Wiederholung
+    („Viel, viel besser“); Wiederholung mit Verstärker danach („Wir haben, wir haben wirklich …“)."""
     out = []
     toks = [_tok(w) for w in words]
     n = len(words)
+    target = float(cfg["pause_target_s"])
     for i in sorted({a for a, _b in sentences}):
         found = None
         for k in range(RESTART_MAX_WORDS, 0, -1):
             first = list(range(i, i + k))
-            if first[-1] >= n or any(not toks[j] or toks[j] in dach_nlp.HARD_FILLERS for j in first):
+            if first[-1] >= n or any(not toks[j] or is_hard_filler(words[j]) for j in first):
                 continue
             if any(_ends_sentence(_text(words[j])) for j in first):
                 continue
-            if all(toks[j] in FUNCTIONAL_REPEAT for j in first):
+            if all(toks[j] in FUNCTIONAL_REPEAT for j in first) or (k == 1 and toks[i] in NOT_A_RESTART_WORD):
                 continue
             j = i + k
-            while j < n and toks[j] in dach_nlp.HARD_FILLERS:
+            while j < n and is_hard_filler(words[j]):
                 j += 1
             second = list(range(j, j + k))
-            if second[-1] >= n:
+            if second[-1] >= n or [toks[x] for x in first] != [toks[x] for x in second]:
                 continue
-            if [toks[x] for x in first] == [toks[x] for x in second] and len({words[x].get("speaker") for x in first + second}) == 1:
+            if len({words[x].get("speaker") for x in first + second}) != 1:
+                continue
+            if second[-1] + 1 < n and toks[second[-1] + 1] in INTENSIFIERS:
+                continue  # Betonung
+            last = _text(words[first[-1]]).rstrip(_CLOSERS)
+            separated = (
+                j > i + k
+                or last.endswith("-")
+                or _gap(words, first[-1]) > target + EPS
+                or (k >= 2 and last.endswith(("…", "...")))
+            )
+            if separated:
                 found = (i, j - 1)
                 break
         if found is None:
             for j in range(i, min(n - 1, i + RESTART_BROKEN_SCAN)):
                 t = _text(words[j]).rstrip(_CLOSERS)
-                if t.endswith(("-", "…", "...")) and toks[j + 1] == toks[i] and words[j + 1].get("speaker") == words[i].get("speaker"):
+                same_spk = words[j + 1].get("speaker") == words[i].get("speaker")
+                if t.endswith("-") and toks[j + 1] == toks[i] and same_spk:
                     found = (i, j)
+                    break
+                if t.endswith(("…", "...")) and same_spk and j > i and toks[j + 1 : j + 3] == toks[i : i + 2]:
+                    found = (i, j)
+                    break
+                if _ends_sentence(t):
                     break
         if found is not None:
             out.append(found)
     return out
 
 
-def _edge_sentences(
+def _edge_removals(
     words: Sequence[Mapping[str, Any]], sentences: list[tuple[int, int]], cfg: Mapping[str, Any]
-) -> list[tuple[int, int, str]]:
-    """Begrüßung, Dank, Abschied und Organisatorisches als ganze Sätze am Anfang oder Ende; der letzte
-    verbleibende Satz bleibt immer."""
-    greeting = tuple(_norm(m) for m in cfg["edge_markers"])
-    organisation = tuple(_norm(m) for m in cfg["organisation_markers"])
+) -> list[tuple[int, int, str, bool]]:
+    """Begrüßung, Dank, Abschied und Organisatorisches am Anfang oder Ende: ``(a, b, reason, whole)``.
 
-    def kind(a: int, b: int) -> str | None:
-        text = f" {_norm(' '.join(_text(w) for w in words[a : b + 1]))} "
-        if any(f" {m} " in text for m in organisation if m):
-            return "organisational"
-        if any(f" {m} " in text for m in greeting if m):
-            return "greeting"
+    Ein Randsatz fällt ganz weg, wenn er überwiegend aus Wendungen besteht (höchstens drei weitere
+    Wörter); sonst nur die Wendung selbst, wenn sie den Satz am Anfang eröffnet oder am Ende schließt
+    („Hallo zusammen, unser größter Kunde hat gekündigt.“ verliert nur „Hallo zusammen,“). Der letzte
+    verbleibende Satz bleibt immer."""
+    tokens = [_tok(w) for w in words]
+    org = [(m, "organisational") for m in (*cfg["organisation_markers"], *cfg["organisation_markers_trim"])]
+    markers = sorted(org + [(m, "greeting") for m in cfg["edge_markers"]], key=lambda x: -len(x[0].split()))
+
+    def matches(a: int, b: int) -> list[tuple[int, int, str]]:
+        taken: set[int] = set()
+        hits = []
+        for phrase, kind in markers:
+            for x, y in _phrase_positions(tokens[a : b + 1], phrase):
+                x, y = x + a, y + a
+                if not taken & set(range(x, y + 1)):
+                    taken |= set(range(x, y + 1))
+                    hits.append((x, y, kind))
+        return sorted(hits)
+
+    def whole(a: int, b: int, hits: list[tuple[int, int, str]]) -> str | None:
+        covered = {i for x, y, _k in hits for i in range(x, y + 1)}
+        others = [i for i in range(a, b + 1) if i not in covered and not is_hard_filler(words[i])]
+        if hits and len(others) <= 3:
+            return "organisational" if any(k == "organisational" for *_r, k in hits) else "greeting"
         return None
 
-    out: list[tuple[int, int, str]] = []
+    out: list[tuple[int, int, str, bool]] = []
     lo, hi = 0, len(sentences) - 1
-    while lo < hi and (k := kind(*sentences[lo])) is not None:
-        out.append((*sentences[lo], k))
-        lo += 1
-    while hi > lo and (k := kind(*sentences[hi])) is not None:
-        out.append((*sentences[hi], k))
-        hi -= 1
+    while lo < hi:
+        a, b = sentences[lo]
+        hits = matches(a, b)
+        reason = whole(a, b, hits)
+        if reason is not None:
+            out.append((a, b, reason, True))
+            lo += 1
+            continue
+        if hits and hits[0][0] == a:
+            out.append((a, hits[0][1], hits[0][2], False))
+        break
+    while hi > lo:
+        a, b = sentences[hi]
+        hits = matches(a, b)
+        reason = whole(a, b, hits)
+        if reason is not None:
+            out.append((a, b, reason, True))
+            hi -= 1
+            continue
+        if hits and hits[-1][1] == b:
+            out.append((hits[-1][0], b, hits[-1][2], False))
+        break
     return out
 
 
 def removal_candidates(words: Sequence[Mapping[str, Any]], policy: editorial.Policy | None = None) -> list[dict]:
     """Was entfernt werden darf, je ``{word_range: [a, b], reason, text}``, sortiert.
 
-    Gründe: ``hard_filler`` (äh, ähm; P3), ``backchannel`` (Einwurf des Gegenübers, nie eine Antwort
-    auf eine Frage), ``restart`` (abgebrochener Ansatz mit Neustart am Satzanfang), ``greeting`` und
-    ``organisational`` (nur am Anfang oder Ende, ``trim.removal.edge_markers`` und
-    ``ausschluss.organisations_marker``). Ausgeschlossen sind Kandidaten mit einem Wort aus
-    ``trim.removal.never_remove`` (Modalpartikeln), Kandidaten in einem Schutzbereich
-    (``protected_spans``) und Kandidaten neben einer Stille ab ``trim.long_silence_s`` (das Zögern davor
-    gehört zur Szene, etwa vor einer stillen Demonstration)."""
+    Gründe: ``hard_filler`` (äh, ähm; P3, am Rohtext: „EM“ ist keins, „Hm?“ ist eine Rückfrage),
+    ``backchannel`` (Einwurf des Gegenübers mitten im Beitrag, nie nach einem Satzende), ``restart``
+    (abgebrochener Ansatz mit Neustart), ``greeting`` und ``organisational`` (nur am Rand,
+    ``trim.removal.edge_markers``, ``trim.removal.organisation_markers`` und
+    ``ausschluss.organisations_marker``). Ausgeschlossen sind:
+
+    * Kandidaten mit einem Wort aus ``trim.removal.never_remove`` (Modalpartikeln im Satz); ein
+      Einwurf („Ja.“ des Gegenübers) und ein ganzer Begrüßungssatz sind keine Modalpartikel im Satz;
+    * Kandidaten im Auslöser oder Rand eines Schutzbereichs (``lock_range``);
+    * Kandidaten neben einer Stille ab ``trim.long_silence_s`` (das Zögern davor gehört zur Szene)."""
     pol, cfg = _policy_settings(policy)
     if not words:
         return []
     sentences = _sentence_ranges(words, pol)
-    raw: list[tuple[int, int, str]] = []
+    raw: list[tuple[int, int, str, bool]] = []
     if cfg["fillers"] == "hard":
-        raw += [(i, i, "hard_filler") for i, w in enumerate(words) if _tok(w) in dach_nlp.HARD_FILLERS]
+        raw += [(i, i, "hard_filler", False) for i, w in enumerate(words) if is_hard_filler(w)]
     if cfg["backchannel"]:
-        raw += [(a, b, "backchannel") for a, b in _backchannels(words)]
+        raw += [(a, b, "backchannel", True) for a, b in _backchannels(words)]
     if cfg["restarts"]:
-        raw += [(a, b, "restart") for a, b in _restarts(words, sentences)]
-    raw += _edge_sentences(words, sentences, cfg)
+        raw += [(a, b, "restart", False) for a, b in _restarts(words, sentences, cfg)]
+    raw += _edge_removals(words, sentences, cfg)
 
-    protected = [tuple(p["word_range"]) for p in protected_spans(words, pol)]
+    locked = [p["lock_range"] for p in protected_spans(words, pol)]
     never = set(cfg["never_remove"])
     long_s = float(cfg["long_silence_s"])
     out, seen = [], set()
-    for a, b, reason in sorted(raw):
+    for a, b, reason, no_particle in sorted(raw):
         if (a, b, reason) in seen:
             continue
         seen.add((a, b, reason))
-        if any(_tok(words[i]) in never for i in range(a, b + 1)):
+        if not no_particle and any(_tok(words[i]) in never for i in range(a, b + 1)):
             continue
-        if any(_overlaps((a, b), p) for p in protected):
+        if any(_overlaps((a, b), p) for p in locked):
             continue
         if (a > 0 and _gap(words, a - 1) >= long_s) or (b + 1 < len(words) and _gap(words, b) >= long_s):
             continue
@@ -512,17 +716,33 @@ def _sentence_text(s: Any) -> str:
 
 
 def _content_tokens(text: str) -> set[str]:
-    return {t for t in _norm(text).split() if len(t) >= REPEAT_MIN_TOKEN_LEN}
+    """Inhaltswörter ab vier Zeichen und jede Zahl oder jedes Zahlwort."""
+    return {t for t in _norm(text).split() if len(t) >= REPEAT_MIN_TOKEN_LEN or _is_number_token(t)}
 
 
 def _is_qualifying(text: str, pol: editorial.Policy) -> bool:
-    """Trägt der Satz eine Einschränkung, Bedingung, Negation, Unsicherheit oder Korrektur?"""
+    """Trägt der Satz eine Einschränkung, Bedingung, Negation, Unsicherheit oder Korrektur? Kontrastwörter
+    zählen an jeder Stelle im Satz, „doch“, „nur“, „bloß“ am Satzanfang."""
     low = _norm(text)
+    tokens = low.split()
     markers = tuple(_norm(m) for m in pol.ausstieg.get("abschwaechung_marker") or ())
-    if any(low == m or low.startswith(m + " ") for m in markers + tuple(fidelity.CONTRAST_STARTS) if m):
+    if any(low == m or low.startswith(m + " ") for m in markers if m):
+        return True
+    if any(t in CONTRAST_WORDS for t in tokens) or (tokens and tokens[0] in CONTRAST_SENTENCE_START):
         return True
     pseudo = [{"text": t, "start": 0.0, "end": 0.0} for t in str(text).split()]
     return any(p["type"] in QUALIFYING_TYPES for p in protected_spans(pseudo, pol))
+
+
+def _is_sales_call(text: str, cfg: Mapping[str, Any]) -> bool:
+    """Verkaufsaufruf: eine Wendung aus ``reward_end.sales_call`` und ein Imperativ oder eine Anrede in
+    der zweiten Person („Schreibt mir für ein Erstgespräch.“, nicht „… haben abonniert.“)."""
+    low = f" {_norm(text)} "
+    if not any(f" {_norm(m)} " in low for m in cfg["sales_call"]):
+        return False
+    tokens = low.split()
+    imperative = len(tokens) >= 2 and tokens[0].endswith(("t", "e")) and tokens[1] in IMPERATIVE_PARTNERS
+    return imperative or bool(SECOND_PERSON & set(tokens)) or " jetzt buchen " in low
 
 
 def _tail_reason(text: str, payoff_text: str, cfg: Mapping[str, Any]) -> str | None:
@@ -530,11 +750,13 @@ def _tail_reason(text: str, payoff_text: str, cfg: Mapping[str, Any]) -> str | N
     head = _norm(text)
     if any(head.startswith(_norm(m)) for m in cfg["weak_summary"]):
         return "weak_summary"
-    if any(f" {_norm(m)}" in low for m in cfg["sales_call"]):  # Wortanfang: „abonnier“ trifft „abonniert“
+    if _is_sales_call(text, cfg):
         return "sales_call"
     if any(f" {_norm(m)} " in low for m in cfg["farewell"]):
         return "farewell"
     mine, payoff = _content_tokens(text), _content_tokens(payoff_text)
+    if any(_is_number_token(t) for t in mine - payoff):
+        return None  # eine neue Zahl ist neue Information
     if len(mine) >= 2 and len(mine & payoff) / len(mine) >= float(cfg["repeat_overlap"]):
         return "repeated_payoff"
     return None
@@ -547,13 +769,13 @@ def reward_end(
     payoff_idx: int | None,
     policy: editorial.Policy | None = None,
 ) -> tuple[int, list[dict]]:
-    """Neues letztes Satzindex und die gekappten Sätze ``{sentence, reason, text}``.
+    """Neuer letzter Satzindex und die gekappten Sätze ``{sentence, reason, text}``.
 
     Gekappt wird von hinten, solange jeder Satz nach dem Payoff Nachlauf ist: wiederholte Pointe
-    (``repeated_payoff``), schwache Zusammenfassung (``weak_summary``), Verkaufsaufruf
-    (``sales_call``) oder Verabschiedung (``farewell``). Ein Satz mit Einschränkung, Bedingung,
-    Negation, Unsicherheit oder Korrektur wird nie gekappt und hält alles davor fest. Ohne Payoff
-    (``None``) oder mit Payoff am Ende bleibt das Ende."""
+    (``repeated_payoff``, ohne neue Zahl), schwache Zusammenfassung (``weak_summary``), Verkaufsaufruf
+    (``sales_call``, Imperativ oder zweite Person) oder Verabschiedung (``farewell``). Ein Satz mit
+    Einschränkung, Bedingung, Negation, Unsicherheit, Korrektur oder Kontrastwort wird nie gekappt und
+    hält alles davor fest. Ohne Payoff (``None``) oder mit Payoff am Ende bleibt das Ende."""
     pol, cfg = _policy_settings(policy)
     if payoff_idx is None or not first <= payoff_idx < last:
         return last, []
@@ -587,9 +809,7 @@ def _keep_ranges(keep_decisions: Sequence[Sequence[int]] | None, first: int, las
     return ranges
 
 
-def _pieces(
-    ranges: list[tuple[int, int]], removed: set[int], split_after: set[int]
-) -> list[tuple[int, int]]:
+def _pieces(ranges: list[tuple[int, int]], removed: set[int], split_after: set[int]) -> list[tuple[int, int]]:
     out: list[tuple[int, int]] = []
     for a, b in ranges:
         cur: list[int] | None = None
@@ -611,8 +831,12 @@ def _pieces(
     return out
 
 
+def _mid(w: Mapping[str, Any]) -> float:
+    return (float(w["start"]) + float(w["end"])) / 2.0
+
+
 def _kept_ids(words: Sequence[Mapping[str, Any]], seg: compose.Segment, lo: int, hi: int) -> list[int]:
-    return [i for i in range(lo, hi + 1) if seg.start <= (float(words[i]["start"]) + float(words[i]["end"])) / 2.0 <= seg.end]
+    return [i for i in range(lo, hi + 1) if seg.start <= _mid(words[i]) <= seg.end]
 
 
 def _group(ids: list[int]) -> list[tuple[int, int]]:
@@ -638,21 +862,25 @@ def build_composition(
     """Komposition für die Wörter ``first_word`` bis ``last_word``.
 
     ``keep_decisions`` sind die redaktionell behaltenen Wortbereiche (aufsteigend, ohne Überlappung;
-    ``None`` heißt die ganze Spanne). Innerhalb davon werden lokale Schnitte gesetzt: Kandidaten aus
-    ``removal_candidates`` (nicht neben einer Pause, die keine technische ist) und technische Pausen
-    (``classify_pauses``) mit mindestens ``trim.min_trim_gain_s`` Gewinn, beide nie in einem
-    Schutzbereich. Pausen werden auf ``trim.pause_target_s`` gekürzt, je zur Hälfte vor und nach der
-    Naht. Ein lokaler Schnitt, der ein Segment unter ``trim.min_segment_s`` erzeugen würde, entfällt.
+    ``None`` heißt die ganze Spanne); jede Naht dazwischen ist semantisch. Innerhalb davon werden
+    lokale Schnitte gesetzt: Kandidaten aus ``removal_candidates`` (nicht neben einer Pause, die keine
+    technische ist) und technische Pausen (``classify_pauses``) mit mindestens ``trim.min_trim_gain_s``
+    Gewinn, nie in einem Schutzbereich. Pausen werden auf ``trim.pause_target_s`` gekürzt, je zur
+    Hälfte vor und nach der Naht. An entfernten Wörtern endet das Segment spätestens am Beginn des
+    ersten entfernten Wortes und beginnt frühestens am Ende des letzten (kein hörbarer Rest). Ein
+    lokaler Schnitt, der ein Segment unter ``trim.min_segment_s`` erzeugen würde, entfällt.
 
     Gezählt wird getrennt (``compose.splice_kinds``): ``semantic_splices`` (Verbindung nicht
-    benachbarter Sätze, höchstens ``trim.max_semantic_splices``) und ``local_cuts``. ``density`` ist
-    die gesprochene Zeit der Segmente (erstes bis letztes behaltenes Wort je Segment) durch die
-    Gesamtdauer der Spanne; unter ``zusammenhang.mindest_dichte`` ist es eine Collage. Verstöße stehen
-    in ``issues``, ``valid`` ist dann false; der Aufrufer fällt auf die ungekürzte Fassung zurück.
+    benachbarter Sätze, höchstens ``trim.max_semantic_splices``) und ``local_cuts``. ``density`` ist der
+    Anteil der Spanne, der nicht durch semantische Schnitte wegfällt; lokale Schnitte und Ränder zählen
+    nicht mit. Unter ``zusammenhang.mindest_dichte`` ist es eine Collage. Verstöße und Schutzbereich-
+    Befunde hoher Schwere stehen in ``issues``, ``valid`` ist dann false; Prüfhinweise mittlerer Schwere
+    in ``review_findings``.
 
-    ``removed_spans`` je Stelle: ``source_in``, ``source_out``, ``removal_reason``,
-    ``protected_context_check`` (Master-Prompt Abschnitt 21) plus ``kind`` (``local``, ``semantic``,
-    ``edge``), ``word_ids`` und ``text``."""
+    ``removed_spans`` im ``ClipCandidate``-Format (genau ``source_in``, ``source_out``,
+    ``removal_reason``, ``protected_context_check``); ``protected_context_check`` trägt ``passed``,
+    ``touched_types``, ``review_types``, ``checked_spans`` und unter ``detail`` die Art der Naht
+    (``kind``: ``local``, ``semantic``, ``edge``), ``word_ids`` und ``text``."""
     pol, cfg = _policy_settings(policy)
     n = len(words)
     if not 0 <= first_word <= last_word < n:
@@ -664,11 +892,15 @@ def build_composition(
     def shift(r: Sequence[int]) -> tuple[int, int]:
         return int(r[0]) + off, int(r[1]) + off
 
-    protected = [{**p, "word_range": list(shift(p["word_range"]))} for p in protected_spans(span, pol)]
+    protected = [
+        {**p, "word_range": list(shift(p["word_range"])), "lock_range": list(shift(p["lock_range"]))}
+        for p in protected_spans(span, pol)
+    ]
     prot_ranges = [tuple(p["word_range"]) for p in protected]
     pauses = [{**p, "after_word": p["after_word"] + off} for p in classify_pauses(span, heat_payload, pol, visual_events)]
     pause_at = {p["after_word"]: p for p in pauses}
     range_of = {i: k for k, (a, b) in enumerate(ranges) for i in range(a, b + 1)}
+    forced = {i for i in range(first_word, last_word + 1) if i not in range_of and ranges[0][0] <= i <= ranges[-1][1]}
 
     # Lokale Schnitte: Wortgruppen und Pausen, jeweils mit Grund.
     cuts: list[dict] = []
@@ -759,19 +991,31 @@ def build_composition(
     removed, split_after = state()
     pieces = _pieces(ranges, removed, split_after)
     comp = compose.from_keep_ranges(list(words), pieces)
+    segs = comp.segments
 
-    # Technische Pause: je die halbe Zielpause vor und nach der Naht behalten, nie null.
-    for seg, nxt_seg in zip(comp.segments, comp.segments[1:]):
-        between = [i for i in range(first_word, last_word + 1) if seg.end < (float(words[i]["start"]) + float(words[i]["end"])) / 2.0 < nxt_seg.start]
-        ids_l = _kept_ids(words, seg, first_word, last_word)
-        ids_r = _kept_ids(words, nxt_seg, first_word, last_word)
-        if not between and ids_l and ids_r and ids_l[-1] in split_after and ids_r[0] == ids_l[-1] + 1:
-            i = ids_l[-1]
-            seg.end = max(seg.end, round(float(words[i]["end"]) + target / 2.0, 3))
-            nxt_seg.start = min(nxt_seg.start, round(float(words[i + 1]["start"]) - target / 2.0, 3))
+    # Ränder an entfernten Wörtern: kein hörbarer Rest; technische Pause: je die halbe Zielpause.
+    gone = {i for i in range(first_word, last_word + 1)} - {i for a, b in pieces for i in range(a, b + 1)}
+    for k, seg in enumerate(segs):
+        ids = _kept_ids(words, seg, first_word, last_word)
+        if not ids:
+            continue
+        if ids[0] - 1 in gone:
+            seg.start = max(seg.start, round(float(words[ids[0] - 1]["end"]), 3))
+        if ids[-1] + 1 in gone:
+            seg.end = min(seg.end, round(float(words[ids[-1] + 1]["start"]), 3))
+        if k + 1 < len(segs) and ids[-1] in split_after:
+            nxt_ids = _kept_ids(words, segs[k + 1], first_word, last_word)
+            if nxt_ids and nxt_ids[0] == ids[-1] + 1:
+                i = ids[-1]
+                seg.end = max(seg.end, round(float(words[i]["end"]) + target / 2.0, 3))
+                segs[k + 1].start = min(segs[k + 1].start, round(float(words[i + 1]["start"]) - target / 2.0, 3))
 
-    kinds = compose.splice_kinds(comp, list(words))
-    kept_ids = sorted({i for s in comp.segments for i in _kept_ids(words, s, first_word, last_word)})
+    kinds = compose.splice_kinds(comp, list(words), forced)
+    kept_ids = sorted({i for s in segs for i in _kept_ids(words, s, first_word, last_word)})
+    findings = [
+        {**f, "word_range": list(shift(f["word_range"]))}
+        for f in protected_cut_findings(span, {i - off for i in kept_ids}, pol)
+    ]
     reason_of: dict[int, str] = {}
     for c in cuts:
         if c["active"] and c["kind"] == "words":
@@ -779,28 +1023,25 @@ def build_composition(
                 reason_of[i] = c["reason"]
 
     def removed_entry(t0: float, t1: float, ids: list[int], kind: str) -> dict:
-        reasons = list(dict.fromkeys(r for i in ids for r in reason_of.get(i, "keep_decision").split(",")))
-        if not ids:
-            reasons = ["technical_pause"]
-        t0, t1 = round(t0, 3), round(t1, 3)
-        touched = sorted({
-            p["type"] for p in protected
-            if any(p["word_range"][0] <= i <= p["word_range"][1] for i in ids)
-            or (ids == [] and float(words[p["word_range"][0]]["start"]) < t1 and t0 < float(words[p["word_range"][1]]["end"]))
-        })  # fmt: skip
+        reasons = list(dict.fromkeys(r for i in ids for r in reason_of.get(i, "keep_decision").split(","))) or ["technical_pause"]
+        hits = [f for f in findings if any(f["word_range"][0] <= i <= f["word_range"][1] for i in ids)]
+        touched = sorted({f["type"] for f in hits if f["severity"] == "high"})
         return {
-            "source_in": t0, "source_out": t1, "removal_reason": "+".join(reasons),
-            "protected_context_check": {"passed": not touched, "touched_types": touched, "checked_spans": len(protected)},
-            "kind": kind, "word_ids": ids, "text": " ".join(_text(words[i]) for i in ids),
+            "source_in": round(t0, 3), "source_out": round(t1, 3), "removal_reason": "+".join(reasons),
+            "protected_context_check": {
+                "passed": not touched, "touched_types": touched,
+                "review_types": sorted({f["type"] for f in hits if f["severity"] != "high"}),
+                "checked_spans": len(protected),
+                "detail": {"kind": kind, "word_ids": ids, "text": " ".join(_text(words[i]) for i in ids)},
+            },
         }  # fmt: skip
 
     removed_spans: list[dict] = []
-    segs = comp.segments
     if kept_ids and kept_ids[0] > first_word:
         ids = list(range(first_word, kept_ids[0]))
         removed_spans.append(removed_entry(float(words[first_word]["start"]), segs[0].start, ids, "edge"))
     for (seg, nxt_seg), kind in zip(zip(segs, segs[1:]), kinds):
-        ids = [i for i in range(first_word, last_word + 1) if i not in kept_ids and seg.end < (float(words[i]["start"]) + float(words[i]["end"])) / 2.0 < nxt_seg.start]
+        ids = [i for i in range(first_word, last_word + 1) if i not in kept_ids and seg.end < _mid(words[i]) < nxt_seg.start]
         if nxt_seg.start - seg.end > EPS:
             removed_spans.append(removed_entry(seg.end, nxt_seg.start, ids, kind))
     if kept_ids and kept_ids[-1] < last_word:
@@ -808,16 +1049,18 @@ def build_composition(
         removed_spans.append(removed_entry(segs[-1].end, float(words[last_word]["end"]), ids, "edge"))
 
     total = float(words[last_word]["end"]) - float(words[first_word]["start"])
-    spoken = 0.0
-    for s in segs:
-        ids = _kept_ids(words, s, first_word, last_word)
-        if ids:
-            spoken += float(words[ids[-1]]["end"]) - float(words[ids[0]]["start"])
-    density = round(spoken / total, 3) if total > 0 else 1.0
-    issues = comp.validate(list(words), max_splices=int(cfg["max_semantic_splices"]), debate_no_reorder=bool(cfg["debate_no_reorder"]))
+    by_kind = {k: sum(r["source_out"] - r["source_in"] for r in removed_spans if r["protected_context_check"]["detail"]["kind"] == k) for k in ("local", "semantic", "edge")}
+    base = total - by_kind["local"] - by_kind["edge"]
+    density = round(max(0.0, 1.0 - by_kind["semantic"] / base), 3) if base > EPS else 1.0
+    issues = comp.validate(
+        list(words), max_splices=int(cfg["max_semantic_splices"]), debate_no_reorder=bool(cfg["debate_no_reorder"]),
+        forced_semantic=forced,
+    )  # fmt: skip
     if density < float(cfg["min_density"]):
         issues.append(f"Dichte {density:.2f} unter zusammenhang.mindest_dichte {float(cfg['min_density']):.2f}: eher Collage als Passage")
-    issues += [f"Schutzbereich berührt: {', '.join(r['protected_context_check']['touched_types'])}" for r in removed_spans if not r["protected_context_check"]["passed"]]
+    high = sorted({f["type"] for f in findings if f["severity"] == "high"})
+    if high:
+        issues.append(f"Schutzbereich berührt: {', '.join(high)}")
     for p in pauses:
         p["action"] = "trimmed" if p["after_word"] in split_after else "kept"
     return {
@@ -832,6 +1075,7 @@ def build_composition(
         "is_debate": compose.is_debate(list(words), first_word, last_word),
         "pauses": pauses,
         "protected_spans": protected,
+        "review_findings": [f for f in findings if f["severity"] != "high"],
         "skipped_candidates": skipped + [
             {"word_range": list(c["word_range"]), "reason": c["reason"], "skipped": c["dropped"]}
             for c in cuts if c["kind"] == "words" and c.get("dropped")
@@ -847,6 +1091,8 @@ __all__ = [
     "PROTECTED_TYPES",
     "build_composition",
     "classify_pauses",
+    "is_hard_filler",
+    "protected_cut_findings",
     "protected_spans",
     "removal_candidates",
     "reward_end",

@@ -6,6 +6,13 @@ Version wandert in `candidates.prompt_version`, `hook_versions.prompt_version` u
 
 Regeln:
 - Eine Änderung am Prompt = neue Datei mit erhöhter Version. Alte Versionen bleiben (Reproduzierbarkeit).
+- Eine neue Version wird erst wirksam, wenn eine Policy sie pinnt. Der Produktionspfad lädt nur über
+  `prompts.load_pinned(name)`; die Version kommt aus der aktiven Grundlage (`CHOPSTR_POLICY_VERSION`,
+  Standard 1). Fassung 1 pinnt im Code (`editorial.V1_PROMPT_PINS`), ab Fassung 2 steht der Pin im
+  Abschnitt `prompts` der Datei `packages/editorial/clip_policy_v<N>.yaml`. Eine neue Datei allein ändert
+  also nichts; erst der Pin schaltet um, und zurück geht es über den Pin oder die Policy-Fassung.
+  `prompts.load(name)` ohne Version nimmt weiter die höchste Datei, schreibt aber eine Warnung ins Log
+  und ist nur für Werkzeuge und Tests gedacht.
 - Jede Änderung läuft gegen den Testdatensatz (`workers/eval`), getrennt nach Dialekt.
 - Was einen guten Clip ausmacht, steht nicht im Prompt, sondern in `packages/editorial/clip_policy_v<N>.yaml`.
   Bewertende Prompts tragen dafür den Platzhalter `{policy}` und im Frontmatter `policy: clip_policy_v<N>`.
@@ -18,7 +25,7 @@ Regeln:
 | `system_editor_v1.md` | Systemrolle: Senior-Redaktion DACH | – |
 | `propose_moments_v1.md` | Stufe 2: Momente pro Kapitel als Satz-Spannen | `propose_moments` |
 | `score_clip_v1.md` | Stufe 3, Bestand: eigene Rubrik (5 Kriterien, 0 bis 10) | `score_clip` |
-| `score_clip_v2.md` | Stufe 3, aktuell: Rubrik aus der redaktionellen Grundlage (7 Kriterien, 0 bis 2) | `score_clip` |
+| `score_clip_v2.md` | Stufe 3, gepinnt in Fassung 1 und 2: Rubrik aus der redaktionellen Grundlage (7 Kriterien, 0 bis 2) | `score_clip` |
 | `story_graph_confirm_v1.md` | Stufe 4: relativiert ein späterer Satz den Clip? | `confirm_qualification` |
 | `hooks_v1.md` | Copy: 5 Hook-Varianten nach Muster | `write_hooks` |
 | `post_caption_v1.md` | Copy: Post-Text pro Plattform | `write_post_caption` |

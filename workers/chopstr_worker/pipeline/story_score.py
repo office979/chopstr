@@ -115,7 +115,7 @@ LEGACY_SCALE_MAX = 10
 
 
 def system_prompt() -> str:
-    return prompts.load("system_editor").render()
+    return prompts.load_pinned("system_editor").render()
 
 
 def rubric_schema(pol: editorial.Policy | None = None) -> dict:
@@ -203,7 +203,7 @@ def weights(p: prompts.Prompt | None = None) -> dict[str, float]:
     ``policy_weights``.
     """
     pol = editorial.load()
-    p = p or prompts.load("score_clip")
+    p = p or prompts.load_pinned("score_clip", pol)
     drift = weight_drift(p, pol)
     if drift:
         log.warning(
@@ -216,7 +216,7 @@ def weights(p: prompts.Prompt | None = None) -> dict[str, float]:
 
 
 def propose(chapter: list[Sentence], brief: dict[str, Any], llm: LLM) -> list[dict]:
-    p = prompts.load("propose_moments")
+    p = prompts.load_pinned("propose_moments")
     user = p.render(
         audience=brief.get("audience"),
         wanted=brief.get("wanted"),
@@ -350,8 +350,8 @@ def _harmonise(r: dict, pol: editorial.Policy) -> tuple[dict[str, float], list[s
 
 
 def score(span_sents: list[Sentence], brief: dict[str, Any], llm: LLM) -> dict:
-    p = prompts.load("score_clip")
     pol = editorial.load()
+    p = prompts.load_pinned("score_clip", pol)
     text = " ".join(s.text for s in span_sents)
     user = p.render(
         audience=brief.get("audience"),

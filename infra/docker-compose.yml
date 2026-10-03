@@ -174,6 +174,12 @@ services:
       HF_TOKEN: ${HF_TOKEN:-}
       EGRESS_ALLOWLIST: ${EGRESS_ALLOWLIST:-}
       YUNET_MODEL_PATH: /app/workers/models/face_detection_yunet_2023mar.onnx
+      # Pfade der gemeinsamen Dateien im Image (workers/Dockerfile kopiert sie nach /app/packages).
+      # Explizit gesetzt, damit ein spaeterer Umzug nicht still bricht; der Worker prueft sie beim Start.
+      PROMPTS_DIR: /app/packages/prompts
+      EDITORIAL_DIR: /app/packages/editorial
+      CHOPSTR_CAPTION_FONTS: /app/packages/design/caption_fonts.json
+      CHOPSTR_AUSGABE_REGELN: /app/packages/schema/ausgabe_regeln_v1.json
     volumes:
       - ../workers/models:/app/workers/models
       - hf-cache:/home/worker/.cache        # Dockerfile läuft als Nutzer worker

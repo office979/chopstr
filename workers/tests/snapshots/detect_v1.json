@@ -1,0 +1,522 @@
+{
+ "demo_with_seeds": {
+  "candidates": [
+   {
+    "end_s": 32.98,
+    "first_sent": 0,
+    "gate_passed": true,
+    "gates": {
+     "fidelity": {
+      "detail": "keine entfernte Verneinung oder Einschränkung",
+      "passed": true
+     },
+     "no_open_loop": {
+      "detail": "endet mit abgeschlossenem Satz",
+      "passed": true
+     },
+     "sentence_boundaries": {
+      "detail": "Start und Ende an Satzgrenzen",
+      "passed": true
+     },
+     "standalone": {
+      "detail": "keine offenen Verweise",
+      "passed": true
+     },
+     "verb_bracket": {
+      "available": false,
+      "detail": "Verbklammer-Prüfung nicht verfügbar, spaCy fehlt",
+      "passed": true
+     }
+    },
+    "last_sent": 5,
+    "model_id": "heuristic-v1",
+    "prompt_version": "score_clip_v2",
+    "risk_flags": [
+     "claim",
+     "heuristic_only"
+    ],
+    "rubric": {
+     "abspiel_dauer_s": 32.98,
+     "contract": "candidates_v1",
+     "duration_s": 32.98,
+     "ends_before_answer": false,
+     "is_humor": false,
+     "klang": null,
+     "kontext_zugabe": null,
+     "laenge_abzug": 0.0,
+     "needs_earlier_context": false,
+     "parent_id": null,
+     "policy_version": "clip_policy_v1",
+     "proposal_why": "Heuristik ohne Sprachmodell: Moment-Typ Konkrete Zahl oder Ergebnis, Diskursmarker „der eigentliche grund“, Zahl im Abschnitt, geschätzt 22 Sekunden.",
+     "repair": {
+      "expanded_back": 0,
+      "expanded_front": 0,
+      "failed": false,
+      "rounds": 0
+     },
+     "rubric_points": {
+      "aufloesung": 1.2,
+      "emotion": 1.0,
+      "hook": 1.8,
+      "offene_frage": 0.4,
+      "spezifitaet": 2.0,
+      "standalone": 2.0,
+      "zielgruppe": 1.0
+     },
+     "scores": {
+      "audience_fit": {
+       "evidence": "Ehrlich gesagt war das der teuerste Fehler meiner",
+       "value": 5,
+       "weight": 0.0769
+      },
+      "hook": {
+       "evidence": "Ehrlich gesagt war das der teuerste Fehler meiner",
+       "value": 9,
+       "weight": 0.3077
+      },
+      "payoff": {
+       "evidence": "Wir haben in unserer Branche 40 Prozent Marge",
+       "value": 6,
+       "weight": 0.1538
+      },
+      "specificity": {
+       "evidence": "Wir haben in unserer Branche 40 Prozent Marge",
+       "value": 10,
+       "weight": 0.2308
+      },
+      "tension": {
+       "evidence": "Ehrlich gesagt war das der teuerste Fehler meiner",
+       "value": 2,
+       "weight": 0.2308
+      }
+     },
+     "sensitive_topic": false,
+     "speakers": [
+      "SPEAKER_00"
+     ],
+     "suggested_title_card": "",
+     "teaser_satz": null,
+     "text": "[0] (SPEAKER_00) Ehrlich gesagt war das der teuerste Fehler meiner Karriere.\n[1] (SPEAKER_00) Wir haben in unserer Branche 40 Prozent Marge verloren, und das gilt für jede Firma.\n[2] (SPEAKER_00) Der eigentliche Grund war ein falsches Preismodell.\n[3] (SPEAKER_00) Wir haben 2019 die Preise um 30 Prozent gesenkt.\n[4] (SPEAKER_00) Das hat alles verändert, und zwar nach unten.\n[5] (SPEAKER_00) Heute machen wir es genau andersrum.",
+     "unresolved_references": []
+    },
+    "segments": [
+     {
+      "end": 32.98,
+      "role": "body",
+      "start": 0.0
+     }
+    ],
+    "start_s": 0.0,
+    "story_graph_flags": [
+     {
+      "confirmed": null,
+      "marker": "das heißt aber nicht",
+      "overlap": 0.43,
+      "reason": "Ohne Sprachmodell nicht prüfbar, Mensch entscheidet",
+      "repair": null,
+      "seconds_after": 0.8,
+      "sentence_idx": 6,
+      "suggestion": "Clip bis Satz 6 verlängern oder Einschränkung als Text einblenden",
+      "text": "Das heißt aber nicht, dass das für jede Branche gilt."
+     }
+    ],
+    "structure": "hook_build_payoff",
+    "total": 10.08,
+    "why": "Kernaussage in 33 Sekunden vollständig, starker Einstieg, konkret mit Zahlen oder Namen, möglicherweise relativiert der Sprecher die Aussage 1 Sekunden später, ungeprüft, Passung für LinkedIn fraglich, Bewertung ohne Sprachmodell."
+   },
+   {
+    "end_s": 85.98,
+    "first_sent": 5,
+    "gate_passed": true,
+    "gates": {
+     "fidelity": {
+      "detail": "keine entfernte Verneinung oder Einschränkung",
+      "passed": true
+     },
+     "no_open_loop": {
+      "detail": "endet mit abgeschlossenem Satz",
+      "passed": true
+     },
+     "sentence_boundaries": {
+      "detail": "Start und Ende an Satzgrenzen",
+      "passed": true
+     },
+     "standalone": {
+      "detail": "keine offenen Verweise",
+      "passed": true
+     },
+     "verb_bracket": {
+      "available": false,
+      "detail": "Verbklammer-Prüfung nicht verfügbar, spaCy fehlt",
+      "passed": true
+     }
+    },
+    "last_sent": 15,
+    "model_id": "heuristic-v1",
+    "prompt_version": "score_clip_v2",
+    "risk_flags": [
+     "claim",
+     "heuristic_only"
+    ],
+    "rubric": {
+     "abspiel_dauer_s": 56.98,
+     "contract": "candidates_v1",
+     "duration_s": 56.98,
+     "ends_before_answer": false,
+     "is_humor": false,
+     "klang": null,
+     "kontext_zugabe": null,
+     "laenge_abzug": 0.132,
+     "needs_earlier_context": false,
+     "parent_id": null,
+     "policy_version": "clip_policy_v1",
+     "proposal_why": "Heuristik ohne Sprachmodell: Moment-Typ Kleine Geschichte mit Wendepunkt, Diskursmarker „konkret heißt das“, Frage im Abschnitt, geschätzt 32 Sekunden.",
+     "repair": {
+      "expanded_back": 0,
+      "expanded_front": 1,
+      "failed": false,
+      "rounds": 1
+     },
+     "rubric_points": {
+      "aufloesung": 1.6,
+      "emotion": 1.1,
+      "hook": 1.4,
+      "offene_frage": 2.0,
+      "spezifitaet": 0.8,
+      "standalone": 2.0,
+      "zielgruppe": 1.2
+     },
+     "scores": {
+      "audience_fit": {
+       "evidence": "Heute machen wir es genau andersrum.",
+       "value": 6,
+       "weight": 0.0769
+      },
+      "hook": {
+       "evidence": "Heute machen wir es genau andersrum.",
+       "value": 7,
+       "weight": 0.3077
+      },
+      "payoff": {
+       "evidence": "Das Problem ist, dass viele Gründer genau das",
+       "value": 8,
+       "weight": 0.1538
+      },
+      "specificity": {
+       "evidence": "Das Problem ist, dass viele Gründer genau das",
+       "value": 4,
+       "weight": 0.2308
+      },
+      "tension": {
+       "evidence": "Das heißt aber nicht, dass das für jede",
+       "value": 10,
+       "weight": 0.2308
+      }
+     },
+     "sensitive_topic": false,
+     "speakers": [
+      "SPEAKER_00",
+      "SPEAKER_01"
+     ],
+     "suggested_title_card": "",
+     "teaser_satz": null,
+     "text": "[5] (SPEAKER_00) Heute machen wir es genau andersrum.\n[6] (SPEAKER_00) Das heißt aber nicht, dass das für jede Branche gilt.\n[7] (SPEAKER_00) Bei Software sieht das anders aus.\n[8] (SPEAKER_00) Was ich gelernt habe: Preise sind Positionierung.\n[9] (SPEAKER_00) Und dann kam der zweite Fehler.\n[10] (SPEAKER_00) Wir haben zu spät eingestellt und zu lange gewartet, aber\n[11] (SPEAKER_00) Allerdings hatten wir Glück mit dem Timing.\n[12] (SPEAKER_01) Was würdest du heute anders machen?\n[13] (SPEAKER_00) Ich würde die Preise nie wieder unter die Kosten setzen.\n[14] (SPEAKER_00) Konkret heißt das: erst rechnen, dann verkaufen.\n[15] (SPEAKER_00) Das Problem ist, dass viele Gründer genau das nicht tun.",
+     "unresolved_references": []
+    },
+    "segments": [
+     {
+      "end": 85.98,
+      "role": "body",
+      "start": 29.0
+     }
+    ],
+    "start_s": 29.0,
+    "story_graph_flags": [],
+    "structure": "decision_story",
+    "total": 9.03,
+    "why": "Kernaussage in 57 Sekunden vollständig, Einstieg mit klarer Gegenposition, keine spätere Relativierung gefunden, passt für LinkedIn, Bewertung ohne Sprachmodell."
+   }
+  ],
+  "chapters": 1,
+  "chapters_with_seeds": 1,
+  "contract": "candidates_v1",
+  "discarded": [],
+  "engine": "story_engine_v4",
+  "model_id": "heuristic-v1",
+  "prompt_versions": [
+   "propose_moments_v1",
+   "score_clip_v2",
+   "story_graph_confirm_v1"
+  ],
+  "proposals": 2,
+  "provider": "local-heuristic",
+  "verworfen": [],
+  "weights": {
+   "audience_fit": 0.0769,
+   "hook": 0.3077,
+   "payoff": 0.1538,
+   "specificity": 0.2308,
+   "tension": 0.2308
+  }
+ },
+ "demo_without_heatmap": {
+  "candidates": [
+   {
+    "end_s": 32.98,
+    "first_sent": 0,
+    "gate_passed": true,
+    "gates": {
+     "fidelity": {
+      "detail": "keine entfernte Verneinung oder Einschränkung",
+      "passed": true
+     },
+     "no_open_loop": {
+      "detail": "endet mit abgeschlossenem Satz",
+      "passed": true
+     },
+     "sentence_boundaries": {
+      "detail": "Start und Ende an Satzgrenzen",
+      "passed": true
+     },
+     "standalone": {
+      "detail": "keine offenen Verweise",
+      "passed": true
+     },
+     "verb_bracket": {
+      "available": false,
+      "detail": "Verbklammer-Prüfung nicht verfügbar, spaCy fehlt",
+      "passed": true
+     }
+    },
+    "last_sent": 5,
+    "model_id": "heuristic-v1",
+    "prompt_version": "score_clip_v2",
+    "risk_flags": [
+     "claim",
+     "heuristic_only"
+    ],
+    "rubric": {
+     "abspiel_dauer_s": 32.98,
+     "contract": "candidates_v1",
+     "duration_s": 32.98,
+     "ends_before_answer": false,
+     "is_humor": false,
+     "klang": null,
+     "kontext_zugabe": null,
+     "laenge_abzug": 0.0,
+     "needs_earlier_context": false,
+     "parent_id": null,
+     "policy_version": "clip_policy_v1",
+     "proposal_why": "Heuristik ohne Sprachmodell: Moment-Typ Konkrete Zahl oder Ergebnis, Diskursmarker „der eigentliche grund“, Zahl im Abschnitt, geschätzt 22 Sekunden.",
+     "repair": {
+      "expanded_back": 0,
+      "expanded_front": 0,
+      "failed": false,
+      "rounds": 0
+     },
+     "rubric_points": {
+      "aufloesung": 1.2,
+      "emotion": 1.0,
+      "hook": 1.8,
+      "offene_frage": 0.4,
+      "spezifitaet": 2.0,
+      "standalone": 2.0,
+      "zielgruppe": 1.0
+     },
+     "scores": {
+      "audience_fit": {
+       "evidence": "Ehrlich gesagt war das der teuerste Fehler meiner",
+       "value": 5,
+       "weight": 0.0769
+      },
+      "hook": {
+       "evidence": "Ehrlich gesagt war das der teuerste Fehler meiner",
+       "value": 9,
+       "weight": 0.3077
+      },
+      "payoff": {
+       "evidence": "Wir haben in unserer Branche 40 Prozent Marge",
+       "value": 6,
+       "weight": 0.1538
+      },
+      "specificity": {
+       "evidence": "Wir haben in unserer Branche 40 Prozent Marge",
+       "value": 10,
+       "weight": 0.2308
+      },
+      "tension": {
+       "evidence": "Ehrlich gesagt war das der teuerste Fehler meiner",
+       "value": 2,
+       "weight": 0.2308
+      }
+     },
+     "sensitive_topic": false,
+     "speakers": [
+      "SPEAKER_00"
+     ],
+     "suggested_title_card": "",
+     "teaser_satz": null,
+     "text": "[0] (SPEAKER_00) Ehrlich gesagt war das der teuerste Fehler meiner Karriere.\n[1] (SPEAKER_00) Wir haben in unserer Branche 40 Prozent Marge verloren, und das gilt für jede Firma.\n[2] (SPEAKER_00) Der eigentliche Grund war ein falsches Preismodell.\n[3] (SPEAKER_00) Wir haben 2019 die Preise um 30 Prozent gesenkt.\n[4] (SPEAKER_00) Das hat alles verändert, und zwar nach unten.\n[5] (SPEAKER_00) Heute machen wir es genau andersrum.",
+     "unresolved_references": []
+    },
+    "segments": [
+     {
+      "end": 32.98,
+      "role": "body",
+      "start": 0.0
+     }
+    ],
+    "start_s": 0.0,
+    "story_graph_flags": [
+     {
+      "confirmed": null,
+      "marker": "das heißt aber nicht",
+      "overlap": 0.43,
+      "reason": "Ohne Sprachmodell nicht prüfbar, Mensch entscheidet",
+      "repair": null,
+      "seconds_after": 0.8,
+      "sentence_idx": 6,
+      "suggestion": "Clip bis Satz 6 verlängern oder Einschränkung als Text einblenden",
+      "text": "Das heißt aber nicht, dass das für jede Branche gilt."
+     }
+    ],
+    "structure": "hook_build_payoff",
+    "total": 10.08,
+    "why": "Kernaussage in 33 Sekunden vollständig, starker Einstieg, konkret mit Zahlen oder Namen, möglicherweise relativiert der Sprecher die Aussage 1 Sekunden später, ungeprüft, Passung für LinkedIn fraglich, Bewertung ohne Sprachmodell."
+   },
+   {
+    "end_s": 85.98,
+    "first_sent": 5,
+    "gate_passed": true,
+    "gates": {
+     "fidelity": {
+      "detail": "keine entfernte Verneinung oder Einschränkung",
+      "passed": true
+     },
+     "no_open_loop": {
+      "detail": "endet mit abgeschlossenem Satz",
+      "passed": true
+     },
+     "sentence_boundaries": {
+      "detail": "Start und Ende an Satzgrenzen",
+      "passed": true
+     },
+     "standalone": {
+      "detail": "keine offenen Verweise",
+      "passed": true
+     },
+     "verb_bracket": {
+      "available": false,
+      "detail": "Verbklammer-Prüfung nicht verfügbar, spaCy fehlt",
+      "passed": true
+     }
+    },
+    "last_sent": 15,
+    "model_id": "heuristic-v1",
+    "prompt_version": "score_clip_v2",
+    "risk_flags": [
+     "claim",
+     "heuristic_only"
+    ],
+    "rubric": {
+     "abspiel_dauer_s": 56.98,
+     "contract": "candidates_v1",
+     "duration_s": 56.98,
+     "ends_before_answer": false,
+     "is_humor": false,
+     "klang": null,
+     "kontext_zugabe": null,
+     "laenge_abzug": 0.132,
+     "needs_earlier_context": false,
+     "parent_id": null,
+     "policy_version": "clip_policy_v1",
+     "proposal_why": "Heuristik ohne Sprachmodell: Moment-Typ Kleine Geschichte mit Wendepunkt, Diskursmarker „konkret heißt das“, Frage im Abschnitt, geschätzt 32 Sekunden.",
+     "repair": {
+      "expanded_back": 0,
+      "expanded_front": 1,
+      "failed": false,
+      "rounds": 1
+     },
+     "rubric_points": {
+      "aufloesung": 1.6,
+      "emotion": 1.1,
+      "hook": 1.4,
+      "offene_frage": 2.0,
+      "spezifitaet": 0.8,
+      "standalone": 2.0,
+      "zielgruppe": 1.2
+     },
+     "scores": {
+      "audience_fit": {
+       "evidence": "Heute machen wir es genau andersrum.",
+       "value": 6,
+       "weight": 0.0769
+      },
+      "hook": {
+       "evidence": "Heute machen wir es genau andersrum.",
+       "value": 7,
+       "weight": 0.3077
+      },
+      "payoff": {
+       "evidence": "Das Problem ist, dass viele Gründer genau das",
+       "value": 8,
+       "weight": 0.1538
+      },
+      "specificity": {
+       "evidence": "Das Problem ist, dass viele Gründer genau das",
+       "value": 4,
+       "weight": 0.2308
+      },
+      "tension": {
+       "evidence": "Das heißt aber nicht, dass das für jede",
+       "value": 10,
+       "weight": 0.2308
+      }
+     },
+     "sensitive_topic": false,
+     "speakers": [
+      "SPEAKER_00",
+      "SPEAKER_01"
+     ],
+     "suggested_title_card": "",
+     "teaser_satz": null,
+     "text": "[5] (SPEAKER_00) Heute machen wir es genau andersrum.\n[6] (SPEAKER_00) Das heißt aber nicht, dass das für jede Branche gilt.\n[7] (SPEAKER_00) Bei Software sieht das anders aus.\n[8] (SPEAKER_00) Was ich gelernt habe: Preise sind Positionierung.\n[9] (SPEAKER_00) Und dann kam der zweite Fehler.\n[10] (SPEAKER_00) Wir haben zu spät eingestellt und zu lange gewartet, aber\n[11] (SPEAKER_00) Allerdings hatten wir Glück mit dem Timing.\n[12] (SPEAKER_01) Was würdest du heute anders machen?\n[13] (SPEAKER_00) Ich würde die Preise nie wieder unter die Kosten setzen.\n[14] (SPEAKER_00) Konkret heißt das: erst rechnen, dann verkaufen.\n[15] (SPEAKER_00) Das Problem ist, dass viele Gründer genau das nicht tun.",
+     "unresolved_references": []
+    },
+    "segments": [
+     {
+      "end": 85.98,
+      "role": "body",
+      "start": 29.0
+     }
+    ],
+    "start_s": 29.0,
+    "story_graph_flags": [],
+    "structure": "decision_story",
+    "total": 9.03,
+    "why": "Kernaussage in 57 Sekunden vollständig, Einstieg mit klarer Gegenposition, keine spätere Relativierung gefunden, passt für LinkedIn, Bewertung ohne Sprachmodell."
+   }
+  ],
+  "chapters": 1,
+  "chapters_with_seeds": 0,
+  "contract": "candidates_v1",
+  "discarded": [],
+  "engine": "story_engine_v4",
+  "model_id": "heuristic-v1",
+  "prompt_versions": [
+   "propose_moments_v1",
+   "score_clip_v2",
+   "story_graph_confirm_v1"
+  ],
+  "proposals": 2,
+  "provider": "local-heuristic",
+  "verworfen": [],
+  "weights": {
+   "audience_fit": 0.0769,
+   "hook": 0.3077,
+   "payoff": 0.1538,
+   "specificity": 0.2308,
+   "tension": 0.2308
+  }
+ }
+}

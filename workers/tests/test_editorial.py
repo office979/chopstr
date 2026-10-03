@@ -106,6 +106,47 @@ def test_verdrehte_laengengrenzen_scheitern_laut(tmp_path, monkeypatch):
     editorial.load.cache_clear()
 
 
+# -- Startprüfung des Workers (AP0a) -------------------------------------------------------------
+def test_startup_check_passes_with_repo_files():
+    from chopstr_worker import worker
+
+    editorial.load.cache_clear()
+    worker.check_assets()
+
+
+def test_startup_check_aborts_clearly_when_editorial_dir_is_empty(tmp_path, monkeypatch):
+    """Im Image ohne Policy soll der Worker gar nicht erst starten, statt in der Kandidatensuche zu scheitern."""
+    from chopstr_worker import worker
+
+    editorial.load.cache_clear()
+    monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path / "gibt_es_nicht"))
+    with pytest.raises(SystemExit) as excinfo:
+        worker.check_assets()
+    editorial.load.cache_clear()
+    message = str(excinfo.value)
+    assert message.startswith("Der Worker startet nicht, weil gemeinsame Dateien fehlen")
+    assert "Redaktionelle Grundlage (EDITORIAL_DIR)" in message
+    assert "nicht gefunden" in message and str(tmp_path / "gibt_es_nicht") in message
+    assert "Schriftenliste" not in message and "Ausgaberegeln" not in message
+
+
+def test_startup_check_names_missing_fonts_and_output_rules(tmp_path, monkeypatch):
+    from chopstr_worker import worker
+    from chopstr_worker.pipeline import ausgabe_pruefung, captions_de
+
+    monkeypatch.setattr(captions_de, "_fonts_zwischenspeicher", None)
+    monkeypatch.setattr(ausgabe_pruefung, "_zwischenspeicher", None)
+    monkeypatch.setenv("CHOPSTR_CAPTION_FONTS", str(tmp_path / "caption_fonts.json"))
+    monkeypatch.setenv("CHOPSTR_AUSGABE_REGELN", str(tmp_path / "ausgabe_regeln_v1.json"))
+    editorial.load.cache_clear()
+    with pytest.raises(SystemExit) as excinfo:
+        worker.check_assets()
+    message = str(excinfo.value)
+    assert "Schriftenliste (CHOPSTR_CAPTION_FONTS)" in message
+    assert "Ausgaberegeln (CHOPSTR_AUSGABE_REGELN)" in message
+    assert "Redaktionelle Grundlage" not in message
+
+
 # -- Länge -----------------------------------------------------------------------------------------
 def test_gutes_fenster_bekommt_keinen_abzug(policy):
     for s in (30, 41, 55):
@@ -353,3 +394,160 @@ def test_zu_kurze_spanne_bekommt_keinen_teaser(policy):
 
     s = _sents(["Alle sagen das ist falsch.", "Und dann kam es anders."])
     assert story_engine.teaser_satz(s, 0, 1, policy, None) is None
+
+
+# -- Fassungen und Pins (AP0b) ---------------------------------------------------------------------
+@pytest.fixture
+def v2_raw():
+    import yaml
+
+    return yaml.safe_load((editorial.policy_dir() / "clip_policy_v2.yaml").read_text(encoding="utf-8"))
+
+
+def _write_v2(tmp_path, monkeypatch, data):
+    import yaml
+
+    (tmp_path / "clip_policy_v2.yaml").write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path))
+    editorial.load.cache_clear()
+
+
+def test_v1_and_v2_load():
+    editorial.load.cache_clear()
+    assert editorial.load(1).version == 1
+    assert editorial.load(2).version == 2
+    assert editorial.policy_version(2) == "clip_policy_v2"
+
+
+def test_active_version_comes_from_environment(monkeypatch):
+    monkeypatch.delenv("CHOPSTR_POLICY_VERSION", raising=False)
+    editorial.load.cache_clear()
+    assert editorial.active_version() == 1
+    assert editorial.load().version == 1 and editorial.policy_version() == "clip_policy_v1"
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    assert editorial.active_version() == 2
+    assert editorial.load().version == 2 and editorial.policy_version() == "clip_policy_v2"
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", " 1 ")
+    assert editorial.load().version == 1
+    editorial.load.cache_clear()
+
+
+def test_typo_in_rollback_switch_fails_loudly(monkeypatch):
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "v2")
+    with pytest.raises(editorial.PolicyError, match="keine Fassungsnummer"):
+        editorial.active_version()
+
+
+def test_unknown_version_fails_loudly(monkeypatch):
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "9")
+    editorial.load.cache_clear()
+    with pytest.raises(editorial.PolicyError, match="nicht gefunden"):
+        editorial.load()
+    editorial.load.cache_clear()
+
+
+def test_v1_pins_are_the_versions_loaded_before_ap0b():
+    assert editorial.load(1).prompt_pins == {
+        "system_editor": 1, "propose_moments": 1, "score_clip": 2,
+        "story_graph_confirm": 1, "hooks": 1, "post_caption": 1,
+    }  # fmt: skip
+    assert editorial.load(1).prompt_pins == editorial.V1_PROMPT_PINS
+
+
+def test_v2_pins_match_v1_and_all_switches_are_false(v2_raw):
+    assert editorial.load(2).prompt_pins == editorial.V1_PROMPT_PINS
+    for path in editorial.V2_SWITCHES:
+        value = v2_raw["implementation"]
+        for part in path.split("."):
+            value = value[part]
+        assert value is False, path
+
+
+def test_v2_rules_are_a_copy_of_v1(v2_raw):
+    """Gleiche Regeln und gleicher Prompt-Text; anders sind nur Kopf, neue Abschnitte und die Begründung
+    bei offene_frage, die nicht mehr auf den widerlegten Zeigarnik-Effekt verweist."""
+    import yaml
+
+    v1_raw = yaml.safe_load((editorial.policy_dir() / "clip_policy_v1.yaml").read_text(encoding="utf-8"))
+    for section in editorial.RULE_SECTIONS:
+        if section == "rubrik":
+            continue
+        assert v2_raw[section] == v1_raw[section], section
+    assert v2_raw["rubrik"]["skala_max"] == v1_raw["rubrik"]["skala_max"]
+    for old, new in zip(v1_raw["rubrik"]["kriterien"], v2_raw["rubrik"]["kriterien"], strict=True):
+        assert {k: v for k, v in old.items() if k != "herkunft"} == {k: v for k, v in new.items() if k != "herkunft"}
+    open_question = next(k for k in editorial.load(2).kriterien if k.schluessel == "offene_frage")
+    assert "Zeigarnik" not in open_question.herkunft and "Ovsiankina" in open_question.herkunft
+    assert editorial.load(1).als_prompt_text() == editorial.load(2).als_prompt_text()
+
+
+def test_every_v2_rule_has_an_origin(v2_raw):
+    paths = editorial.rule_paths(v2_raw)
+    assert set(paths) == set(v2_raw["origins"])
+    for path in paths:
+        entry = v2_raw["origins"][path]
+        assert entry["origin"] in {"F", "H", "R", "G"}, path
+        assert entry["source"].strip(), path
+    # Recherche: das Längenfenster aus „105 Beispielclips“ ist nicht belastbar, G gibt es noch nicht.
+    for path in ("laenge.ziel_s", "laenge.gut_von_s", "laenge.gut_bis_s", "rubrik.kriterien.offene_frage"):
+        assert v2_raw["origins"][path]["origin"] == "H", path
+    assert not any(e["origin"] == "G" for e in v2_raw["origins"].values())
+
+
+def test_v2_text_has_no_dashes():
+    import re
+
+    text = (editorial.policy_dir() / "clip_policy_v2.yaml").read_text(encoding="utf-8")
+    assert "–" not in text and "—" not in text
+    assert not re.search(r"\S - ", text)  # Bindestrich als Gedankenstrich, YAML-Listenzeichen ausgenommen
+
+
+@pytest.mark.parametrize("section", ["prompts", "implementation", "origins"])
+def test_v2_without_required_section_fails_loudly(tmp_path, monkeypatch, v2_raw, section):
+    del v2_raw[section]
+    _write_v2(tmp_path, monkeypatch, v2_raw)
+    with pytest.raises(editorial.PolicyError, match=f"Pflichtabschnitte fehlen: {section}"):
+        editorial.load(2)
+    editorial.load.cache_clear()
+
+
+def test_v2_rule_without_origin_fails_loudly(tmp_path, monkeypatch, v2_raw):
+    del v2_raw["origins"]["laenge.ziel_s"]
+    _write_v2(tmp_path, monkeypatch, v2_raw)
+    with pytest.raises(editorial.PolicyError, match="Regeln ohne Herkunft in origins: laenge.ziel_s"):
+        editorial.load(2)
+    editorial.load.cache_clear()
+
+
+def test_v2_orphaned_origin_and_bad_status_fail_loudly(tmp_path, monkeypatch, v2_raw):
+    v2_raw["origins"]["laenge.gibt_es_nicht"] = {"origin": "H", "source": "x"}
+    _write_v2(tmp_path, monkeypatch, v2_raw)
+    with pytest.raises(editorial.PolicyError, match="origins nennt Regeln, die es nicht gibt: laenge.gibt_es_nicht"):
+        editorial.load(2)
+    del v2_raw["origins"]["laenge.gibt_es_nicht"]
+    v2_raw["origins"]["laenge.ziel_s"] = {"origin": "X", "source": "x"}
+    _write_v2(tmp_path, monkeypatch, v2_raw)
+    with pytest.raises(editorial.PolicyError, match="muss F, H, R oder G sein"):
+        editorial.load(2)
+    editorial.load.cache_clear()
+
+
+def test_v2_without_pin_or_switch_fails_loudly(tmp_path, monkeypatch, v2_raw):
+    del v2_raw["prompts"]["hooks"]
+    _write_v2(tmp_path, monkeypatch, v2_raw)
+    with pytest.raises(editorial.PolicyError, match="prompts pinnt nicht: hooks"):
+        editorial.load(2)
+    v2_raw["prompts"]["hooks"] = 1
+    del v2_raw["implementation"]["cut"]
+    _write_v2(tmp_path, monkeypatch, v2_raw)
+    with pytest.raises(editorial.PolicyError, match="implementation ohne Schalter: cut.padding"):
+        editorial.load(2)
+    editorial.load.cache_clear()
+
+
+def test_file_name_and_version_must_match(tmp_path, monkeypatch, v2_raw):
+    v2_raw["version"] = 3
+    _write_v2(tmp_path, monkeypatch, v2_raw)
+    with pytest.raises(editorial.PolicyError, match="nennt version 3, erwartet 2"):
+        editorial.load(2)
+    editorial.load.cache_clear()

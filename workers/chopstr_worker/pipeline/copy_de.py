@@ -111,7 +111,7 @@ def lint(text: str, p: BrandProfile) -> tuple[str, list[str]]:
 
 
 def build_hook_prompt(clip_text: str, p: BrandProfile) -> tuple[str, prompts.Prompt]:
-    pr = prompts.load("hooks")
+    pr = prompts.load_pinned("hooks")
     return (
         pr.render(
             address=p.address.upper(),

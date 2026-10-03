@@ -83,7 +83,7 @@ def find_later_qualifications(sents: list[Sentence], clip_first: int, clip_last:
 
 
 def build_confirm_prompt(clip_text: str, later_text: str, seconds_after: float) -> tuple[str, prompts.Prompt]:
-    p = prompts.load("story_graph_confirm")
+    p = prompts.load_pinned("story_graph_confirm")
     return p.render(clip_text=clip_text, later_text=later_text, seconds_after=round(seconds_after)), p
 
 

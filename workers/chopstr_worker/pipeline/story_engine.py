@@ -848,11 +848,13 @@ def select_best(cands: list[CandidateResult], limit: int = MAX_CANDIDATES) -> tu
 
 
 def prompt_versions() -> list[str]:
-    """Die drei Prompt-Versionen der Engine (für Event-Payload und Idempotenz-Key)."""
+    """Die drei Prompt-Versionen der Engine (für Event-Payload und Idempotenz-Key), so wie die aktive
+    Policy sie pinnt. Eine neue Prompt-Datei ändert diese Liste erst, wenn eine Policy sie pinnt."""
+    pol = editorial.load()
     return [
-        prompts.load("propose_moments").prompt_version,
-        prompts.load("score_clip").prompt_version,
-        prompts.load("story_graph_confirm").prompt_version,
+        prompts.load_pinned("propose_moments", pol).prompt_version,
+        prompts.load_pinned("score_clip", pol).prompt_version,
+        prompts.load_pinned("story_graph_confirm", pol).prompt_version,
     ]
 
 

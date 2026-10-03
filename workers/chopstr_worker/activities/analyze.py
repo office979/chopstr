@@ -7,7 +7,9 @@ ASR-Ergebnis bereits im Storage (Re-Run), fließt auch der Text-Anteil ein (``si
 laufen und schreibt ``candidates`` nach ``packages/schema/CANDIDATES.md``.
 
 Seit dem Wegfall des Auswahlschritts legt ``detect_candidates`` im selben Zug für **jeden** Kandidaten
-eine ``clips``-Zeile an (``auto_create_clips``) und setzt den Kandidaten auf ``human_verdict = 'accepted'``.
+eine ``clips``-Zeile an (``auto_create_clips``) und setzt den Kandidaten auf ``human_verdict = 'accepted'``,
+außer er trägt einen Risikohinweis aus ``AUTO_ACCEPT_BLOCKING_FLAGS``: dann bleibt das Urteil leer und
+der Clip ein Entwurf ohne Render, bis ein Mensch ihn annimmt.
 Damit ist die Warteschlange des Renderers (``clips.status = 'draft'`` mit angenommenem Kandidaten)
 ohne menschliches Zutun gefüllt. Weil beide Wege — der lokale Worker und die Temporal-Activity —
 durch ``run_detect_candidates`` laufen, hängt die Clip-Erzeugung an genau einer Stelle.
@@ -43,6 +45,11 @@ SIGNALS_VERSION = "signals_v2"
 AUTO_CLIP_ASPECT = "9:16"
 AUTO_CLIP_PLATFORM = "reels"  # Rückfall, wenn an der Quelle kein Markenprofil hängt
 AUTO_VERDICT_REASON = "automatisch angenommen (ohne Auswahlschritt)"
+# Produktregel Freigabepflicht (Master-Prompt Priorität 1 Originaltreue): Humor, sensible Themen und
+# Tatsachenbehauptungen nimmt nie die Automatik an. Der Clip-Entwurf entsteht trotzdem, das Urteil
+# bleibt leer, und ohne angenommenen Kandidaten rendert ihn kein Worker.
+AUTO_ACCEPT_BLOCKING_FLAGS = ("humor", "sensitive_topic", "claim")
+AUTO_HOLD_REASON_PREFIX = "automatische Freigabe ausgesetzt: "
 # Rundung der Kandidatenfenster für den Dublettenschutz (Zehntelsekunden)
 _WINDOW_DIGITS = 1
 
@@ -53,14 +60,23 @@ SQL_CLIP_FOR_CANDIDATE = "select id from clips where candidate_id = %s limit 1"
 SQL_CLIP_WINDOWS = (
     "select k.start_s, k.end_s from clips c join candidates k on k.id = c.candidate_id where c.source_id = %s"
 )
-# Re-Run: die noch nicht gerenderten Automatik-Clips und ihre Kandidaten weichen dem neuen Ergebnis.
+# Re-Run: die noch nicht gerenderten Automatik-Clips und ihre Kandidaten weichen dem neuen Ergebnis,
+# auch die zurückgehaltenen (Begründung beginnt mit ``AUTO_HOLD_REASON_PREFIX``); deren Kandidaten
+# haben kein Urteil und fallen danach mit allen anderen ohne Urteil weg.
 # Menschliche Urteile haben immer ein ``verdict_by`` und bleiben deshalb unberührt.
 SQL_DROP_AUTO_CLIPS = (
     "delete from clips where status = 'draft' and candidate_id in "
-    "(select id from candidates where source_id = %s and verdict_by is null and verdict_reason = %s)"
+    "(select id from candidates where source_id = %s and verdict_by is null "
+    "and (verdict_reason = %s or verdict_reason like %s))"
 )
 SQL_DROP_AUTO_CANDIDATES = (
     "delete from candidates where source_id = %s and verdict_by is null and verdict_reason = %s "
+    "and not exists (select 1 from clips c where c.candidate_id = candidates.id)"
+)
+# Kandidaten ohne Urteil weichen dem neuen Lauf. Ein zurückgehaltener Kandidat, dessen Clip schon
+# gerendert ist (ein Mensch hat ihn angestoßen), bleibt stehen wie ein angenommener mit Clip.
+SQL_DROP_UNJUDGED_CANDIDATES = (
+    "delete from candidates where source_id = %s and human_verdict is null "
     "and not exists (select 1 from clips c where c.candidate_id = candidates.id)"
 )
 # Die Kandidaten, die einen Lauf ueberleben, weil jemand sie beurteilt hat.
@@ -148,9 +164,13 @@ def candidates_key_for(tv_id: str, tv_version: int, brief: dict, prompt_versions
 
     Die Grundlage gehoert dazu, weil sie das Ergebnis bestimmt: Laengengrenzen, Kontextzugabe,
     Gewichte der Rubrik. Ohne sie bliebe nach einer Aenderung an der Richtlinie das alte Ergebnis
-    aus dem Zwischenspeicher stehen, und die Aenderung sieht aus, als haette sie nicht gewirkt."""
+    aus dem Zwischenspeicher stehen, und die Aenderung sieht aus, als haette sie nicht gewirkt.
+
+    Gemeint ist die aktive Fassung (``CHOPSTR_POLICY_VERSION``), nicht die Standardfassung, und die
+    ``prompt_versions`` sind die gepinnten (``story_engine.prompt_versions``): ein Wechsel auf v2
+    oder ein neuer Pin ergibt einen neuen Schluessel."""
     try:
-        policy = editorial.policy_version()
+        policy = editorial.policy_version(editorial.load().version)
     except Exception:  # ohne Richtlinie lieber weiterarbeiten als gar nicht
         policy = "unbekannt"
     params = {
@@ -182,7 +202,7 @@ def _drop_stale_auto_rows(ctx: common.Context, source_id: str) -> None:
     Kandidaten und doppelte Clips. Entfernt werden deshalb die Automatik-Clips, die noch nicht gerendert
     sind (``draft``), und anschließend die Automatik-Kandidaten, an denen danach kein Clip mehr hängt.
     Gerenderte Ergebnisse und alles mit menschlichem Urteil (``verdict_by`` gesetzt) bleiben stehen."""
-    ctx.conn.execute(SQL_DROP_AUTO_CLIPS, (source_id, AUTO_VERDICT_REASON))
+    ctx.conn.execute(SQL_DROP_AUTO_CLIPS, (source_id, AUTO_VERDICT_REASON, AUTO_HOLD_REASON_PREFIX + "%"))
     ctx.conn.execute(SQL_DROP_AUTO_CANDIDATES, (source_id, AUTO_VERDICT_REASON))
 
 
@@ -198,7 +218,7 @@ def _write_rows(ctx: common.Context, source_id: str, cands: list[story_engine.Ca
     Verglichen wird mit demselben Maß wie in der Auswahl (Anteil am kürzeren Abschnitt), damit nicht
     zwei verschiedene Begriffe von „dasselbe" nebeneinander stehen."""
     _drop_stale_auto_rows(ctx, source_id)
-    ctx.conn.execute("delete from candidates where source_id = %s and human_verdict is null", (source_id,))
+    ctx.conn.execute(SQL_DROP_UNJUDGED_CANDIDATES, (source_id,))
     ueberlebende = [
         (float(r[0] or 0.0), float(r[1] or 0.0))
         for r in db.fetch_all(ctx.conn, SQL_SURVIVING_CANDIDATES, (source_id,))
@@ -260,6 +280,20 @@ def clip_platform(ctx: common.Context, source_id: str) -> str:
     return value
 
 
+def auto_accept_blockers(risk_flags: Any) -> list[str]:
+    """Die Risikohinweise, die eine automatische Annahme verbieten, in der Reihenfolge des Kandidaten."""
+    blockers: list[str] = []
+    for flag in risk_flags or ():
+        if flag in AUTO_ACCEPT_BLOCKING_FLAGS and flag not in blockers:
+            blockers.append(flag)
+    return blockers
+
+
+def auto_hold_reason(blockers: list[str]) -> str:
+    """Begründung für einen zurückgehaltenen Kandidaten, lesbar in der Oberfläche."""
+    return f"{AUTO_HOLD_REASON_PREFIX}{', '.join(blockers)}, menschliche Prüfung nötig"
+
+
 def auto_create_clips(
     ctx: common.Context, source_id: str, src: dict, candidate_ids: list[str], cands: list[story_engine.CandidateResult]
 ) -> list[str]:
@@ -272,11 +306,16 @@ def auto_create_clips(
 
     Idempotent auf zwei Ebenen: ein Kandidat mit vorhandenem Clip wird übersprungen, und ein Fenster,
     zu dem an dieser Quelle schon ein Clip existiert, bekommt keinen zweiten (zweiter Lauf, gelöschte
-    oder bereits gerenderte Clips)."""
+    oder bereits gerenderte Clips).
+
+    Angenommen wird nur ein Kandidat ohne Hinweis aus ``AUTO_ACCEPT_BLOCKING_FLAGS``. Sonst bleibt
+    ``human_verdict`` leer und ``verdict_reason`` nennt die Hinweise; der Clip bleibt ``draft`` und
+    wird erst nach menschlicher Annahme gerendert."""
     platform = clip_platform(ctx, source_id)
     ad_label = ad_label_for(dict(src.get("brief") or {}), src.get("country") or "AT")
     taken = {_window(r[0], r[1]) for r in db.fetch_all(ctx.conn, SQL_CLIP_WINDOWS, (source_id,))}
     created: list[str] = []
+    held = 0
     for candidate_id, cand in zip(candidate_ids, cands):
         if not candidate_id:
             continue
@@ -302,17 +341,25 @@ def auto_create_clips(
             status="draft",
             created_by=None,
         )
-        db.update(
-            ctx.conn,
-            "candidates",
-            {"id": candidate_id},
-            human_verdict="accepted",
-            verdict_reason=AUTO_VERDICT_REASON,
-            verdict_at=datetime.now(UTC),
-        )
+        blockers = auto_accept_blockers(row.get("risk_flags"))
+        if blockers:
+            db.update(ctx.conn, "candidates", {"id": candidate_id}, verdict_reason=auto_hold_reason(blockers))
+            held += 1
+        else:
+            db.update(
+                ctx.conn,
+                "candidates",
+                {"id": candidate_id},
+                human_verdict="accepted",
+                verdict_reason=AUTO_VERDICT_REASON,
+                verdict_at=datetime.now(UTC),
+            )
         taken.add(key)
         created.append(str(inserted[0]) if inserted else "")
-    log.info("auto clips source=%s platform=%s aspect=%s created=%s", source_id, platform, AUTO_CLIP_ASPECT, len(created))
+    log.info(
+        "auto clips source=%s platform=%s aspect=%s created=%s held=%s",
+        source_id, platform, AUTO_CLIP_ASPECT, len(created), held,
+    )  # fmt: skip
     return created
 
 
@@ -431,14 +478,18 @@ def notify(source_id: str, event: str) -> None:
 
 
 __all__ = [
+    "AUTO_ACCEPT_BLOCKING_FLAGS",
     "AUTO_CLIP_ASPECT",
     "AUTO_CLIP_PLATFORM",
+    "AUTO_HOLD_REASON_PREFIX",
     "AUTO_VERDICT_REASON",
     "SIGNALS_VERSION",
     "STEP_CANDIDATES",
     "STEP_HEATMAP",
     "STEP_RENDER",
+    "auto_accept_blockers",
     "auto_create_clips",
+    "auto_hold_reason",
     "candidates_key_for",
     "clip_platform",
     "detect_candidates",

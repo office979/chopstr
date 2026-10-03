@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import pytest
 
-from chopstr_worker import config, heuristic_llm, providers_llm, residency
+from chopstr_worker import config, editorial, heuristic_llm, providers_llm, residency
 from chopstr_worker.pipeline import segment, story_engine, story_graph, story_score
 from chopstr_worker.providers_llm import LLM
 from chopstr_worker.residency import Tenant
 from tests.transcript_fixtures import demo_words
 
 BRIEF = {"audience": "Gründer", "wanted": "Zahlen", "exclude": "Werbung", "platform": "linkedin"}
+
+
+@pytest.fixture(autouse=True, params=[1, 2], ids=["policy_v1", "policy_v2"])
+def active_policy(request, monkeypatch):
+    """AP0b: Der Heuristik-Provider läuft unter beiden Fassungen der Grundlage gleich."""
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", str(request.param))
+    editorial.load.cache_clear()
+    yield request.param
+    editorial.load.cache_clear()
 
 
 @pytest.fixture
@@ -100,13 +109,15 @@ def test_confirm_returns_no_verdict(no_network):
     assert out["prompt_version"] == "story_graph_confirm_v1"
 
 
-def test_engine_with_heuristic_marks_results(no_network):
+def test_engine_with_heuristic_marks_results(no_network, active_policy):
     report = story_engine.run(demo_words(), BRIEF, {}, {"seeds": [2]}, _llm("sovereign"))
+    assert report.prompt_versions == ["propose_moments_v1", "score_clip_v2", "story_graph_confirm_v1"]
     assert report.provider == "local-heuristic" and report.model_id == "heuristic-v1"
     assert report.candidates, report.discarded
     for c in report.candidates:
         assert c.model_id == "heuristic-v1"
         assert c.prompt_version == "score_clip_v2"
+        assert c.rubric["policy_version"] == f"clip_policy_v{active_policy}"
         assert "heuristic_only" in c.risk_flags
         assert c.why.endswith("Bewertung ohne Sprachmodell.")
         assert 12.0 <= c.duration_s <= 90.0

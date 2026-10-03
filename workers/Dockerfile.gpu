@@ -9,7 +9,11 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+# Gemeinsame Dateien aus dem Monorepo, wie im CPU-Image (siehe workers/Dockerfile)
 COPY packages/prompts /app/packages/prompts
+COPY packages/editorial /app/packages/editorial
+COPY packages/design /app/packages/design
+COPY packages/schema /app/packages/schema
 COPY workers/pyproject.toml workers/README.md /app/workers/
 COPY workers/chopstr_worker /app/workers/chopstr_worker
 COPY workers/eval /app/workers/eval

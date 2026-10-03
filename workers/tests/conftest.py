@@ -373,7 +373,11 @@ class FakeDB:
             # Die Zeilen, die einen erneuten Lauf ueberleben; neue Kandidaten duerfen sie nicht wiederholen.
             return FakeCursor([(c["start_s"], c["end_s"]) for c in self.candidates if c["source_id"] == params[0]])
         if q.startswith("delete from candidates where source_id = %s and human_verdict is null"):
-            self.candidates = [c for c in self.candidates if not (c["source_id"] == params[0] and c.get("human_verdict") is None)]
+            with_clip = {c.get("candidate_id") for c in self.clips.values()} if "not exists" in q else set()
+            self.candidates = [
+                c for c in self.candidates
+                if not (c["source_id"] == params[0] and c.get("human_verdict") is None and c["id"] not in with_clip)
+            ]
             return FakeCursor([])
         if q.startswith("update candidates set"):
             cid = params[-1]
@@ -384,6 +388,14 @@ class FakeDB:
         # Automatische Clips (analyze.auto_create_clips): Aufräumen vor dem Neuschreiben
         if q.startswith("delete from clips where status = 'draft' and candidate_id in"):
             auto = {c["id"] for c in self._auto_candidates(params[0], params[1])}
+            if len(params) > 2:  # zurückgehaltene Automatik-Kandidaten: ``verdict_reason like <Präfix>%``
+                prefix = str(params[2]).rstrip("%")
+                auto |= {
+                    c["id"]
+                    for c in self.candidates
+                    if c["source_id"] == params[0] and c.get("verdict_by") is None
+                    and str(c.get("verdict_reason") or "").startswith(prefix)
+                }
             return self._delete_dict(self.clips, lambda c: c["status"] == "draft" and c.get("candidate_id") in auto)
         if q.startswith("delete from candidates where source_id = %s and verdict_by is null and verdict_reason = %s"):
             with_clip = {c.get("candidate_id") for c in self.clips.values()}

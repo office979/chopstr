@@ -12,6 +12,11 @@ Kandidat die ``policy_version`` mit.
 Fehlt die Datei oder ist sie unvollständig, wird das nicht stillschweigend übergangen: Die
 Bewertung ohne redaktionelle Grundlage wäre beliebig, und eine beliebige Bewertung sieht von
 aussen genauso aus wie eine gute.
+
+Welche Fassung gilt, entscheidet ``CHOPSTR_POLICY_VERSION`` (Standard 1, siehe ``active_version``).
+Das ist der Rollback-Schalter: v1 bleibt unverändert und ladbar, neue Regeln kommen nur in v2. Jede
+Fassung pinnt ausserdem die Prompt-Versionen (``Policy.prompt_pins``), damit eine neue Prompt-Datei
+den laufenden Pfad nicht umschaltet, solange keine Policy sie pinnt.
 """
 
 from __future__ import annotations
@@ -23,16 +28,62 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+# Standard, solange ``CHOPSTR_POLICY_VERSION`` nicht gesetzt ist (bis zur Abnahme in AP11).
 POLICY_VERSION = 1
+POLICY_VERSION_ENV = "CHOPSTR_POLICY_VERSION"
 
 PFLICHTFELDER = (
     "version", "laenge", "rubrik", "bewertung", "moment_typen",
     "einstieg", "ausstieg", "zusammenhang", "audio", "hook_vorziehen", "ausschluss",
 )  # fmt: skip
+# Abschnitte mit redaktionellen Regeln; ab v2 braucht jede Regel darin eine Herkunft in ``origins``.
+RULE_SECTIONS = PFLICHTFELDER[1:]
+
+# Prompt-Versionen der Fassung 1, im Code eingefroren, weil die v1-Datei nicht verändert wird.
+# Genau die Versionen, die ``prompts.load`` ohne Versionsangabe vor AP0b geladen hat.
+V1_PROMPT_PINS: dict[str, int] = {
+    "system_editor": 1,
+    "propose_moments": 1,
+    "score_clip": 2,
+    "story_graph_confirm": 1,
+    "hooks": 1,
+    "post_caption": 1,
+}
+
+# Ab v2 zusätzlich Pflicht: Prompt-Pins, Schalter je Arbeitspaket, Herkunft je Regel.
+V2_REQUIRED_SECTIONS = ("prompts", "implementation", "origins")
+# Schalter der folgenden Arbeitspakete (Plan Abschnitt 4), als Pfad in ``implementation``. Alle
+# stehen auf false, bis ihr Paket gebaut und gemessen ist; einzeln abschaltbar.
+V2_SWITCHES = (
+    "sentence_rule",
+    "gates.discard_hard",
+    "search.payoff_first",
+    "hook.native_spoken",
+    "trim.enabled",
+    "cut.padding",
+    "captions.word_bridge",
+)
+# F Forschungsbefund, H Übertragungshypothese, R Produktregel, G gelernte Entscheidung
+# (docs/RESEARCH-CLIPPING-KERN.md, Statusschreibweise).
+ORIGIN_VALUES = ("F", "H", "R", "G")
 
 
 class PolicyError(RuntimeError):
     """Die redaktionelle Grundlage fehlt oder ist unbrauchbar."""
+
+
+def active_version() -> int:
+    """Die aktive Fassung aus ``CHOPSTR_POLICY_VERSION``; ohne Wert ``POLICY_VERSION``.
+
+    Ein Wert, der keine ganze Zahl ist, scheitert laut: ein Tippfehler im Rollback-Schalter darf
+    nicht still auf eine andere Fassung fallen."""
+    raw = os.environ.get(POLICY_VERSION_ENV, "").strip()
+    if not raw:
+        return POLICY_VERSION
+    try:
+        return int(raw)
+    except ValueError:
+        raise PolicyError(f"{POLICY_VERSION_ENV}={raw!r} ist keine Fassungsnummer (erlaubt: 1, 2).") from None
 
 
 def policy_dir() -> Path:
@@ -243,6 +294,14 @@ class Policy:
     def ausschluss(self) -> dict[str, Any]:
         return dict(self.roh["ausschluss"])
 
+    # -- Prompt-Pins ---------------------------------------------------------------------------
+    @property
+    def prompt_pins(self) -> dict[str, int]:
+        """Prompt-Name zu Version. v1 aus ``V1_PROMPT_PINS``, ab v2 aus dem Abschnitt ``prompts``."""
+        if self.version == 1:
+            return dict(V1_PROMPT_PINS)
+        return {str(name): int(version) for name, version in self.roh["prompts"].items()}
+
     def ist_organisatorisch(self, text: str) -> bool:
         if not self.ausschluss.get("organisatorisches_gespraech"):
             return False
@@ -291,11 +350,74 @@ def _pruefe(daten: dict[str, Any], quelle: Path) -> None:
         raise PolicyError(f"{quelle.name}: Die Längengrenzen stehen nicht in aufsteigender Reihenfolge.")
     if daten["bewertung"]["modus"] not in ("sortieren", "sperren"):
         raise PolicyError(f"{quelle.name}: bewertung.modus muss sortieren oder sperren sein.")
+    if int(daten["version"]) >= 2:
+        _check_v2(daten, quelle)
+
+
+def rule_paths(data: dict[str, Any]) -> list[str]:
+    """Alle Regeln der Abschnitte aus ``RULE_SECTIONS`` als Punktpfad.
+
+    Eine Regel ist ein Blattwert (Zahl, Schalter, Wortliste) oder ein Listeneintrag mit
+    ``schluessel`` (Kriterium, Moment-Typ), der als Ganzes eine Regel ist:
+    ``laenge.ziel_s``, ``rubrik.kriterien.hook``, ``moment_typen.zahl``, ``audio.merkmale.lachen``."""
+    paths: list[str] = []
+
+    def walk(value: Any, path: str) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                walk(child, f"{path}.{key}")
+        elif isinstance(value, list) and value and all(isinstance(x, dict) and "schluessel" in x for x in value):
+            paths.extend(f"{path}.{x['schluessel']}" for x in value)
+        else:
+            paths.append(path)
+
+    for section in RULE_SECTIONS:
+        walk(data[section], section)
+    return paths
+
+
+def _switch_value(implementation: dict[str, Any], path: str) -> Any:
+    value: Any = implementation
+    for part in path.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return None
+        value = value[part]
+    return value
+
+
+def _check_v2(data: dict[str, Any], source: Path) -> None:
+    """Zusätzliche Pflichten ab Fassung 2: Pins, Schalter, Herkunft je Regel."""
+    name = source.name
+    missing = [f for f in V2_REQUIRED_SECTIONS if not isinstance(data.get(f), dict)]
+    if missing:
+        raise PolicyError(f"{name}: Pflichtabschnitte fehlen: {', '.join(missing)}")
+    pins = data["prompts"]
+    unpinned = [prompt for prompt in V1_PROMPT_PINS if prompt not in pins]
+    if unpinned:
+        raise PolicyError(f"{name}: prompts pinnt nicht: {', '.join(unpinned)}")
+    if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in pins.values()):
+        raise PolicyError(f"{name}: prompts braucht je Name eine ganze Versionsnummer ab 1.")
+    missing_switches = [s for s in V2_SWITCHES if _switch_value(data["implementation"], s) is None]
+    if missing_switches:
+        raise PolicyError(f"{name}: implementation ohne Schalter: {', '.join(missing_switches)}")
+    origins = data["origins"]
+    paths = rule_paths(data)
+    without_origin = [p for p in paths if p not in origins]
+    if without_origin:
+        raise PolicyError(f"{name}: Regeln ohne Herkunft in origins: {', '.join(without_origin)}")
+    orphaned = [p for p in origins if p not in paths]
+    if orphaned:
+        raise PolicyError(f"{name}: origins nennt Regeln, die es nicht gibt: {', '.join(orphaned)}")
+    for path, entry in origins.items():
+        origin = entry.get("origin") if isinstance(entry, dict) else None
+        if origin not in ORIGIN_VALUES:
+            raise PolicyError(f"{name}: origins.{path}.origin muss F, H, R oder G sein, nicht {origin!r}.")
+        if not str(entry.get("source") or "").strip():
+            raise PolicyError(f"{name}: origins.{path} hat keine source.")
 
 
 @lru_cache(maxsize=4)
-def load(version: int = POLICY_VERSION) -> Policy:
-    """Grundlage laden und prüfen. Wirft PolicyError, wenn etwas fehlt."""
+def _load_version(version: int) -> Policy:
     import yaml
 
     pfad = policy_dir() / f"clip_policy_v{version}.yaml"
@@ -306,21 +428,38 @@ def load(version: int = POLICY_VERSION) -> Policy:
         )
     daten = yaml.safe_load(pfad.read_text(encoding="utf-8")) or {}
     _pruefe(daten, pfad)
+    if int(daten["version"]) != version:
+        raise PolicyError(f"{pfad.name}: Die Datei nennt version {daten['version']}, erwartet {version}.")
     return Policy(version=int(daten["version"]), stand=str(daten.get("stand", "")), roh=daten)
 
 
-def policy_version(version: int = POLICY_VERSION) -> str:
-    """Kennung für ``candidates.policy_version``, im selben Stil wie prompt_version."""
-    return f"clip_policy_v{version}"
+def load(version: int | None = None) -> Policy:
+    """Grundlage laden und prüfen; ohne Argument die aktive Fassung. Wirft PolicyError, wenn etwas fehlt."""
+    return _load_version(active_version() if version is None else int(version))
+
+
+# Tests und Werkzeuge leeren den Zwischenspeicher über ``load.cache_clear()`` wie bisher.
+load.cache_clear = _load_version.cache_clear  # type: ignore[attr-defined]
+
+
+def policy_version(version: int | None = None) -> str:
+    """Kennung für ``candidates.policy_version``, im selben Stil wie prompt_version; ohne Argument die aktive."""
+    return f"clip_policy_v{active_version() if version is None else version}"
 
 
 __all__ = [
+    "ORIGIN_VALUES",
     "POLICY_VERSION",
+    "POLICY_VERSION_ENV",
+    "V1_PROMPT_PINS",
+    "V2_SWITCHES",
     "Kriterium",
     "MomentTyp",
     "Policy",
     "PolicyError",
+    "active_version",
     "load",
     "policy_dir",
     "policy_version",
+    "rule_paths",
 ]

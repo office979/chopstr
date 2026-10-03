@@ -10,8 +10,13 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Prompts liegen im Monorepo unter packages/prompts; prompts.py findet sie relativ zum Paket
+# Gemeinsame Dateien aus dem Monorepo: Prompts, redaktionelle Grundlage, Schriftenliste, Ausgaberegeln.
+# Die Pfade setzt docker-compose zusaetzlich explizit (PROMPTS_DIR, EDITORIAL_DIR, CHOPSTR_CAPTION_FONTS,
+# CHOPSTR_AUSGABE_REGELN); fehlt eine Datei, bricht der Worker beim Start ab (worker.check_assets).
 COPY packages/prompts /app/packages/prompts
+COPY packages/editorial /app/packages/editorial
+COPY packages/design /app/packages/design
+COPY packages/schema /app/packages/schema
 COPY workers/pyproject.toml workers/README.md /app/workers/
 COPY workers/chopstr_worker /app/workers/chopstr_worker
 COPY workers/eval /app/workers/eval

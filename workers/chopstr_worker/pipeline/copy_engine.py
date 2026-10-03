@@ -121,12 +121,12 @@ def limit_notes(spoken: str, onscreen: str) -> list[str]:
 
 
 def _system_prompt() -> str:
-    return prompts.load("system_editor").render()
+    return prompts.load_pinned("system_editor").render()
 
 
 def generate_variants(llm, clip_text: str, brand: copy_de.BrandProfile) -> tuple[list[HookVariant], str]:
     """``hooks_v1`` aufrufen, jede Variante linten, Limits und Claims prüfen. Gibt (Varianten, prompt_version)."""
-    pr = prompts.load("hooks")
+    pr = prompts.load_pinned("hooks")
     user = pr.render(
         address=brand.address.upper(),
         country=brand.country,
@@ -202,7 +202,7 @@ def copy_decisions(variants: list[HookVariant], chosen: HookVariant, platform: s
 
 def generate_post_caption(llm, clip_text: str, brand: copy_de.BrandProfile, platform: str, hook_onscreen: str) -> tuple[str, str, list[str], list[str], str]:
     """``post_caption_v1`` für eine Plattform: (text, cta, lint_notes, claim_issues, prompt_version)."""
-    pr = prompts.load("post_caption")
+    pr = prompts.load_pinned("post_caption")
     user = pr.render(
         address=brand.address.upper(),
         country=brand.country,

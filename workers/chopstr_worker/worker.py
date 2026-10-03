@@ -180,9 +180,38 @@ class _all:
             await w.__aexit__(*exc)
 
 
+def check_assets() -> None:
+    """Startprüfung: redaktionelle Grundlage, Schriftenliste und Ausgaberegeln müssen lesbar sein.
+
+    Ohne diese Prüfung startet der Worker scheinbar gesund und scheitert erst mitten in der
+    Kandidatensuche (``PolicyError``) oder nach dem Encode (``FileNotFoundError``). Fehlt etwas,
+    bricht der Start mit einer deutschen Meldung ab, die sagt, was fehlt und welche Variable zählt."""
+    from . import editorial
+    from .pipeline import ausgabe_pruefung, captions_de
+
+    checks = (
+        ("Redaktionelle Grundlage", "EDITORIAL_DIR", editorial.load),
+        ("Schriftenliste", "CHOPSTR_CAPTION_FONTS", captions_de.schriften),
+        ("Ausgaberegeln", "CHOPSTR_AUSGABE_REGELN", ausgabe_pruefung.regeln),
+    )
+    problems: list[str] = []
+    for label, variable, load in checks:
+        try:
+            load()
+        except Exception as exc:  # jede Ursache (fehlend, kaputtes YAML oder JSON) beendet den Start
+            problems.append(f"  {label} ({variable}): {exc}")
+    if problems:
+        raise SystemExit(
+            "Der Worker startet nicht, weil gemeinsame Dateien fehlen oder unlesbar sind:\n"
+            + "\n".join(problems)
+            + "\nIm Image liegen sie unter /app/packages; die Variablen setzt infra/docker-compose.yml."
+        )
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    check_assets()
     queues = [q.strip() for q in args.queues.split(",") if q.strip()]
     asyncio.run(run_workers(queues, args.max_concurrent, schedules=args.ensure_schedules))
 

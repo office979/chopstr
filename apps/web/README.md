@@ -30,7 +30,7 @@ Alle Variablen stehen in `.env.example` im Monorepo-Root. Für die Web-App relev
 | `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, `TEMPORAL_TASK_QUEUE_CPU` | Startet `ClipProjectWorkflow` nach dem Upload. Ohne Adresse oder im Demo-Modus wird nur geloggt. |
 | `NEXT_PUBLIC_TUS_ENDPOINT` (Fallback `TUS_ENDPOINT`) | tusd-Endpoint für den Browser-Upload, Default `http://localhost:1080/files/`. |
 | `TUS_HOOK_SECRET` | Secret für `/api/tus/hooks` (Header `Hook-Secret` oder Query `?secret=`). Nicht gesetzt: Hook wird mit Warnung angenommen (nur Entwicklung). |
-| `UPLOAD_MAX_BYTES` | Upload-Limit, Default 5 GB. |
+| `UPLOAD_MAX_BYTES` | Upload-Limit, Default 25 GB. Muss zu `-max-size` von tusd passen. |
 | `NEXT_PUBLIC_DEMO_UPLOAD=true` | Erzwingt den simulierten Upload auch mit Datenbank. |
 | `NEXT_PUBLIC_MEDIA_BASE_URL` | Basis-URL für Medien aus dem `derived`-Bucket: 720p-Proxy im Editor sowie MP4, SRT, VTT und Poster auf der Clip-Seite (lokal MinIO `http://localhost:9000/chopstr-derived`). Ohne sie: simulierter Player und deaktivierte Export-Links. |
 | `UPLOAD_MODE`, `NEXT_PUBLIC_UPLOAD_MODE` | `tus` (Default) oder `direct`: direkter Upload über `POST /api/uploads/direct` in `LOCAL_STORAGE_DIR` statt tusd (siehe „Lokaler Testmodus“). |

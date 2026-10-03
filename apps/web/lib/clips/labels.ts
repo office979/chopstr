@@ -36,7 +36,12 @@ export const PATTERN_LABELS: Record<HookPattern, string> = {
   open_loop: "Neugier wecken",
   results_first: "Ergebnis zuerst",
   mistake_warning: "Vor Fehler warnen",
+  native: "Originalstelle",
 };
+
+/* Muster des wörtlichen Rückfalls (Worker copy_engine.NATIVE_PATTERN); steht nicht in PATTERN_ORDER, wird also
+ * weder zur Auswahl angeboten noch von Thompson gezogen, ist aber ein gültiger gespeicherter Wert. */
+export const NATIVE_PATTERN: HookPattern = "native";
 
 export function patternLabel(p: HookPattern | null | undefined): string {
   return p ? (PATTERN_LABELS[p] ?? p) : "Ohne Muster";
@@ -60,7 +65,7 @@ export function isPlatform(v: unknown): v is Platform {
 }
 
 export function isHookPattern(v: unknown): v is HookPattern {
-  return typeof v === "string" && (PATTERN_ORDER as string[]).includes(v);
+  return typeof v === "string" && ((PATTERN_ORDER as string[]).includes(v) || v === NATIVE_PATTERN);
 }
 
 /* Lautheit im DACH-Format: „-16,0 LUFS, -1,5 dBTP“. Nur für „Details für Profis“. */

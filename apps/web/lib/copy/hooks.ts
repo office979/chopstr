@@ -16,7 +16,9 @@ export type ManualHookFields = Pick<
 >;
 
 /* Manuelle Version aus dem Hook-Studio: Linter und Claim-Check laufen serverseitig noch einmal,
- * Varianten der Vorversion bleiben erhalten (sie sind die Auswahlbasis im Studio). */
+ * Varianten der Vorversion bleiben erhalten (sie sind die Auswahlbasis im Studio).
+ * Manuelle Hooks prüft das Web weiter mit hookClaimCheck (v1). Die Einbindung von hookClaimCheckV2
+ * (lib/copy/claims.ts) braucht eine Policy-Fassung im Web (AP12b), sonst würde sie auch unter Fassung 1 gelten. */
 export function prepareManualHook(input: SaveHookInput, ctx: HookContext, prev: HookVersion | null): ManualHookFields {
   const spoken = lintHook(input.spoken_hook.trim(), "spoken", ctx.profile);
   const onscreen = lintHook(input.onscreen_hook.trim(), "onscreen", ctx.profile);

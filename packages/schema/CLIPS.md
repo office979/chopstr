@@ -41,7 +41,8 @@ Vertragsversion: `clips_v1`, `render_plan_v1`.
 | `provenance` | `{ "c2pa": "signed" \| "skipped" \| "failed", "reason": "c2patool nicht installiert", "ai_label_required": false, "ai_features": [], "source_credit": "Quelle: …" \| null, "ad_label": "Anzeige" \| null }` |
 | `render_plan` | siehe unten, deterministisch, vollständig (aus dem Plan lässt sich der Render wiederholen) |
 | `cps_warnings` | Liste von Strings (Lesetempo über 17 Zeichen/Sekunde) |
-| `fidelity_warnings` | Ergebnis von `fidelity.check_cut` für die Komposition |
+| `composition` | Beim Annehmen `candidate.segments`. Nach dem Render unter Policy v2 mit `cut.padding` (AP10b) mit Vor- und Nachlauf: die gepaddeten Quellsegmente aus `render_plan.timeline` (`source_in`, `source_out`, gleiche Reihenfolge und Rollen), damit das Web die Ausgabezeit aus denselben Segmenten rechnet wie das Video. Nur bei bestandener technischer Prüfung; das Padding ist idempotent, ein erneuter Render ergibt denselben Plan. Unter v1 unverändert. Der Kandidat bleibt unverändert. |
+| `fidelity_warnings` | Ergebnis von `fidelity.check_cut` für die Komposition; unter v2 mit `cut.padding` zusätzlich Übergangsbefunde `transition_cut_in_word` (`high`, mittel nur bei überlappenden Wortzeiten), `transition_gap_short`, `transition_speaker_change`, `transition_caption_lost` (je `medium`) mit `detail`, `segment_index` und je nach Art `edge`, `time_s`, `word_index`, `rest_s` |
 | `speaker_positions` | aus der UI bestätigt oder vom Worker vorgeschlagen `{ "SPEAKER_00": 0, "SPEAKER_01": 1 }` |
 | `caption_style` | Untertitel-Stil dieses Clips (Migration 0008), `{}` heißt: nichts eingestellt. Felder: `preset`, `font`, `font_px`, `bold`, `all_caps`, `words_per_card` (1 bis 6), `max_lines`, `base_color`, `highlight_color`, `highlight_words`, `outline_px`, `box`, `bottom_margin_px`. Größen gelten für 1080x1920 und werden auf die Ausgabegröße umgerechnet. Grenzen und Prüfung: `captions_de.STIL_GRENZEN` / `style_anwenden`, gespiegelt in `apps/web/lib/clips/caption-style.ts`. Der Clipstil sticht den Stil des Markenprofils. |
 
@@ -80,6 +81,21 @@ Vertragsversion: `clips_v1`, `render_plan_v1`.
   "versions": { "captions_de": "captions_v1", "render": "render_v1", "reframe": "reframe_v2" }
 }
 ```
+
+Unter Policy v2 mit `cut.padding` (AP10b, `pipeline/transitions.py`) kommen additiv hinzu, ohne Schalter
+fehlen sie und der Plan ist byte-gleich zu vorher:
+
+* `segments` sind die gepaddeten Schnittzeiten: Start höchstens `cut.lead_in_s` (0,06 s) vor dem ersten Wort,
+  nie vor dem Ende des Vorworts; Ende höchstens `cut.lead_out_s` (0,18 s) nach dem letzten Wort, nie in das
+  Folgewort; bei lückenlosen Wortzeiten kein Padding; bei niedriger Sicherheit höchstens bis zur Mitte der Stille.
+* `timeline`: je Segment Herkunft und Ziel, deterministisch aus `compose.output_timeline`:
+  `{ "segment_index": 0, "role": "body", "source_in": 812.34, "source_out": 830.28, "output_in": 0.0, "output_out": 17.94, "boundary_confidence": 0.95, "low_confidence": false }`.
+  `boundary_confidence` (0 bis 1, Formel im Modulkopf von `transitions.py`, Herkunft H) ist die schwächere
+  der beiden Kanten; `null` für ein Segment ohne Wort.
+* `timebase`: `{ "unit": "s", "reference": "source_audio", "frame_snapping": false, "vfr": false | true | null, "vfr_verified": false }`.
+  Kanonische Zeitbasis sind Sekunden auf der Audioebene der Quelle, keine Rasterung auf Frames; `vfr` kommt aus
+  ffprobe (mittlere gegen nominelle Bildrate), das Verhalten bei variabler Bildrate ist ungeprüft.
+* `versions.render` ist `render_v2` (sonst `render_v1`); der Idempotenz-Hash ändert sich damit nur bei aktivem Schalter.
 
 Ausgabegrößen: `9:16` 1080×1920, `4:5` 1080×1350, `1:1` 1080×1080, `16:9` 1920×1080. Bildrate = Quellrate,
 nie mischen (25 oder 30 oder 50/60 bleiben).

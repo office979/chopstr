@@ -10,6 +10,7 @@ import { serializePublication } from "@/lib/api/serializers";
 import { startPublishWorkflow } from "@/lib/api/publish-workflow";
 import { getQuota } from "@/lib/billing/quota";
 import { latestByClip } from "@/lib/guest/approval";
+import { verdictReason } from "@/lib/publishing/gates";
 
 export const dynamic = "force-dynamic";
 
@@ -36,9 +37,9 @@ export const POST = apiRoute<{ id: string }>("publish", async (request: NextRequ
   const workspace = await repo.getWorkspace();
   if (!workspace.dpa_signed_at) throw conflict("Der AV-Vertrag ist noch nicht angenommen. Bitte unter /rechtliches/avv annehmen.", "dpa_missing");
   if (clip.status !== "rendered" && clip.status !== "exported") throw conflict(`Clip ist nicht gerendert (Status ${clip.status}).`, "clip_not_rendered");
-  if (!clip.candidate_id) throw conflict("Clip hat keinen Kandidaten.", "candidate_missing");
-  const candidate = await repo.getCandidate(clip.candidate_id);
-  if (candidate?.human_verdict !== "accepted") throw conflict(`Kandidat ist nicht angenommen (Urteil ${candidate?.human_verdict ?? "offen"}).`, "candidate_not_accepted");
+  /* Urteil am Kandidaten: dieselbe Prüfung wie der Weg über die Oberfläche (lib/publishing/gates.ts) */
+  const verdict = verdictReason(clip.candidate_id, clip.candidate_id ? await repo.getCandidate(clip.candidate_id) : null);
+  if (verdict) throw conflict(verdict.message, verdict.code);
   if (clip.guest_approval_required) {
     const latest = latestByClip(await repo.listGuestApprovals(source.id)).get(clip.id);
     if (latest?.decision !== "approved") throw conflict("Gast-Freigabe fehlt.", "guest_approval_missing");

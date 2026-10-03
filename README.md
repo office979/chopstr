@@ -139,7 +139,7 @@ Alle Variablen mit Erklärung stehen in [`.env.example`](.env.example). Die wich
 | `DATABASE_URL` | Postgres. Fehlt sie, läuft die Web-App im Demo-Modus. |
 | `TEMPORAL_ADDRESS`, `TEMPORAL_TASK_QUEUE_CPU/GPU` | Temporal-Server und Queues. |
 | `S3_ENDPOINT`, `S3_BUCKET_SOURCES`, `S3_BUCKET_DERIVED` | Objektspeicher (EU). Lokal MinIO. |
-| `TUS_HOOK_SECRET`, `UPLOAD_MAX_BYTES` | Upload-Hooks und Größenlimit (5 GB). |
+| `TUS_HOOK_SECRET`, `UPLOAD_MAX_BYTES` | Upload-Hooks und Größenlimit (25 GB, rund sieben Stunden 1080p). Muss zu `-max-size` von tusd in `infra/docker-compose*.yml` passen. |
 | `LLM_PROVIDER`, `BEDROCK_MODEL_ID`, `MISTRAL_*` | LLM-Provider hinter dem Residency-Guard. Keine Modell-IDs im Code. |
 | `ASR_MODEL_DE`, `ASR_MODEL_CH`, `HF_TOKEN` | ASR-Modelle (faster-whisper) und pyannote-Zugang. |
 | `EGRESS_ALLOWLIST` | zusätzliche erlaubte Hosts für ausgehende Worker-Aufrufe. |

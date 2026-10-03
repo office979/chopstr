@@ -109,6 +109,19 @@ describe("die drei Achsen sind unabhängig", () => {
     expect(pruefstand(eingabe({ clip: c })).qualitaet).toBe("fehler");
   });
 
+  it.each([
+    ["transition_cut_in_word", "high", "Ein Schnitt liegt in einem Wort.", "fehler"],
+    ["transition_gap_short", "medium", "Sehr kurze Pause an einer Schnittstelle.", "hinweis"],
+    ["transition_speaker_change", "medium", "Sprecherwechsel an einer Schnittstelle.", "hinweis"],
+    ["transition_caption_lost", "medium", "Ein halb hörbares Wort hat keinen Untertitel.", "hinweis"],
+  ])("nennt den Übergangsbefund %s mit eigenem Text", (type, severity, text, qualitaet) => {
+    /* Übergänge betreffen die Schnittkante; der Standardsatz „verändert die Aussage" wäre falsch. */
+    const c = clip({ fidelity_warnings: [{ type, severity, detail: "Schnitt bei 7,12 s" }] });
+    const p = pruefstand(eingabe({ clip: c }));
+    expect(p.befunde.map((b) => b.text)).toEqual([text]);
+    expect(p.qualitaet).toBe(qualitaet);
+  });
+
   it("hält eine weggeschnittene Einschränkung für einen Hinweis", () => {
     const c = clip({ fidelity_warnings: [{ type: "qualifier_removed", severity: "medium", detail: ["meistens"] }] });
     expect(pruefstand(eingabe({ clip: c })).qualitaet).toBe("hinweis");

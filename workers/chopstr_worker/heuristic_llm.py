@@ -33,7 +33,12 @@ from .pipeline.story_graph import CONTRAST_MARKERS
 
 MODEL_ID = "heuristic-v1"
 WORDS_PER_SECOND = 2.5  # ruhiges Sprechtempo Deutsch, etwa 150 Wörter pro Minute
-PROPOSE_MAX_MOMENTS = 3
+# Notbremse gegen Endlosschleifen, keine redaktionelle Zahl. Wie viele Vorschlaege ein Kapitel
+# wirklich hergibt, steht in der Grundlage (`ausbeute`), siehe Policy.kandidaten_fuer().
+PROPOSE_MAX_MOMENTS_HART = 40
+# Mindestabstand zweier Anker in Saetzen. Klein genug fuer versetzte Zuschnitte desselben
+# Moments, gross genug, dass nicht jeder Satz einen eigenen Vorschlag erzeugt.
+ANKER_MINDESTABSTAND_SAETZE = 2
 EVIDENCE_WORDS = 8
 HOOK_MAX_WORDS = 15  # „stoppt in drei Sekunden“ heisst in Textmerkmalen: kurzer erster Satz
 NEUTRAL = 0.5  # Mittelwert für das, was die Heuristik ehrlicherweise nicht misst
@@ -142,7 +147,13 @@ def _anchor_score(sent: dict, p: editorial.Policy | None = None) -> float:
     """Wie sehr taugt dieser Satz als Anker? Eigene Marker plus die Moment-Typen der Grundlage."""
     p = p or policy()
     low = sent["text"].lower()
-    score = 0.0
+    # Grundwert: Jeder Satz taugt grundsaetzlich als Anker, Marker heben ihn nur hervor.
+    # Vorher stand hier 0.0, und propose_moments brach beim ersten Anker ohne Marker ab. Da die
+    # Marker nur auf 2,4 bis 6,2 Prozent der Saetze greifen (Messung in der Grundlage), entstanden
+    # pro Kapitel ein bis zwei Vorschlaege, unabhaengig von seiner Laenge. Das widersprach
+    # `bewertung.modus: sortieren`: ein Moment, der nie vorgeschlagen wird, ist unterdrueckt.
+    # Ueber den Wert entscheidet der Mensch, nicht diese Funktion.
+    score = 0.1 if p.anker_ohne_marker else 0.0
     score += 2.0 * min(len(_markers_in(low)), 2)
     if _NUMBER.search(sent["text"]):
         score += 1.0
@@ -180,31 +191,52 @@ def propose_moments(user: str) -> dict:
     bis ``gut_von_s``, und nie über ``gut_bis_s`` hinaus. Was ``hart_min_s`` nicht erreicht, wird
     nicht vorgeschlagen: kürzer ist als Clip unbrauchbar, und die Grundlage verbietet nur das
     Unterdrücken von Bewertungen, nicht das Zuschneiden eines Vorschlags.
+
+    Mit ``propose_moments_v2`` (Kapitel zwischen ``<chapter>`` und ``</chapter>``, AP5) gilt stattdessen
+    ``_propose_moments_v2``: deterministische Suche aus ``payoff_search`` statt der Anker.
     """
+    chapter = _chapter_block(user)
+    if chapter is not None:
+        return _propose_moments_v2(chapter, _prompt_policy(user))
     sents = parse_numbered(user)
     if not sents:
         return {"moments": []}
     p = policy()
     ziel, von, bis, minimum = p.ziel_s, p.gut_von_s, p.gut_bis_s, p.hart_min_s
     anchors = sorted(((_anchor_score(s, p), i) for i, s in enumerate(sents)), key=lambda x: (-x[0], x[1]))
+    # Wie viele Vorschlaege dieses Kapitel hergeben soll, richtet sich nach seiner Laenge
+    # (`ausbeute.kandidaten_je_minute`), nicht nach einer festen Zahl. Ein Kapitel von vier
+    # Minuten hat mehr zu bieten als eines von einer Minute.
+    # Fassung 2 (`ausbeute`) richtet die Zahl nach der Laenge des Kapitels und erlaubt versetzte
+    # Zuschnitte. Fassung 1 bleibt unveraendert - der Golden Snapshot haengt daran.
+    weit = p.hat_ausbeute
+    obergrenze = min(p.vorschlaege_fuer(estimate_seconds(sents)), PROPOSE_MAX_MOMENTS_HART)
     chosen: list[tuple[int, int]] = []
     moments = []
     for score, i in anchors:
-        if score <= 0 or len(moments) >= PROPOSE_MAX_MOMENTS:
+        if score <= 0 or len(moments) >= obergrenze:
             break
-        if any(a <= i <= b for a, b in chosen):
+        # Fassung 1: jeder bereits gewaehlte Bereich ist komplett gesperrt, und ein Vorschlag
+        # waechst nicht in einen fremden hinein. Mit `ausbeute` (Fassung 2) gilt stattdessen nur
+        # ein Mindestabstand zwischen den Ankern: versetzte Zuschnitte desselben Bereichs werden
+        # moeglich, und `select_best` sortiert zu Aehnliches spaeter wieder aus. Die Wahl zwischen
+        # zwei Zuschnitten gehoert dem Menschen, nicht dieser Schleife.
+        if weit:
+            if any(abs(i - a) < ANKER_MINDESTABSTAND_SAETZE for a, _b in chosen):
+                continue
+        elif any(a <= i <= b for a, b in chosen):
             continue
         a, b = i, i
         while estimate_seconds(sents[a : b + 1]) < ziel and b + 1 < len(sents):
             if estimate_seconds(sents[a : b + 2]) > bis:
                 break
-            if any(x <= b + 1 <= y for x, y in chosen):
+            if not weit and any(x <= b + 1 <= y for x, y in chosen):
                 break
             b += 1
         while estimate_seconds(sents[a : b + 1]) < von and a > 0:
             if estimate_seconds(sents[a - 1 : b + 1]) > bis:
                 break
-            if any(x <= a - 1 <= y for x, y in chosen):
+            if not weit and any(x <= a - 1 <= y for x, y in chosen):
                 break
             a -= 1
         if estimate_seconds(sents[a : b + 1]) < minimum:
@@ -300,15 +332,32 @@ def _standalone(m: _Merkmale, p: editorial.Policy) -> float:
     Satzanfang, Rückverweis irgendwo im Text, Einleitungsfloskel, Frage eines anderen Sprechers.
     Ein Clip, der mit „Er ist ja offensichtlich …“ beginnt, verliert hier; „Krankschreibungen werden
     massiv missbraucht.“ verliert nichts.
+
+    Ab Fassung 2 (Abschnitt ``gates``) gilt für Pronomen und Rückverweis dieselbe Regel wie das Gate
+    (``editorial_gates.unresolved_pronoun`` und ``back_reference``); ist ein Gate dort abgeschaltet, gilt
+    für diesen Teil die Regel aus Fassung 1. Die Bildverweise aus ``REFERENCE_PHRASES`` zählen weiter.
     """
+    from .pipeline import editorial_gates
+
     ein = p.einstieg
     a = 1.0
     erstes_wort = re.sub(r"[^\wäöüß]", "", m.first_low.split()[0]) if m.first_low.split() else ""
-    if ein.get("keine_pronomen_ohne_bezug") and erstes_wort in {x.lower() for x in ein.get("pronomen", [])}:
+    pronomen = ein.get("keine_pronomen_ohne_bezug") and erstes_wort in {x.lower() for x in ein.get("pronomen", [])}
+    verweis = any(r in m.low for r in REFERENCE_PHRASES)
+    gates = editorial.gates_settings(p)
+    if gates is not None:
+        words, sents = editorial_gates.from_sentence_texts(m.sents)
+        last = len(sents) - 1
+        if gates["enabled"]["unresolved_pronoun"] and sents:
+            gate = editorial_gates.unresolved_pronoun(words, sents, 0, last, p)
+            pronomen = ein.get("keine_pronomen_ohne_bezug") and not gate["passed"]
+        if gates["enabled"]["back_reference"] and sents:
+            verweis = verweis or not editorial_gates.back_reference(words, sents, 0, last, p)["passed"]
+    if pronomen:
         a -= 0.40
     if m.first_low.startswith(CONTEXT_STARTS):
         a -= 0.35
-    if any(r in m.low for r in REFERENCE_PHRASES):
+    if verweis:
         a -= 0.25
     if ein.get("einleitungen_kappen") and any(f in m.first_low for f in ein.get("einleitungsfloskeln", [])):
         a -= 0.15
@@ -406,6 +455,10 @@ def _aufloesung(m: _Merkmale, p: editorial.Policy, laenge_ok: bool) -> float:
 
     Die Abschwächungsmarker aus ``ausstieg.abschwaechung_marker`` im letzten Satz kosten: dort hätte
     der Schnitt davor sitzen müssen.
+
+    Mit ``bewertung.length_only_as_penalty`` (Fassung 2, AP9) gibt es keinen Längenbonus: die Länge wirkt
+    dann nur noch über ``laenge_abzug`` mit der gemessenen Abspieldauer (``story_engine.policy_total``),
+    nicht ein zweites Mal geschätzt (RESEARCH-CLIPPING-KERN Abschnitt 2, weitere Befunde).
     """
     aus = p.ausstieg
     letzter = m.last["text"].rstrip()
@@ -418,7 +471,7 @@ def _aufloesung(m: _Merkmale, p: editorial.Policy, laenge_ok: bool) -> float:
         a -= 0.15
     if aus.get("vor_der_abschwaechung") and any(w in letzter.lower() for w in aus.get("abschwaechung_marker", [])):
         a -= 0.20
-    if laenge_ok:
+    if laenge_ok and not editorial.length_only_as_penalty(p):
         a += 0.20
     if m.markers:
         a += 0.10
@@ -432,8 +485,36 @@ def _zielgruppe(m: _Merkmale, p: editorial.Policy, laenge_ok: bool) -> float:
     neutralen Mittelwert und korrigiert ihn nur um das eine, was sie wirklich sieht: ob die Länge
     zum Format passt. Alles andere wäre vorgetäuschte Genauigkeit. Ein Sprachmodell mit Brief kann
     das beantworten, diese Funktion nicht.
+
+    Mit ``bewertung.length_only_as_penalty`` (Fassung 2, AP9) entfällt auch diese Korrektur: die Länge
+    wirkt nur über ``laenge_abzug``, der Wert bleibt der neutrale Mittelwert.
     """
-    return _anteil(NEUTRAL + (0.10 if laenge_ok else 0.0))
+    bonus = 0.10 if laenge_ok and not editorial.length_only_as_penalty(p) else 0.0
+    return _anteil(NEUTRAL + bonus)
+
+
+# Reaktion des Gegenübers, die eine Pointe anzeigt (kleingeschriebene Kerntokens, ganzer Satz höchstens
+# ``LAUGH_REACTION_MAX_WORDS`` Wörter).
+LAUGH_REACTIONS = frozenset({"haha", "hahaha", "hahahaha", "hehe", "hihi", "lacht", "lachen", "gelächter", "lol"})
+LAUGH_REACTION_MAX_WORDS = 3
+
+
+def _humor(sents: list[dict], p: editorial.Policy) -> str | None:
+    """Ab Fassung 2 (Abschnitt ``search``): Pointe im Clip? Pointe mit Setup aus ``payoff_search``
+    (``punchline``) oder eine Lachreaktion eines anderen Sprechers nach einem Satz. Dann ``is_humor`` und
+    damit ``risk_flags`` humor, also menschliche Prüfung (P27). Lachen aus der Heatmap sieht der Provider
+    nicht, er kennt nur den Prompt. Fassung 1: ``None`` (unverändert)."""
+    if editorial.search_settings(p) is None:
+        return None
+    from .pipeline import payoff_search
+
+    if any("punchline" in h["types"] for h in payoff_search.find_payoffs(_timed(sents), p)):
+        return "Pointe mit Setup (menschliche Humorprüfung)"
+    for prev, s in zip(sents, sents[1:]):
+        toks = [dach_nlp.core_token(x) for x in s["text"].split()]
+        if s["speaker"] != prev["speaker"] and 0 < len(toks) <= LAUGH_REACTION_MAX_WORDS and set(toks) & LAUGH_REACTIONS:
+            return "Lachreaktion des Gegenübers (menschliche Humorprüfung)"
+    return None
 
 
 def score_clip(user: str) -> dict:
@@ -452,6 +533,7 @@ def score_clip(user: str) -> dict:
     if not sents:
         sents = [{"idx": 0, "speaker": "?", "text": user.strip() or "-"}]
     m = _merkmale(sents, p)
+    humor = _humor(sents, p)
     est_s = estimate_seconds(sents)
     laenge_ok = p.laenge_ok(est_s)
     abzug = p.laenge_abzug(est_s)
@@ -500,6 +582,8 @@ def score_clip(user: str) -> dict:
         parts.append("Kontrastmarker")
     if organisatorisch:
         parts.append("reines Organisationsgespräch")
+    if humor:
+        parts.append(humor)
     parts.append(f"geschätzt {round(est_s)} Sekunden" + ("" if laenge_ok else f", Längenabzug {abzug:.2f}"))
     return {
         "unresolved_references": unresolved,
@@ -526,7 +610,7 @@ def score_clip(user: str) -> dict:
         "punkte": punkte,
         "punkte_gesamt": p.punkte_gesamt,
         "policy_version": editorial.policy_version(p.version),
-        "is_humor": False,
+        "is_humor": humor is not None,
         "sensitive_topic": sensitive,
         "suggested_title_card": "",
         "why": "Heuristik ohne Sprachmodell: " + ", ".join(parts) + ".",
@@ -587,7 +671,50 @@ def _fit(prefix: str, sentence: str, limit: int, suffix: str = "") -> str:
 
 
 def write_hooks(user: str) -> dict:
-    """Fünf Hook-Varianten aus Satzanfängen, erster Zahl und Kontrastmarker des Clips. Keine neuen Zahlen."""
+    """Fünf Hook-Varianten aus Satzanfängen, erster Zahl und Kontrastmarker des Clips. Keine neuen Zahlen.
+
+    Mit ``hooks_v2`` (Clip zwischen Begrenzern, Fassung 2, AP6a): keine eigenen Rahmungen, jede Variante ist
+    ein ganzer Originalsatz aus dem Clip (mit ``hook.allow_partial_opening`` auch ein geschlossener Teilsatz,
+    siehe ``copy_engine.sentence_hook``), möglichst je Muster ein anderer Satz. Mit ``hooks_v1`` wie bisher."""
+    open_at, close_at = user.find("<clip>"), user.rfind("</clip>")
+    if open_at >= 0 and close_at > open_at:
+        from .pipeline import copy_engine
+
+        clip_v2 = user[open_at + len("<clip>") : close_at]
+        partial = copy_engine.allow_partial_opening()
+        sents = [
+            " ".join(t)
+            for i, t in enumerate(copy_engine.clip_sentences(clip_v2))
+            if not copy_engine.is_meta_speech(" ".join(t))
+            and (i == 0 or dach_nlp.core_token(t[0]) not in copy_engine.ANAPHORIC_STARTS)
+        ]
+        excerpts = {}
+        for x in sents or [clip_v2.strip() or "-"]:
+            toks = x.split()
+            onscreen = copy_engine.sentence_hook(toks, ONSCREEN_MAX_WORDS, partial)
+            if onscreen is not None:
+                excerpts[x] = (copy_engine.sentence_hook(toks, SPOKEN_MAX_WORDS, partial) or x, onscreen)
+        if not excerpts:
+            first = sents[0] if sents else clip_v2.strip() or "-"
+            excerpts[first] = (first, first)
+        order = list(excerpts)
+        fits = {
+            "identity_call": lambda x: re.search(r"\b(du|dich|dir|dein\w*|euch|euer|eure\w*|ihr|Ihnen)\b", x, re.IGNORECASE),
+            "contrarian": lambda x: CONTRAST_WORDS.search(x.lower()),
+            "open_loop": lambda x: x.endswith("?"),
+            "results_first": lambda x: _NUMBER.search(x),
+            "mistake_warning": lambda x: re.search(r"\b(fehler\w*|falsch\w*|verloren|problem\w*|teuer\w*)\b", x.lower()),
+        }
+        used: set[int] = set()
+        native = []
+        for pattern in HOOK_PATTERNS:
+            idx = next((i for i, x in enumerate(order) if i not in used and fits[pattern](x)), None)
+            if idx is None:
+                idx = next((i for i in range(len(order)) if i not in used), 0)
+            used.add(idx)
+            spoken, onscreen = excerpts[order[idx]]
+            native.append({"pattern": pattern, "spoken": spoken, "onscreen": onscreen})
+        return {"variants": native}
     clip = clip_text_of(user)
     address = address_of(user)
     sents = sentences_of(clip) or [clip or "-"]
@@ -653,10 +780,199 @@ def write_post_caption(user: str) -> dict:
     return {"text": text, "cta": cta}
 
 
+# -- AP5: propose_moments_v2 und episode_overview ----------------------------------------------------
+def _chapter_block(user: str) -> str | None:
+    """Kapiteltext zwischen ``<chapter>`` und ``</chapter>`` (Prompts ab ``propose_moments_v2``), sonst ``None``."""
+    open_at, close_at = user.find("<chapter>"), user.rfind("</chapter>")
+    if open_at < 0 or close_at <= open_at:
+        return None
+    return user[open_at + len("<chapter>") : close_at]
+
+
+_GRUNDLAGE = re.compile(r"^GRUNDLAGE: clip_policy_v(\d+)\s*$", re.MULTILINE)
+
+
+def _prompt_policy(user: str) -> editorial.Policy:
+    """Die Fassung, die der Aufrufer in den Prompt geschrieben hat (``story_score.propose_policy_text``),
+    sonst die aktive."""
+    m = _GRUNDLAGE.search(user)
+    return editorial.load(int(m.group(1))) if m else policy()
+
+
+def _word(low: str, marker: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(marker)}(?!\w)", low) is not None
+
+
+def _timed(sents: list[dict]) -> list[dict]:
+    """Sätze mit geschätzten Zeiten (``WORDS_PER_SECOND``), weil der Prompt keine Zeiten enthält."""
+    out, t = [], 0.0
+    for s in sents:
+        end = t + estimate_seconds([s])
+        out.append({**s, "start": t, "end": end})
+        t = end
+    return out
+
+
+def _propose_moments_v2(chapter: str, pol: editorial.Policy) -> dict:
+    """Vorschläge aus ``payoff_search.search_moments``: Payoff zuerst, Einstieg zuerst, Abgleich.
+
+    Diesen Prompt rendert ``story_score.propose`` nur bei verdrahteter Suche
+    (``implementation.search.payoff_first``); der Schalter ist damit schon geprüft. Zeiten sind aus der
+    Wortzahl geschätzt. ``viewer_promise`` und ``central_idea`` kann die Heuristik nicht formulieren, sie
+    bleiben ``null``. Schwaches Material ergibt keinen Vorschlag."""
+    from .pipeline import payoff_search
+
+    sents = parse_numbered(chapter)
+    if not sents:
+        return {"moments": []}
+    found = payoff_search.search_moments(_timed(sents), pol)
+    moments = []
+    for prop in found["proposals"]:
+        span = [s for s in sents if prop["first_sent"] <= s["idx"] <= prop["last_sent"]]
+        reasons = [f"Payoff in Satz {prop['payoff_sent']} ({prop['payoff_type']})", f"Einstieg in Satz {prop['opening_sent']}"]
+        if prop["hook_type"]:
+            reasons.append(f"Hook-Typ {prop['hook_type']}")
+        reasons.append(f"Richtung {prop['direction']}")
+        reasons.append(f"geschätzt {round(estimate_seconds(span))} Sekunden")
+        moments.append(
+            {
+                "first_sent": prop["first_sent"],
+                "last_sent": prop["last_sent"],
+                "structure": _structure_for(span),
+                "why": "Heuristik ohne Sprachmodell: " + ", ".join(reasons) + ".",
+                "payoff_sent": prop["payoff_sent"],
+                "opening_sent": prop["opening_sent"],
+                "required_context_sents": prop["required_context_sents"],
+                "narrative_type": prop["narrative_type"],
+                "viewer_promise": None,
+                "central_idea": None,
+                "direction": prop["direction"],
+            }
+        )
+    return {"moments": moments}
+
+
+def episode_overview(user: str) -> dict:
+    """Übersicht eines Kapitels aus Markern, gekennzeichnet mit ``heuristic: true``.
+
+    Bekannt sind Sprecher (ohne Rolle), Behauptungen (Payoffs aus ``payoff_search.find_payoffs``),
+    Belege (``moment_typen.zahl``, „zum Beispiel“), Einwände (``moment_typen.konflikt``), Einschränkungen
+    (``ausstieg.abschwaechung_marker``) und Korrekturen (``search.hook_type_markers.self_correction``,
+    ``moment_typen.gestaendnis``). Unbekannt und deshalb ``null``: Themen, Rollen, Zusammenfassungen,
+    worauf sich ein Beleg, Einwand oder eine Korrektur bezieht, und die Abhängigkeitsketten."""
+    from .pipeline import payoff_search
+
+    chapter = _chapter_block(user)
+    sents = parse_numbered(user if chapter is None else chapter)
+    p = policy()
+    cfg = editorial.search_settings(p)
+    typen = {t.schluessel: t for t in p.moment_typen}
+    abschwaechung = [str(m).lower() for m in p.ausstieg.get("abschwaechung_marker") or ()]
+    korrektur = list(cfg["hook_type_markers"]["self_correction"]) if cfg else []
+    korrektur += list(typen["gestaendnis"].marker) if "gestaendnis" in typen else []
+    konflikt = typen["konflikt"].marker if "konflikt" in typen else ()
+
+    speakers: dict[str, list[int]] = {}
+    evidence, objections, limitations, corrections = [], [], [], []
+    for s in sents:
+        low = s["text"].lower()
+        speakers.setdefault(s["speaker"], []).append(s["idx"])
+        if ("zahl" in typen and typen["zahl"].trifft(low)) or _word(low, "zum beispiel"):
+            evidence.append({"sent": s["idx"], "supports_sent": None})
+        if any(_word(low, m) for m in konflikt):
+            objections.append({"sent": s["idx"], "against_sent": None})
+        if any(_word(low, m) for m in abschwaechung):
+            limitations.append({"sent": s["idx"], "limits_sent": None})
+        if any(_word(low, m) for m in korrektur):
+            corrections.append({"sent": s["idx"], "corrects_sent": None})
+    claims = None
+    if cfg is not None and sents:
+        claims = [{"sent": h["payoff_sent"], "summary": None} for h in payoff_search.find_payoffs(_timed(sents), p)]
+    return {
+        "topics": None,
+        "speakers": [{"speaker": k, "role": None, "sents": v} for k, v in speakers.items()],
+        "claims": claims,
+        "evidence": evidence,
+        "objections": objections,
+        "limitations": limitations,
+        "corrections": corrections,
+        "dependencies": None,
+        "heuristic": True,
+    }
+
+
+# -- AP6b: Kritiker ohne Sprachmodell -------------------------------------------------------------------
+# Welche Gate-Verletzung welcher Art des Kritikers entspricht (critic.CRITIC_KINDS) und mit welcher Schwere.
+# Andere Gates (offene Frage, Vorverweis, Sprecherwechsel, Markierungen) sind keine Fragen des Kritikers; sie
+# stehen ohnehin in rubric.quality_gate_results.
+CRITIC_GATE_KINDS = {
+    "unresolved_pronoun": ("unclear_pronoun", "clarity"),
+    "back_reference": ("unclear_pronoun", "clarity"),
+    "boundary_negation_condition": ("removed_condition", "fidelity"),
+    "reported_speech": ("reported_position", "fidelity"),
+    "later_correction": ("claim_contradicted", "fidelity"),
+}
+
+
+def _block(user: str, tag: str) -> list[dict]:
+    open_at, close_at = user.find(f"<{tag}>"), user.find(f"</{tag}>")
+    if open_at < 0 or close_at <= open_at:
+        return []
+    return parse_numbered(user[open_at + len(tag) + 2 : close_at])
+
+
+def critique_clip(user: str) -> dict:
+    """Kritiker als Heuristik, gekennzeichnet mit ``heuristic: true``: die harten Gates
+    (``editorial_gates.run_gates``) über Clip und Kontext aus dem Prompt und spätere Einschränkungen
+    (``story_graph.find_later_qualifications``, Regel v2). Jeder Befund zitiert einen ganzen Satz aus dem
+    Prompt; erfunden wird nichts. ``confirmed`` ist immer false: die Heuristik ist unkalibriert und verwirft
+    nie, ihre Befunde sind nur Bericht. Einen Text-Hook prüft sie nicht (das kann sie ohne Sprachmodell nicht)."""
+    from .pipeline import editorial_gates, story_graph
+
+    before, clip, after = _block(user, "context_before"), _block(user, "clip"), _block(user, "context_after")
+    if not clip:
+        return {"findings": [], "confirmed": False, "heuristic": True}
+    items = [*before, *clip, *after]
+    words, sents = editorial_gates.from_sentence_texts(items)
+    if len(sents) != len(items):  # leere Zeilen: dann lieber kein Befund als ein falsch zugeordneter
+        return {"findings": [], "confirmed": False, "heuristic": True}
+    original = [s["idx"] for s in items]
+    first, last = len(before), len(before) + len(clip) - 1
+
+    def sentence_of(word_id: int) -> int | None:
+        return next((n for n, s in enumerate(sents) if s.word_range[0] <= word_id <= s.word_range[1]), None)
+
+    findings: list[dict] = []
+    res = editorial_gates.run_gates(words, sents, first, last, policy(), context_before=len(before), context_after=len(after))
+    for key in res["failed"]:
+        if key not in CRITIC_GATE_KINDS:
+            continue
+        kind, severity = CRITIC_GATE_KINDS[key]
+        result = res["results"][key]
+        ids = [sentence_of(i) for i in result.get("evidence_word_ids") or []]
+        n = next((x for x in ids if x is not None), first if result.get("healable") != "back" else last)
+        findings.append({
+            "kind": kind, "severity": severity, "evidence_quote": sents[n].text, "sentence_refs": [original[n]],
+            "explanation": f"Heuristik, Gate {key}: {result.get('detail') or ''}".strip(),
+        })  # fmt: skip
+    seen = {f["sentence_refs"][0] for f in findings if f["kind"] == "claim_contradicted"}
+    for hit in story_graph.find_later_qualifications(sents, first, last, rule="v2"):
+        n = int(hit["sentence_idx"])
+        if original[n] in seen:
+            continue
+        findings.append({
+            "kind": "claim_contradicted", "severity": "fidelity", "evidence_quote": sents[n].text, "sentence_refs": [original[n]],
+            "explanation": f"Heuristik, spätere Einschränkung mit dem Marker „{hit['marker']}“, Überlappung {hit['overlap']}",
+        })  # fmt: skip
+    return {"findings": findings, "confirmed": False, "heuristic": True}
+
+
 HANDLERS = {
     "propose_moments": propose_moments,
+    "episode_overview": episode_overview,
     "score_clip": score_clip,
     "confirm_qualification": confirm_qualification,
+    "critique_clip": critique_clip,
     "write_hooks": write_hooks,
     "write_post_caption": write_post_caption,
 }
@@ -673,6 +989,7 @@ def answer(tool_name: str, user: str, schema: dict | None = None) -> dict:
 __all__ = [
     "ALT_AUS_NEU",
     "ALT_SKALA_MAX",
+    "CRITIC_GATE_KINDS",
     "HANDLERS",
     "HOOK_PATTERNS",
     "MODEL_ID",
@@ -685,6 +1002,8 @@ __all__ = [
     "answer",
     "clip_text_of",
     "confirm_qualification",
+    "critique_clip",
+    "episode_overview",
     "estimate_seconds",
     "parse_numbered",
     "policy",

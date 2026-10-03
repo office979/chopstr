@@ -1537,7 +1537,12 @@ function Weitere({
             onClick={() => umschalten(false)}
             className="fixed inset-0 z-30 cursor-default"
           />
-          <div className="absolute right-0 z-40 mt-1 flex w-[260px] flex-col gap-1 rounded-inner border border-line-strong bg-[#0b0b14] p-1.5 shadow-xl">
+          {/* Unter sm richtet sich die Klappe am Fenster aus, nicht am Stift. Grund: dort bricht die
+              Knopfzeile um und der Stift steht irgendwo in der Karte; eine am Stift ausgerichtete
+              Klappe von 260 px lief dann aus dem Bild (gemessen bei 375 px: rechtsbuendig 39 px links
+              abgeschnitten, „Bearbeiten" wurde zu „arbeiten"; linksbuendig 27 Prozent rechts weg).
+              Ab sm ist Platz, dort bleibt sie rechtsbuendig unter dem Stift. */}
+          <div className="z-40 mt-1 flex flex-col gap-1 rounded-inner border border-line-strong bg-[#0b0b14] p-1.5 shadow-xl max-sm:fixed max-sm:inset-x-3 max-sm:w-auto sm:absolute sm:right-0 sm:w-[260px]">
             <MenuLink href={bearbeiten} onClick={() => umschalten(false)}>
               Bearbeiten
             </MenuLink>

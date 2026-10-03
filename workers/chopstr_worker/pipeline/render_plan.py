@@ -9,6 +9,13 @@ Phase 5c: bei ``reframe.strategy = slide_pip`` beginnt die Caption-Safe-Zone unt
 Abstand), damit Captions, Titelkarte und Hook-Overlay in der Sprecherfläche liegen. ``captions.text_field``
 steht nur im Plan, wenn die normalisierte Form (``text_norm``) eingebrannt wird; so bleiben Hashes bestehender
 Pläne stabil.
+
+AP10b (Fassung 2, Schalter ``implementation.cut.padding``): ``build_plan`` setzt Vor- und Nachlauf an
+Wortgrenzen (``transitions.pad_segments``), ``segments`` sind dann die gepaddeten Schnittzeiten. Additiv
+kommen ``timeline`` (je Segment ``source_in``, ``source_out``, ``output_in``, ``output_out``,
+``boundary_confidence``, ``low_confidence``) und ``timebase`` (Sekunden auf der Audioebene, keine
+Frame-Rasterung, Kennzeichen für variable Bildrate, ungeprüft) hinzu, ``versions.render`` ist
+``render_v2``. Ohne Schalter bleibt der Plan byte-gleich.
 """
 
 from __future__ import annotations
@@ -17,11 +24,17 @@ import hashlib
 import json
 from typing import Any
 
-from . import captions_de, reframe
+from .. import editorial
+from . import captions_de, compose, reframe, transitions
 
 CONTRACT = "render_plan_v1"
 RENDER_VERSION = "render_v1"
+# Schnittkanten nach AP10b (Policy v2, implementation.cut.padding). Nur bei aktivem Schalter im Plan.
+RENDER_VERSION_V2 = "render_v2"
 CAPTIONS_VERSION = "captions_v1"
+# Untertitel nach AP10a (Policy v2, implementation.captions.word_bridge). Steht nur bei aktiven Regeln
+# im Plan: Umschalten und Rollback ändern den Hash und rendern neu; unter v1 bleibt der Hash gleich.
+CAPTIONS_VERSION_V2 = "captions_v2"
 OUTPUT_SIZES: dict[str, tuple[int, int]] = {"9:16": (1080, 1920), "4:5": (1080, 1350), "1:1": (1080, 1080), "16:9": (1920, 1080)}
 PLATFORM_ASPECT = {"tiktok": "9:16", "reels": "9:16", "shorts": "9:16", "linkedin": "4:5"}
 TITLE_CARD_S = 2.5
@@ -176,6 +189,32 @@ def normalize_segments(segments: list[dict]) -> list[dict]:
     return out
 
 
+def cut_segments(segments: list[dict], words: list[dict] | None, policy: editorial.Policy | None = None) -> list[dict]:
+    """Die Segmente, wie der Render sie schneidet: unter Fassung 2 mit ``cut.padding`` an Wortgrenzen gepaddet
+    (dieselbe Rechnung wie in ``build_plan``), sonst ``normalize_segments`` unverändert. Für Reframe und
+    Captions, die vor dem Plan gebraucht werden."""
+    segs = normalize_segments(segments)
+    rules = transitions.cut_rules(policy)
+    if rules is None or not words:
+        return segs
+    return [{k: s[k] for k in ("start", "end", "role")} for s in transitions.pad_segments(segs, words, rules)]
+
+
+def timeline_block(padded: list[dict]) -> list[dict]:
+    """Herkunft und Ziel je Segment (``compose.output_timeline``) mit der Sicherheit der Kanten."""
+    comp = compose.Composition.from_json([{k: s[k] for k in ("start", "end", "role")} for s in padded])
+    return [
+        {**entry, "boundary_confidence": s["boundary_confidence"], "low_confidence": bool(s["low_confidence"])}
+        for entry, s in zip(compose.output_timeline(comp), padded)
+    ]
+
+
+def timebase_block(src_vfr: bool | None) -> dict[str, Any]:
+    """Kanonische Zeitbasis: Sekunden auf der Audioebene der Quelle, keine Rasterung auf Frames.
+    ``vfr`` aus den probe-Metadaten (``None``: unbekannt); das Verhalten bei variabler Bildrate ist ungeprüft."""
+    return {"unit": "s", "reference": "source_audio", "frame_snapping": False, "vfr": src_vfr, "vfr_verified": False}
+
+
 def plan_duration(plan: dict) -> float:
     return round(sum(float(s["end"]) - float(s["start"]) for s in plan["segments"]), 3)
 
@@ -195,13 +234,17 @@ def build_plan(
     onscreen_hook: str | None = None,
     hook_overlay: bool | None = None,
     audio_preset: str = "master",
-    filler_cuts: bool = False,
+    filler_cuts: bool | None = None,
     caption_font: str | None = None,
     brand: dict[str, Any] | None = None,
     caption_text_field: str | None = None,
     zeitmarken: list[dict] | None = None,
     effekte: list[dict] | None = None,
     musik: dict[str, Any] | None = None,
+    composition: dict[str, Any] | None = None,
+    policy: editorial.Policy | None = None,
+    words: list[dict] | None = None,
+    src_vfr: bool | None = None,
 ) -> dict[str, Any]:
     """Baut den Plan. ``caption_preset`` ist das Basis-Preset (Name oder 1080x1920-Objekt), die Skalierung passiert hier.
     ``sources`` erwartet ``storage_key``, ``transcript_version``, ``hook_version``, ``candidate_id``.
@@ -209,7 +252,25 @@ def build_plan(
     ``caption_text_field`` (``text`` | ``text_norm``) wählt die Wortform der Captions (Schweizerdeutsch-Beta).
     ``zeitmarken`` sind die Bildausschnitt-Entscheidungen von Hand, in Quellzeit. Sie stecken zwar
     schon über die Einstellungen im Plan, stehen aber zusätzlich unverändert darin: nur so kann die
-    Oberfläche sagen, ob das gebaute Video noch zu den gesetzten Marken passt."""
+    Oberfläche sagen, ob das gebaute Video noch zu den gesetzten Marken passt.
+    ``composition`` ist das Ergebnis von ``trim_plan.build_composition`` (AP7): unter Fassung 2
+    (``policy`` oder die aktive) ist ``filler_cuts`` dann true, wenn die Komposition lokale Schnitte
+    hat (``local_cuts`` größer null). Unter Fassung 1 bleibt ``filler_cuts`` der übergebene Wert (ohne Angabe
+    false). Überschreibt die Komposition einen ausdrücklich übergebenen anderen Wert, steht das als
+    ``filler_cuts_note`` im Plan.
+    ``words`` (Transkript in Quellzeit) und ``src_vfr`` (probe) wirken nur unter Fassung 2 mit
+    ``cut.padding`` (AP10b): Segmente gepaddet, dazu ``timeline``, ``timebase`` und ``render_v2``."""
+    note = None
+    if composition is not None and (policy if policy is not None else editorial.load()).version >= 2:
+        from_comp = int(composition.get("local_cuts") or 0) > 0
+        if filler_cuts is not None and bool(filler_cuts) != from_comp:
+            note = (
+                f"filler_cuts {'true' if filler_cuts else 'false'} übergeben, aus der Komposition "
+                f"{'true' if from_comp else 'false'} gesetzt (local_cuts {int(composition.get('local_cuts') or 0)})"
+            )
+        filler_cuts = from_comp
+    cut = transitions.cut_rules(policy)
+    padded = transitions.pad_segments(normalize_segments(segments), words or [], cut) if cut is not None else None
     aspect = aspect or aspect_for_platform(platform)
     out_w, out_h = output_size(aspect)
     fps = float(src_fps) if src_fps else DEFAULT_FPS
@@ -227,7 +288,7 @@ def build_plan(
         "platform": platform,
         "aspect": aspect,
         "output": {"width": out_w, "height": out_h, "fps": fps},
-        "segments": normalize_segments(segments),
+        "segments": [{k: s[k] for k in ("start", "end", "role")} for s in padded] if padded is not None else normalize_segments(segments),
         "filler_cuts": bool(filler_cuts),
         "reframe": reframe_result.plan_block(),
         "shots": reframe_result.shots_json(),
@@ -252,10 +313,26 @@ def build_plan(
             "hook_version": sources.get("hook_version"),
             "candidate_id": sources.get("candidate_id"),
         },
-        "versions": dict(VERSIONS),
+        "versions": plan_versions(policy),
     }
+    if note:
+        plan["filler_cuts_note"] = note
+    if padded is not None:
+        plan["timeline"] = timeline_block(padded)
+        plan["timebase"] = timebase_block(src_vfr)
     json.dumps(plan)  # muss serialisierbar sein, sonst hier scheitern statt beim DB-Schreiben
     return plan
+
+
+def plan_versions(policy: editorial.Policy | None = None) -> dict[str, str]:
+    """Modulversionen für den Plan; ``captions_de`` wird ``captions_v2``, wenn die AP10a-Regeln gelten,
+    ``render`` wird ``render_v2``, wenn ``cut.padding`` gilt (AP10b). Ohne ``policy`` die aktive Fassung."""
+    versions = dict(VERSIONS)
+    if captions_de.caption_rules(policy).enabled:
+        versions["captions_de"] = CAPTIONS_VERSION_V2
+    if transitions.cut_rules(policy) is not None:
+        versions["render"] = RENDER_VERSION_V2
+    return versions
 
 
 def plan_hash(plan: dict, hook_version: int | None, transcript_version: int | None) -> str:
@@ -267,6 +344,7 @@ def plan_hash(plan: dict, hook_version: int | None, transcript_version: int | No
 __all__ = [
     "AUDIO_PRESETS",
     "CAPTIONS_VERSION",
+    "CAPTIONS_VERSION_V2",
     "CONTRACT",
     "DEFAULT_FPS",
     "HOOK_OVERLAY_DEFAULT",
@@ -275,6 +353,7 @@ __all__ = [
     "OUTPUT_SIZES",
     "PLATFORM_ASPECT",
     "RENDER_VERSION",
+    "RENDER_VERSION_V2",
     "TITLE_CARD_S",
     "VERSIONS",
     "WATERMARK_DEFAULTS",
@@ -283,9 +362,13 @@ __all__ = [
     "brand_block",
     "build_plan",
     "caption_block",
+    "cut_segments",
     "hook_overlay_enabled",
     "normalize_segments",
     "output_size",
     "plan_duration",
     "plan_hash",
+    "plan_versions",
+    "timebase_block",
+    "timeline_block",
 ]

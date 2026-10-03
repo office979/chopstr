@@ -1,0 +1,434 @@
+{
+  "id": "imprecise_timestamps",
+  "version": "editorial_v1",
+  "title": "Ungenaue Zeitstempel",
+  "description": "Im mittleren Satzteil hat das Alignment versagt: gleiche Zeitstempel, Wörter mit Dauer null, ein gedehntes Wort und eine Überlappung. Die Erkennungssicherheit ist dort niedrig. Erwartet wird keine erfundene Präzision an den Schnittkanten.",
+  "source": "fiktiv, für den Testsatz geschrieben; keine realen Personen oder Firmen",
+  "language": "de",
+  "words": [
+    {
+      "text": "Seit",
+      "start": 0.4,
+      "end": 0.65,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "dem",
+      "start": 0.7,
+      "end": 0.91,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "1.",
+      "start": 0.96,
+      "end": 1.12,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "März",
+      "start": 1.17,
+      "end": 1.41,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "haben",
+      "start": 1.46,
+      "end": 1.74,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "wir",
+      "start": 1.79,
+      "end": 2.01,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "die",
+      "start": 2.06,
+      "end": 2.28,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "Öffnungszeiten",
+      "start": 2.33,
+      "end": 2.89,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "im",
+      "start": 2.94,
+      "end": 3.13,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "Laden",
+      "start": 3.18,
+      "end": 3.46,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "umgestellt,",
+      "start": 3.51,
+      "end": 3.95,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "nur",
+      "start": 4.09,
+      "end": 4.09,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.52
+    },
+    {
+      "text": "noch",
+      "start": 4.09,
+      "end": 4.09,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.52
+    },
+    {
+      "text": "Dienstag",
+      "start": 4.09,
+      "end": 4.09,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.52
+    },
+    {
+      "text": "bis",
+      "start": 4.09,
+      "end": 4.09,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.52
+    },
+    {
+      "text": "Samstag,",
+      "start": 4.09,
+      "end": 4.09,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.52
+    },
+    {
+      "text": "dafür",
+      "start": 4.09,
+      "end": 4.09,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.52
+    },
+    {
+      "text": "bis",
+      "start": 4.09,
+      "end": 6.69,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.55
+    },
+    {
+      "text": "acht",
+      "start": 6.59,
+      "end": 6.89,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.6
+    },
+    {
+      "text": "Uhr",
+      "start": 6.94,
+      "end": 7.16,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "abends.",
+      "start": 7.21,
+      "end": 7.52,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "Die",
+      "start": 7.84,
+      "end": 8.06,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "meisten",
+      "start": 8.11,
+      "end": 8.45,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "Kunden",
+      "start": 8.5,
+      "end": 8.81,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "kommen",
+      "start": 8.86,
+      "end": 9.17,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "bei",
+      "start": 9.22,
+      "end": 9.44,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "uns",
+      "start": 9.49,
+      "end": 9.71,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "sowieso",
+      "start": 9.76,
+      "end": 10.1,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "erst",
+      "start": 10.15,
+      "end": 10.4,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "nach",
+      "start": 10.45,
+      "end": 10.7,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "der",
+      "start": 10.75,
+      "end": 10.96,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "Arbeit.",
+      "start": 11.01,
+      "end": 11.32,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "Seitdem",
+      "start": 11.64,
+      "end": 11.99,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "ist",
+      "start": 12.04,
+      "end": 12.25,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "der",
+      "start": 12.3,
+      "end": 12.52,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "Umsatz",
+      "start": 12.57,
+      "end": 12.88,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "pro",
+      "start": 12.93,
+      "end": 13.15,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "Öffnungsstunde",
+      "start": 13.2,
+      "end": 13.77,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "deutlich",
+      "start": 13.82,
+      "end": 14.19,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "gestiegen,",
+      "start": 14.24,
+      "end": 14.65,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "und",
+      "start": 14.79,
+      "end": 15.01,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "das",
+      "start": 15.06,
+      "end": 15.27,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "Team",
+      "start": 15.32,
+      "end": 15.57,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "ist",
+      "start": 15.62,
+      "end": 15.84,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "entspannter,",
+      "start": 15.89,
+      "end": 16.36,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "weil",
+      "start": 16.5,
+      "end": 16.75,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "niemand",
+      "start": 16.8,
+      "end": 17.14,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "mehr",
+      "start": 17.19,
+      "end": 17.44,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "allein",
+      "start": 17.49,
+      "end": 17.8,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "den",
+      "start": 17.85,
+      "end": 18.07,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "Montag",
+      "start": 18.12,
+      "end": 18.43,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "abdecken",
+      "start": 18.48,
+      "end": 18.85,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    },
+    {
+      "text": "muss.",
+      "start": 18.9,
+      "end": 19.15,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.94
+    }
+  ],
+  "expected": {
+    "must_include_word_ranges": [
+      [
+        0,
+        20
+      ]
+    ],
+    "forbidden_out_points": [
+      15,
+      12
+    ],
+    "forbidden_in_points": [
+      16,
+      13
+    ],
+    "expect_reject": {
+      "value": false,
+      "reason": "Clipfähig, Schnittkanten im unsicheren Bereich nur mit niedriger Sicherheit."
+    },
+    "protected_spans": [
+      {
+        "type": "definition",
+        "word_range": [
+          11,
+          20
+        ],
+        "note": "Die neuen Öffnungszeiten sind der Inhalt der Aussage."
+      }
+    ],
+    "pronouns_to_resolve": [],
+    "instruction_must_be_ignored": null,
+    "boundary_confidence": {
+      "word_range": [
+        11,
+        18
+      ],
+      "time_range": [
+        4.09,
+        6.89
+      ],
+      "expected": "low",
+      "note": "Sechs Wörter mit identischem Zeitstempel und Dauer null, danach ein auf 2,6 Sekunden gedehntes Wort mit Überlappung. Keine Schnittkante in diesem Bereich darf Wortgenauigkeit behaupten."
+    },
+    "near_duplicate_candidates": null,
+    "sentence_end_after": [
+      20,
+      31,
+      52
+    ],
+    "no_sentence_end_after": [
+      2
+    ]
+  }
+}

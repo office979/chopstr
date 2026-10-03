@@ -3,7 +3,7 @@
   probe_and_extract (cpu)
     -> gather(transcribe_de (gpu), diarize (gpu), heatmap (cpu))
     -> fuse_and_nlp (cpu)
-    -> detect_candidates (cpu, Story-Engine mit LLM, bis 60 Minuten, Heartbeat-Timeout 15 Minuten, Heartbeat pro Kapitel)
+    -> detect_candidates (cpu, Story-Engine mit LLM, Heartbeat-Timeout 15 Minuten, Heartbeat pro Kapitel)
     -> notify(candidates_ready)
     -> Warten auf Freigabe-Signale (approve / finish_review), bis zu 14 Tage
     -> render_pack (cpu, Phase 3, Stub)
@@ -11,6 +11,11 @@
 Retry-Policies wie im Gerüst: IO_RETRY (5 Versuche), LLM_RETRY (3 Versuche);
 ``ResidencyError``, ``SchemaError`` und ``TranscribeError`` sind nicht wiederholbar.
 Der Workflow-Code ist deterministisch: keine Umgebungsvariablen, keine I/O; Queues kommen als Parameter.
+
+Die Zeitgrenzen der Stufen richten sich nach der Laenge der Quelle (``zeitgrenze``), nicht nach
+Festwerten. Die Laenge kommt aus dem Ergebnis von ``probe_and_extract`` und liegt damit im
+Event-Log, ein Replay rechnet also dieselben Werte. Untergrenzen sind die frueheren Festwerte,
+kurze Quellen verhalten sich unveraendert.
 """
 
 from __future__ import annotations
@@ -29,6 +34,39 @@ GPU_RETRY = RetryPolicy(maximum_attempts=3, initial_interval=timedelta(seconds=3
 LLM_RETRY = RetryPolicy(maximum_attempts=3, initial_interval=timedelta(seconds=10), non_retryable_error_types=NON_RETRYABLE)
 
 REVIEW_TIMEOUT = timedelta(days=14)
+
+# Zeitgrenzen je Stufe: (Untergrenze in Minuten, Faktor auf die Laenge der Quelle).
+#
+# Vorher waren das Festwerte. Sie stammten aus einer Zeit, in der das Upload-Limit bei 5 GB lag,
+# also rund eineinhalb Stunden 1080p. Mit 25 GB sind sieben Stunden moeglich, und dann reisst
+# nicht die Dateigroesse, sondern die Transkription: zwei Stunden Grenze fuer sieben Stunden Ton.
+#
+# Die Untergrenzen sind exakt die bisherigen Festwerte. Kurze Quellen verhalten sich damit
+# unveraendert, nur lange bekommen mehr Zeit. Die Faktoren sind bewusst grosszuegig, weil ein zu
+# knapper Timeout einen fertig gerechneten Lauf wegwirft, waehrend ein zu weiter nur einen
+# haengenden Job spaeter abbricht. Gegen echtes Haengen schuetzen die Heartbeat-Timeouts, nicht
+# diese Grenzen.
+ZEITGRENZEN: dict[str, tuple[int, float]] = {
+    "ingest": (60, 0.5),   # Audio extrahieren und Proxy bauen, I/O-lastig
+    "asr": (120, 1.0),     # Transkription und Diarisierung, laufen parallel auf der GPU
+    "nlp": (30, 0.3),      # Zusammenfuehren und deutsche Sprachanalyse
+    "detect": (60, 0.75),  # Story-Engine, ein LLM-Aufruf je Kapitel und Kandidat
+}
+# Notbremse: keine Stufe darf laenger laufen als das, egal wie lang die Quelle ist.
+ZEITGRENZE_MAX_MIN = 12 * 60
+
+
+def zeitgrenze(stufe: str, dauer_s: float, untergrenze_min: int | None = None) -> timedelta:
+    """Zeitgrenze einer Stufe aus der Laenge der Quelle.
+
+    Rein und deterministisch, damit der Workflow bei einem Replay dieselben Werte erhaelt.
+    ``untergrenze_min`` uebersteuert die Untergrenze aus der Tabelle (fuer die Parameter des
+    Workflows, die von aussen gesetzt werden koennen).
+    """
+    basis, faktor = ZEITGRENZEN[stufe]
+    unten = basis if untergrenze_min is None else untergrenze_min
+    aus_dauer = (max(0.0, dauer_s) / 60.0) * faktor
+    return timedelta(minutes=min(ZEITGRENZE_MAX_MIN, max(unten, round(aus_dauer))))
 
 
 @dataclass
@@ -78,28 +116,36 @@ class ClipProjectWorkflow:
         sid = params.source_id
         cpu = dict(task_queue=params.cpu_queue, retry_policy=IO_RETRY, heartbeat_timeout=timedelta(minutes=5))
         gpu = dict(task_queue=params.gpu_queue, retry_policy=GPU_RETRY, heartbeat_timeout=timedelta(minutes=10))
+        # Fuer die erste Stufe ist die Laenge der Quelle noch unbekannt; hier gilt der Parameter.
+        # Alle spaeteren Stufen rechnen mit `zeitgrenze` aus der gemessenen Dauer.
         ingest_t = timedelta(minutes=params.ingest_timeout_min)
-        asr_t = timedelta(minutes=params.asr_timeout_min)
 
         self.state.stage = "ingesting"
-        await workflow.execute_activity("probe_and_extract", sid, start_to_close_timeout=ingest_t, **cpu)
+        # Das Ergebnis traegt die Laenge der Quelle. Vorher wurde es verworfen, und alle
+        # folgenden Stufen liefen gegen Festwerte.
+        info = await workflow.execute_activity("probe_and_extract", sid, start_to_close_timeout=ingest_t, **cpu)
+        dauer_s = float((info or {}).get("duration_s") or 0.0)
 
         self.state.stage = "transcribing"
+        asr_dyn = zeitgrenze("asr", dauer_s, params.asr_timeout_min)
+        ingest_dyn = zeitgrenze("ingest", dauer_s, params.ingest_timeout_min)
         await asyncio.gather(
-            workflow.execute_activity("transcribe_de", sid, start_to_close_timeout=asr_t, **gpu),
-            workflow.execute_activity("diarize", sid, start_to_close_timeout=asr_t, **gpu),
-            workflow.execute_activity("heatmap", sid, start_to_close_timeout=ingest_t, **cpu),
+            workflow.execute_activity("transcribe_de", sid, start_to_close_timeout=asr_dyn, **gpu),
+            workflow.execute_activity("diarize", sid, start_to_close_timeout=asr_dyn, **gpu),
+            workflow.execute_activity("heatmap", sid, start_to_close_timeout=ingest_dyn, **cpu),
         )
 
         self.state.stage = "analyzing"
-        await workflow.execute_activity("fuse_and_nlp", sid, start_to_close_timeout=timedelta(minutes=30), **cpu)
+        await workflow.execute_activity(
+            "fuse_and_nlp", sid, start_to_close_timeout=zeitgrenze("nlp", dauer_s), **cpu
+        )
 
         self.state.stage = "scoring"
         await workflow.execute_activity(
             "detect_candidates",
             sid,
             task_queue=params.cpu_queue,
-            start_to_close_timeout=timedelta(minutes=60),
+            start_to_close_timeout=zeitgrenze("detect", dauer_s),
             heartbeat_timeout=timedelta(minutes=15),  # ein Heartbeat pro Kapitel
             retry_policy=LLM_RETRY,
         )

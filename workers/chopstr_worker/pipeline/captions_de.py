@@ -16,8 +16,10 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from dataclasses import dataclass, field, replace
 
+from .. import editorial
 from .dach_nlp import NEGATIONS
 
 W, H = 1080, 1920
@@ -28,6 +30,77 @@ MAX_CPS = 17.0
 MAX_WARNUNGEN = 20
 BREAK_WORDS = {"und", "aber", "weil", "dass", "denn", "oder", "wenn", "sondern", "also", "obwohl", "damit"}
 TEXT_FIELDS = ("text", "text_norm")
+
+
+@dataclass(frozen=True)
+class CaptionRules:
+    """Regeln aus AP10a (Abschnitt ``captions`` der Policy, Fassung 2).
+
+    ``enabled`` ist der Schalter ``implementation.captions.word_bridge`` (Rollback). Aus heisst: genau das
+    Verhalten vor AP10a, Wort fuer Wort (Fassung 1 und Rollback). An heisst zusaetzlich zu den
+    Werten unten: Zahl plus Einheit ist ein Token, Bindestrichwoerter werden nur am vorhandenen
+    Bindestrich getrennt, Komposita bevorzugt an Morphemgrenzen. Stil, Farben, Schrift, Groesse,
+    Position, Woerter je Karte und Highlight bleiben in beiden Faellen gleich."""
+
+    enabled: bool = False
+    bridge_words: bool = False
+    bridge_max_s: float = 0.0
+    min_event_s: float = 0.0
+    comma_break_only_on_overflow: bool = False
+
+
+LEGACY_RULES = CaptionRules()
+
+
+def caption_rules(policy: editorial.Policy | None = None) -> CaptionRules:
+    """Regeln der aktiven (oder uebergebenen) Policy; ohne Schalter ``LEGACY_RULES``."""
+    settings = editorial.caption_settings(policy if policy is not None else editorial.load())
+    return LEGACY_RULES if settings is None else CaptionRules(enabled=True, **settings)
+
+
+def _rules(rules: CaptionRules | None) -> CaptionRules:
+    return caption_rules() if rules is None else rules
+
+
+# Zahl plus Einheit bleibt ein Token und wird nie getrennt („40 Prozent", „3,5 Mio. Euro", „14.30 Uhr").
+# Netflix German Timed Text Style Guide (RK 5). Dieselbe Liste steht in apps/web/lib/clips/captions.ts;
+# packages/editorial/parity/caption_cards_v1.json haelt beide gleich.
+NUMBER_RE = re.compile(r"^[+-]?\d+(?:[.,:]\d+)*$")  # 40, 3,5, 40.000, 14.30, 14:30
+UNIT_WORDS = frozenset({
+    "%", "prozent", "prozentpunkte", "promille",
+    "€", "euro", "eur", "cent", "$", "dollar", "usd", "chf", "franken", "rappen", "£", "pfund",
+    "tsd.", "tausend", "mio.", "mio", "million", "millionen", "mrd.", "mrd", "milliarde", "milliarden",
+    "uhr", "sekunde", "sekunden", "minute", "minuten", "stunde", "stunden", "tag", "tage", "tagen",
+    "woche", "wochen", "monat", "monate", "monaten", "jahr", "jahre", "jahren",
+    "km", "m", "cm", "mm", "kg", "g", "kwh", "grad", "°c", "°", "km/h", "mal", "punkte",
+})  # fmt: skip
+MAX_UNITS_PER_NUMBER = 2  # „3,5 Mio. Euro": Groessenordnung und Waehrung
+
+# Haeufige Kompositaglieder (klein) fuer die Trennung an Morphemgrenzen. Bewusst klein: sie wird nur
+# fuer Woerter gebraucht, die breiter als die Zeile sind; was hier fehlt, trennt pyphen.
+COMPOUND_MEMBERS = (
+    "anfrage", "arbeit", "bearbeitung", "beitrag", "bemessung", "beratung", "bereich", "betrieb",
+    "bildung", "bundes", "daten", "dienst", "energie", "entwicklung", "fahrt", "familie", "forschung",
+    "frage", "führung", "geld", "geschäft", "gesellschaft", "gesetz", "gesundheit", "gewinnung",
+    "grenze", "handel", "haus", "jahr", "kampagne", "kinder", "klima", "konzept", "kosten", "kranken",
+    "krise", "kunde", "kunden", "land", "leistung", "leitung", "lösung", "markt", "ministerium",
+    "mitarbeiter", "mittel", "netz", "ordnung", "personal", "pflege", "planung", "politik", "preis",
+    "programm", "projekt", "prozess", "prüfung", "qualität", "recht", "rente", "schiff", "schutz",
+    "sicherheit", "sozial", "staat", "stadt", "stelle", "steuer", "strategie", "system", "technik",
+    "umwelt", "unternehmen", "verband", "verkehr", "versicherung", "vertrag", "vertrieb", "verwaltung",
+    "wandel", "welt", "wert", "wirtschaft", "wissen", "zeit", "ziel", "zins", "erhöhung", "verlag",
+    "hilfe", "sofort",
+)  # fmt: skip
+# Fugenelemente zwischen zwei Gliedern (Fugen-s, Fugen-n und Verwandte).
+COMPOUND_JOINTS = ("es", "en", "er", "s", "n", "e")
+# Untrennbare Vorsilben: „be|arbeitung" ist keine Fuge, die Grenze liegt davor.
+INSEPARABLE_PREFIXES = ("miss", "zer", "ver", "ent", "be", "ge", "er")
+# Ableitungsendungen: dahinter beginnt kein neues Glied („Zeit|ung" ist keine Fuge).
+SUFFIXES = ("ung", "heit", "keit", "schaft", "lich", "isch", "nis", "tum", "bar", "sam", "haft", "ig", "in", "er", "en", "e")  # fmt: skip
+MIN_MORPHEME = 3
+# Gleitkomma-Toleranz für den Vergleich mit bridge_max_s (0,4 s Lücke aus 1,2 minus 0,8).
+BRIDGE_EPS = 1e-6
+
 
 def check_text_field(text_field: str | None) -> str:
     """``text`` oder ``text_norm``; alles andere ist ein Programmierfehler."""
@@ -345,10 +418,16 @@ def _hyphenator():
     return _hyph
 
 
-def hyphenate(word: str, limit: int) -> list[str]:
-    """Teilt ein zu langes Wort an Silben-/Morphemgrenzen (pyphen). Jede Zeile außer der letzten endet auf '-'."""
+def hyphenate(word: str, limit: int, rules: CaptionRules | None = None) -> list[str]:
+    """Teilt ein zu langes Wort an Silben-/Morphemgrenzen (pyphen). Jede Zeile außer der letzten endet auf '-'.
+
+    Mit den Regeln aus AP10a (``rules.enabled``): ein Bindestrichwort nur am vorhandenen Bindestrich,
+    nie darin; sonst bevorzugt an Morphemgrenzen (``COMPOUND_MEMBERS``, Fugen), pyphen nur fuer ein
+    Glied, das allein breiter als die Zeile ist."""
     if len(word) <= limit:
         return [word]
+    if _rules(rules).enabled:
+        return _hyphenate_v2(word, limit)
     parts = _hyphenator().inserted(word, hyphen="|").split("|")
     if len(parts) == 1:
         return [word[i : i + limit] for i in range(0, len(word), limit)]
@@ -359,6 +438,153 @@ def hyphenate(word: str, limit: int) -> list[str]:
             cur = p
         else:
             cur += p
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _hyphen_segments(word: str) -> list[str]:
+    """``Kunden-Anfrage-Bearbeitung`` zu ``Kunden-``, ``Anfrage-``, ``Bearbeitung``; nur innere Bindestriche."""
+    segments, cur = [], ""
+    for i, ch in enumerate(word):
+        cur += ch
+        if ch == "-" and 0 < i < len(word) - 1 and word[i + 1] != "-" and cur.strip("-"):
+            segments.append(cur)
+            cur = ""
+    if cur:
+        segments.append(cur)
+    return segments
+
+
+def _morpheme_boundaries(word: str) -> list[int]:
+    """Trennstellen an Morphemgrenzen aus ``COMPOUND_MEMBERS`` und ``COMPOUND_JOINTS``, links nach rechts.
+
+    Eine Stelle innerhalb eines laengeren erkannten Gliedes zaehlt nicht (``anfrage`` schlaegt
+    ``frage``), jedes Teilstueck hat mindestens ``MIN_MORPHEME`` Zeichen."""
+    low = word.lower()
+    n = len(low)
+    spans = []
+    for m in COMPOUND_MEMBERS:
+        i = low.find(m)
+        while i != -1:
+            spans.append((i, i + len(m)))
+            i = low.find(m, i + 1)
+    starts = {s for s, _ in spans}
+    cands: set[int] = set()
+    for s, e in spans:
+        b = s
+        for pre in INSEPARABLE_PREFIXES:
+            if low[:b].endswith(pre) and b - len(pre) >= MIN_MORPHEME:
+                b -= len(pre)
+                break
+        cands.add(b)
+        # Ende des Gliedes: direkt ein neues Glied, ein Glied hinter einer Fuge, sonst Fuge oder nichts,
+        # solange danach keine Ableitungsendung beginnt.
+        if e in starts:
+            cands.add(e)
+            continue
+        fuge = next((f for f in COMPOUND_JOINTS if low.startswith(f, e) and e + len(f) in starts), None)
+        if fuge is not None:
+            cands.add(e + len(fuge))
+            continue
+        for f in ("s", "n", ""):
+            # Eine Ableitungsendung zählt nur, wenn dort kein bekanntes Glied beginnt.
+            if low.startswith(f, e) and (e + len(f) in starts or not low[e + len(f) :].startswith(SUFFIXES)):
+                cands.add(e + len(f))
+                break
+    return sorted(
+        b for b in cands if MIN_MORPHEME <= b <= n - MIN_MORPHEME and not any(s < b < e for s, e in spans)
+    )
+
+
+def _syllables(piece: str, size: int) -> list[str]:
+    """pyphen-Silben eines Gliedes; einzelne Buchstaben haengen am Nachbarn (``be|ar|bei|tung``)."""
+    parts = _hyphenator().inserted(piece, hyphen="|").split("|")
+    if len(parts) == 1:
+        chunks = [piece[i : i + size] for i in range(0, len(piece), max(1, size))]
+        if len(chunks) > 1 and len(chunks[-1]) == 1 and len(chunks[-2]) > 2:
+            # Kein Rest von einem Zeichen: einen Buchstaben vom vorigen Stück herübernehmen.
+            chunks[-2], chunks[-1] = chunks[-2][:-1], chunks[-2][-1] + chunks[-1]
+        return chunks
+    merged: list[str] = []
+    carry = ""
+    for p in parts:
+        p = carry + p
+        carry = ""
+        if len(p) == 1:
+            carry = p
+            continue
+        merged.append(p)
+    if carry:
+        if merged:
+            merged[-1] += carry
+        else:
+            merged.append(carry)
+    return merged
+
+
+def _split_compound(word: str, limit: int, trailing_dash: bool = False) -> list[str]:
+    """Ein Wort ohne Bindestrich an Morphemgrenzen, ein zu breites Glied mit pyphen. Jede Zeile
+    ausser der letzten bekommt einen Trennstrich; ``trailing_dash`` reserviert auch in der letzten
+    Zeile Platz für einen Bindestrich, der danach angehängt wird."""
+    cuts = [0, *_morpheme_boundaries(word), len(word)]
+    pieces = [word[a:b] for a, b in zip(cuts, cuts[1:])]
+    end_dash = 1 if trailing_dash else 0
+    lines, cur = [], ""
+    for k, piece in enumerate(pieces):
+        last_piece = k == len(pieces) - 1
+        # Die letzte Zeile braucht keinen Trennstrich, jede andere einen.
+        if len(piece) + (end_dash if last_piece else 1) <= limit:
+            units = [piece]
+        else:
+            # Ein Glied breiter als die Zeile: erst an der Morphemgrenze davor brechen, dann pyphen.
+            if cur:
+                lines.append(cur + "-")
+                cur = ""
+            units = _syllables(piece, max(1, limit - 1))
+        for j, u in enumerate(units):
+            dash = end_dash if last_piece and j == len(units) - 1 else 1
+            if cur and len(cur) + len(u) + dash > limit:
+                lines.append(cur + "-")
+                cur = u
+            else:
+                cur += u
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _hyphenate_v2(word: str, limit: int) -> list[str]:
+    """Zwischen Bindestrich-Segmenten nur am Bindestrich; ein Segment, das allein breiter als die
+    Zeile ist, wird an Morphemgrenzen und notfalls mit pyphen weiter geteilt. Ein Bindestrich am
+    Wortende („Kunden-“ in „Kunden- und Lieferantendaten“) bleibt am Ende stehen."""
+    core = word.rstrip("-")
+    tail = word[len(core) :]
+    if not core:
+        return [word]
+    segments = _hyphen_segments(core)
+    lines: list[str] = []
+    cur = ""
+    for k, seg in enumerate(segments):
+        last = k == len(segments) - 1
+        seg_text = seg + tail if last else seg
+        if len(seg_text) <= limit:
+            if cur and len(cur) + len(seg_text) > limit:
+                lines.append(cur)
+                cur = seg_text
+            else:
+                cur += seg_text
+            continue
+        # Segment allein zu breit: vorige Zeile abschliessen, Segment ohne seinen Bindestrich teilen.
+        if cur:
+            lines.append(cur)
+            cur = ""
+        inner = seg[:-1] if seg.endswith("-") else seg
+        dash = seg[len(inner) :] + (tail if last else "")
+        parts = _split_compound(inner, limit, trailing_dash=bool(dash))
+        parts[-1] += dash
+        lines.extend(parts[:-1])
+        cur = parts[-1]
     if cur:
         lines.append(cur)
     return lines
@@ -408,7 +634,7 @@ def _kartenlaenge(card: list[dict], text_field: str, all_caps: bool) -> int:
 
 
 def _passend_teilen(
-    card: list[dict], limit: int, max_lines: int, text_field: str, all_caps: bool
+    group: list[list[dict]], limit: int, max_lines: int, text_field: str, all_caps: bool
 ) -> list[list[dict]]:
     """Eine Karte so aufteilen, dass jeder Teil in die erlaubten Zeilen passt.
 
@@ -417,22 +643,88 @@ def _passend_teilen(
 
     Ein einzelnes Wort, das fuer sich schon zu lang ist, bleibt allein stehen: es weiter zu
     zerlegen hiesse, mitten im Wort umzubrechen, und dafuer gibt es die Silbentrennung.
+
+    ``group`` besteht aus Tokens (siehe ``_tokens``): ein Token ist ein Wort, mit den Regeln aus
+    AP10a auch Zahl plus Einheit, und wird nie geteilt.
     """
+    card = [w for tok in group for w in tok]
     budget = max(1, limit * max_lines)
-    if len(card) <= 1 or _kartenlaenge(card, text_field, all_caps) <= budget:
+    if len(group) <= 1 or _kartenlaenge(card, text_field, all_caps) <= budget:
         return [card]
     aus: list[list[dict]] = []
     lauf: list[dict] = []
-    for w in card:
-        versuch = [*lauf, w]
+    for tok in group:
+        versuch = [*lauf, *tok]
         if lauf and _kartenlaenge(versuch, text_field, all_caps) > budget:
             aus.append(lauf)
-            lauf = [w]
+            lauf = list(tok)
         else:
             lauf = versuch
     if lauf:
         aus.append(lauf)
     return aus
+
+
+def _is_unit(text: str) -> bool:
+    key = text.lower().rstrip(",;:!?")
+    return key in UNIT_WORDS or key.rstrip(".") in UNIT_WORDS
+
+
+def _tokens(
+    words: list[dict], text_field: str, rules: CaptionRules, limit: int | None = None, all_caps: bool = False
+) -> list[list[dict]]:
+    """Woerter zu Tokens. Ohne AP10a ist jedes Wort ein Token; mit AP10a bilden eine Zahl und bis zu
+    ``MAX_UNITS_PER_NUMBER`` folgende Einheiten ein Token („3,5 Mio. Euro"). Eine Einheit mit
+    Satzzeichen (ausser dem Punkt einer Abkuerzung wie „Mio.") schliesst das Token ab.
+
+    Ein Token steht immer in einer Zeile. Ist es breiter als ``limit``, bleibt nur Zahl plus erste
+    Einheit, sonst die Zahl allein („3,5 Milliarden Euro" bei 15 Zeichen: „3,5 Milliarden", „Euro")."""
+    if not rules.enabled:
+        return [[w] for w in words]
+    out: list[list[dict]] = []
+    i = 0
+    while i < len(words):
+        tok = [words[i]]
+        if NUMBER_RE.match(word_text(words[i], text_field)):
+            while len(tok) <= MAX_UNITS_PER_NUMBER and i + len(tok) < len(words):
+                prev = word_text(tok[-1], text_field)
+                if len(tok) > 1 and prev.lower() not in UNIT_WORDS:
+                    break
+                if not _is_unit(word_text(words[i + len(tok)], text_field)):
+                    break
+                tok.append(words[i + len(tok)])
+            while limit and len(tok) > 1 and _token_len(tok, text_field, all_caps) > limit:
+                tok.pop()
+        out.append(tok)
+        i += len(tok)
+    return out
+
+
+def _token_text(tok: list[dict], text_field: str) -> str:
+    return " ".join(word_text(w, text_field) for w in tok)
+
+
+def _token_len(tok: list[dict], text_field: str, all_caps: bool) -> int:
+    text = _token_text(tok, text_field)
+    return len(text.upper() if all_caps else text)
+
+
+def _comma_overflows(tokens: list[list[dict]], i: int, cur_len: int, cap: int, text_field: str) -> bool:
+    """P30: bricht die Karte nach dem Komma von Token ``i`` nur, wenn sie sonst ueberliefe.
+
+    Gemessen wird der folgende Satzteil bis zum naechsten Satzzeichen oder einer Pause ueber 0,4 s.
+    Passt er nicht mehr in die Karte (Zeichen je Zeile mal Zeilen), ist das Komma die bessere Stelle."""
+    total = cur_len
+    for k in range(i + 1, len(tokens)):
+        if float(tokens[k][0]["start"]) - float(tokens[k - 1][-1]["end"]) > 0.4:
+            break
+        t = _token_text(tokens[k], text_field)
+        total += len(t) + 1
+        if total - 1 > cap:
+            return True
+        if t.endswith((".", "!", "?", ",")):
+            break
+    return False
 
 
 def build_cards(
@@ -442,6 +734,7 @@ def build_cards(
     text_field: str = "text",
     words_per_card: int | None = None,
     all_caps: bool = False,
+    rules: CaptionRules | None = None,
 ) -> list[list[dict]]:
     """Gruppiert Wörter zu Karten. Bricht an Satzzeichen, Konjunktionen, Pausen und vor langen Komposita.
     ``text_field`` bestimmt, welche Wortform Länge und Satzzeichen liefert (siehe ``word_text``).
@@ -454,11 +747,17 @@ def build_cards(
     erlaubten Zeilen, wird sie geteilt. Vorher entstand daraus eine Karte, deren Rest in die letzte
     Zeile gequetscht wurde (siehe ``wrap_lines``) - der Text war dann nicht weg, stand aber über
     die sichere Fläche hinaus oder in einer Zeile mehr, als eingestellt war. Beides sieht im Bild
-    falsch aus, und beides kann niemand von aussen reparieren."""
+    falsch aus, und beides kann niemand von aussen reparieren.
+
+    ``rules`` (Standard: aktive Policy, siehe ``caption_rules``): mit AP10a zaehlt Zahl plus Einheit
+    als ein Token (auch bei ``words_per_card``), und ein Komma bricht die Karte nur, wenn sie sonst
+    ueberliefe (P30). Ohne AP10a ist jedes Wort ein Token und alles wie zuvor."""
+    rules = _rules(rules)
     limit = limit or PRESETS["tiktok_bold"].max_chars
     words = sichtbare_woerter(words, text_field)
+    tokens = _tokens(words, text_field, rules, limit, all_caps)
     if words_per_card and words_per_card > 0:
-        roh = [words[i : i + words_per_card] for i in range(0, len(words), words_per_card)]
+        roh = [tokens[i : i + words_per_card] for i in range(0, len(tokens), words_per_card)]
         aus: list[list[dict]] = []
         for gruppe in roh:
             aus.extend(_passend_teilen(gruppe, limit, max_lines, text_field, all_caps))
@@ -467,8 +766,8 @@ def build_cards(
     cards: list[list[dict]] = []
     cur: list[dict] = []
     cur_len = 0
-    for i, w in enumerate(words):
-        t = word_text(w, text_field)
+    for i, tok in enumerate(tokens):
+        t = _token_text(tok, text_field)
         is_long = len(t) > limit
         if is_long and cur and cur_len > 8:
             cards.append(cur)
@@ -477,10 +776,13 @@ def build_cards(
         if cur and not is_long and (cur_len + len(t) + 1 > cap or (starts_clause and cur_len > 8)):
             cards.append(cur)
             cur, cur_len = [], 0
-        cur.append(w)
+        cur.extend(tok)
         cur_len += len(t) + 1
-        nxt = words[i + 1] if i + 1 < len(words) else None
-        if is_long or t.endswith((".", "!", "?", ",")) or (nxt and float(nxt["start"]) - float(w["end"]) > 0.4):
+        nxt = tokens[i + 1][0] if i + 1 < len(tokens) else None
+        comma = t.endswith(",") and (
+            not rules.comma_break_only_on_overflow or _comma_overflows(tokens, i, cur_len, cap, text_field)
+        )
+        if is_long or t.endswith((".", "!", "?")) or comma or (nxt and float(nxt["start"]) - float(tok[-1]["end"]) > 0.4):
             cards.append(cur)
             cur, cur_len = [], 0
     if cur:
@@ -526,19 +828,27 @@ def _ass_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("{", "(").replace("}", ")")
 
 
-def card_lines(card: list[dict], preset: CaptionPreset, text_field: str = "text") -> list[list[tuple[dict, str]]]:
+def card_lines(
+    card: list[dict], preset: CaptionPreset, text_field: str = "text", rules: CaptionRules | None = None
+) -> list[list[tuple[dict, str]]]:
     """Zeilen einer Karte als Liste von (Wort, Textstück)-Paaren, inklusive Silbentrennung.
 
     ``all_caps`` wird hier angewendet und nicht erst beim Setzen: Grossbuchstaben brauchen mehr
     Platz, und die Silbentrennung muss mit der Form rechnen, die spaeter im Bild steht. Beim
     deutschen ``ß`` macht ``upper()`` daraus ``SS``, also ein Zeichen mehr - genau deshalb darf die
-    Umwandlung nicht hinter der Laengenrechnung passieren."""
+    Umwandlung nicht hinter der Laengenrechnung passieren.
+
+    Mit AP10a geht ein Token aus Zahl plus Einheit als eine Umbrucheinheit an ``wrap_lines``, damit
+    „40 Prozent" oder „14.30 Uhr" nie über zwei Zeilen verteilt werden."""
+    rules = _rules(rules)
+    if rules.enabled:
+        return _card_lines_v2(card, preset, text_field, rules)
     pieces: list[tuple[dict, str]] = []
     for w in card:
         text = word_text(w, text_field)
         if preset.all_caps:
             text = text.upper()
-        for piece in hyphenate(text, preset.max_chars):
+        for piece in hyphenate(text, preset.max_chars, rules):
             pieces.append((w, piece))
     tokens = [p for _, p in pieces]
     lines_text = wrap_lines(tokens, preset.max_chars, preset.max_lines)
@@ -551,6 +861,61 @@ def card_lines(card: list[dict], preset: CaptionPreset, text_field: str = "text"
     return lines
 
 
+# Bindet die Wörter eines Tokens für ``wrap_lines`` zu einer Einheit (zählt wie ein Leerzeichen).
+_TOKEN_JOINER = "\u00a0"
+
+
+def _card_lines_v2(
+    card: list[dict], preset: CaptionPreset, text_field: str, rules: CaptionRules
+) -> list[list[tuple[dict, str]]]:
+    units: list[list[tuple[dict, str]]] = []
+    for tok in _tokens(card, text_field, rules, preset.max_chars, preset.all_caps):
+        texts = [word_text(w, text_field) for w in tok]
+        if preset.all_caps:
+            texts = [t.upper() for t in texts]
+        if len(tok) > 1:
+            units.append(list(zip(tok, texts, strict=True)))
+            continue
+        units.extend([(tok[0], piece)] for piece in hyphenate(texts[0], preset.max_chars, rules))
+    lines_text = wrap_lines(
+        [_TOKEN_JOINER.join(piece for _, piece in u) for u in units], preset.max_chars, preset.max_lines
+    )
+    lines: list[list[tuple[dict, str]]] = []
+    k = 0
+    for line in lines_text:
+        n = len(line.split(" "))
+        lines.append([pair for u in units[k : k + n] for pair in u])
+        k += n
+    return lines
+
+
+def _min_card_end(card: list[dict], end: float, next_card: float | None, rules: CaptionRules) -> float:
+    """Ende einer Karte nach AP10a, nie über den Beginn der nächsten Karte und nie kürzer als das
+    gesprochene Ende.
+
+    Überbrückung zwischen Karten: ist die Lücke bis zur nächsten Karte höchstens ``bridge_max_s``,
+    steht die Karte bis zu deren Start (jede Caption bis zur nächsten sichtbar, deckt die Presets mit
+    einem Wort je Karte ab). Danach Mindestdauer ``min_event_s`` ab Kartenbeginn, nur für Karten mit
+    mehreren Wörtern."""
+    if not rules.enabled:
+        return end
+    if next_card is not None and next_card > float(card[-1]["start"]):
+        if end > next_card:
+            end = next_card  # ASR-Zeiten überlappen: nie in die nächste Karte hinein
+        elif rules.bridge_words and next_card - end <= rules.bridge_max_s + BRIDGE_EPS:
+            end = next_card
+    if len(card) < 2 or rules.min_event_s <= 0:
+        return end
+    target = float(card[0]["start"]) + rules.min_event_s
+    if next_card is not None:
+        target = min(target, next_card)
+    return max(end, target)
+
+
+def _next_start(cards: list[list[dict]], i: int) -> float | None:
+    return float(cards[i + 1][0]["start"]) if i + 1 < len(cards) else None
+
+
 def to_ass(
     words: list[dict],
     clip_start: float = 0.0,
@@ -558,13 +923,21 @@ def to_ass(
     play_res: tuple[int, int] = (W, H),
     font_family: str | None = None,
     text_field: str = "text",
+    rules: CaptionRules | None = None,
 ) -> str:
     """ASS mit Wort-Highlight: pro Wort ein Event, aktives Wort eingefärbt (bei ``highlight_words``).
 
     ``play_res`` ist die Ausgabegröße; das Preset muss dazu passen (siehe ``scaled_preset``).
     ``font_family`` überschreibt den ``Fontname`` des Presets (Marken-Font aus ``brand_assets``).
-    ``text_field`` wählt Original (``text``) oder normalisierte Form (``text_norm``, Fallback ``text``)."""
+    ``text_field`` wählt Original (``text``) oder normalisierte Form (``text_norm``, Fallback ``text``).
+
+    ``rules`` (Standard: aktive Policy): mit AP10a endet ein Wort-Ereignis erst beim Start des
+    nächsten Wortes, wenn die Lücke höchstens ``bridge_max_s`` beträgt; das gilt innerhalb einer
+    Karte und vom letzten Wort einer Karte bis zum Start der nächsten. Eine Karte mit mehreren
+    Wörtern steht mindestens ``min_event_s``, nie in die nächste Karte hinein.
+    Stil, Farben und Text der Ereignisse bleiben gleich, nur die Zeiten ändern sich."""
     text_field = check_text_field(text_field)
+    rules = _rules(rules)
     p = preset if isinstance(preset, CaptionPreset) else preset_for(preset)
     font = (font_family or "").strip() or p.font
     play_w, play_h = play_res
@@ -581,15 +954,25 @@ def to_ass(
         "[Events]\nFormat: Layer, Start, End, Style, Text\n"
     )
     events = []
-    for card in build_cards(words, p.max_chars, p.max_lines, text_field, p.words_per_card, p.all_caps):
-        lines = card_lines(card, p, text_field)
+    cards = build_cards(words, p.max_chars, p.max_lines, text_field, p.words_per_card, p.all_caps, rules)
+    for ci, card in enumerate(cards):
+        lines = card_lines(card, p, text_field, rules)
+        next_card = float(cards[ci + 1][0]["start"]) if ci + 1 < len(cards) else None
         if not p.highlight_words:
-            s, e = float(card[0]["start"]) - clip_start, float(card[-1]["end"]) - clip_start
+            s, e = float(card[0]["start"]), float(card[-1]["end"])
+            e = _min_card_end(card, e, next_card, rules)
             text = NEWLINE.join(" ".join(_ass_escape(piece) for _, piece in ln) for ln in lines)
-            events.append(f"Dialogue: 0,{_fmt_t(s)},{_fmt_t(e)},Cap,{text}")
+            events.append(f"Dialogue: 0,{_fmt_t(s - clip_start)},{_fmt_t(e - clip_start)},Cap,{text}")
             continue
-        for w in card:
-            s, e = float(w["start"]) - clip_start, float(w["end"]) - clip_start
+        for j, w in enumerate(card):
+            s, e = float(w["start"]), float(w["end"])
+            if rules.bridge_words and j + 1 < len(card):
+                nxt = float(card[j + 1]["start"])
+                if s < nxt and nxt - e <= rules.bridge_max_s + BRIDGE_EPS:
+                    e = nxt
+            if j == len(card) - 1:
+                e = _min_card_end(card, e, next_card, rules)
+            s, e = s - clip_start, e - clip_start
             rendered = []
             for ln in lines:
                 parts = [f"{{\\c{p.highlight_color if tw is w else p.base_color}}}{_ass_escape(piece)}" for tw, piece in ln]
@@ -599,7 +982,10 @@ def to_ass(
 
 
 def beiblatt_karten(
-    words: list[dict], preset: str | CaptionPreset | int | None = None, text_field: str = "text"
+    words: list[dict],
+    preset: str | CaptionPreset | int | None = None,
+    text_field: str = "text",
+    rules: CaptionRules | None = None,
 ) -> tuple[list[list[dict]], int]:
     """Die Karten für die Beiblätter SRT und VTT, und die Zeilenbreite dazu.
 
@@ -622,7 +1008,7 @@ def beiblatt_karten(
     if isinstance(preset, int):
         # Alter Aufruf mit blosser Zeichenbreite. Bleibt lesbar und tut genau das, was er bisher
         # tat, damit ein vorhandener Aufruf nicht stillschweigend etwas anderes liefert.
-        return build_cards(words, preset, PRESETS["tiktok_bold"].max_lines, text_field=text_field), preset
+        return build_cards(words, preset, PRESETS["tiktok_bold"].max_lines, text_field=text_field, rules=rules), preset
     p = (
         PRESETS["tiktok_bold"]
         if preset is None
@@ -630,17 +1016,19 @@ def beiblatt_karten(
         if isinstance(preset, CaptionPreset)
         else preset_for(preset)
     )
-    return build_cards(words, p.max_chars, p.max_lines, text_field=text_field), p.max_chars
+    return build_cards(words, p.max_chars, p.max_lines, text_field=text_field, rules=rules), p.max_chars
 
 
 def to_srt(
     words: list[dict], clip_start: float = 0.0, preset: str | CaptionPreset | int | None = None, text_field: str = "text"
 ) -> str:
     text_field = check_text_field(text_field)
-    karten, breite = beiblatt_karten(words, preset, text_field)
+    rules = caption_rules()
+    karten, breite = beiblatt_karten(words, preset, text_field, rules)
     out = []
     for i, card in enumerate(karten, start=1):
-        s, e = float(card[0]["start"]) - clip_start, float(card[-1]["end"]) - clip_start
+        e = _min_card_end(card, float(card[-1]["end"]), _next_start(karten, i - 1), rules)
+        s, e = float(card[0]["start"]) - clip_start, e - clip_start
         text = "\n".join(wrap_lines([word_text(w, text_field) for w in card], breite))
         out.append(f"{i}\n{_srt_t(s)} --> {_srt_t(e)}\n{text}\n")
     return "\n".join(out)
@@ -663,10 +1051,12 @@ def to_vtt(
 ) -> str:
     """WebVTT mit denselben Karten wie ``to_srt`` (Punkt statt Komma in den Zeiten, Kopfzeile WEBVTT)."""
     text_field = check_text_field(text_field)
-    karten, breite = beiblatt_karten(words, preset, text_field)
+    rules = caption_rules()
+    karten, breite = beiblatt_karten(words, preset, text_field, rules)
     out = ["WEBVTT", ""]
     for i, card in enumerate(karten, start=1):
-        s, e = float(card[0]["start"]) - clip_start, float(card[-1]["end"]) - clip_start
+        e = _min_card_end(card, float(card[-1]["end"]), _next_start(karten, i - 1), rules)
+        s, e = float(card[0]["start"]) - clip_start, e - clip_start
         text = "\n".join(wrap_lines([word_text(w, text_field) for w in card], breite))
         out.append(f"{i}\n{_vtt_t(s)} --> {_vtt_t(e)}\n{text}\n")
     return "\n".join(out)
@@ -679,12 +1069,16 @@ def cards_for(
     text_field = check_text_field(text_field)
     p = preset if isinstance(preset, CaptionPreset) else preset_for(preset)
     out = []
-    for card in build_cards(words, p.max_chars, p.max_lines, text_field, p.words_per_card, p.all_caps):
-        lines = [" ".join(piece for _, piece in ln) for ln in card_lines(card, p, text_field)]
+    rules = caption_rules()
+    cards = build_cards(words, p.max_chars, p.max_lines, text_field, p.words_per_card, p.all_caps, rules)
+    for ci, card in enumerate(cards):
+        lines = [" ".join(piece for _, piece in ln) for ln in card_lines(card, p, text_field, rules)]
+        # Mit AP10a dasselbe Kartenende wie im eingebrannten Video (Brücke, Mindestdauer).
+        end = _min_card_end(card, float(card[-1]["end"]), _next_start(cards, ci), rules)
         out.append(
             {
                 "start": round(float(card[0]["start"]) - clip_start, 3),
-                "end": round(float(card[-1]["end"]) - clip_start, 3),
+                "end": round(end - clip_start, 3),
                 "lines": lines,
             }
         )
@@ -694,6 +1088,11 @@ def cards_for(
 __all__ = [
     "AVG_CHAR_EM",
     "BREAK_WORDS",
+    "COMPOUND_MEMBERS",
+    "LEGACY_RULES",
+    "UNIT_WORDS",
+    "CaptionRules",
+    "caption_rules",
     "MAX_CPS",
     "MAX_WARNUNGEN",
     "PLATFORM_DEFAULT_PRESET",

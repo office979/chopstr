@@ -1,0 +1,405 @@
+{
+  "id": "silent_demonstration",
+  "version": "editorial_v1",
+  "title": "Demonstration ohne Sprache",
+  "description": "Eine Schreinerin zeigt eine Holzverbindung. Zwischen „passen Sie auf, äh,“ und „So.“ liegen 6,5 Sekunden ohne Sprache, in denen sie den Zapfen einschlägt. Diese Stille trägt die Aussage und darf weder als Pause noch zusammen mit dem Füllwort davor entfernt werden.",
+  "source": "fiktiv, für den Testsatz geschrieben; keine realen Personen oder Firmen",
+  "language": "de",
+  "words": [
+    {
+      "text": "Ich",
+      "start": 0.4,
+      "end": 0.62,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "zeig",
+      "start": 0.67,
+      "end": 0.91,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Ihnen",
+      "start": 0.96,
+      "end": 1.24,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "das",
+      "start": 1.29,
+      "end": 1.51,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "am",
+      "start": 1.56,
+      "end": 1.74,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "besten",
+      "start": 1.79,
+      "end": 2.11,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "direkt",
+      "start": 2.16,
+      "end": 2.47,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "am",
+      "start": 2.52,
+      "end": 2.7,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Werkstück.",
+      "start": 2.75,
+      "end": 3.16,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Hier",
+      "start": 3.48,
+      "end": 3.73,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "sehen",
+      "start": 3.78,
+      "end": 4.06,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Sie",
+      "start": 4.11,
+      "end": 4.32,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "die",
+      "start": 4.37,
+      "end": 4.59,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "alte",
+      "start": 4.64,
+      "end": 4.89,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Verbindung,",
+      "start": 4.94,
+      "end": 5.38,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "die",
+      "start": 5.52,
+      "end": 5.73,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ist",
+      "start": 5.78,
+      "end": 6.0,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "nur",
+      "start": 6.05,
+      "end": 6.27,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "geleimt",
+      "start": 6.32,
+      "end": 6.66,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "und",
+      "start": 6.71,
+      "end": 6.93,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "nach",
+      "start": 6.98,
+      "end": 7.22,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ein",
+      "start": 7.27,
+      "end": 7.49,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "paar",
+      "start": 7.54,
+      "end": 7.79,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Jahren",
+      "start": 7.84,
+      "end": 8.15,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wackelt",
+      "start": 8.2,
+      "end": 8.54,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "sie.",
+      "start": 8.59,
+      "end": 8.81,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Und",
+      "start": 9.13,
+      "end": 9.35,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "jetzt",
+      "start": 9.4,
+      "end": 9.68,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "passen",
+      "start": 9.73,
+      "end": 10.04,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Sie",
+      "start": 10.09,
+      "end": 10.3,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "auf,",
+      "start": 10.35,
+      "end": 10.57,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "äh,",
+      "start": 10.71,
+      "end": 10.89,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "So.",
+      "start": 17.39,
+      "end": 17.58,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Das",
+      "start": 17.9,
+      "end": 18.11,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hält",
+      "start": 18.16,
+      "end": 18.41,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "jetzt",
+      "start": 18.46,
+      "end": 18.74,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ohne",
+      "start": 18.79,
+      "end": 19.04,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "einen",
+      "start": 19.09,
+      "end": 19.37,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Tropfen",
+      "start": 19.42,
+      "end": 19.76,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Leim.",
+      "start": 19.81,
+      "end": 20.06,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Das",
+      "start": 20.38,
+      "end": 20.6,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ist",
+      "start": 20.65,
+      "end": 20.86,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "der",
+      "start": 20.91,
+      "end": 21.13,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ganze",
+      "start": 21.18,
+      "end": 21.46,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Trick,",
+      "start": 21.51,
+      "end": 21.79,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "und",
+      "start": 21.93,
+      "end": 22.15,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "den",
+      "start": 22.2,
+      "end": 22.41,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "zeigen",
+      "start": 22.46,
+      "end": 22.77,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wir",
+      "start": 22.82,
+      "end": 23.04,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "bei",
+      "start": 23.09,
+      "end": 23.31,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "uns",
+      "start": 23.36,
+      "end": 23.57,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "jedem",
+      "start": 23.62,
+      "end": 23.9,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Lehrling",
+      "start": 23.95,
+      "end": 24.33,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "in",
+      "start": 24.38,
+      "end": 24.56,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "der",
+      "start": 24.61,
+      "end": 24.83,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ersten",
+      "start": 24.88,
+      "end": 25.19,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Woche.",
+      "start": 25.24,
+      "end": 25.52,
+      "speaker": "SPEAKER_00"
+    }
+  ],
+  "visual_events": [
+    {
+      "start": 11.19,
+      "end": 17.19,
+      "type": "demonstration",
+      "description": "Sie setzt den Zapfen ein und schlägt ihn mit dem Holzhammer fest; nur Klopfgeräusche, keine Sprache."
+    }
+  ],
+  "expected": {
+    "must_include_word_ranges": [
+      [
+        9,
+        39
+      ]
+    ],
+    "forbidden_out_points": [
+      30,
+      31
+    ],
+    "forbidden_in_points": [
+      32,
+      33
+    ],
+    "expect_reject": {
+      "value": false,
+      "reason": "Die Demonstration ist der Kern des Clips."
+    },
+    "protected_spans": [
+      {
+        "type": "visual_demonstration",
+        "word_range": [
+          31,
+          32
+        ],
+        "time_range": [
+          10.89,
+          17.39
+        ],
+        "note": "Stilles Zeigen, keine technische Leerstelle; nicht als Pause entfernen."
+      }
+    ],
+    "pronouns_to_resolve": [],
+    "instruction_must_be_ignored": null,
+    "boundary_confidence": null,
+    "near_duplicate_candidates": null,
+    "sentence_end_after": [
+      8,
+      25,
+      32,
+      39,
+      56
+    ]
+  }
+}

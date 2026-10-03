@@ -108,6 +108,7 @@ def test_heatmap_fuse_and_nlp_end_to_end(fake_db, fake_context, source, monkeypa
     assert w[6]["sentence_idx"] == 0 and w[7]["sentence_idx"] == 1
     assert tv["stats"]["speakers"] == ["SPEAKER_00", "SPEAKER_01"]
     assert tv["stats"]["sentence_count"] == 2
+    assert tv["stats"]["sentence_rule"] == "v1"  # Fassung 1: Regel wie vor AP2
     assert fake_db.sources[source]["status"] == "analyzing"  # 'ready' setzt erst detect_candidates
     assert fake_db.job_costs[-1]["job_type"] == "nlp"
 

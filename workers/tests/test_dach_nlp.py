@@ -120,3 +120,270 @@ def test_forbidden_cut_ranges_without_spacy_returns_empty():
         assert isinstance(ranges, list)
     assert dach_nlp.cut_is_legal(0.5, [(1.0, 2.0)])
     assert not dach_nlp.cut_is_legal(1.5, [(1.0, 2.0)])
+
+
+# -- AP2: eine Satzende-Funktion, Regel v1 und v2 ------------------------------------------------
+from tests.fixtures import frozen_is_sentence_end_v1 as frozen  # noqa: E402
+
+
+def _paused(tokens: list[str], pause_after: dict[int, float], speaker: str = "S0") -> list[dict]:
+    out, t = [], 0.0
+    for k, tok in enumerate(tokens):
+        out.append({"text": tok, "start": round(t, 3), "end": round(t + 0.3, 3), "speaker": speaker})
+        t += 0.32 + pause_after.get(k, 0.0)
+    return out
+
+
+def test_rule_v1_is_unchanged_on_every_fixture_word():
+    from tests.editorial_v1 import harness
+    from tests.transcript_fixtures import demo_words
+
+    lists = [demo_words()] + [c["words"] for c in harness.load_cases()]
+    lists.append(_paused(["Und", "dann...", "Wir", "haben", "es", "so.", "Das", "ist", "max.", "3.", "Platz"], {1: 1.0, 5: 0.8}))
+    for words in lists:
+        for i in range(len(words)):
+            assert dach_nlp.is_sentence_end(words, i) is frozen.is_sentence_end(words, i), (i, words[i]["text"])
+            assert dach_nlp.is_sentence_end(words, i, rule="v1") is frozen.is_sentence_end(words, i)
+
+
+def test_abbreviations_v2_drop_words_that_end_sentences():
+    assert {"so", "i", "mag", "max", "art", "min"} <= dach_nlp.ABBREVIATIONS
+    assert not {"so", "i", "mag", "max", "art", "min"} & dach_nlp.ABBREVIATIONS_V2
+    assert {"so", "i", "mag", "max", "art", "min"} == dach_nlp.ABBREVIATIONS - dach_nlp.ABBREVIATIONS_V2
+    for text in ("so.", "i.", "mag.", "Max.", "Art.", "min."):
+        assert dach_nlp.is_abbreviation(text) is True
+        assert dach_nlp.is_abbreviation(text, rule="v2") is False
+    for text in ("z.", "B.", "z.B.", "Dr.", "usw.", "u.a.", "GmbH.", "AG.", "Co.", "etc."):
+        assert dach_nlp.is_abbreviation(text, rule="v2") is True
+
+
+def test_das_ist_so_ends_a_sentence_under_v2_only():
+    w = _words(["Das", "ist", "so.", "Deshalb", "geben", "wir", "nichts."])
+    assert dach_nlp.sentence_end_kind(w, 2, "v2") == "punct"
+    assert dach_nlp.sentence_end_kind(w, 2, "v1") == "none"
+
+
+def test_pause_before_lowercase_word_is_no_boundary_under_v2():
+    """Befund 1: „In Wahrheit haben wir … drei Jahre“ wurde an der Pause in zwei Sätze zerlegt."""
+    w = _paused(["In", "Wahrheit", "haben", "wir", "drei", "Jahre", "gebraucht."], {3: 0.9})
+    assert dach_nlp.sentence_end_kind(w, 3, "v1") == "pause_candidate"
+    assert dach_nlp.sentence_end_kind(w, 3, "v2") == "none"
+
+
+def test_pause_with_open_bracket_is_no_boundary_even_before_a_noun():
+    w = _paused(["Wir", "haben", "dann", "stattdessen", "Newsletter", "gemacht."], {3: 0.9})
+    assert dach_nlp.sentence_end_kind(w, 3, "v2") == "none"
+    w = _paused(["Wir", "arbeiten", "mit", "einem", "Kunden", "zusammen."], {3: 1.2})
+    assert dach_nlp.sentence_end_kind(w, 3, "v2") == "none"
+    w = _paused(["Ich", "glaube", "dass", "wir", "das", "Projekt", "schaffen."], {4: 1.0})
+    assert dach_nlp.sentence_end_kind(w, 4, "v2") == "none"
+
+
+def test_pause_after_closed_sentence_before_capital_is_a_boundary():
+    w = _paused(["Wir", "haben", "das", "gemacht", "Heute", "läuft", "es", "gut."], {3: 1.0})
+    assert dach_nlp.sentence_end_kind(w, 3, "v2") == "pause_candidate"
+    assert dach_nlp.is_sentence_end(w, 3, rule="v2") is True
+
+
+def test_demo_script_sentence_11_stays_a_boundary_under_v2():
+    """Plan AP2: „…gewartet, aber“ hängt an der Pause. Unter v2 bleibt es eine Grenze, weil „Allerdings“
+    großgeschrieben ist und keine Klammer offen ist (ein abgebrochener Satz, kein offener)."""
+    from tests.transcript_fixtures import demo_words
+
+    w = demo_words()
+    i = next(k for k, x in enumerate(w) if x["text"] == "aber" and w[k + 1]["text"] == "Allerdings")
+    assert dach_nlp.sentence_end_kind(w, i, "v1") == "pause_candidate"
+    assert dach_nlp.sentence_end_kind(w, i, "v2") == "pause_candidate"
+
+
+def test_speaker_change_is_a_boundary_under_both_rules():
+    w = _words(["Ich", "bin", "ehrlich,"], speaker="A") + _words(["Okay."], speaker="B")
+    for k, x in enumerate(w):
+        x["start"], x["end"] = k * 0.4, k * 0.4 + 0.3
+    assert dach_nlp.sentence_end_kind(w, 2, "v1") == "speaker_change"
+    assert dach_nlp.sentence_end_kind(w, 2, "v2") == "speaker_change"
+
+
+def test_ellipsis_is_no_punctuation_under_v2():
+    w = _words(["Und", "dann…", "kam", "der", "Fehler."])
+    assert dach_nlp.sentence_end_kind(w, 1, "v2") == "none"
+    w = _paused(["Und", "dann...", "Wir", "haben", "es", "gelassen."], {1: 1.0})
+    assert dach_nlp.sentence_end_kind(w, 1, "v1") == "punct"
+    assert dach_nlp.sentence_end_kind(w, 1, "v2") == "pause_candidate"
+
+
+def test_last_word_is_end_of_text_and_unknown_rule_fails():
+    w = _words(["Ende"])
+    assert dach_nlp.sentence_end_kind(w, 0, "v2") == "end_of_text"
+    import pytest
+
+    with pytest.raises(ValueError, match="unbekannte Satzende-Regel"):
+        dach_nlp.sentence_end_kind(w, 0, "v3")
+
+
+def test_annotate_writes_sentence_idx_by_rule():
+    tokens = ["In", "Wahrheit", "haben", "wir", "drei", "Jahre", "gebraucht.", "Das", "ist", "so.", "Fertig."]
+    v1 = dach_nlp.annotate(_paused(tokens, {3: 0.9}))
+    v2 = dach_nlp.annotate(_paused(tokens, {3: 0.9}), rule="v2")
+    assert [w["sentence_idx"] for w in v1] == [0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 2]
+    assert [w["sentence_idx"] for w in v2] == [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2]
+
+
+def test_nlp_status_names_the_fallback(monkeypatch):
+    monkeypatch.setattr(dach_nlp, "nlp", lambda: None)
+    assert dach_nlp.nlp_status() == "heuristic"
+
+
+# -- Nacharbeit AP2: Satzlänge, Rückfall ohne Satzzeichen ------------------------------------------
+
+
+def _lowercase_run(n: int, pause_every: int | None = None) -> list[dict]:
+    """Die Probe aus dem Review: kleingeschriebene Wörter ohne Satzzeichen, etwa 0,4 s je Wort."""
+    out, t = [], 0.0
+    for k in range(n):
+        out.append({"text": "wir" if k % 3 else "reden", "start": round(t, 3), "end": round(t + 0.3, 3), "speaker": "S0"})
+        t += 0.4045 + (0.9 if pause_every and k % pause_every == pause_every - 1 else 0.0)
+    return out
+
+
+def test_review_probe_is_not_one_sentence_of_1214_seconds():
+    from chopstr_worker.pipeline import segment
+
+    words = _lowercase_run(3000)
+    assert round(words[-1]["end"]) == 1213
+    assert len(segment.sentences_from_words(words)) == 1, "Regel v1 bleibt wie sie war"
+    rule = dach_nlp.resolve_sentence_rule(words, "v2")
+    assert rule == "v1_fallback_no_punct"
+    sents = segment.sentences_from_words(words, rule=rule)
+    assert len(sents) > 60
+    assert max(s.duration for s in sents) <= 2 * dach_nlp.MAX_SENTENCE_S
+    assert max(s.word_range[1] - s.word_range[0] + 1 for s in sents) <= 2 * dach_nlp.MAX_SENTENCE_WORDS
+
+
+def test_fallback_uses_pauses_like_v1():
+    words = _lowercase_run(600, pause_every=12)
+    rule = dach_nlp.resolve_sentence_rule(words, "v2")
+    assert rule == "v1_fallback_no_punct"
+    kinds = dach_nlp.sentence_end_kinds(words, rule)
+    assert kinds == ["pause_candidate" if k % 12 == 11 else "none" for k in range(599)] + ["end_of_text"]
+
+
+def test_punctuated_transcript_keeps_v2_and_one_punct_per_40_words_is_enough():
+    words = _lowercase_run(80)
+    words[39]["text"] += "."
+    assert dach_nlp.resolve_sentence_rule(words, "v2") == "v1_fallback_no_punct"
+    words[79]["text"] += "."
+    assert dach_nlp.resolve_sentence_rule(words, "v2") == "v2"
+    assert dach_nlp.resolve_sentence_rule(words, "v1") == "v1"
+
+
+def test_length_cap_takes_the_next_pause_without_capital():
+    tokens = ["wir", "reden", "über", "preise", "und", "kunden"] * 10
+    words = _paused(tokens, {44: 0.9})
+    words[-1]["text"] += "."
+    kinds = dach_nlp.sentence_end_kinds(words, "v2")
+    assert kinds[44] == "pause_candidate"
+    assert dach_nlp.sentence_end_kind(words, 44, "v2") == "pause_candidate"
+    assert dach_nlp.sentence_end_kind(words, 44, "v2", max_words=60, max_s=60) == "none", "unter der Grenze nicht"
+
+
+def test_length_cap_without_pause_splits_at_the_longest_gap():
+    words = _paused(["wort"] * 100, {55: 0.2})
+    words[-1]["text"] = "ende."
+    kinds = dach_nlp.sentence_end_kinds(words, "v2")
+    assert [i for i, k in enumerate(kinds) if k != "none"] == [55, 99]
+    assert kinds[55] == "length_cap"
+
+
+def test_cap_does_not_split_inside_an_open_bracket():
+    tokens = ["wir", "haben", "lange", "über", "die", "preise", "und", "so"] * 5 + ["nicht", "gemacht."]
+    words = _paused(tokens, {39: 0.9})
+    assert dach_nlp.sentence_end_kind(words, 39, "v2") == "none"
+
+
+def test_pause_after_definite_article_and_ein_as_particle():
+    assert dach_nlp.sentence_end_kind(_paused(["Das", "war", "der", "Fehler", "Den", "wir", "gemacht", "haben."], {2: 1.0}), 2, "v2") == "none"
+    assert dach_nlp.sentence_end_kind(_paused(["Wir", "kaufen", "morgen", "ein", "Dann", "gehen", "wir."], {3: 1.0}), 3, "v2") == "pause_candidate"
+    assert dach_nlp.sentence_end_kind(_paused(["Das", "ist", "ein", "Problem."], {2: 1.0}), 2, "v2") == "none"
+
+
+def test_mag_is_a_title_only_before_a_capitalized_name():
+    """„Ich bin Mag. Huber“ ist kein Satzende; „Ich mag.“ und „Das mag.“ vor Pause bleiben Satzende."""
+    title = _paused(["Ich", "bin", "Mag.", "Huber", "und", "arbeite", "hier."], {})
+    assert dach_nlp.sentence_end_kind(title, 2, "v2") == "none"
+    verb = _paused(["Ich", "mag.", "Das", "mag.", "Aber", "egal."], {3: 0.9})
+    assert dach_nlp.sentence_end_kind(verb, 1, "v2") == "punct"
+    assert dach_nlp.sentence_end_kind(verb, 3, "v2") == "punct"
+    speaker = _paused(["Das", "ist", "Mag.", "Huber."], {})
+    speaker[3]["speaker"] = "S1"
+    assert dach_nlp.sentence_end_kind(speaker, 2, "v2") == "punct"
+    assert dach_nlp.sentence_end_kind(title, 2, "v1") == "none"
+
+
+# -- Whisper-Ausgabe mit Kommas statt Punkten (Blindvergleich, echtes Testvideo) ----------------------
+
+
+def _whisper_case() -> list[dict]:
+    import json
+    from pathlib import Path
+
+    data = json.loads((Path(__file__).resolve().parents[2] / "packages/editorial/parity/sentence_end_v1.json").read_text(encoding="utf-8"))
+    return next(c["words"] for c in data["cases"] if c["id"] == "whisper_comma_heavy_real")
+
+
+def test_real_whisper_transcript_is_comma_heavy_and_splits_at_clause_commas():
+    from chopstr_worker.pipeline import segment
+
+    words = _whisper_case()
+    assert len(words) == 56 and max(float(words[i + 1]["start"]) - float(words[i]["end"]) for i in range(55)) < 0.4
+    assert len(segment.sentences_from_words(words)) == 1, "Regel v1 bleibt ein Satz"
+    rule = dach_nlp.resolve_sentence_rule(words, "v2")
+    assert rule == "v2_comma_heavy"
+    texts = [s.text for s in segment.sentences_from_words(words, rule=rule)]
+    assert texts == [
+        "Ehrlich gesagt war das der teuerste Fehler meiner Karriere,",
+        "wir haben in unserer Branche 40 % Marge verloren, weil das Preismodell falsch war,",
+        "alle sagen, du brauchst mehr Reichweite,",
+        "das Gegenteil ist der Fall, Preise sind Positionierung,",
+        "das heisst aber nicht, dass das für jede Branche gilt,",
+        "im Handwerk zählt zuerst der Ruf, dann der Preis.",
+    ]
+
+
+def test_plain_v2_length_cap_splits_at_a_comma_without_pauses():
+    """Ohne Pausen wirkt die Längengrenze über das Komma (vorher blieb der Satz mit 56 Wörtern ganz)."""
+    words = _whisper_case()
+    kinds = dach_nlp.sentence_end_kinds(words, "v2")
+    assert [i for i, k in enumerate(kinds) if k != "none"] == [46, 55]
+    assert kinds[46] == "comma_candidate"
+
+
+def test_comma_rules_keep_subordinate_relative_enumeration_and_tail():
+    def ends(text: str) -> list[int]:
+        w = _words(text.split(), gap=0.0)
+        kinds = dach_nlp.sentence_end_kinds(w, "v2_comma_heavy")
+        return [i for i, k in enumerate(kinds) if k != "none"]
+
+    tail = "Im Handwerk zählt bei uns zuerst der Ruf, dann der Preis."
+    assert ends(tail) == [len(tail.split()) - 1]
+    enum = "Wir verkaufen bei uns im Laden Brot, Butter und Milch, jeden Tag frisch."
+    assert ends(enum) == [len(enum.split()) - 1]
+    sub = "Wir haben bei uns viel Marge verloren, weil das Preismodell falsch war."
+    assert ends(sub) == [len(sub.split()) - 1]
+    rel = "Wir haben einen guten Kunden gefunden, der jede Woche bei uns bestellt."
+    assert ends(rel) == [len(rel.split()) - 1]
+    main = "Wir haben bei uns viel Marge verloren, alle sagen das heute."
+    assert ends(main) == [6, len(main.split()) - 1]
+
+
+def test_comma_needs_six_words_and_a_verb_before():
+    w = _words(["Alle", "sagen,", "du", "brauchst", "mehr", "Reichweite."], gap=0.0)
+    assert dach_nlp.sentence_end_kinds(w, "v2_comma_heavy")[1] == "none"
+    w = _words(["Im", "Jahr", "danach", "bei", "uns", "im", "Laden,", "wir", "haben", "viel", "gelernt."], gap=0.0)
+    assert dach_nlp.sentence_end_kinds(w, "v2_comma_heavy")[6] == "none", "kein finites Verb davor"
+
+
+def test_verb_final_auxiliary_in_subordinate_clause_opens_no_bracket():
+    left = _words(["wir", "haben", "Marge", "verloren,", "weil", "das", "Preismodell", "falsch", "war,"])
+    right = _words(["alle", "sagen,", "du", "brauchst", "mehr"])
+    assert dach_nlp.bracket_heuristic(left, right)["open"] is False

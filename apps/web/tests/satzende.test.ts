@@ -54,11 +54,11 @@ describe("Paritätsdatei sentence_end_v1", () => {
   it("hat Fälle und nur bekannte Arten", () => {
     expect(datei.version).toBe(1);
     expect(datei.cases.length).toBeGreaterThan(15);
-    expect(datei.kinds).toEqual(["punct", "speaker_change", "pause_candidate", "length_cap", "end_of_text", "none"]);
+    expect(datei.kinds).toEqual(["punct", "speaker_change", "pause_candidate", "comma_candidate", "length_cap", "end_of_text", "none"]);
   });
 
   for (const fall of datei.cases) {
-    for (const rule of ["v1", "v2", "v1_fallback_no_punct"] as SentenceRule[]) {
+    for (const rule of ["v1", "v2", "v1_fallback_no_punct", "v2_comma_heavy"] as SentenceRule[]) {
       it(`${fall.id} unter ${rule}`, () => {
         const limits = { maxS: datei.max_sentence_s, maxWords: datei.max_sentence_words };
         const art = fall.words.map((_w, i) => sentenceEndKind(fall.words, i, rule, limits));
@@ -172,5 +172,25 @@ describe("„Mag.“ unter v2", () => {
     const verb = woerter("Ich mag. Das mag. Aber egal.", { 3: 0.9 });
     expect(sentenceEndKind(verb, 1, "v2")).toBe("punct");
     expect(sentenceEndKind(verb, 3, "v2")).toBe("punct");
+  });
+});
+
+describe("Whisper-Ausgabe mit Kommas statt Punkten", () => {
+  const fall = datei.cases.find((c) => c.id === "whisper_comma_heavy_real");
+
+  it("zerfällt unter v2_comma_heavy an den Satzkommas wie im Worker", () => {
+    if (!fall) throw new Error("Fall fehlt");
+    const w = fall.words.map((x) => ({ ...x, prob: 1, filler: null, negation: false }) as unknown as TranscriptWord);
+    expect(resolveSentenceRule(w, "v2")).toBe("v2_comma_heavy");
+    expect(sentencesFromWords(w).length).toBe(1);
+    expect(sentencesFromWords(w, "v2_comma_heavy").map((s) => s.text)).toEqual([
+      "Ehrlich gesagt war das der teuerste Fehler meiner Karriere,",
+      "wir haben in unserer Branche 40 % Marge verloren, weil das Preismodell falsch war,",
+      "alle sagen, du brauchst mehr Reichweite,",
+      "das Gegenteil ist der Fall, Preise sind Positionierung,",
+      "das heisst aber nicht, dass das für jede Branche gilt,",
+      "im Handwerk zählt zuerst der Ruf, dann der Preis.",
+    ]);
+    expect(sentenceRuleFromStats({ sentence_rule: "v2_comma_heavy" })).toBe("v2_comma_heavy");
   });
 });

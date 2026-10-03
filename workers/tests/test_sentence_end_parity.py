@@ -27,7 +27,7 @@ def test_parity_file_names_the_kinds_of_the_code():
     assert len(DATA["cases"]) > 30
 
 
-@pytest.mark.parametrize("rule", ["v1", "v2", "v1_fallback_no_punct"])
+@pytest.mark.parametrize("rule", ["v1", "v2", "v1_fallback_no_punct", "v2_comma_heavy"])
 @pytest.mark.parametrize("case", DATA["cases"], ids=[c["id"] for c in DATA["cases"]])
 def test_sentence_end_kind_matches_parity_file(case, rule):
     words = case["words"]

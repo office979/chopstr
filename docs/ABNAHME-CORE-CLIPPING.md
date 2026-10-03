@@ -2,7 +2,7 @@
 
 Stand 03.10.2026, Codebasis `main` nach den Wellen 1 bis 4 (Commits 651da29 bis zum Abschlusscommit dieser
 Datei). Auftrag: `docs/MASTER-PROMPT-CORE-CLIPPING.md`. Grundlage: `docs/RESEARCH-CLIPPING-KERN.md`. Ist-Pipeline:
-`docs/PIPELINE.md`. Entscheidungen: `docs/ENTSCHEIDUNGEN.md` P25 bis P54. Evidenz: unabhängiger
+`docs/PIPELINE.md`. Entscheidungen: `docs/ENTSCHEIDUNGEN.md` P25 bis P56. Evidenz: unabhängiger
 Verifikationslauf auf Commit 42bc092 plus Nachkorrekturen (Abschnitt 6).
 
 Getrennt berichtet, wie Abschnitt 30 verlangt: Bestandsanalyse, eingegrenzte Änderungen, implementierte
@@ -251,3 +251,80 @@ Offen, in Reihenfolge der Dringlichkeit:
    `story_engine.run` prüfbar werden.
 4. Lachen und Applaus in der Heatmap berechnen oder die Payoff-Art entfernen.
 5. Policy-Fassung ins Web geben, damit Claim-Check v2 und Caption-Regeln auch in der Vorschau gelten.
+
+## 9. Blindvergleich mit Testmaterial (Lauf B, 03.10.2026)
+
+Nachtrag zu Abschnitt 8 Punkt 1. Lauf `workers/eval/blind_compare.py --k 5` auf 20 Quellen: Demo, die 14
+`editorial_v1`-Fixtures, zwei echte Quellen aus der lokalen Datenbank (ein Interview zu Preisen, 22 s
+Whisper-Transkript; eine Werbeanzeige, 44 s) und drei synthetische Gespräche von 4 bis 5 Minuten
+(Interview Handwerk, Monolog Gründerin, Debatte Viertagewoche), die als Sprachaufnahme erzeugt und durch die
+echte ASR des Workers transkribiert wurden. Provider: `local-heuristic`, kein Sprachmodell. Ablage:
+`workers/eval/runs/2026-10-03-b-testmaterial/` (nicht versioniert, `workers/eval/runs/` steht in
+`.gitignore`); Skripte und Erwartungen unter `workers/eval/runs/testmaterial/`.
+
+### 9.1 Zwei Defekte am echten Material, in diesem Lauf behoben
+
+Ein erster Lauf (A) mit denselben Quellen lieferte unter Fassung 2 für beide echten Quellen keinen
+einzigen Kandidaten, Fassung 1 je einen. Ursachen und Korrekturen:
+
+1. **Kommagetrennte ASR ohne Pausen.** Das echte Whisper-Transkript enthält über 22 s kein einziges
+   Satzende-Zeichen, nur Kommas, und keine Wortlücke über 0,25 s. Die Satzregel v2 fand damit kein
+   Satzende und die Suche kein Fenster. Neu: Satzende-Art `v2_comma_heavy` (Satzregel v2, erkennbar im
+   Report), die bei kommalastigen Transkripten ein Komma nach mindestens sechs Wörtern als Satzgrenze
+   zulässt, plus eine pausenfreie Längenobergrenze. Web (`sentences.ts`) und Parität
+   (`packages/editorial/parity/sentence_end_v1.json`) sind mitgezogen; Fassung 1 bleibt byteidentisch
+   (Snapshot bestanden). Eine Fehlmeldung der Verbklammer bei Hilfsverb am Satzende ist dabei mit korrigiert.
+2. **Payoff-Marker fanden gesprochene Sprache nicht.** Die Marker standen nur am Satzanfang und ohne
+   Normalisierung von ß und ss; die Werbeanzeige löst ohne Frage davor auf („die Lösung heißt“) und endet
+   mit Handlungsaufforderung. Neu: Marker auch an Teilsatzgrenzen, ß/ss-Normalisierung, Markergruppen
+   `search.payoff_markers.resolution` und `search.cta_markers` (beide Herkunft H, Quelle in der Policy),
+   und ein ehrlicher Suchbefund `diagnosis`, den `no_viable_moment` als Grund durchreicht statt „nur
+   Organisatorisches“ zu raten. Fixtures `real_preise.json` und `real_werbeanzeige.json` halten beide
+   Transkripte als Regressionstests fest.
+
+Dazu ein Fehler im Vergleichswerkzeug: Für Datenbankquellen wurden die unter Fassung 1 gespeicherten
+Satzindizes mitgeladen, so dass Fassung 2 mit fremden Satzgrenzen rechnete. Das Werkzeug streicht
+`sentence_idx` jetzt vor der Übergabe, jede Fassung segmentiert selbst.
+
+Testlauf auf diesem Stand: Worker `pytest -q` 2746 passed, 3 skipped, 24 xfailed; `ruff check` ohne
+Befund; Web `vitest run` 807 passed in 31 Dateien. Snapshot v1 und Paritätstests sind enthalten.
+
+### 9.2 Ergebnis Lauf B (Zahlen wörtlich aus `bericht.md`)
+
+| Kennzahl | v1 | v2 |
+|---|---|---|
+| Clip-Paare bei gleicher Ausgabemenge | 24 | 24 |
+| nicht gepaart (Überhang) | 2 | 3 |
+| angebotene Kandidaten | 26 | 27 |
+| Verwerfungsquote (Stufe 2) | 0 von 26 (0,0 %) | 19 von 46 (41,3 %) |
+| Dubletten (nicht in der Quote) | 0 | 34 |
+| Modellaufrufe je Quellstunde | 304,2 | 399,9 |
+| Laufzeit je Quellstunde (s) | 0,4 | 9,3 |
+| editorial_v1 Bestehensquote | 11 von 14 | 14 von 14 |
+| Hooks ohne Overlay-Text | 0,0 % | 29,2 % |
+
+Verwerfungsgründe v2: Überdeckung 6, Kapitelgrenze 5, zu kurz 4, Versprechen nicht eingelöst 2,
+kein tragfähiger Moment 2. Variantenlauf: Auswahl (Gates scharf, Payoff zuerst) bringt 14 von 14, Basis und
+Kürzung 12 von 14; Hooks nativ bei 7 von 26 Kandidaten, davon 1 mit Claim-Befund.
+
+Beobachtungen an den echten und synthetischen Quellen, ohne Bewertung: Fassung 2 wählt kürzere Spannen
+(Mittel 30,3 s gegen 33,6 s) und setzt beim Preis-Interview einen Teaser („alle sagen, du brauchst mehr
+Reichweite“) vor den Körper; Fassung 1 beginnt dort und bei der Debatte mit organisatorischem Vorlauf
+(„Die nächste Folge erscheint wegen der Feiertage erst in drei Wochen.“), was Fassung 2 wegschneidet.
+Fassung 2 bietet bei der Gründerin den Veranstaltungsvorspann („Willkommen zurück zum zweiten Teil des
+Abends“) als Kandidaten an; das ist ein offener Punkt für die Einstiegsbewertung mit Sprachmodell.
+
+**Urteil weiterhin: nicht bewertet.** Es gibt keine menschlichen Bewertungen (0 von 24 Paaren), und die
+Stil-Leck-Prüfung warnt: Im Hook-Bogen beginnt jeder v1-Hook mit „Du kennst das“ und jeder v1-Overlay-Text
+mit „Kennst du das“, Fassung 2 nie. Der Clip-Bogen zeigt keine Hooks und bleibt verblindet.
+
+### 9.3 Bewerten und auswerten
+
+1. `workers/eval/bewertung.html` im Browser öffnen, die Dateien `bewertung.json`, `hooks_bewertung.json`,
+   `quellen.json` und `raster.json` aus dem Laufordner laden, Clip-Bogen und Hook-Bogen ausfüllen, exportieren
+   (die Seite schreibt dieselben Dateinamen zurück in den Laufordner).
+2. `cd workers && .venv/bin/python -m eval.blind_compare --auswerten eval/runs/2026-10-03-b-testmaterial`
+   erzeugt `bericht.md` mit Urteil, Streuung und Vorzeichentest.
+3. Für eine belastbare Aussage: echter Sprachmodell-Provider (`LLM_PROVIDER`), zehn bis zwanzig echte
+   Quellen, zwei Bewertende; erst dann über `gates.discard_hard`, `trim.enabled` und
+   `CHOPSTR_POLICY_VERSION=2` entscheiden (Abschnitt 8 Punkt 2).

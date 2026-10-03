@@ -171,6 +171,34 @@ Ergebnis ist beobachtend, kein A/B-Test, kein Viralitätsmaß.
    Fehlt ein Paar im Schlüssel, steht ein unbekanntes Kriterium oder ein Wert außerhalb 0 bis 4 im
    Bogen, bricht die Auswertung mit einer Meldung ab, die das Paar nennt.
 
+### Bewertungsseite (`bewertung.html`)
+
+Die Redaktion füllt die Bögen in einer einzelnen Datei aus, ohne Build, Server oder Installation:
+`eval/bewertung.html` im Browser öffnen (Doppelklick genügt), dann den Ordner des Laufs auf die Fläche
+ziehen oder über „Dateien wählen“ beziehungsweise „Ordner wählen“ laden. Gelesen werden nur
+`bewertung.json`, `hooks_bewertung.json`, `quellen.json` und `raster.json`; `schluessel.json` und
+`lauf.json` bleiben ungeöffnet, damit die Verblindung hält. Alles läuft lokal im Browser.
+
+Der Reiter Clips zeigt je Paar Seite A und Seite B nebeneinander (Text, Dauer, Segmentzahl, Zeiten) und
+darunter den Quellkontext aus `quellen.json` mit Markierung, welche Sätze zu A und zu B gehören. Hook,
+Versionskennung und Score erscheinen dort nicht. Der Reiter Hooks zeigt gesprochenen Hook, Overlay-Text
+und den Clip-Text zur Deckung. Je Kriterium aus `raster.json` stehen die Anker 0 bis 4 mit Text, dazu
+Präferenz (A, B, gleich) und ein Freitextfeld.
+
+Tastatur: `0` bis `4` setzen den Wert am Cursor und rücken vor (erst alle Kriterien von Seite A, dann
+von Seite B), Pfeiltasten bewegen den Cursor, `Entf` löscht den Wert, `A`, `B` und `G` setzen die
+Präferenz, `W` und `Z` blättern. Der Fortschritt liegt im `localStorage` des Browsers, getrennt je Bogen
+und Inhalt; „Lokalen Stand verwerfen“ setzt auf den Stand der geladenen Dateien zurück.
+
+„Bewertung exportieren“ lädt `bewertung.json` und `hooks_bewertung.json` im Format des Erzeugers
+herunter (gleiche Dateinamen, gleiche Schlüsselfolge, Werte als ganze Zahlen 0 bis 4 oder `null`). Beide
+Dateien in den Ordner des Laufs legen, die Originale ersetzen, und mit `--auswerten` rechnen. Sind
+Paare unvollständig, warnt die Seite und exportiert trotzdem: solche Paare tragen `"offen": true`, die
+Liste steht in `offene_paare`; die Auswertung ignoriert beides und zählt ein Paar ohne Präferenz als
+„offen“. Eine Präferenz ohne einen einzigen Kriterienwert wird nicht exportiert (sie ließe die
+Auswertung abbrechen) und in der Warnung genannt. Clips und Hooks am besten von verschiedenen Personen
+bewerten lassen; jede Person exportiert ihren Bogen, die Dateien eines Bogens sind nicht zusammenführbar.
+
 ### Raster (Master-Prompt Abschnitte 19 und 26)
 
 Anker für alle Kriterien: 0 nicht vorhanden oder kritisch verletzt, 1 schwach, 2 brauchbar, 3 stark

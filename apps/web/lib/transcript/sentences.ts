@@ -19,8 +19,15 @@ export interface Sentence {
  * nur Grenzkandidat mit großgeschriebenem Folgewort und ohne offene Klammer; ab 25 s oder 40 Wörtern
  * die nächste Pause ohne offene Klammer, sonst die längste Pause bis zur doppelten Grenze.
  * v1_fallback_no_punct: Regel v2 bei kaum Satzzeichen, entscheidet wie v1 mit der Längengrenze. */
-export type SentenceRule = "v1" | "v2" | "v1_fallback_no_punct";
-export type SentenceEndKind = "punct" | "speaker_change" | "pause_candidate" | "length_cap" | "end_of_text" | "none";
+export type SentenceRule = "v1" | "v2" | "v1_fallback_no_punct" | "v2_comma_heavy";
+export type SentenceEndKind =
+  | "punct"
+  | "speaker_change"
+  | "pause_candidate"
+  | "comma_candidate"
+  | "length_cap"
+  | "end_of_text"
+  | "none";
 
 export interface WordLike {
   text: string;
@@ -30,6 +37,9 @@ export interface WordLike {
 }
 
 export const FALLBACK_NO_PUNCT = "v1_fallback_no_punct";
+/* Kommas, aber kaum Satzendezeichen (deutsche Whisper-Ausgaben): Kommas mit passender Syntax trennen. */
+export const COMMA_HEAVY = "v2_comma_heavy";
+const COMMA_MIN_WORDS = 6;
 export const MAX_SENTENCE_S = 25;
 export const MAX_SENTENCE_WORDS = 40;
 const WORDS_PER_PUNCT_MIN = 40;
@@ -153,7 +163,7 @@ function wordText(w: WordLike): string {
 }
 
 function baseRule(rule: SentenceRule): "v1" | "v2" {
-  return rule === "v2" ? "v2" : "v1";
+  return rule === "v2" || rule === COMMA_HEAVY ? "v2" : "v1";
 }
 
 function isLowerChar(c: string): boolean {
@@ -302,6 +312,10 @@ export function bracketHeuristic(leftWords: WordLike[], rightWords: WordLike[]):
     if (AUXILIARY_SET.has(coreToken(wordText(w)))) auxAt = k;
   });
   if (auxAt < 0) return closed;
+  /* Hilfsverb am Ende eines Nebensatzes („weil das Preismodell falsch war") öffnet keine Klammer. */
+  const part = clause(left, true);
+  const auxInPart = part.indexOf(sentence[auxAt]);
+  if (auxInPart >= 0 && part.slice(0, auxInPart).some((w) => SUBORDINATOR_SET.has(coreToken(wordText(w))))) return closed;
   const joined = [...sentence, ...right.slice(0, 1)];
   let isClosed = false;
   for (let k = auxAt + 1; k < sentence.length; k += 1) {
@@ -339,13 +353,15 @@ export function bracketHeuristic(leftWords: WordLike[], rightWords: WordLike[]):
 export function resolveSentenceRule(words: WordLike[], rule: SentenceRule): SentenceRule {
   if (rule !== "v2" || words.length === 0) return rule;
   const punct = words.filter((w) => hasTerminalPunct(wordText(w))).length;
-  return punct * WORDS_PER_PUNCT_MIN >= words.length ? "v2" : FALLBACK_NO_PUNCT;
+  if (punct * WORDS_PER_PUNCT_MIN >= words.length) return "v2";
+  const commas = words.filter((w) => rstripChars(wordText(w), CLOSERS).endsWith(",")).length;
+  return commas * WORDS_PER_PUNCT_MIN >= words.length ? COMMA_HEAVY : FALLBACK_NO_PUNCT;
 }
 
 /* Die Satzregel einer Transkriptversion aus stats.sentence_rule; ohne Angabe v1 (Stand vor AP2). */
 export function sentenceRuleFromStats(stats: { sentence_rule?: string | null } | null | undefined): SentenceRule {
   const rule = stats?.sentence_rule;
-  return rule === "v2" || rule === FALLBACK_NO_PUNCT ? rule : "v1";
+  return rule === "v2" || rule === FALLBACK_NO_PUNCT || rule === COMMA_HEAVY ? rule : "v1";
 }
 
 function runningSentence<T extends WordLike>(words: T[], i: number, rule: SentenceRule): T[] {
@@ -388,7 +404,7 @@ function magTitle(words: WordLike[], i: number, minPauseS: number): boolean {
   return !(i > 0 && PERSONAL_PRONOUNS.has(coreToken(wordText(words[i - 1]))));
 }
 
-function baseKind(words: WordLike[], i: number, rule: "v1" | "v2", minPauseS: number): SentenceEndKind {
+function baseKind(words: WordLike[], i: number, rule: "v1" | "v2", minPauseS: number, relaxed = false): SentenceEndKind {
   const w = words[i];
   const text = wordText(w);
   const nxt = words[i + 1];
@@ -405,7 +421,10 @@ function baseKind(words: WordLike[], i: number, rule: "v1" | "v2", minPauseS: nu
     if (!(isOrdinal(stripped) || /^\d/.test(nextText) || isAbbreviation(stripped, rule) || title)) return "punct";
   }
   if (speakerChange) return "speaker_change";
-  if (gap(words, i) >= minPauseS && (rule === "v1" || pauseBoundaryAccepted(words, i, rule))) return "pause_candidate";
+  if (gap(words, i) >= minPauseS) {
+    if (rule === "v1" || pauseBoundaryAccepted(words, i, rule)) return "pause_candidate";
+    if (relaxed && softCandidate(words, i - runningSentence(words, i, rule).length + 1, i, minPauseS)) return "pause_candidate";
+  }
   return "none";
 }
 
@@ -423,6 +442,63 @@ function softCandidate(words: WordLike[], start: number, j: number, minPauseS: n
 /* Python rundet mit round(x, 2) (Banker-Rundung nur bei exakten Hälften, die bei Lücken praktisch nicht vorkommen). */
 function round2(x: number): number {
   return Math.round(x * 100) / 100;
+}
+
+/* Relativpronomen und Fragewörter, mit denen nach einem Komma ein Nebensatz beginnt. */
+const RELATIVE_WORDS = new Set([
+  "welcher", "welche", "welches", "welchen", "welchem", "wo", "was", "wobei", "denen", "deren", "dessen", "wie",
+]);
+const D_WORDS = new Set(["der", "die", "das", "dem", "den"]);
+const NON_VERBS = new Set([
+  "nicht", "jetzt", "erst", "zuerst", "selbst", "sonst", "meist", "meistens", "oft", "gut", "mit", "bitte",
+  "heute", "gerade", "ganz", "ganze", "recht", "leicht", "schlecht", "echt", "vielleicht", "nachts",
+  "längst", "fast", "jede", "jeden", "jedem", "letzte", "letzten", "erste", "ersten", "beste", "besten",
+  "mehrere", "andere", "gleiche", "gleichen", "eigene", "eigenen", "neue", "neuen", "große", "großen",
+  "kleine", "kleinen", "halbe", "zuletzt", "insgesamt", "bereits", "genau", "seit", "bisschen",
+]);
+
+function isFiniteVerb(seq: WordLike[], k: number): boolean {
+  const t = wordText(seq[k]);
+  const tok = coreToken(t);
+  if (AUXILIARY_SET.has(tok)) return true;
+  if (!isLower(t) || NON_VERBS.has(tok) || DETERMINERS_E.has(tok) || NOT_INFINITIVE.has(tok) || NOT_PARTICIPLE.has(tok)) {
+    return false;
+  }
+  if (isParticiple(t) || adjectiveBeforeNoun(seq, k)) return false;
+  return VERB_LIKE.test(tok);
+}
+
+function hasFiniteVerb(seq: WordLike[]): boolean {
+  return seq.some((_w, k) => isFiniteVerb(seq, k));
+}
+
+function nextClause(words: WordLike[], j: number): WordLike[] {
+  const out: WordLike[] = [];
+  for (const w of words.slice(j + 1, j + 16)) {
+    out.push(w);
+    if (endsClause(wordText(w))) break;
+  }
+  return out;
+}
+
+function isComma(w: WordLike): boolean {
+  return rstripChars(wordText(w), CLOSERS).endsWith(",");
+}
+
+/* Port von dach_nlp._comma_boundary. */
+function commaBoundary(words: WordLike[], start: number, j: number, minWords: number = COMMA_MIN_WORDS): boolean {
+  if (j + 1 >= words.length || !isComma(words[j]) || j - start + 1 < minWords) return false;
+  const nxt = words[j + 1];
+  if (nxt.speaker !== undefined && nxt.speaker !== null && nxt.speaker !== words[j].speaker) return false;
+  const tok = coreToken(wordText(nxt));
+  if (SUBORDINATOR_SET.has(tok) || RELATIVE_WORDS.has(tok)) return false;
+  const afterVerb = j + 2 < words.length && isFiniteVerb(words, j + 2);
+  if (D_WORDS.has(tok) && !(afterVerb || (j + 2 < words.length && isNounLike(words[j + 2])))) return false;
+  if (isNounLike(words[j]) && isNounLike(nxt) && !afterVerb) return false;
+  const left = words.slice(start, j + 1);
+  if (!hasFiniteVerb(clause(left, true))) return false;
+  if (!hasFiniteVerb(nextClause(words, j))) return false;
+  return !bracketHeuristic(left.slice(-BRACKET_MAX_WORDS), words.slice(j + 1, j + 1 + RIGHT_SCAN_WORDS)).open;
 }
 
 function lengthBreaks(
@@ -454,22 +530,56 @@ function lengthBreaks(
     const last = Math.min(windowEnd, stop - 1);
     let k = -1;
     for (let j = cap; j <= last; j += 1) {
-      if (softCandidate(words, start, j, minPauseS)) {
+      if (softCandidate(words, start, j, minPauseS) || commaBoundary(words, start, j, 0)) {
         k = j;
         break;
       }
     }
     if (k >= 0) {
-      out.set(k, "pause_candidate");
-    } else if (windowEnd >= stop) {
-      break;
+      out.set(k, gap(words, k) >= minPauseS ? "pause_candidate" : "comma_candidate");
     } else {
-      k = cap;
-      for (let j = cap + 1; j <= last; j += 1) if (round2(gap(words, j)) > round2(gap(words, k))) k = j;
+      for (let j = cap; j <= last; j += 1) {
+        if (isComma(words[j])) {
+          k = j;
+          break;
+        }
+      }
+      if (k < 0 && windowEnd >= stop) break;
+      if (k < 0) {
+        k = cap;
+        for (let j = cap + 1; j <= last; j += 1) if (round2(gap(words, j)) > round2(gap(words, k))) k = j;
+      }
       out.set(k, "length_cap");
     }
     start = k + 1;
   }
+  return out;
+}
+
+/* Port von dach_nlp._stretch_breaks: Kommas (nur v2_comma_heavy und Rückfall) und Längengrenze. */
+function stretchBreaks(
+  words: WordLike[],
+  h: number,
+  stop: number,
+  rule: SentenceRule,
+  minPauseS: number,
+  maxS: number,
+  maxWords: number,
+): Map<number, SentenceEndKind> {
+  const out = new Map<number, SentenceEndKind>();
+  const segments: [number, number][] = [];
+  let start = h;
+  if (rule === COMMA_HEAVY || rule === FALLBACK_NO_PUNCT) {
+    for (let j = h; j < stop; j += 1) {
+      if (commaBoundary(words, start, j)) {
+        out.set(j, "comma_candidate");
+        segments.push([start, j]);
+        start = j + 1;
+      }
+    }
+  }
+  segments.push([start, stop]);
+  for (const [a, b] of segments) for (const [j, kind] of lengthBreaks(words, a, b, minPauseS, maxS, maxWords)) out.set(j, kind);
   return out;
 }
 
@@ -483,14 +593,15 @@ export interface SentenceLimits {
 export function sentenceEndKinds(words: WordLike[], rule: SentenceRule = "v2", limits: SentenceLimits = {}): SentenceEndKind[] {
   const minPauseS = limits.minPauseS ?? MIN_PAUSE_S;
   const base = baseRule(rule);
-  const kinds = words.map((_w, i) => baseKind(words, i, base, minPauseS));
+  const relaxed = rule === COMMA_HEAVY;
+  const kinds = words.map((_w, i) => baseKind(words, i, base, minPauseS, relaxed));
   if (rule === "v1") return kinds;
   const maxS = limits.maxS ?? MAX_SENTENCE_S;
   const maxWords = limits.maxWords ?? MAX_SENTENCE_WORDS;
   let h = 0;
   for (let i = 0; i < kinds.length; i += 1) {
     if (kinds[i] === "none") continue;
-    for (const [j, kind] of lengthBreaks(words, h, i, minPauseS, maxS, maxWords)) kinds[j] = kind;
+    for (const [j, kind] of stretchBreaks(words, h, i, rule, minPauseS, maxS, maxWords)) kinds[j] = kind;
     h = i + 1;
   }
   return kinds;
@@ -505,13 +616,16 @@ export function sentenceEndKind(
 ): SentenceEndKind {
   const minPauseS = limits.minPauseS ?? MIN_PAUSE_S;
   const base = baseRule(rule);
-  const kind = baseKind(words, i, base, minPauseS);
+  const relaxed = rule === COMMA_HEAVY;
+  const kind = baseKind(words, i, base, minPauseS, relaxed);
   if (rule === "v1" || kind !== "none") return kind;
   let h = i;
-  while (h > 0 && baseKind(words, h - 1, base, minPauseS) === "none") h -= 1;
+  while (h > 0 && baseKind(words, h - 1, base, minPauseS, relaxed) === "none") h -= 1;
   let stop = i + 1;
-  while (baseKind(words, stop, base, minPauseS) === "none") stop += 1;
-  const breaks = lengthBreaks(words, h, stop, minPauseS, limits.maxS ?? MAX_SENTENCE_S, limits.maxWords ?? MAX_SENTENCE_WORDS);
+  while (baseKind(words, stop, base, minPauseS, relaxed) === "none") stop += 1;
+  const maxS = limits.maxS ?? MAX_SENTENCE_S;
+  const maxWords = limits.maxWords ?? MAX_SENTENCE_WORDS;
+  const breaks = stretchBreaks(words, h, stop, rule, minPauseS, maxS, maxWords);
   return breaks.get(i) ?? "none";
 }
 
@@ -524,7 +638,7 @@ export function cutBoundaryKind(
   limits: SentenceLimits = {},
 ): SentenceEndKind {
   const kind = sentenceEndKind(words, i, rule, limits);
-  if (rule === "v2" && kind === "speaker_change" && endsOpenClause(wordText(words[i]))) return "none";
+  if (baseRule(rule) === "v2" && kind === "speaker_change" && endsOpenClause(wordText(words[i]))) return "none";
   return kind;
 }
 

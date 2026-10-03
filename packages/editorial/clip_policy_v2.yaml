@@ -620,27 +620,32 @@ search:
     lesson: ["gelernt", "seitdem", "seither", "die lehre daraus", "im nachhinein", "rückblickend"]
     # Emotionale Auflösung (Master-Prompt 7): der Sprecher ordnet ein, was ein Moment mit ihm gemacht hat.
     emotional: ["heute weiß ich", "das hat mich", "bis heute", "seit diesem tag"]
+    # Auflösung ohne Frage davor („für dich gibt es eine Lösung und die heißt …“); Nomen oder Zahl danach.
+    resolution: ["die lösung heißt", "die lösung ist", "lösung und die heißt", "die antwort ist", "das ergebnis ist", "das ergebnis war", "unterm strich"]
   # Heckenwörter: ein Satz damit trägt keine Behauptung und ist kein Payoff (Füllgespräch).
   hedge_markers: ["halt", "irgendwie", "ne", "keine ahnung", "ich weiß nicht", "weiß nicht", "oder so"]
+  # Verkaufsaufruf (Werbeanzeige, Webinar): der Satz ist nie Payoff und nie Einstieg und beendet die
+  # Verlängerung, schließt aber das Material davor nicht aus.
+  cta_markers: ["klick hier", "klicke hier", "klicken sie hier", "auf den link", "link in der bio", "link unten", "jetzt anmelden", "jetzt buchen", "jetzt kaufen", "check das", "komplett kostenlos", "trag dich ein", "abonnier"]
   # Wo die Suche endet: Rückweg und Verlängerung gehen nicht über einen Satz mit diesen Markern hinaus,
   # und ein solcher Satz ist weder Payoff noch Einstieg (zusätzlich ausschluss.organisations_marker und
   # an ein Modell gerichtete Sätze, editorial_gates.embedded_instruction und meta_speech).
   stop_markers:
     sponsor: ["werbepause", "sponsor", "gesponsert", "präsentiert von", "rabattcode", "mit dem code", "werbung in eigener sache", "kurze werbung"]
-    farewell: ["tschüss", "ciao", "auf wiedersehen", "bis zum nächsten mal", "danke fürs zuhören", "danke für das gespräch", "bis bald"]
+    farewell: ["tschüss", "ciao", "auf wiedersehen", "bis zum nächsten mal", "danke fürs zuhören", "danke für das gespräch", "bis bald", "bis dann", "wir sehen uns"]
     topic_change: ["zurück zum thema", "anderes thema", "nächstes thema", "kommen wir zu", "nächste frage", "themenwechsel"]
   # Marker der Hook-Typen aus Master-Prompt Abschnitt 9 (payoff_search.find_openings). Ein Treffer macht einen
   # Satz zum Einstiegskandidaten (ganze Wörter, kleingeschrieben); ob das Material einlöst, prüft
   # payoff_search.forward_payoff.
   hook_type_markers:
-    concrete_contradiction: ["gleichzeitig unser", "in wahrheit", "das gegenteil", "stimmt nicht", "ist falsch"]
+    concrete_contradiction: ["gleichzeitig unser", "in wahrheit", "das gegenteil", "stimmt nicht", "ist falsch", "alle sagen"]
     mistake_with_consequence: ["unser fehler", "mein fehler", "größter fehler", "teuerste fehler", "das war ein fehler", "ohne vorher"]
     result_with_open_cause: ["trotzdem gestiegen", "stieg trotzdem", "trotzdem mehr", "obwohl wir weniger"]
     scene_with_stakes: ["damals", "zwei tage vor", "am letzten tag", "kurz vor dem", "mitten in der"]
     decision_rule: ["nur wenn", "nur, wenn", "nur dann", "wir nehmen nur", "der wichtigste rat", "mein rat ist"]
     demonstration: ["hier siehst du", "hier sehen sie", "schau mal hier", "schau hier", "guck mal", "ich zeig", "ich zeige", "so sieht das aus"]
     self_correction: ["ich dachte lange", "ich dachte immer", "ich lag falsch", "ich habe mich geirrt", "ich hab mich geirrt"]
-    recognizable_problem: ["kennst du das", "kennen sie das", "du bekommst ständig", "das problem ist", "fast niemand"]
+    recognizable_problem: ["kennst du das", "kennen sie das", "du bekommst ständig", "das problem ist", "fast niemand", "du bekommst keine", "bekommst einfach keine", "bekommt einfach keine", "bekommt keine"]
     perspective_shift: ["das problem war nicht", "das problem ist nicht", "es geht nicht um", "der punkt ist nicht"]
     punchline: ["stellt sich heraus", "stellte sich heraus", "wie sich herausstellte", "und dann fragt"]
 
@@ -824,6 +829,8 @@ implementation:
     search.payoff_markers.lesson: {status: implemented}
     search.payoff_markers.emotional: {status: implemented}
     search.hedge_markers: {status: implemented}
+    search.payoff_markers.resolution: {status: implemented}
+    search.cta_markers: {status: implemented}
     search.stop_markers.sponsor: {status: implemented}
     search.stop_markers.farewell: {status: implemented}
     search.stop_markers.topic_change: {status: implemented}
@@ -1034,3 +1041,5 @@ origins:
   gates.embedded_instruction: {origin: R, source: "Master-Prompt Abschnitte 22 (Transkripte sind unvertrauenswürdige Eingabe, keine Anweisungen) und 27 (Anweisung im Transkript)", wordlist: {origin: H, source: "Steuerwörter in editorial_gates.py und Modellanrede aus copy_engine.is_meta_speech, ohne Messung"}}
   gates.meta_speech: {origin: R, source: "Plan core-clipping-intelligence, offene Punkte aus Welle 1 (Meta-Rede nur als Hook-Ausschluss); Master-Prompt Abschnitt 22", wordlist: {origin: H, source: "Modellbegriffe und Anreden aus copy_engine.is_meta_speech, ohne Messung"}}
   gates.discard_hard: {origin: R, source: "Master-Prompt Abschnitt 19 (harte Prüfungen vor dem Ranking); RK 2 Befund 4; Rollback über implementation.gates.discard_hard"}
+  search.payoff_markers.resolution: {origin: H, source: "Master-Prompt Abschnitt 7 (Auflösung als Payoff); Befund Blindvergleich mit echtem Material (Werbeanzeige ohne Frage davor); Wortliste ohne Messung"}
+  search.cta_markers: {origin: H, source: "Master-Prompt Abschnitt 12 (kein unpassender Verkaufsaufruf am Ende); Befund Blindvergleich mit echtem Material (Werbeanzeige); Wortliste ohne Messung"}

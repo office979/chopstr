@@ -632,7 +632,7 @@ SEARCH_HOOK_TYPES = (
 )  # fmt: skip
 # Payoff-Arten, die über Wortmarker erkannt werden (search.payoff_markers). Ergebnis mit Zahl, Auflösung
 # nach Frage, Pointe nach Setup und Lachen erkennt payoff_search aus der Struktur.
-SEARCH_PAYOFF_MARKER_TYPES = ("rule", "consequence", "explanation", "lesson", "emotional")
+SEARCH_PAYOFF_MARKER_TYPES = ("rule", "consequence", "explanation", "lesson", "emotional", "resolution")
 # Wo Rückweg und Verlängerung enden (search.stop_markers).
 SEARCH_STOP_MARKER_TYPES = ("sponsor", "farewell", "topic_change")
 # Abschnitt search ist eine Regel der Fassung 2 und braucht Herkunft; Pins für AP5.
@@ -654,7 +654,7 @@ def search_settings(policy: Policy) -> dict[str, Any] | None:
     """Einstellungen der Suche aus ``search`` (AP5) oder ``None`` in Fassung 1 und ohne Abschnitt.
 
     Rückgabe ``{payoff_first, opening_first, chapter_overlap_s, max_llm_calls_per_source_hour,
-    payoff_markers, hook_type_markers, hedge_markers, stop_markers, wired}``. ``payoff_search`` und der Heuristik-Provider lesen die
+    payoff_markers, hook_type_markers, hedge_markers, stop_markers, cta_markers, wired}``. ``payoff_search`` und der Heuristik-Provider lesen die
     Werte immer, sobald der Abschnitt da ist; ``wired`` ist ``implementation.search.payoff_first`` und
     sagt, ob ``story_engine.run`` die Suche schon nutzt (bis zur Verdrahtung false). Ein fehlender oder
     unbrauchbarer Wert scheitert laut."""
@@ -687,6 +687,10 @@ def search_settings(policy: Policy) -> dict[str, Any] | None:
     if not isinstance(hedges, list) or not hedges:
         raise PolicyError(f"clip_policy_v{v}: search.hedge_markers braucht eine Wortliste.")
     settings["hedge_markers"] = tuple(str(x).lower() for x in hedges if str(x).strip())
+    cta = raw.get("cta_markers")
+    if not isinstance(cta, list) or not cta:
+        raise PolicyError(f"clip_policy_v{v}: search.cta_markers braucht eine Wortliste.")
+    settings["cta_markers"] = tuple(str(x).lower() for x in cta if str(x).strip())
     settings["wired"] = _switch_value(policy.roh.get("implementation") or {}, SEARCH_SWITCH) is True
     return settings
 
@@ -1147,3 +1151,10 @@ def budget_min_source_s(policy: Policy) -> float:
 
 
 __all__ += ["budget_min_source_s"]
+
+
+# -- AP5 Nacharbeit (echtes Material): neue Regeln der Suche lesen ``search_settings`` -------------------
+IMPLEMENTED_KEYS.update({
+    "search.payoff_markers.resolution": _E + "search_settings",
+    "search.cta_markers": _E + "search_settings",
+})  # fmt: skip

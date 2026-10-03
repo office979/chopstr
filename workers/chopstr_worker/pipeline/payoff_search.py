@@ -127,8 +127,17 @@ NUMBER_WORDS = frozenset(
 # Mengenangabe in einer Erzählung („mit drei Leuten“).
 RESULT_VERBS = frozenset(
     {"gespart", "gesteigert", "reduziert", "gesenkt", "erhöht", "verdoppelt", "halbiert", "gestiegen",
-     "gesunken", "gewachsen", "verloren", "gewonnen", "verdient", "eingespart", "zurückgegangen", "angestiegen"}
+     "gesunken", "gewachsen", "verloren", "gewonnen", "verdient", "eingespart", "zurückgegangen", "angestiegen",
+     "geholfen", "gewinnen", "gebracht", "eingebracht", "erreicht", "verkauft", "abgeschlossen"}
 )  # fmt: skip
+# Zahl mit Einheit („40 %“, „30 Prozent“, „40.000 Euro“); ergänzt moment_typen.zahl, dessen Muster nach
+# „%“ eine Wortgrenze verlangt und „40 %“ deshalb nicht trifft.
+UNIT_NUMBER = re.compile(r"\d+(?:[.,]\d+)*\s*(?:%|prozent|euro|€|franken|chf)(?!\w)")
+# Kopula eines Merksatzes in Kurzform („Preise sind Positionierung“, „Zeit ist Geld“).
+COPULAS = frozenset({"ist", "sind"})
+# Wörter, mit denen ein Teilsatz beginnt (neben Komma, Semikolon, Doppelpunkt).
+CLAUSE_OPENERS = frozenset({"und", "aber", "sondern", "denn", "weil", "dann", "doch", "oder"})
+_PERSONAL = frozenset({"ich", "du", "er", "sie", "es", "wir", "ihr", "man", "das", "dies", "der", "die"})
 ENUMERATION_STARTS = frozenset({"erstens", "zweitens", "drittens", "viertens", "fünftens", "letztens"})
 # Floskelfragen: ihre Antwort ist keine Auflösung.
 SMALL_TALK_QUESTIONS = (
@@ -171,7 +180,7 @@ class _S:
 
     @property
     def low(self) -> str:
-        return self.text.lower()
+        return _norm(self.text)
 
 
 @dataclass
@@ -198,6 +207,10 @@ class _Ctx:
     # Sätzen und sichtbare Ereignisse aus ``heat["visual_events"]``, je ``(von, bis)`` in Sekunden.
     silences: list[tuple[float, float]] = field(default_factory=list)
     demo: list[str | None] = field(default_factory=list)
+    # Teilsätze je Satz als Tokenbereiche ``[von, bis)``, getrennt an Komma, Semikolon und Doppelpunkt.
+    clauses: list[list[tuple[int, int]]] = field(default_factory=list)
+    # Verkaufsaufruf („klick hier auf den Link“): nie Payoff, nie Einstieg, beendet die Verlängerung.
+    cta: list[bool] = field(default_factory=list)
 
     def duration(self, a: int, b: int) -> float:
         return max(0.0, self.v[b].end - self.v[a].start)
@@ -228,12 +241,21 @@ def _views(sents: Sequence[Any]) -> list[_S]:
     return out
 
 
+def _norm(text: str) -> str:
+    """Kleinschreibung und Schweizer Schreibung: „ß“ wird „ss“ („das heisst“ gleich „das heißt“)."""
+    return str(text).lower().replace("ß", "ss")
+
+
 def _core(token: str) -> str:
-    return dach_nlp.core_token(token)
+    return _norm(dach_nlp.core_token(token))
+
+
+_UNIT_TOKENS = frozenset({"%", "€"})
 
 
 def _tokens(text: str) -> list[str]:
-    return [t for t in text.split() if _core(t)]
+    """Wörter mit Inhalt; einzeln stehende Einheiten („40 %“) bleiben erhalten."""
+    return [t for t in text.split() if _core(t) or t.strip(",;:.") in _UNIT_TOKENS]
 
 
 def _upper(token: str) -> bool:
@@ -242,12 +264,22 @@ def _upper(token: str) -> bool:
 
 
 def _has(low: str, marker: str) -> bool:
-    """Marker als ganze Wörter im kleingeschriebenen Text."""
-    return re.search(rf"(?<!\w){re.escape(marker)}(?!\w)", low) is not None
+    """Marker als ganze Wörter im kleingeschriebenen, normalisierten Text (``_norm``)."""
+    return re.search(rf"(?<!\w){re.escape(_norm(marker))}(?!\w)", low) is not None
 
 
 def _any(low: str, markers: Iterable[str]) -> bool:
     return any(_has(low, m) for m in markers)
+
+
+def _nset(items: Iterable[str]) -> frozenset[str]:
+    return frozenset(_norm(x) for x in items)
+
+
+_OPEN_LOOP = _nset(dach_nlp.OPEN_LOOP_END)
+_BACK_REFERENCE = _nset(BACK_REFERENCE_STARTS)
+_NUMBER_WORDS = _nset(NUMBER_WORDS)
+_RESULT_VERBS = _nset(RESULT_VERBS)
 
 
 def _silences(
@@ -297,7 +329,7 @@ def _ctx(
         cfg=cfg,
         v=v,
         pos={s.idx: i for i, s in enumerate(v)},
-        qualification=tuple(str(m).lower() for m in (policy.ausstieg.get("abschwaechung_marker") or ())),
+        qualification=tuple(_norm(m) for m in (policy.ausstieg.get("abschwaechung_marker") or ())),
         merksatz=typen["merksatz"].marker if "merksatz" in typen else (),
         story=(typen["ministory"].marker if "ministory" in typen else ()) + cfg["hook_type_markers"]["scene_with_stakes"],
         no_host_question=bool(policy.einstieg.get("keine_gastgeberfrage")),
@@ -332,6 +364,15 @@ def _ctx(
         ctx.stop.append(
             policy.ist_organisatorisch(s.text) or _any(s.low, stops) or (ctx.addressed[k] and not ctx.quoted[k])
         )
+    for k, toks in enumerate(ctx.toks):
+        bounds, start = [], 0
+        for j, tok in enumerate(toks):
+            if tok.rstrip("\"'»«“”‘’)]}").endswith((",", ";", ":")) and j + 1 < len(toks):
+                bounds.append((start, j + 1))
+                start = j + 1
+        bounds.append((start, len(toks)))
+        ctx.clauses.append(bounds)
+        ctx.cta.append(_any(v[k].low, cfg["cta_markers"]))
     demo_markers = cfg["hook_type_markers"]["demonstration"]
     ctx.demo = [(_marker_hit(ctx, k, demo_markers, clause_start=False) or (None,))[0] for k in range(len(v))]
     return ctx
@@ -365,9 +406,9 @@ def _opening_defects(ctx: _Ctx, i: int) -> list[str]:
         out.append("Pronomen ohne Bezug im Einstiegssatz")
     nxt = toks[1] if len(toks) > 1 else ""
     if (
-        core in dach_nlp.OPEN_LOOP_END
-        or " ".join(_core(t) for t in toks[:2]) in dach_nlp.OPEN_LOOP_END
-        or core in BACK_REFERENCE_STARTS
+        core in _OPEN_LOOP
+        or " ".join(_core(t) for t in toks[:2]) in _OPEN_LOOP
+        or core in _BACK_REFERENCE
         or _starts_with_qualification(ctx, i)
         or (core in DEMONSTRATIVES and nxt and not _upper(nxt))
     ):
@@ -380,6 +421,8 @@ def _opening_defects(ctx: _Ctx, i: int) -> list[str]:
         out.append("Satz spricht ein Modell an oder enthält eine Anweisung, bleibt Inhalt")
     if ctx.stop[i] and not ctx.addressed[i]:
         out.append("Organisatorisches, Sponsor, Verabschiedung oder Themenwechsel")
+    if ctx.cta[i]:
+        out.append("Verkaufsaufruf")
     return out
 
 
@@ -495,7 +538,7 @@ def _laughter_after(heat: Mapping[str, Any] | None, s: _S) -> bool:
 
 
 def _number_token(tok: str, core: str) -> bool:
-    return any(ch.isdigit() for ch in tok) or core in NUMBER_WORDS
+    return any(ch.isdigit() for ch in tok) or core in _NUMBER_WORDS
 
 
 def _substance(ctx: _Ctx, i: int, after: int) -> bool:
@@ -520,8 +563,13 @@ def _clause_start(ctx: _Ctx, i: int, j: int) -> bool:
     return k == 0 or toks[k - 1].rstrip(_LEADING[::-1] + "\"'»«“”‘’)]}").endswith((",", ";", ":", ".", "!", "?"))
 
 
-def _marker_hit(ctx: _Ctx, i: int, markers: Iterable[str], clause_start: bool) -> tuple[str, int] | None:
-    """Erster Marker als Wortfolge in Satz ``i`` mit Nomen oder Zahl danach: ``(marker, ende)``."""
+def _marker_hit(
+    ctx: _Ctx, i: int, markers: Iterable[str], clause_start: bool, ok: Callable[[int, int], bool] | None = None
+) -> tuple[str, int, int] | None:
+    """Erster Marker als Wortfolge in Satz ``i`` (normalisiert, ``_norm``): ``(marker, ende, anfang)``.
+
+    ``clause_start`` verlangt einen Satz- oder Teilsatzanfang; ``ok(anfang, ende)`` kann einen Treffer
+    verwerfen (etwa wegen Heckenwörtern im Teilsatz)."""
     cores = ctx.cores[i]
     for m in markers:
         words = [_core(w) for w in m.split()]
@@ -530,15 +578,88 @@ def _marker_hit(ctx: _Ctx, i: int, markers: Iterable[str], clause_start: bool) -
                 continue
             if clause_start and not _clause_start(ctx, i, j):
                 continue
-            return m, j + len(words)
+            if ok is not None and not ok(j, j + len(words)):
+                continue
+            return m, j + len(words), j
     return None
 
 
+def _clause_index(ctx: _Ctx, i: int, j: int) -> int:
+    return next((n for n, (a, b) in enumerate(ctx.clauses[i]) if a <= j < b), len(ctx.clauses[i]) - 1)
+
+
+def _clause_low(ctx: _Ctx, i: int, n: int) -> str:
+    a, b = ctx.clauses[i][n]
+    return _norm(" ".join(ctx.toks[i][a:b]))
+
+
+def _clause_clean(ctx: _Ctx, i: int, j: int) -> bool:
+    """Kein Heckenwort und keine Moderation im Teilsatz von Token ``j`` und in seinen Nachbarn."""
+    n = _clause_index(ctx, i, j)
+    for m in range(max(0, n - 1), min(len(ctx.clauses[i]), n + 2)):
+        low = _clause_low(ctx, i, m)
+        if _any(low, ctx.cfg["hedge_markers"]) or any(p in low for p in TOPIC_ANNOUNCEMENTS):
+            return False
+    return True
+
+
+def _clause_substance(ctx: _Ctx, i: int, end: int) -> bool:
+    """Nomen oder Zahl nach Token ``end`` im selben Teilsatz oder im nächsten (nach „:“ oder „,“)."""
+    n = _clause_index(ctx, i, max(0, end - 1))
+    stop = ctx.clauses[i][min(n + 1, len(ctx.clauses[i]) - 1)][1]
+    toks, cores = ctx.toks[i], ctx.cores[i]
+    return any(
+        _number_token(toks[j], cores[j]) or (j > 0 and _upper(toks[j]) and cores[j] not in _NOT_NOUNS)
+        for j in range(end, stop)
+    )
+
+
+def _clause_noun(ctx: _Ctx, i: int, n: int) -> bool:
+    a, b = ctx.clauses[i][n]
+    return any(j > 0 and _upper(ctx.toks[i][j]) and ctx.cores[i][j] not in _NOT_NOUNS for j in range(a, b))
+
+
+def _structural(ctx: _Ctx, i: int) -> dict[str, tuple[str, int]]:
+    """Payoff-Arten aus der Form eines Teilsatzes: Ergebnis mit Zahl, Merksatz in Kurzform, „zuerst …
+    dann“, Erklärung mit „weil“ nach einer Aussage im selben Satz. Rückgabe Art zu ``(marker, token)``."""
+    out: dict[str, tuple[str, int]] = {}
+    zahl = next((t for t in ctx.policy.moment_typen if t.schluessel == "zahl"), None)
+    toks, cores = ctx.toks[i], ctx.cores[i]
+    clauses = ctx.clauses[i]
+    for n, (a, b) in enumerate(clauses):
+        if not _clause_clean(ctx, i, a):
+            continue
+        low = _clause_low(ctx, i, n)
+        part = cores[a:b]
+        if "result" not in out and _clause_noun(ctx, i, n):
+            unit = bool(UNIT_NUMBER.search(low)) or (zahl is not None and zahl.trifft(low))
+            counted = any(_number_token(toks[j], cores[j]) for j in range(a, b)) and bool(set(part) & _RESULT_VERBS)
+            if unit or counted:
+                out["result"] = ("zahl", a)
+        body = [j for j in range(a, b) if cores[j] not in CLAUSE_OPENERS]
+        if "rule" not in out and 3 <= len(body) <= 6 and cores[body[1]] in COPULAS:
+            head, rest = body[0], body[2:]
+            if (
+                _upper(toks[head])
+                and cores[head] not in _PERSONAL | DEFINITE_ARTICLES | ENUMERATION_STARTS
+                and len(cores[head]) >= _MIN_NOUN_LEN
+                and any(_upper(toks[j]) and cores[j] not in _NOT_NOUNS for j in rest)
+                and not set(cores[j] for j in rest) & _PERSONAL
+            ):
+                out["rule"] = ("merksatz_form", a)
+        if "rule" not in out and "zuerst" in part and n + 1 < len(clauses):
+            nxt = clauses[n + 1]
+            if cores[nxt[0]] == "dann" and _clause_noun(ctx, i, n + 1):
+                out["rule"] = ("zuerst … dann", a)
+        if "explanation" not in out and n > 0 and part and part[0] == "weil" and _clause_noun(ctx, i, n):
+            out["explanation"] = ("weil", a)
+    return out
+
+
 def _excluded_payoff(ctx: _Ctx, i: int) -> bool:
-    s = ctx.v[i]
-    if not ctx.toks[i] or ctx.question(i) or ctx.stop[i] or ctx.quoted[i] or ctx.addressed[i]:
-        return True
-    if _any(s.low, ctx.cfg["hedge_markers"]) or any(p in s.low for p in TOPIC_ANNOUNCEMENTS):
+    """Nie Payoff: Frage, Stoppsatz, vorgelesener oder an ein Modell gerichteter Satz, Verkaufsaufruf,
+    Aufzählungsanfang. Heckenwörter und Moderation wirken je Teilsatz (``_clause_clean``)."""
+    if not ctx.toks[i] or ctx.question(i) or ctx.stop[i] or ctx.quoted[i] or ctx.addressed[i] or ctx.cta[i]:
         return True
     return bool(ctx.cores[i]) and ctx.cores[i][0] in ENUMERATION_STARTS
 
@@ -571,35 +692,41 @@ def _payoff_at(ctx: _Ctx, i: int, heat: Mapping[str, Any] | None = None) -> dict
     if _excluded_payoff(ctx, i):
         return None
     s = ctx.v[i]
-    low = s.low
     markers = ctx.cfg["payoff_markers"]
     found: dict[str, tuple[int, str, tuple[int, ...]]] = {}  # Art: (Beleg-Position, Marker, Kontext)
+    tokens: dict[str, int] = {}  # Art: Token, an dem der Payoff im Satz beginnt
     prev = (i - 1,) if i > 0 and not ctx.stop[i - 1] else ()
+    cores = ctx.cores[i]
 
-    for typ in ("rule", "consequence", "explanation", "lesson", "emotional"):
+    def clean(a: int, _b: int) -> bool:
+        return _clause_clean(ctx, i, a)
+
+    for typ in ("rule", "consequence", "explanation", "lesson", "emotional", "resolution"):
         pool = tuple(markers[typ]) + (ctx.merksatz if typ == "rule" else ())
-        hit = _marker_hit(ctx, i, pool, typ in CLAUSE_START_TYPES)
+        hit = _marker_hit(ctx, i, pool, typ in CLAUSE_START_TYPES, ok=clean)
         if hit is None:
             continue
-        marker, end = hit
+        marker, end, start = hit
         if typ == "emotional":
             if len(ctx.toks[i]) < _MIN_CLAIM_TOKENS:
                 continue
-        elif not _substance(ctx, i, end):
+        elif not _clause_substance(ctx, i, end):
             continue
-        if typ == "explanation" and end < len(ctx.cores[i]) and ctx.cores[i][end] in ("ich", "wir", "du", "man"):
+        if typ == "explanation" and end < len(cores) and cores[end] in ("ich", "wir", "du", "man"):
             continue  # „Das heißt, ich muss morgen früher los.“
-        needs = prev if typ in ("consequence", "explanation") or marker in BACKWARD_LESSON_MARKERS else ()
+        if typ == "explanation" and start > 0 and end < len(cores) and cores[end] in ("aber", "nicht"):
+            continue  # „…, das heißt aber nicht, dass …“ mitten im Satz schränkt ein, löst nicht auf
+        needs = prev if (typ in ("consequence", "explanation") and start == 0) or marker in BACKWARD_LESSON_MARKERS else ()
         found[typ] = (i, marker, needs)
-    zahl = next((t for t in ctx.policy.moment_typen if t.schluessel == "zahl"), None)
-    numbers = (zahl is not None and zahl.trifft(low)) or (
-        any(c in NUMBER_WORDS for c in ctx.cores[i]) and bool(set(ctx.cores[i]) & RESULT_VERBS)
-    )
-    if numbers and ctx.has_noun[i]:
-        found["result"] = (i, "zahl", ())
+        tokens[typ] = start
+    for typ, (marker, start) in _structural(ctx, i).items():
+        if typ not in found:
+            found[typ] = (i, marker, ())
+            tokens[typ] = start
     q = _resolution(ctx, i)
-    if q is not None:
+    if q is not None and "resolution" not in found:
         found["resolution"] = (q, "frage", (q,))
+        tokens["resolution"] = 0
     for noun in ctx.definite[i]:
         if any(noun in ctx.nouns[m] for m in range(max(0, i - 1), i)):
             continue
@@ -623,6 +750,8 @@ def _payoff_at(ctx: _Ctx, i: int, heat: Mapping[str, Any] | None = None) -> dict
         return None
     primary = next(t for t in TYPE_PRIORITY if t in found)
     evidence, marker, _needs = found[primary]
+    token = tokens.get(primary, 0)
+    a, b = ctx.clauses[i][_clause_index(ctx, i, token)]
     return {
         "payoff_sent": s.idx,
         "payoff_type": primary,
@@ -630,6 +759,8 @@ def _payoff_at(ctx: _Ctx, i: int, heat: Mapping[str, Any] | None = None) -> dict
         "marker": marker,
         "types": [t for t in TYPE_PRIORITY if t in found],
         "needs_sents": sorted({ctx.v[n].idx for _e, _m, ns in found.values() for n in ns}),
+        "token": token,
+        "clause": " ".join(ctx.toks[i][a:b]).rstrip(",;:"),
     }
 
 
@@ -704,7 +835,7 @@ def _extend(ctx: _Ctx, a: int, b: int, p: int) -> int:
     b0 = b
 
     def blocked(n: int) -> bool:
-        if n >= len(ctx.v) or ctx.stop[n] or ctx.addressed[n] or ctx.duration(a, n) > pol.hart_max_s:
+        if n >= len(ctx.v) or ctx.stop[n] or ctx.addressed[n] or ctx.cta[n] or ctx.duration(a, n) > pol.hart_max_s:
             return True
         if _backchannel(ctx, n):
             return False
@@ -785,13 +916,18 @@ def backtrack_opening(
 # -- Einstieg zuerst: vorwärts zum Payoff -----------------------------------------------------------
 
 
-def _hook_at(ctx: _Ctx, i: int) -> tuple[str, str] | None:
-    """Hook-Typ allein aus dem Einstiegssatz ``i``."""
-    for hook_type in editorial.SEARCH_HOOK_TYPES:
+def _hook_at(ctx: _Ctx, i: int) -> tuple[str, str, int] | None:
+    """Hook-Typ allein aus dem Einstiegssatz ``i``: ``(hook_type, marker, token)``; bei mehreren Treffern
+    der früheste im Satz (ein langer Satz kann Einstieg und Einlösung enthalten)."""
+    hits = []
+    for n, hook_type in enumerate(editorial.SEARCH_HOOK_TYPES):
         hit = _marker_hit(ctx, i, ctx.cfg["hook_type_markers"][hook_type], clause_start=False)
         if hit:
-            return hook_type, hit[0]
-    return None
+            hits.append((hit[2], n, hook_type, hit[0]))
+    if not hits:
+        return None
+    token, _n, hook_type, marker = min(hits)
+    return hook_type, marker, token
 
 
 def find_openings(sents: Sequence[Any], policy: editorial.Policy) -> list[dict]:
@@ -815,6 +951,14 @@ def _openings(ctx: _Ctx) -> list[dict]:
 def _forward(ctx: _Ctx, a: int, hook_type: str | None, heat: Mapping[str, Any] | None) -> dict | None:
     accepted = set(HOOK_FULFILLED_BY.get(hook_type or "", PAYOFF_TYPES))
     first_hit = None
+    # Ein langer Satz kann Einstieg und Einlösung tragen: Payoff in einem späteren Teilsatz desselben Satzes.
+    hook = _hook_at(ctx, a)
+    own = _payoff_at(ctx, a, heat)
+    if hook is not None and own is not None and own["token"] > hook[2] and set(own["types"]) & accepted:
+        first_hit = {**_span(ctx, a, a, a, set()), "hook_type": hook_type, "payoff_type": next(t for t in own["types"] if t in accepted),
+                     "evidence_sent": own["evidence_sent"], "missing_context_sents": []}  # fmt: skip
+        if ctx.duration(a, a) >= ctx.policy.hart_min_s:
+            return first_hit
     for b in range(a + 1, len(ctx.v)):
         if ctx.stop[b]:
             break
@@ -1084,7 +1228,8 @@ def search_moments(
     ``min_s = laenge.hart_min_s`` abgeglichen; danach werden gleiche Spannen, gleiche Einstiege und fast
     gleiche Aussagen zusammengeführt. Payoffs ohne gültigen Einstieg fallen mit ``no_opening`` heraus.
 
-    Rückgabe ``{proposals, rejected, duplicates, payoffs, openings}``. Schwaches Material (nur
+    Rückgabe ``{proposals, rejected, duplicates, payoffs, openings, diagnosis}``; ``diagnosis`` (nur ohne
+    Vorschlag, sonst ``None``) erklärt, warum nichts kam (``_diagnosis``). Schwaches Material (nur
     Organisatorisches oder Füllgespräch, keine Behauptung mit Beleg) hat keinen Payoff und ergibt keinen
     Vorschlag. ``words`` (Wortliste mit Zeiten) macht Stillen zwischen Wörtern sichtbar (stilles Zeigen);
     ``heat["visual_events"]`` liefert sichtbare Ereignisse."""
@@ -1123,7 +1268,41 @@ def search_moments(
         "duplicates": res["duplicates"] + merged,
         "payoffs": payoffs,
         "openings": openings,
+        "diagnosis": None if kept else _diagnosis(ctx, payoffs, openings),
     }
+
+
+DIAGNOSIS_CANDIDATES = 3
+
+
+def _diagnosis(ctx: _Ctx, payoffs: list[dict], openings: list[dict]) -> dict:
+    """Warum die Suche nichts vorschlägt, als Text für ``story_engine.no_viable_moment``.
+
+    ``filler``: Organisations-, Stopp- oder Heckenmarker haben tatsächlich getroffen. ``marker_coverage``:
+    kein Payoff- oder Einstiegsmarker getroffen; ``candidates`` nennt die stärksten unerkannten Sätze (mit Zahl
+    oder Verneinung), damit die Lücke in den Markern sichtbar wird. ``rejected``: es gab Payoffs oder
+    Einstiege, aber keine tragfähige Spanne (siehe ``rejected``)."""
+    if payoffs or openings:
+        return {"kind": "rejected", "detail": "Payoffs oder Einstiege gefunden, aber keine tragfähige Spanne", "candidates": []}
+    hedges = ctx.cfg["hedge_markers"]
+    filler = [s.idx for k, s in enumerate(ctx.v) if ctx.stop[k] or _any(s.low, hedges)]
+    if filler:
+        return {
+            "kind": "filler",
+            "detail": "nur Organisatorisches oder Füllgespräch (Marker in Satz " + ", ".join(map(str, filler)) + ")",
+            "candidates": [],
+        }
+    scored = []
+    for k, s in enumerate(ctx.v):
+        number = any(_number_token(tok, c) for tok, c in zip(ctx.toks[k], ctx.cores[k]))
+        negation = bool(set(ctx.cores[k]) & dach_nlp.NEGATIONS)
+        if number or negation:
+            scored.append((-(2 * number + negation), k, {"sent": s.idx, "text": s.text, "number": number, "negation": negation}))
+    candidates = [c for _score, _k, c in sorted(scored)[:DIAGNOSIS_CANDIDATES]]
+    detail = "keine Payoff- oder Einstiegsmarker getroffen (Markerabdeckung)"
+    if candidates:
+        detail += "; stärkste unerkannte Sätze: " + ", ".join(str(c["sent"]) for c in candidates)
+    return {"kind": "marker_coverage", "detail": detail, "candidates": candidates}
 
 
 __all__ = [

@@ -38,3 +38,6 @@ apps/web/public/fonts/
 # oh-my-claudecode Laufzeitzustand (Pläne, Checkpoints), nicht versionieren
 .omc/
 !.omc/skills/
+
+# Blindvergleichs-Laeufe mit Testmaterial, nicht versionieren
+workers/eval/runs/

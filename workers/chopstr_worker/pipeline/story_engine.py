@@ -1914,6 +1914,8 @@ def no_viable_moment(report: DetectReport, chapter_no: int, chapter: list[Senten
     stats = (report.search.get("chapters") or [{}])[-1]
     if stats.get("rejected_reasons"):
         detail = "keine tragfähige Spanne, Vorschläge der Suche verworfen (" + ", ".join(stats["rejected_reasons"]) + ")"
+    elif stats.get("diagnosis") and stats["diagnosis"].get("detail"):
+        detail = str(stats["diagnosis"]["detail"])
     elif not stats.get("payoffs") and not stats.get("openings") and stats.get("search") == 0:
         detail = "nur Organisatorisches oder Füllgespräch, keine Behauptung mit Beleg und kein Einstieg mit Einlösung"
     else:
@@ -2194,7 +2196,7 @@ def _propose_v2(
         "search": len(found["proposals"]), "search_rejected": len(found["rejected"]) + len(res["rejected"]),
         "duplicates": sum(len(d.get("dropped") or []) for d in duplicates), "evaluated": len(kept),
         "overview": overview is not None, "payoffs": len(found.get("payoffs") or []),
-        "openings": len(found.get("openings") or []), "rejected_reasons": sorted({str(d.get("reason")) for d in [*found["rejected"], *res["rejected"]]}),
+        "openings": len(found.get("openings") or []), "diagnosis": found.get("diagnosis"), "rejected_reasons": sorted({str(d.get("reason")) for d in [*found["rejected"], *res["rejected"]]}),
     })  # fmt: skip
     return kept
 

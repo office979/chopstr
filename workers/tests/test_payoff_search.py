@@ -499,3 +499,83 @@ def test_alternative_openings_are_different_sentences(pol):
 def test_search_is_deterministic(pol):
     _case, sents = case_sents("punchline_setup")
     assert payoff_search.search_moments(sents, pol) == payoff_search.search_moments(sents, pol)
+
+
+# -- Echtes Material (Blindvergleich): lange Sätze, Schweizer Schreibung, Werbeanzeige -------------------
+def real_sents(name: str, rule: str | None = None) -> tuple[list[dict], list[segment.Sentence]]:
+    """Wörter aus ``tests/fixtures/real_*.json`` (eigenes Testmaterial des Nutzers, exportiert mit
+    ``eval.clip_eval.load_words``); ohne ``rule`` die gespeicherte Satzzerlegung (``sentence_idx``)."""
+    import json
+    from pathlib import Path
+
+    words = json.loads((Path(__file__).resolve().parent / "fixtures" / f"{name}.json").read_text(encoding="utf-8"))["words"]
+    sents = segment.sentences_from_words(words, rule=rule) if rule else segment.sentences_from_annotated(words)
+    return words, sents
+
+
+@pytest.mark.parametrize("rule", [None, "v2"])
+def test_real_long_sentence_gets_its_payoff_and_opening(rule, pol):
+    """Quelle 1: ein Satz nur mit Kommas. Ergebnis mit Zahl („40 % Marge verloren“) im Teilsatz, Einstieg
+    „Ehrlich gesagt war das der teuerste Fehler“; dazu Erklärung mit „weil“ und Merksätze."""
+    words, sents = real_sents("real_preise", rule)
+    res = payoff_search.search_moments(sents, pol, words=words)
+    assert res["proposals"] and res["diagnosis"] is None
+    p = res["proposals"][0]
+    assert p["first_sent"] == p["opening_sent"] == 0
+    assert sents[0].text.startswith("Ehrlich gesagt war das der teuerste Fehler")
+    hit = next(h for h in res["payoffs"] if h["payoff_sent"] == p["payoff_sent"])
+    assert hit["payoff_type"] == "result" and "40 % Marge verloren" in hit["clause"]
+    assert {"result", "explanation", "rule"} <= {t for h in res["payoffs"] for t in h["types"]}
+    assert res["openings"] and res["openings"][0]["opening_sent"] == 0
+
+
+def test_real_advert_problem_to_solution_without_the_call_to_action(pol):
+    """Quelle 2: Problem-Einstieg, Auflösung „die heisst Outbound Outreach“, Ergebnis mit Zahlwörtern; der
+    Verkaufsaufruf ist nie Payoff und beendet die Spanne."""
+    words, sents = real_sents("real_werbeanzeige")
+    res = payoff_search.search_moments(sents, pol, words=words)
+    cta = {s.idx for s in sents if "klick hier" in s.text.lower()}
+    assert cta
+    assert not cta & {h["payoff_sent"] for h in res["payoffs"]}
+    assert res["openings"][0] == {"opening_sent": 0, "hook_type": "recognizable_problem", "marker": "bekommt einfach keine"}
+    p = res["proposals"][0]
+    assert (p["first_sent"], p["payoff_sent"], p["payoff_type"], p["hook_type"]) == (0, 1, "resolution", "recognizable_problem")
+    assert p["last_sent"] < min(cta) and p["direction"] == "both"
+    result = next(h for h in res["payoffs"] if h["payoff_type"] == "result")
+    assert "350 Agenturen" in result["clause"]
+
+
+def test_swiss_spelling_and_clause_markers(pol):
+    one = lambda text: payoff_search.find_payoffs([{"idx": 0, "text": text, "speaker": "A", "start": 0.0, "end": 5.0}], pol)  # noqa: E731
+    assert "explanation" in one("Das heisst konkret: Jeder Auftrag unter 500 Euro lohnt sich für uns nicht.")[0]["types"]
+    assert one("Das heisst konkret: Jeder Auftrag braucht eine Anzahlung.")[0]["payoff_type"] == "explanation"
+    assert one("Wir haben in unserer Branche 40 % Marge verloren, weil das Preismodell falsch war.")[0]["types"][:1] == ["result"]
+    hit = one("Alle reden über Reichweite, Preise sind Positionierung, mehr ist da nicht.")[0]
+    assert hit["payoff_type"] == "rule" and hit["clause"] == "Preise sind Positionierung"
+    assert one("Im Handwerk zählt zuerst der Ruf, dann der Preis.")[0]["payoff_type"] == "rule"
+    assert one("Wir haben damit zwischen drei und fünf Neukunden pro Monat gewonnen.")[0]["payoff_type"] == "result"
+    assert one("Die Kunden waren zufrieden, das heisst aber nicht, dass das für jede Branche gilt.") == []
+    assert one("Klick hier auf den Link, über 350 Agenturen haben schon 40 % mehr Umsatz gewonnen.") == []
+
+
+def test_contradiction_opening_alle_sagen(pol):
+    rows = sents_of([("A", "Alle sagen, du brauchst mehr Reichweite, das Gegenteil ist der Fall.", 5.0)])
+    assert payoff_search.find_openings(rows, pol)[0]["hook_type"] == "concrete_contradiction"
+
+
+def test_diagnosis_tells_filler_from_marker_coverage(pol):
+    _case, sents = case_sents("weak_material")
+    diag = payoff_search.search_moments(sents, pol)["diagnosis"]
+    assert diag["kind"] == "filler" and diag["detail"].startswith("nur Organisatorisches oder Füllgespräch")
+    rows = sents_of(
+        [
+            ("A", "Unser Laden liegt direkt am Marktplatz neben der Apotheke.", 4.0),
+            ("A", "Im Sommer kommen jeden Samstag 300 Gäste vorbei.", 4.0),
+            ("A", "Parkplätze gibt es keine, die Leute kommen zu Fuß.", 4.0),
+        ]
+    )
+    res = payoff_search.search_moments(rows, pol)
+    assert res["proposals"] == [] and res["diagnosis"]["kind"] == "marker_coverage"
+    assert res["diagnosis"]["detail"].startswith("keine Payoff- oder Einstiegsmarker getroffen (Markerabdeckung)")
+    assert [c["sent"] for c in res["diagnosis"]["candidates"]][:1] == [1]  # Satz mit Zahl zuerst
+    assert payoff_search.search_moments(sents_of(PRONOUN_STORY), pol)["diagnosis"] is None

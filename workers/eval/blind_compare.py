@@ -440,7 +440,10 @@ def database_sources(source_ids: list[str]) -> list[dict[str, Any]]:
         for sid in source_ids:
             row = db.fetch_one(conn, SQL_MEDIA, (sid,))
             medien = {"quelle_id": sid, "storage_key": row[0], "titel": row[1]} if row else {"quelle_id": sid}
-            out.append({"name": f"quelle_{sid}", "words": clip_eval.load_words(conn, sid), "case": None, "medien": medien})
+            # Gespeicherte Satzindizes stammen aus der Satzregel zur Zeit der Transkription. Fuer den Vergleich
+            # zerlegt jede Fassung die Woerter frisch mit ihrer eigenen Regel.
+            words = [{k: v for k, v in w.items() if k != "sentence_idx"} for w in clip_eval.load_words(conn, sid)]
+            out.append({"name": f"quelle_{sid}", "words": words, "case": None, "medien": medien})
         return out
     finally:
         conn.close()

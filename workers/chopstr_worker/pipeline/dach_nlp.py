@@ -158,10 +158,17 @@ def is_sentence_end(
 
 # Regel v1 als Rückfall für ein Transkript mit kaum Satzzeichen (ausgewiesen in stats und Rubrik).
 FALLBACK_NO_PUNCT = "v1_fallback_no_punct"
-SENTENCE_RULES = ("v1", "v2", FALLBACK_NO_PUNCT)
+# Regel v2 für Transkripte mit Kommas, aber kaum Satzendezeichen (typisch für deutsche Whisper-Ausgaben:
+# ein Punkt am Ende, sonst Kommas vor kleingeschriebenem Wort, lückenlose Wortzeiten).
+COMMA_HEAVY = "v2_comma_heavy"
+SENTENCE_RULES = ("v1", "v2", FALLBACK_NO_PUNCT, COMMA_HEAVY)
+# In diesen Regeln ist ein Komma mit passender Syntax ein Grenzkandidat (``comma_candidate``).
+COMMA_RULES = (COMMA_HEAVY, FALLBACK_NO_PUNCT)
+# Mindestlänge des laufenden Satzes in Wörtern, bevor ein Komma ihn beenden darf.
+COMMA_MIN_WORDS = 6
 # Rückgabewerte von ``sentence_end_kind``. ``end_of_text``: letztes Wort des Transkripts.
 # ``length_cap``: der Satz war zu lang und ohne passende Pause, getrennt an der längsten Pause.
-END_KINDS = ("punct", "speaker_change", "pause_candidate", "length_cap", "end_of_text", "none")
+END_KINDS = ("punct", "speaker_change", "pause_candidate", "comma_candidate", "length_cap", "end_of_text", "none")
 # Obergrenze der Satzlänge unter v2 (segmentation.max_sentence_s und max_sentence_words in der Policy).
 MAX_SENTENCE_S = 25.0
 MAX_SENTENCE_WORDS = 40
@@ -268,10 +275,10 @@ def _text(w: dict | str) -> str:
 
 
 def _base_rule(rule: str) -> str:
-    """``v1`` oder ``v2``; ``v1_fallback_no_punct`` entscheidet wie ``v1``."""
+    """``v1`` oder ``v2``; ``v1_fallback_no_punct`` entscheidet wie ``v1``, ``v2_comma_heavy`` wie ``v2``."""
     if rule not in SENTENCE_RULES:
         raise ValueError(f"unbekannte Satzende-Regel {rule!r} (erlaubt: {', '.join(SENTENCE_RULES)})")
-    return "v2" if rule == "v2" else "v1"
+    return "v2" if rule in ("v2", COMMA_HEAVY) else "v1"
 
 
 def _ends_with_ellipsis(text: str) -> bool:
@@ -419,6 +426,12 @@ def bracket_heuristic(
     aux_at = max((k for k, w in enumerate(sentence) if core_token(_text(w)) in auxiliaries), default=None)
     if aux_at is None:
         return out
+    # Steht das Hilfsverb am Ende eines Nebensatzes („weil das Preismodell falsch war"), ist es verbletzt
+    # und schließt den Nebensatz; es öffnet keine Klammer.
+    part = _clause(left, clause_level=True)
+    aux_in_part = next((k for k, w in enumerate(part) if w is sentence[aux_at]), None)
+    if aux_in_part is not None and any(core_token(_text(w)) in subordinators for w in part[:aux_in_part]):
+        return out
     # Ein Partizip schließt überall, ein Infinitiv nur am Ende („haben dann stattdessen" bleibt offen),
     # und keines von beiden, wenn es als Adjektiv vor einem Nomen steht.
     joined = sentence + right[:1]
@@ -451,14 +464,18 @@ def bracket_heuristic(
 
 
 def resolve_sentence_rule(words: list[dict], rule: str) -> str:
-    """Die Regel, die für dieses Transkript gilt: unter ``v2`` mit weniger als einem Satzzeichen je
-    ``WORDS_PER_PUNCT_MIN`` Wörtern ``v1_fallback_no_punct`` (Zerlegung wie v1; ohne Satzzeichen trägt
-    nur die Pause), sonst die Regel selbst."""
+    """Die Regel, die für dieses Transkript gilt: unter ``v2`` mit weniger als einem Satzendezeichen
+    (. ! ?) je ``WORDS_PER_PUNCT_MIN`` Wörtern ``v2_comma_heavy``, wenn wenigstens ebenso viele Kommas da
+    sind (Kommas tragen die Zerlegung), sonst ``v1_fallback_no_punct`` (Zerlegung wie v1); sonst die
+    Regel selbst."""
     _base_rule(rule)
     if rule != "v2" or not words:
         return rule
     punct = sum(1 for w in words if _has_terminal_punct(_text(w)))
-    return "v2" if punct * WORDS_PER_PUNCT_MIN >= len(words) else FALLBACK_NO_PUNCT
+    if punct * WORDS_PER_PUNCT_MIN >= len(words):
+        return "v2"
+    commas = sum(1 for w in words if _text(w).rstrip(_CLOSERS).endswith(","))
+    return COMMA_HEAVY if commas * WORDS_PER_PUNCT_MIN >= len(words) else FALLBACK_NO_PUNCT
 
 
 def _running_sentence(words: list[dict], i: int, rule: str) -> list[dict]:
@@ -514,8 +531,10 @@ def _mag_title(words: list[dict], i: int, min_pause_s: float) -> bool:
     return not (i > 0 and core_token(_text(words[i - 1])) in _PERSONAL_PRONOUNS)
 
 
-def _base_kind(words: list[dict], i: int, rule: str, min_pause_s: float) -> str:
-    """Satzende-Art ohne Längengrenze (Regel v1 oder v2)."""
+def _base_kind(words: list[dict], i: int, rule: str, min_pause_s: float, relaxed: bool = False) -> str:
+    """Satzende-Art ohne Längen- und Kommagrenze (Regel v1 oder v2). ``relaxed`` (``v2_comma_heavy``): eine
+    Pause ohne offene Klammer gilt auch vor kleingeschriebenem Wort, weil die Großschreibung dort nichts
+    über den Satzanfang sagt."""
     w = words[i]
     text = str(w.get("text", "")).strip()
     nxt = words[i + 1] if i + 1 < len(words) else None
@@ -542,6 +561,8 @@ def _base_kind(words: list[dict], i: int, rule: str, min_pause_s: float) -> str:
     if _gap(words, i) >= min_pause_s:
         if rule == "v1" or _pause_boundary_accepted(words, i, rule):
             return "pause_candidate"
+        if relaxed and _soft_candidate(words, i - len(_running_sentence(words, i, rule)) + 1, i, min_pause_s):
+            return "pause_candidate"
     return "none"
 
 
@@ -559,10 +580,90 @@ def _soft_candidate(words: list[dict], start: int, j: int, min_pause_s: float) -
     return not bracket_heuristic(left, words[j + 1 : j + 1 + _RIGHT_SCAN_WORDS])["open"]
 
 
+# Relativpronomen und Fragewörter, mit denen nach einem Komma ein Nebensatz beginnt.
+_RELATIVE_WORDS = frozenset(
+    {"welcher", "welche", "welches", "welchen", "welchem", "wo", "was", "wobei", "denen", "deren", "dessen", "wie"}
+)  # fmt: skip
+# „der", „die", „das" … sind Relativpronomen, außer vor einem Nomen (Artikel) oder vor einem finiten Verb
+# (Demonstrativpronomen als Subjekt eines Hauptsatzes: „das heisst", „das ist").
+_D_WORDS = frozenset({"der", "die", "das", "dem", "den"})
+# Kleingeschriebene Wörter in Verbgestalt (-t, -st, -e, -en), die kein Verb sind.
+_NON_VERBS = frozenset(
+    {
+        "nicht", "jetzt", "erst", "zuerst", "selbst", "sonst", "meist", "meistens", "oft", "gut", "mit", "bitte",
+        "heute", "gerade", "ganz", "ganze", "recht", "leicht", "schlecht", "echt", "vielleicht", "nachts",
+        "längst", "fast", "jede", "jeden", "jedem", "letzte", "letzten", "erste", "ersten", "beste", "besten",
+        "mehrere", "andere", "gleiche", "gleichen", "eigene", "eigenen", "neue", "neuen", "große", "großen",
+        "kleine", "kleinen", "halbe", "zuletzt", "insgesamt", "bereits", "genau", "seit", "bisschen",
+    }
+)  # fmt: skip
+
+
+def _is_finite_verb(seq: list, k: int) -> bool:
+    """Grob: Hilfs- oder Modalverb, oder kleingeschriebenes Wort mit Verbendung, das kein Partizip,
+    kein Begleiter, kein bekanntes Adverb und kein Adjektiv vor einem Nomen ist."""
+    t = _text(seq[k])
+    tok = core_token(t)
+    if tok in AUXILIARY_FORMS:
+        return True
+    if not _is_lower(t) or tok in _NON_VERBS or tok in _DETERMINERS_E or tok in _NOT_INFINITIVE or tok in _NOT_PARTICIPLE:
+        return False
+    if is_participle(t) or _adjective_before_noun(seq, k):
+        return False
+    return bool(_VERB_LIKE.match(tok))
+
+
+def _has_finite_verb(seq: list) -> bool:
+    return any(_is_finite_verb(seq, k) for k in range(len(seq)))
+
+
+def _next_clause(words: list[dict], j: int) -> list[dict]:
+    """Die Wörter nach Wort ``j`` bis zum nächsten Komma oder Satzzeichen (höchstens 15)."""
+    out = []
+    for w in words[j + 1 : j + 16]:
+        out.append(w)
+        if _ends_clause(_text(w)):
+            break
+    return out
+
+
+def _is_comma(w: dict) -> bool:
+    return _text(w).rstrip(_CLOSERS).endswith(",")
+
+
+def _comma_boundary(words: list[dict], start: int, j: int, min_words: int = COMMA_MIN_WORDS) -> bool:
+    """Beendet das Komma an Wort ``j`` den Satz, der bei ``start`` beginnt (``v2_comma_heavy`` und Rückfall)?
+
+    Ja, wenn der laufende Satz mindestens ``min_words`` Wörter hat, der Teilsatz davor und der danach je ein
+    finites Verb haben (kein Nachtrag wie „dann der Preis."), keine Klammer offen ist, das Folgewort weder
+    Nebensatzkonnektor noch Relativpronomen ist und keine Aufzählung vorliegt (zwei Nomen ohne Verb danach)."""
+    if j + 1 >= len(words) or not _is_comma(words[j]) or j - start + 1 < min_words:
+        return False
+    nxt = words[j + 1]
+    if nxt.get("speaker") is not None and nxt.get("speaker") != words[j].get("speaker"):
+        return False
+    tok = core_token(_text(nxt))
+    if tok in SUBORDINATORS or tok in _RELATIVE_WORDS:
+        return False
+    after_verb = j + 2 < len(words) and _is_finite_verb(words, j + 2)
+    if tok in _D_WORDS and not (after_verb or (j + 2 < len(words) and _is_noun_like(words[j + 2]))):
+        return False
+    if _is_noun_like(words[j]) and _is_noun_like(nxt) and not after_verb:
+        return False  # Aufzählung („Brot, Butter und Milch")
+    left = words[start : j + 1]
+    if not _has_finite_verb(_clause(left, clause_level=True)):
+        return False
+    if not _has_finite_verb(_next_clause(words, j)):
+        return False
+    return not bracket_heuristic(left[-_BRACKET_MAX_WORDS:], words[j + 1 : j + 1 + _RIGHT_SCAN_WORDS])["open"]
+
+
 def _length_breaks(words: list[dict], h: int, stop: int, min_pause_s: float, max_s: float, max_words: int) -> dict[int, str]:
     """Zusätzliche Satzenden in der Strecke ``h`` bis ``stop`` (``stop`` ist ein Satzende ohne
-    Längengrenze). Ab ``max_s`` oder ``max_words`` gilt die nächste Pause ohne offene Klammer; findet
-    sich bis zur doppelten Grenze keine, die längste Pause dazwischen (``length_cap``)."""
+    Längengrenze). Ab ``max_s`` oder ``max_words`` gilt die nächste Pause ohne offene Klammer oder das
+    nächste Komma mit passender Syntax. Gibt es keines, trennt das nächste Komma; ohne Komma bleibt ein
+    Satz, der vor der doppelten Grenze endet, sonst trennt die längste Pause (bei lückenlosen Wortzeiten
+    das Wort an der Grenze). Kein Satz wächst über die doppelte Grenze."""
     out: dict[int, str] = {}
     start = h
     while start < stop:
@@ -571,15 +672,39 @@ def _length_breaks(words: list[dict], h: int, stop: int, min_pause_s: float, max
             break
         window_end = next((e for e in range(cap, stop + 1) if _too_long(words, start, e, 2 * max_s, 2 * max_words)), stop)
         last = min(window_end, stop - 1)
-        k = next((j for j in range(cap, last + 1) if _soft_candidate(words, start, j, min_pause_s)), None)
+        k = next(
+            (j for j in range(cap, last + 1) if _soft_candidate(words, start, j, min_pause_s) or _comma_boundary(words, start, j, 0)),
+            None,
+        )
         if k is not None:
-            out[k] = "pause_candidate"
-        elif window_end >= stop:
-            break  # der Satz endet ohnehin innerhalb der doppelten Grenze
+            out[k] = "pause_candidate" if _gap(words, k) >= min_pause_s else "comma_candidate"
         else:
-            k = max(range(cap, last + 1), key=lambda j: (round(_gap(words, j), 2), -j))
+            k = next((j for j in range(cap, last + 1) if _is_comma(words[j])), None)
+            if k is None and window_end >= stop:
+                break  # kein Komma, und der Satz endet ohnehin innerhalb der doppelten Grenze
+            if k is None:
+                k = max(range(cap, last + 1), key=lambda j: (round(_gap(words, j), 2), -j))
             out[k] = "length_cap"
         start = k + 1
+    return out
+
+
+def _stretch_breaks(
+    words: list[dict], h: int, stop: int, rule: str, min_pause_s: float, max_s: float, max_words: int
+) -> dict[int, str]:
+    """Satzenden in der Strecke ``h`` bis ``stop`` aus Kommas (nur ``COMMA_RULES``) und der Längengrenze."""
+    out: dict[int, str] = {}
+    segments = []
+    start = h
+    if rule in COMMA_RULES:
+        for j in range(h, stop):
+            if _comma_boundary(words, start, j):
+                out[j] = "comma_candidate"
+                segments.append((start, j))
+                start = j + 1
+    segments.append((start, stop))
+    for a, b in segments:
+        out.update(_length_breaks(words, a, b, min_pause_s, max_s, max_words))
     return out
 
 
@@ -592,7 +717,8 @@ def sentence_end_kinds(
 ) -> list[str]:
     """``sentence_end_kind`` für alle Wörter in einem Durchgang (Zerlegung)."""
     base = _base_rule(rule)
-    kinds = [_base_kind(words, i, base, min_pause_s) for i in range(len(words))]
+    relaxed = rule == COMMA_HEAVY
+    kinds = [_base_kind(words, i, base, min_pause_s, relaxed) for i in range(len(words))]
     if rule == "v1":
         return kinds
     max_s = MAX_SENTENCE_S if max_s is None else float(max_s)
@@ -600,7 +726,7 @@ def sentence_end_kinds(
     h = 0
     for i, k in enumerate(kinds):
         if k != "none":
-            for j, kind in _length_breaks(words, h, i, min_pause_s, max_s, max_words).items():
+            for j, kind in _stretch_breaks(words, h, i, rule, min_pause_s, max_s, max_words).items():
                 kinds[j] = kind
             h = i + 1
     return kinds
@@ -629,18 +755,19 @@ def sentence_end_kind(
     Sekunden oder ``max_words`` Wörter (Standard 25 und 40), gilt die nächste Pause ohne offene Klammer
     auch vor kleingeschriebenem Wort, sonst bis zur doppelten Grenze die längste Pause (``length_cap``)."""
     base = _base_rule(rule)
-    kind = _base_kind(words, i, base, min_pause_s)
+    relaxed = rule == COMMA_HEAVY
+    kind = _base_kind(words, i, base, min_pause_s, relaxed)
     if rule == "v1" or kind != "none":
         return kind
     h = i
-    while h > 0 and _base_kind(words, h - 1, base, min_pause_s) == "none":
+    while h > 0 and _base_kind(words, h - 1, base, min_pause_s, relaxed) == "none":
         h -= 1
     stop = i + 1
-    while _base_kind(words, stop, base, min_pause_s) == "none":
+    while _base_kind(words, stop, base, min_pause_s, relaxed) == "none":
         stop += 1
     max_s = MAX_SENTENCE_S if max_s is None else float(max_s)
     max_words = MAX_SENTENCE_WORDS if max_words is None else int(max_words)
-    return _length_breaks(words, h, stop, min_pause_s, max_s, max_words).get(i, "none")
+    return _stretch_breaks(words, h, stop, rule, min_pause_s, max_s, max_words).get(i, "none")
 
 
 def cut_boundary_kind(
@@ -893,6 +1020,9 @@ __all__ = [
     "AUXILIARY_FORMS",
     "END_KINDS",
     "PAUSE_OPEN_END_WORDS",
+    "COMMA_HEAVY",
+    "COMMA_MIN_WORDS",
+    "COMMA_RULES",
     "FALLBACK_NO_PUNCT",
     "MAX_SENTENCE_S",
     "MAX_SENTENCE_WORDS",

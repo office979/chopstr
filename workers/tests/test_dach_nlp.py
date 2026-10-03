@@ -318,3 +318,72 @@ def test_mag_is_a_title_only_before_a_capitalized_name():
     speaker[3]["speaker"] = "S1"
     assert dach_nlp.sentence_end_kind(speaker, 2, "v2") == "punct"
     assert dach_nlp.sentence_end_kind(title, 2, "v1") == "none"
+
+
+# -- Whisper-Ausgabe mit Kommas statt Punkten (Blindvergleich, echtes Testvideo) ----------------------
+
+
+def _whisper_case() -> list[dict]:
+    import json
+    from pathlib import Path
+
+    data = json.loads((Path(__file__).resolve().parents[2] / "packages/editorial/parity/sentence_end_v1.json").read_text(encoding="utf-8"))
+    return next(c["words"] for c in data["cases"] if c["id"] == "whisper_comma_heavy_real")
+
+
+def test_real_whisper_transcript_is_comma_heavy_and_splits_at_clause_commas():
+    from chopstr_worker.pipeline import segment
+
+    words = _whisper_case()
+    assert len(words) == 56 and max(float(words[i + 1]["start"]) - float(words[i]["end"]) for i in range(55)) < 0.4
+    assert len(segment.sentences_from_words(words)) == 1, "Regel v1 bleibt ein Satz"
+    rule = dach_nlp.resolve_sentence_rule(words, "v2")
+    assert rule == "v2_comma_heavy"
+    texts = [s.text for s in segment.sentences_from_words(words, rule=rule)]
+    assert texts == [
+        "Ehrlich gesagt war das der teuerste Fehler meiner Karriere,",
+        "wir haben in unserer Branche 40 % Marge verloren, weil das Preismodell falsch war,",
+        "alle sagen, du brauchst mehr Reichweite,",
+        "das Gegenteil ist der Fall, Preise sind Positionierung,",
+        "das heisst aber nicht, dass das für jede Branche gilt,",
+        "im Handwerk zählt zuerst der Ruf, dann der Preis.",
+    ]
+
+
+def test_plain_v2_length_cap_splits_at_a_comma_without_pauses():
+    """Ohne Pausen wirkt die Längengrenze über das Komma (vorher blieb der Satz mit 56 Wörtern ganz)."""
+    words = _whisper_case()
+    kinds = dach_nlp.sentence_end_kinds(words, "v2")
+    assert [i for i, k in enumerate(kinds) if k != "none"] == [46, 55]
+    assert kinds[46] == "comma_candidate"
+
+
+def test_comma_rules_keep_subordinate_relative_enumeration_and_tail():
+    def ends(text: str) -> list[int]:
+        w = _words(text.split(), gap=0.0)
+        kinds = dach_nlp.sentence_end_kinds(w, "v2_comma_heavy")
+        return [i for i, k in enumerate(kinds) if k != "none"]
+
+    tail = "Im Handwerk zählt bei uns zuerst der Ruf, dann der Preis."
+    assert ends(tail) == [len(tail.split()) - 1]
+    enum = "Wir verkaufen bei uns im Laden Brot, Butter und Milch, jeden Tag frisch."
+    assert ends(enum) == [len(enum.split()) - 1]
+    sub = "Wir haben bei uns viel Marge verloren, weil das Preismodell falsch war."
+    assert ends(sub) == [len(sub.split()) - 1]
+    rel = "Wir haben einen guten Kunden gefunden, der jede Woche bei uns bestellt."
+    assert ends(rel) == [len(rel.split()) - 1]
+    main = "Wir haben bei uns viel Marge verloren, alle sagen das heute."
+    assert ends(main) == [6, len(main.split()) - 1]
+
+
+def test_comma_needs_six_words_and_a_verb_before():
+    w = _words(["Alle", "sagen,", "du", "brauchst", "mehr", "Reichweite."], gap=0.0)
+    assert dach_nlp.sentence_end_kinds(w, "v2_comma_heavy")[1] == "none"
+    w = _words(["Im", "Jahr", "danach", "bei", "uns", "im", "Laden,", "wir", "haben", "viel", "gelernt."], gap=0.0)
+    assert dach_nlp.sentence_end_kinds(w, "v2_comma_heavy")[6] == "none", "kein finites Verb davor"
+
+
+def test_verb_final_auxiliary_in_subordinate_clause_opens_no_bracket():
+    left = _words(["wir", "haben", "Marge", "verloren,", "weil", "das", "Preismodell", "falsch", "war,"])
+    right = _words(["alle", "sagen,", "du", "brauchst", "mehr"])
+    assert dach_nlp.bracket_heuristic(left, right)["open"] is False

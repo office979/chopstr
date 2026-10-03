@@ -1,0 +1,86 @@
+{
+  "quelle": "schnitte/tipp1.mp4",
+  "transkript": "schnitte/tipp1.transcript.json",
+  "schnittgefuehl": "kompakt",
+  "erstelltAm": "2026-09-26",
+  "hinweis": "ENTWURF. Pausen stammen aus silencedetect (Ton), nicht aus Transkriptzeiten. Jede Grenze vor dem Schneiden an Bild und Ton nachprüfen. Einträge unter zurPruefung sind NICHT geschnitten.",
+  "behalten": [
+    {
+      "start": 0,
+      "ende": 1.606,
+      "grund": "Sprechinhalt",
+      "unsicherheit": "keine"
+    },
+    {
+      "start": 2.322,
+      "ende": 6.486,
+      "grund": "Sprechinhalt",
+      "unsicherheit": "keine"
+    },
+    {
+      "start": 8.306,
+      "ende": 10.949,
+      "grund": "Sprechinhalt",
+      "unsicherheit": "keine"
+    },
+    {
+      "start": 11.532,
+      "ende": 14.321,
+      "grund": "Sprechinhalt",
+      "unsicherheit": "keine"
+    },
+    {
+      "start": 14.748,
+      "ende": 17.221,
+      "grund": "Sprechinhalt",
+      "unsicherheit": "keine"
+    }
+  ],
+  "entfernt": [
+    {
+      "start": 1.606,
+      "ende": 2.322,
+      "grund": "Pause von 1.086s auf 0.25s gekürzt",
+      "beleg": "zwischen \"ich\" und \"wie\" (silencedetect 1.55–2.63s)",
+      "unsicherheit": "keine"
+    },
+    {
+      "start": 6.486,
+      "ende": 8.306,
+      "grund": "Pause von 2.189s auf 0.25s gekürzt",
+      "beleg": "zwischen \"Video\" und \"1.\" (silencedetect 6.43–8.62s)",
+      "unsicherheit": "gering"
+    },
+    {
+      "start": 10.949,
+      "ende": 11.532,
+      "grund": "Pause von 0.954s auf 0.25s gekürzt",
+      "beleg": "zwischen \"ein\" und \"auf.\" (silencedetect 10.89–11.84s)",
+      "unsicherheit": "keine"
+    },
+    {
+      "start": 14.321,
+      "ende": 14.748,
+      "grund": "Pause von 0.797s auf 0.25s gekürzt",
+      "beleg": "zwischen \"die\" und \"3.\" (silencedetect 14.26–15.06s)",
+      "unsicherheit": "keine"
+    }
+  ],
+  "zurPruefung": [
+    {
+      "zeit": 0,
+      "bereich": [
+        0,
+        2.632
+      ],
+      "frage": "Die ersten 1.55s Sprache werden von einer 1.086s-Pause abgeschlossen. Das sieht nach einem Fehlstart aus, der danach neu begonnen wird. Anhören: soll 0–2.63s weg?",
+      "vorschlag": "anhören — nicht automatisch geschnitten",
+      "hinweis": "Whisper zieht Fehlstarts oft im Transkript zusammen. Verlass dich hier auf das Ohr."
+    },
+    {
+      "zeit": 6.43,
+      "frage": "Pause von 2.189s zwischen \"Video\" und \"1.\". Betonungspause oder Versehen?",
+      "vorschlag": "ansehen"
+    }
+  ]
+}

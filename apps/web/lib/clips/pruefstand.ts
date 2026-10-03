@@ -136,6 +136,16 @@ function treueSatz(typ: string, detail: unknown): string {
       return liste
         ? `Zwei Stellen sind zusammengesetzt, die im Original ${liste} auseinanderliegen. Das klingt wie ein Satz, war aber keiner.`
         : "Zwei weit auseinanderliegende Stellen sind zusammengesetzt. Das klingt wie ein Satz, war aber keiner.";
+    /* Übergangsbefunde aus dem Worker (AP10b, transitions.check_transitions): sie betreffen die
+     * Schnittkante, nicht die Aussage. */
+    case "transition_cut_in_word":
+      return "Ein Schnitt liegt in einem Wort.";
+    case "transition_gap_short":
+      return "Sehr kurze Pause an einer Schnittstelle.";
+    case "transition_speaker_change":
+      return "Sprecherwechsel an einer Schnittstelle.";
+    case "transition_caption_lost":
+      return "Ein halb hörbares Wort hat keinen Untertitel.";
     default:
       return "Der Schnitt verändert die Aussage. Bitte den Text ansehen.";
   }

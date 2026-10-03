@@ -1,22 +1,43 @@
 # Pipeline des Clipping-Kerns: Ist-Zustand
 
-Stand 03.10.2026, Code-Stand HEAD 070d916. Beschrieben ist, was heute im Code läuft, nicht was laufen soll.
-Lieferung nach `docs/MASTER-PROMPT-CORE-CLIPPING.md` Abschnitt 3 (Phase 1). Bekannte Schwächen mit Fundstellen stehen
+Stand 03.10.2026, Code-Stand HEAD 8054125 (nach Welle 3 des Core-Clipping-Plans). Beschrieben ist, was im Code läuft, nicht was laufen soll.
+Lieferung nach `docs/MASTER-PROMPT-CORE-CLIPPING.md` Abschnitt 3 (Phase 1), fortgeschrieben nach den Wellen 1 bis 3. Bekannte Schwächen mit Fundstellen stehen
 in `docs/RESEARCH-CLIPPING-KERN.md` Abschnitt 2 und werden hier nicht wiederholt, nur über ihre Nummer (Befund 1 bis 13) verlinkt.
 
-Schreibweise: `W/` = `workers/chopstr_worker/`, `A/` = `apps/web/lib/`, `P/` = `packages/`. Fundstellen als `Datei:Funktion Zeilen`.
-Jede Aussage wurde am Code gelesen. Was nicht gelesen oder nicht ausgeführt wurde, steht als "ungeprüft". Stellen, die ich
-zusätzlich im venv ausgeführt habe (`workers/.venv`, nur lesend), sind mit "ausgeführt" markiert.
+**Zwei Fassungen.** Der Kern läuft in zwei Fassungen der redaktionellen Grundlage. Fassung 1 (`packages/editorial/clip_policy_v1.yaml`) ist der Standard und verhält sich wie vor dem Core-Clipping-Plan (ein eingefrorener Lauf hält das fest, Abschnitt 8). Fassung 2 (`packages/editorial/clip_policy_v2.yaml`) gilt nur mit `CHOPSTR_POLICY_VERSION=2`. Innerhalb von Fassung 2 hat jedes Paket einen eigenen Schalter (`implementation.*`) und teils eine eigene Regel. Jede Stufe unten nennt, was unter Fassung 1 und was unter Fassung 2 läuft; welcher Schalter heute an ist und warum, steht in Abschnitt 8.
+
+Schreibweise: `W/` = `workers/chopstr_worker/`, `A/` = `apps/web/lib/`, `P/` = `packages/`. Fundstellen als `Datei:Funktion Zeilen`. Zeilennummern stehen nur bei Dateien, die sich seit dem ersten Stand dieses Dokuments (Commit 04fd6f3) nicht geändert haben; bei allen anderen steht nur der Funktionsname, weil sich Zeilen mit jedem Paket verschieben.
+Jede Aussage wurde am Code gelesen. Was nicht gelesen oder nicht ausgeführt wurde, steht als "ungeprüft". Die Zählung der Policy-Schlüssel (Abschnitt 5) wurde im venv ausgeführt (`workers/.venv`, nur lesend). Die Angaben zum venv und zum Container in Abschnitt 4 stammen aus dem ersten Stand und wurden nicht neu ausgeführt, soweit sie nicht als geändert markiert sind.
 
 ## 1. Übersicht der Stufen
 
 ```
-Ingest → ASR + Diarisierung (+ Heatmap) → Fusion/NLP → [Kapitel → Vorschlag → Bewertung → Heilung/Teaser → select_best]
+Ingest → ASR + Diarisierung (+ Heatmap) → Fusion/NLP
+       → [Kapitel → (F2: Episodenübersicht) → Vorschlag (F2: + Payoff-Suche und Abgleich)
+          → Bewertung (F2: Anfang heilen, harte Gates mit Heilen vor Verwerfen, Kürzung) → Teaser → select_best
+          → (F2: ClipCandidates)]
        → Zeilen + auto_create_clips → render_pack: [Copy → Reframe → Captions → Plan → ffmpeg → Prüfung] → Ausgabeentscheidung
 ```
 
 Die eckigen Klammern markieren je eine Activity (`detect_candidates`, `render_pack`). Beide laufen
-im lokalen Worker und im Temporal-Workflow über dieselben `run_*`-Funktionen (Unterschiede: Abschnitt 4).
+im lokalen Worker und im Temporal-Workflow über dieselben `run_*`-Funktionen (Unterschiede: Abschnitt 4). F1 = Fassung 1, F2 = Fassung 2.
+
+| Stufe | F1 | F2 | Schalter (Abschnitt 8) |
+|---|---|---|---|
+| 1.1 Ingest | gleich | gleich | keiner |
+| 1.2 Transkription, Fusion | v1-Satzzerlegung | Satzzerlegung nach Regel v2 | `sentence_rule` |
+| 1.3 Segmentierung | Satzende v1, Kapitel ohne Überlappung | Satzende v2, Kapitel mit 30 s Überlappung | `sentence_rule`, `search.payoff_first` |
+| 1.4 Heatmap | gleich | gleich, Heatmap-Hash im Cache-Key | keiner |
+| 1.5 Episodenübersicht | gibt es nicht | ein Modellaufruf je Kapitel (Analyst) | `search.payoff_first` |
+| 1.6 Kandidatensuche | Modellvorschlag mit `propose_moments_v1` | Modellvorschlag `propose_moments_v2` plus deterministische Payoff-Suche und Abgleich, Budget | `search.payoff_first` |
+| 1.7 Bewertung, Heilung, Teaser | Rubrik, Ende heilen, fünf Tore | zusätzlich Anfang heilen, Neubewertung, Verbklammer über die Grenze | `sentence_rule` |
+| 1.8 Harte Gates | gibt es nicht | zehn Gates, Heilen vor Verwerfen | `gates.discard_hard` (aus) |
+| 1.9 Kürzung | gibt es nicht | Nachlauf kappen, Pausen und Füllwörter | `trim.enabled` (Schalter an, Regel aus) |
+| 1.10 Auswahl | `select_best` | zusätzlich Modus sperren (nur Sprachmodell) | `gates.discard_hard` |
+| 1.11 ClipCandidate | gibt es nicht | Adapter im Bericht und kompakt in der Rubrik | Fassung 2 |
+| 1.12 Persistenz, Freigabe | Kandidat wird angenommen oder zurückgehalten | gleich, Cache-Key mit Policy-Hash | keiner |
+| 1.14 Copy | Hooks v1, erste Variante ohne Claim-Treffer | Hooks v2, wörtlicher Einstieg, Claim-Check v2 | `hook.native_spoken` |
+| 1.15 Captions | Wort für Wort | Wort-Ereignisse mit Überbrückung, Zahl plus Einheit | `captions.word_bridge` |
 
 ### 1.1 Ingest
 - Eingabe: `sources`-Zeile, Original im Bucket `sources`.
@@ -25,170 +46,232 @@ im lokalen Worker und im Temporal-Workflow über dieselben `run_*`-Funktionen (U
 - Art: deterministisch (ffprobe, ffmpeg). Kein Prompt, keine Policy.
 - Key: `storage.derived_key(storage_key, AUDIO_PARAMS | PROXY_PARAMS, "ingest_v1")` (`W/activities/common.py 67-72`). Vorhandene Ableitungen werden übersprungen. Nutzungsminuten werden nur gebucht, wenn `sources.duration_s` noch leer ist (`ingest.py 81-83`).
 - Fehler: laut. Ohne Tonspur `IngestError`, `sources.status = failed` über `events.step` (`W/events.py:step 82-110`).
+- Fassungen: gleich.
 
 ### 1.2 Transkription, Diarisierung, Fusion
 - Eingabe: `audio16k.wav`, `asr_variant` (`de` | `de-CH`) und `brand_vocab` des Markenprofils (`W/db.py:load_source 70-98`).
 - Ausgabe: `asr/<hash>.json` (`TranscriptResult`: `words[]`, `model_id`, `variant`, `provider`, `beta`, `windows`, `duration_s`, `stats`), `diar/<hash>.json` (`turns[[start,end,speaker]]`, `model_id`, `speakers`, `skipped`, `hint`), danach `transcript_versions` (Zeile mit `words`, `stats`, `origin = asr`, `version = max + 1`).
-- Code: `W/activities/transcribe.py:run_transcribe 48-99`, `run_diarize 102-145`; `W/pipeline/transcribe.py:plan_windows 78-93`, `merge_windows 111-139`, `transcribe_window 303-327`, `diarize 503-537`; Fusion `W/activities/nlp.py:run 45-116` mit `assign_speakers` (`transcribe.py 203-232`), `normalize_numbers` (196-200), `dach_nlp.detect_dialect` (246-274) und `dach_nlp.annotate` (301-322).
-- Art: Modelle (faster-whisper, pyannote), deterministische Fusion. Kein Prompt, keine Policy.
+- Code: `W/activities/transcribe.py:run_transcribe 48-99`, `run_diarize 102-145`; `W/pipeline/transcribe.py:plan_windows 78-93`, `merge_windows 111-139`, `transcribe_window 303-327`, `diarize 503-537`; Fusion `W/activities/nlp.py:run` mit `assign_speakers` (`transcribe.py 203-232`), `normalize_numbers` (196-200), `dach_nlp.detect_dialect` und `dach_nlp.annotate`.
+- Art: Modelle (faster-whisper, pyannote), deterministische Fusion. Kein Prompt.
 - Key: ASR `derived_key(audio_key, {variant, vocab-hash, window_s, overlap_s}, "asr_v1:<model>")`, Diarisierung `derived_key(audio_key, {speakers}, "diar_v1:<model>")` (`activities/transcribe.py 25-31`). Treffer im Storage überspringen den Schritt. Jede Fusion schreibt eine neue `transcript_versions`-Zeile, auch bei unverändertem Input.
 - Fehler: ASR laut (`TranscribeError` ohne konfiguriertes Modell, `ImportError` ohne faster-whisper). Diarisierung still: ohne `HF_TOKEN` oder ohne pyannote bekommt die ganze Datei den Sprecher `SPEAKER_00`, `skipped: true`, Hinweis nur im Event (`transcribe.py 454-482, 503-519`).
+- F1: `annotate` zerlegt nach Regel v1 und schreibt `sentence_idx` je Wort. F2: `nlp.run` liest `editorial.sentence_rule` und `editorial.sentence_limits` der aktiven Policy; mit `implementation.sentence_rule` gilt Regel v2, bei weniger als einem Satzzeichen je 40 Wörter `v1_fallback_no_punct`. Die gewählte Regel steht in `stats.sentence_rule` der Transkriptversion. Eine vorhandene Transkriptversion behält ihre `sentence_idx`.
 
 ### 1.3 Segmentierung (Sätze, Kapitel)
 - Eingabe: Wortliste der höchsten `transcript_versions.version` (`W/activities/common.py:load_transcript 87-99`).
 - Ausgabe: `Sentence[]` und Kapitel `list[list[Sentence]]`, beide nur im Speicher, nie persistiert (Abschnitt 2).
-- Code: `W/pipeline/segment.py:sentences_from_words 50-67`, `chapterize 94-107`, `numbered 110-112`; Grenzen `W/pipeline/dach_nlp.py:is_sentence_end 125-146`.
-- Art: deterministisch. Satzende = Satzzeichen (`! ? …`, `.` außer Abkürzung, Ordinalzahl, Dezimalzahl), Pause von mindestens 0,7 s oder Sprecherwechsel. Kapitel schließen, sobald sie 240 s erreichen (`story_engine.CHAPTER_SECONDS 53`).
-- Key, Fehler: keiner, keine eigene Fehlerbehandlung. `segment.candidate_windows 70-91` (Fenster 12 bis 90 s) wird nirgends aufgerufen.
+- Code: `W/pipeline/segment.py:sentences_from_words`, `sentences_from_annotated`, `chapterize`, `numbered`; Satzende `W/pipeline/dach_nlp.py:sentence_end_kind`, `sentence_end_kinds`, `cut_boundary_kind`, `is_sentence_end` (Adapter).
+- Art: deterministisch. Kapitel schließen, sobald sie 240 s erreichen (`story_engine.CHAPTER_SECONDS`).
+- F1: Satzende = Satzzeichen (`! ? …`, `.` außer Abkürzung, Ordinalzahl, Dezimalzahl), jede Pause ab 0,7 s und jeder Sprecherwechsel. `story_engine.run` zerlegt mit `sentences_from_words`. Kapitel ohne Überlappung.
+- F2 (Schalter `sentence_rule`): Regel v2 in `sentence_end_kind`. Satzzeichen zuerst (Abkürzungsliste ohne "so", "i", "mag", "max", "art", "min"; Auslassungspunkte sind kein Satzende), ein Sprecherwechsel ist eine Grenze, eine Pause ab 0,7 s nur ein Kandidat, angenommen bei großgeschriebenem Folgewort, ohne offene Verbklammer (`bracket_heuristic`) und ohne Ende auf Artikel, Präposition oder Nebensatzkonnektor. Obergrenze `segmentation.max_sentence_s` 25 s und `max_sentence_words` 40: darüber gilt die nächste Pause auch vor Kleinschreibung, sonst die längste Pause (`length_cap`). Ein Sprecherwechsel nach Komma, Semikolon oder Doppelpunkt ist für Schnitte kein Satzende (`cut_boundary_kind`). `story_engine.run` nimmt die `sentence_idx` der Transkriptversion (`sentences_from_annotated`) und zerlegt nur ohne sie neu; so sehen Worker und Web dieselben Sätze (P5, Falldatei `P/editorial/parity/sentence_end_v1.json`). Kapitel mit Überlappung nur mit `search.payoff_first`: jedes folgende Kapitel beginnt zusätzlich mit den Sätzen des vorigen, die in dessen letzten `search.chapter_overlap_s` (30 s) beginnen.
+- Key, Fehler: keiner, keine eigene Fehlerbehandlung. `segment.candidate_windows` (Fenster 12 bis 90 s) wird nirgends aufgerufen.
 - Befund 1.
 
 ### 1.4 Signale und Heatmap
-- Eingabe: Audio, optional ASR-Wörter, falls `asr/<hash>.json` beim Start der Activity schon existiert (`W/activities/analyze.py:run_heatmap 80-130`).
+- Eingabe: Audio, optional ASR-Wörter, falls `asr/<hash>.json` beim Start der Activity schon existiert (`W/activities/analyze.py:run_heatmap`).
 - Ausgabe: `heatmap/<hash>.json` (`bin_s`, `n_bins`, `values`, `seeds` bis 25 mit 45 s Mindestabstand, `audio_values`, `text_included`), `wellenform/<hash>.json` (25 Werte je Sekunde, nur für die Zeitleiste), `sources.waveform_key`.
 - Code: `W/pipeline/signals.py:audio_heatmap 67-81`, `text_heatmap 84-108`, `combined 123-131`, `seeds 111-120`, `to_payload 134-149`.
-- Art: deterministisch. Audio 0,6 RMS + 0,4 Spectral Flux als z-Wert, begrenzt auf -3 bis 3; Text aus festen Diskursmarkern, Fragen, Zahlen; Mischung 0,5 zu 0,5. Lachen-Eingang (`laughter`) wird nirgends übergeben.
-- Key: `derived_key(audio_key, {text: bool}, "signals_v2")`, Wellenform eigener Key (`analyze.py 70-77`). Der Textanteil ist Teil des Keys, der Inhalt der Heatmap nicht Teil des Keys der Kandidaten (Befund 3).
-- Fehler: `fail_status=None`, die Quelle wird nicht auf `failed` gesetzt. Wellenform-Fehler nur als Warnung. Fehlt die Heatmap, läuft die Engine ohne Seeds (`_load_heat 133-142`).
-- Verwendung: Seeds ordnen nur die Kapitel (`story_engine.chapter_order 333-342`). `audio_values` wirken über `audio_wert 190-226` auf den Gesamtwert und die Teaser-Wahl. Im Prompt kommt nichts davon vor (Befund 3).
+- Art: deterministisch. Audio 0,6 RMS + 0,4 Spectral Flux als z-Wert, begrenzt auf -3 bis 3; Text aus festen Diskursmarkern, Fragen, Zahlen; Mischung 0,5 zu 0,5. Lachen-Eingang (`laughter`) wird nirgends übergeben; die Nutzlast trägt keinen Schlüssel für Lachen (Abschnitt 7, Beobachtung g).
+- Key: `derived_key(audio_key, {text: bool}, "signals_v2")`, Wellenform eigener Key (`analyze.py:heatmap_key_for`). Der Textanteil ist Teil des Keys der Heatmap.
+- Fehler: `fail_status=None`, die Quelle wird nicht auf `failed` gesetzt. Wellenform-Fehler nur als Warnung. Fehlt die Heatmap, läuft die Engine ohne Seeds (`_load_heat`).
+- Verwendung F1: Seeds ordnen nur die Kapitel (`story_engine.chapter_order`). `audio_values` wirken über `story_engine.audio_wert` auf den Gesamtwert und die Teaser-Wahl. Im Prompt kommt nichts davon vor (Befund 3).
+- Verwendung F2: zusätzlich geben die Seeds als Zeilen "Sekunde 34, Satz 12: Text" in den Vorschlags-Prompt (`story_score.seed_lines`), und ein Hash über `seeds`, `audio_values` und `bin_s` geht in den Cache-Key der Kandidaten (1.12). Damit ist der Heatmap-Inhalt unter F2 Teil des Keys (Befund 3).
 
-### 1.5 Kandidatensuche (Vorschlag)
-- Eingabe: Kapitel, `sources.brief` (`audience`, `wanted`, `exclude`, `platform`).
-- Ausgabe: je Kapitel höchstens 4 Satzspannen `{first_sent, last_sent, structure, why}` (`MAX_PER_CHAPTER 51`), gesamt `report.proposals`.
-- Code: `W/pipeline/story_score.py:propose 218-234`, Aufruf `story_engine.run 859-911`. Vorfilter vor der Bewertung `_vorfilter_grund 602-625`.
-- Art: Sprachmodell (`LLM.structured`, `max_tokens 2000`, `temperature 0.2`, `W/providers_llm.py 53-131`). Provider `local-heuristic` antwortet deterministisch aus dem gerenderten Prompt (`W/heuristic_llm.py:propose_moments 174-233`, höchstens 3 Momente, Länge aus Wortzahl geschätzt, 2,5 Wörter/s).
-- Prompt: `propose_moments_v1` (kennt weder Policy noch Länge noch Moment-Typen, RESEARCH Abschnitt 2, Absatz "Weitere neue Befunde"), System `system_editor_v1`. Policy: nur die Heuristik liest `laenge.*` und `moment_typen` (Abschnitt 5).
-- Key: der Vorschlag selbst wird nicht gecacht (`LLM(...)` ohne Redis, `analyze.py 339`); der Cache liegt eine Ebene höher (1.8).
-- Fehler: laut. Ein Vorschlag mit Index außerhalb des Kapitels oder `first > last` wird still gestrichen (`story_score.py 230-233`).
+### 1.5 Episodenübersicht (nur F2)
+- Eingabe: ein Kapitel (mit Überlappung), Satznummern.
+- Ausgabe: je Kapitel ein Objekt mit `topics`, `speakers`, `claims`, `evidence`, `objections`, `limitations`, `corrections` und `dependencies` (Kette Behauptung, Begründung, Beispiel, Einschränkung, Schlussfolgerung), jeweils mit Satznummern; geprüft von `story_score.validate_overview` (Satznummern außerhalb des Kapitels fallen weg), markiert `search_only: true`; gesammelt in `report.overviews`.
+- Code: `W/pipeline/story_score.py:overview`, Aufruf in `story_engine._propose_v2`; Heuristik-Handler `W/heuristic_llm.py:episode_overview` (Behauptungen aus `payoff_search.find_payoffs`, `heuristic: true`).
+- Art: Sprachmodell, Rolle Analyst (`LLM.structured`, `job_type llm_overview`). Die Übersicht beschreibt, was gesagt wird, wählt nichts aus und ist weder Zitat- noch Schnittquelle; sie steht nur als Kontext im Vorschlags-Prompt.
+- Prompt: `episode_overview_v1`, gepinnt erst in Fassung 2 (Abschnitt 6). Unter Fassung 1 scheitert ein Aufruf laut (`PolicyError`, kein Pin); der Pfad wird dort nicht erreicht.
+- Key: keiner je Kapitel; die Übersichten liegen im Bericht, der unter dem Kandidaten-Key gecacht wird (1.12).
+- Fehler: Ist das Modellbudget erschöpft (1.6), entfällt die Übersicht (`llm_budget`, Stufe `overview`), die Suche läuft weiter.
+- Schalter: `implementation.search.payoff_first`.
+
+### 1.6 Kandidatensuche (Vorschlag, Payoff-Suche, Abgleich)
+- Eingabe: Kapitel, `sources.brief` (`audience`, `wanted`, `exclude`, `platform`); F2 zusätzlich Übersicht, Seeds, Policy-Text, Heatmap.
+- Ausgabe: je Kapitel höchstens 4 Satzspannen `{first_sent, last_sent, structure, why}` (`MAX_PER_CHAPTER`), gesamt `report.proposals`. F2 zusätzlich je Vorschlag `payoff_sent`, `opening_sent`, `required_context_sents`, `narrative_type`, `direction` (`both`, `payoff_only`, `opening_only`) und `source` (`model` oder `search`).
+- Vorfilter vor der Bewertung: `story_engine._vorfilter_grund`.
+- F1: `W/pipeline/story_score.py:propose` (Sprachmodell, `LLM.structured`, `max_tokens 2000`, `temperature 0.2`, `W/providers_llm.py 53-131`) mit `propose_moments_v1`. Der Prompt kennt weder Policy noch Länge noch Moment-Typen (RESEARCH Abschnitt 2, Absatz "Weitere neue Befunde"). Provider `local-heuristic` antwortet deterministisch aus dem gerenderten Prompt (`W/heuristic_llm.py:propose_moments`, höchstens 3 Momente, Länge aus Wortzahl geschätzt, 2,5 Wörter/s).
+- F2 mit `search.payoff_first` (`story_engine._propose_v2`), je Kapitel:
+  1. Übersicht (1.5).
+  2. Modellvorschlag mit `propose_moments_v2` (Rolle Editor): Policy-Text (Rubrik, Moment-Typen, Längenfenster), Übersicht, Seeds, Kapitel zwischen Begrenzern (`mask_delimiters` entschärft Begrenzer im Text). Die Antwort prüft `story_score.validate_moments_v2`; ein Vorschlag ohne die v2-Felder wird abgewertet (`missing_v2_fields`) und rückt nach hinten.
+  3. Deterministische Suche `payoff_search.search_moments`: Payoff zuerst (`find_payoffs`: Merksatz, Ergebnis mit Zahl, Folge, Erklärung, Erkenntnis, emotionale Auflösung, Auflösung nach Frage, Pointe, Lachen) und rückwärts zum frühesten gültigen Einstieg (`backtrack_opening`, Kontext wie Definition, Bedingung, Pronomenbezug und Sprecherzuordnung muss mit hinein); Einstieg zuerst (`find_openings` mit den zehn Hook-Typen aus Master-Prompt 9, `forward_payoff` prüft die Einlösung). Jede Spanne wird nach dem Payoff verlängert (`_extend`, bis `laenge.gut_von_s`, höchstens `ziel_s`, solange derselbe Sprecher weiterführt; eine Einschränkung direkt danach kommt samt dem auflösenden Folgesatz in den Clip; Verabschiedung, Themenwechsel, Sponsor-Read, anderer Sprecher oder eine Modellanrede beenden die Verlängerung).
+  4. Abgleich `payoff_search.reconcile`: Treffer aus beiden Richtungen sind `both`; ein Einstieg ohne Einlösung fällt mit `promise_unfulfilled` heraus, ein Einstieg ohne den nötigen Kontext mit `context_missing`, ein Vorschlag unter `laenge.hart_min_s` mit `too_short`, ein Payoff ohne gültigen Einstieg mit `no_opening`. Mehrere Vorschläge zum selben `payoff_sent` sind Dubletten (einer bleibt, die anderen stehen als `duplicate_payoff` im Bericht); die Suche führt zusätzlich gleiche Spannen, gleiche Einstiege und fast gleichen Payoff-Text (Jaccard der Inhaltswörter ab 0,8) zusammen.
+  5. Sortiert wird nach (fehlende v2-Felder, Richtung, Modell vor Suche, Satznummer); über 4 hinaus fällt der Rest mit `chapter_limit` heraus. Gleiche Spannen aus überlappenden Kapiteln werden nur einmal bewertet (`duplicate`).
+  Der Heuristik-Provider ruft dafür `payoff_search` selbst auf (`heuristic_llm._propose_moments_v2`).
+- Modellbudget (nur mit Suche verdrahtet): `llm_budget_for` rechnet `search.max_llm_calls_per_source_hour` (400) mal Quelldauer in Stunden, aufgerundet, mindestens ein Kapitel (240 s, also 27 Aufrufe). `BudgetLLM` zählt jeden `structured`-Aufruf und verweigert ab dem Limit jeden weiteren; der Lauf bricht nicht ab. Kapitel laufen in der Reihenfolge von `chapter_order` (Kapitel mit Seed zuerst), die letzten bekommen also zuerst kein Modell mehr. Verweigerte Schritte stehen als `llm_budget` im Bericht, am Ende ein Eintrag `budget_exhausted`; `report.llm_budget` nennt Limit, Verbrauch, Verweigerte und Status.
+- Policy: F1 liest nur die Heuristik `laenge.*` und `moment_typen`; F2 liest `search.*`, `laenge.*`, `einstieg.*`, `ausstieg.*`, `ausschluss.*` und `moment_typen` in der Suche (Abschnitt 5).
+- Key: der Vorschlag selbst wird nicht gecacht (`LLM(...)` ohne Redis, `analyze.py:run_detect_candidates`); der Cache liegt eine Ebene höher (1.12).
+- Fehler: laut. Ein Vorschlag mit Index außerhalb des Kapitels oder `first > last` wird still gestrichen (`story_score.propose`, `validate_moments_v2`). Verwerfungen der Suche stehen mit `stage: search` in `report.discarded`.
 - Befund 3, 11.
 
-### 1.6 Bewertung (Rubrik, Gates, Heilung, Teaser)
+### 1.7 Bewertung (Rubrik, Heilung, Teaser)
 - Eingabe: ein Vorschlag, die Satzliste, Wortliste, Heatmap.
-- Ausgabe: `CandidateResult` (Abschnitt 2) oder `{"reason": too_short | too_long | *_after_repair, ...}` in `report.discarded` (`story_engine.evaluate_span 683-796`).
-- Ablauf in `evaluate_span`:
-  1. `story_score.score_with_repair 376-392`: bewertet, erweitert bei `needs_earlier_context` oder `unresolved_references` um einen Satz nach vorn und bei `ends_before_answer` um einen Satz nach hinten, höchstens 2 Runden (`MAX_REPAIR_ROUNDS 52`), danach `repair_failed`. Jede Runde ist ein neuer Modellaufruf.
-  2. `kontext_verlaengern 628-680`: wenn eines der Enden-Gates (`fidelity`, `sentence_boundaries`, `no_open_loop`, `ENDE_TORE 49`) reißt, werden bis zu `kontext_zugabe_saetze` (2) Sätze angehängt, solange `kontext_zugabe_s` (7 s) und `hart_max_s + zugabe` nicht überschritten sind und danach alle fünf Gates bestehen. Danach wird nicht neu bewertet.
-  3. Längenprüfung `_length_reason 585-599`: `hart_min_s 18`, `hart_max_s 70` (+ 7 s nur nach Heilung).
-  4. `deterministic_gates 453-461`: `standalone` (aus den drei Modell-Flags), `fidelity` (nur `ends_before_contrast`, 3 Folgewörter), `sentence_boundaries` (Satzzeichen am Wort vor dem Start und am letzten Wort, `…` zählt nicht), `verb_bracket` (spaCy, sonst `passed: true, available: false`), `no_open_loop` (`OPEN_LOOP_END`).
-  5. Story-Graph `story_graph.find_later_qualifications 57-82` (Kontrastmarker plus lexikalische Überlappung ab 0,15 im 60-s-Folgefenster) und je Treffer `story_graph.confirm 90-97`; ohne Urteil `confirmed = null`.
-  6. Teaser `teaser_satz 255-292`: stärkster Satz (Moment-Typ-Bonus plus Klang) aus Satz 2 bis zum Beginn des letzten Viertels, höchstens 6 s, Vorsprung mindestens 2,0 gegenüber dem ersten Satz, kein Rückverweis-Pronomen am Anfang. Nur wenn `compose.Composition.validate` den Teaser akzeptiert (`compose.py 48-67`), wird er als erstes Segment `role: teaser` vorangestellt und `structure = payoff_first`.
-  7. `total = policy_total 295-327`: `Policy.gesamtwert(rubric_points) * (1 - laenge_abzug(abspiel_dauer))`, danach Klang-Faktor `(1 - w) + w * 2 * klang` mit `w = 0,15`. Skala nominal 0 bis 14 (`punkte_gesamt`), nicht 0 bis 10; durch den Klang-Faktor sind bis 16,1 möglich. Die Gewichte aus `resolve_weights` (`learned_weights`) gehen nur in `rubric.scores[k].weight` ein, nicht in `total` (Befund 12).
+- Ausgabe: `CandidateResult` (Abschnitt 2) oder `{"reason": ..., ...}` in `report.discarded` (`story_engine.evaluate_span`). Gründe unter F1: `too_short`, `too_long`, `*_after_repair`. F2 zusätzlich `ends_on_qualification`, `instruction_followed`, `llm_budget`.
+- Ablauf in `evaluate_span`, mit den Unterschieden der Fassungen:
+  1. `story_score.score_with_repair`: bewertet, erweitert bei `needs_earlier_context` oder `unresolved_references` um einen Satz nach vorn und bei `ends_before_answer` um einen Satz nach hinten, höchstens 2 Runden (`MAX_REPAIR_ROUNDS`), danach `repair_failed`. Jede Runde ist ein neuer Modellaufruf. Gleich in beiden Fassungen.
+  2. F2 mit `sentence_rule`: `heal_start` heilt den Anfang nach vorn, bis zu `laenge.context_front_sentences` (2) Sätzen und `context_front_s` (7 s), nie mit dem Satz eines anderen Sprechers (`einstieg.keine_gastgeberfrage`), nur gegen einen benannten Mangel aus `start_defects` (Anfang mitten im Satz, Pronomen ohne Bezug als erstes Wort, offene Verbklammer am Schnitt). Gelingt das nicht, reißt später das Tor `standalone` (`start_not_healed`).
+  3. `kontext_verlaengern`: wenn eines der Enden-Gates (`fidelity`, `sentence_boundaries`, `no_open_loop`, `ENDE_TORE`) reißt, werden bis zu `kontext_zugabe_saetze` (2) Sätze angehängt, solange `kontext_zugabe_s` (7 s) und `hart_max_s + zugabe` nicht überschritten sind und danach die Gates bestehen. F1: alle fünf Tore der Spanne. F2 mit `sentence_rule`: die Tore des Endes und `verb_bracket`; ebenfalls mit `sentence_rule` endet die Heilung dank `ausstieg.never_end_on_qualification` nie auf einem Satz, der mit einem Abschwächungsmarker beginnt, sondern verwirft mit `ends_on_qualification`.
+  4. F2: harte Gates mit Heilen vor Verwerfen (1.8).
+  5. F2: nach einer Heilung (vorn, hinten oder durch ein Gate) genau eine Neubewertung mit `story_score.score` auf der neuen Spanne; `pre_heal_scores` hält die alten Werte, ein jetzt nicht eigenständiger Kandidat gilt als `repair_failed`. F1: nach der Heilung wird nicht neu bewertet.
+  6. Längenprüfung `_length_reason`: `hart_min_s 18`, `hart_max_s 70` (+ 7 s nur nach Heilung).
+  7. F2: Kürzung (1.9).
+  8. Teaser `teaser_satz`: stärkster Satz (Moment-Typ-Bonus plus Klang) aus Satz 2 bis zum Beginn des letzten Viertels, höchstens 6 s, Vorsprung mindestens 2,0 gegenüber dem ersten Satz, kein Rückverweis-Pronomen am Anfang. Nur wenn `compose.Composition.validate` den Teaser akzeptiert, wird er als erstes Segment `role: teaser` vorangestellt und `structure = payoff_first`. F2 mit verdrahteter Kürzung: in einer Debatte (`compose.is_debate`) kein Teaser (E6).
+  9. `deterministic_gates`: `standalone` (aus den drei Modell-Flags), `fidelity`, `sentence_boundaries`, `verb_bracket`, `no_open_loop`. F1: `fidelity` nur `ends_before_contrast` (3 Folgewörter), `sentence_boundaries` prüft Satzzeichen am Wort vor dem Start und am letzten Wort (`…` zählt nicht), `verb_bracket` prüft innerhalb des ersten und letzten Satzes mit spaCy, sonst `passed: true, available: false`. F2: `sentence_boundaries` entscheidet wie die Zerlegung (`cut_boundary_kind`) und meldet "Grenze nur aus Pause"; `verb_bracket` prüft über die Schnittgrenze (Wort vor dem Anfang gegen den ersten Satz, letzter Satz gegen das Folgewort) mit spaCy oder der Heuristik `dach_nlp.bracket_heuristic` (`method` im Ergebnis, nie mehr still bestanden); nur mit `verb_bracket.fallback: off` und ohne spaCy bleibt es ungeprüft und sagt das.
+  10. Story-Graph `story_graph.find_later_qualifications` (Kontrastmarker plus lexikalische Überlappung ab 0,15 im 60-s-Folgefenster) und je Treffer `story_graph.confirm`; ohne Urteil `confirmed = null`. Mit verdrahteten Gates gilt Regel v2 (Marker an Wortgrenzen, Korrekturmarker, "außer" trifft nicht "außerdem").
+  11. `total = policy_total`: `Policy.gesamtwert(rubric_points) * (1 - laenge_abzug(abspiel_dauer))`, danach Klang-Faktor `(1 - w) + w * 2 * klang` mit `w = 0,15`. Skala nominal 0 bis 14 (`punkte_gesamt`), nicht 0 bis 10; durch den Klang-Faktor sind bis 16,1 möglich. Die Gewichte aus `resolve_weights` (`learned_weights`) gehen nur in `rubric.scores[k].weight` ein, nicht in `total` (Befund 12, P29).
 - Art: Sprachmodell für Rubrik und Story-Graph-Bestätigung, alles andere deterministisch.
 - Prompt: `score_clip_v2` (sieben Kriterien, Skala 0 bis 2, Platzhalter `{policy}`), `story_graph_confirm_v1`. Policy: Abschnitt 5.
-- Key: keiner je Spanne (kein Redis, `LLM(...)` in `analyze.py 339`).
-- Fehler: laut bei fehlender Policy (`PolicyError`) und bei Antworten ohne jede Punktzahl (`_harmonise 301-303`). Still: fehlendes spaCy (`verb_bracket`), Heuristik ohne Story-Graph-Urteil, Rubrikwerte, die geraten werden müssen (`rubric_guessed`, nirgends gespeichert). Die Belegprüfung `_evidence_grounded 244-252` wird berechnet (`ungrounded_evidence`, `story_score.py 369`), aber von keinem Code gelesen oder gespeichert. Gleiches gilt für `needs_human` (368).
+- Key: keiner je Spanne (kein Redis).
+- Fehler: laut bei fehlender Policy (`PolicyError`) und bei Antworten ohne jede Punktzahl (`story_score._harmonise`). Still: fehlendes spaCy unter F1 (`verb_bracket`), Heuristik ohne Story-Graph-Urteil, Rubrikwerte, die geraten werden müssen (`rubric_guessed`, nirgends gespeichert). Die Belegprüfung `_evidence_grounded` wird berechnet (`ungrounded_evidence`), aber von keinem Code gelesen oder gespeichert. Gleiches gilt für `needs_human`.
 - Befund 2, 5, 6, 11, 12.
 
-### 1.7 Auswahl (`select_best`)
+### 1.8 Harte Gates (nur F2, Schalter `gates.discard_hard`)
+- Eingabe: der Kandidat nach den Heilungen aus 1.7, Wortliste, zwei Sätze Kontext davor (Zitatrahmen) und danach (Distanzierung).
+- Ausgabe: `rubric.quality_gate_results` (ein Ergebnis je Gate mit `passed`, `detail`, `evidence_word_ids`, `healable`, `origin`), `rubric.quality_gate_decision` (`decision` `accepted`, `reported` oder `rejected`, Grund `gate:<schluessel>`, `failed`, `flagged`, `unhealable`, `discard_hard`, `switch`) und `rubric.gate_heal`. Je Quellvideo `report.gate_rejections` (Quote je Gate: wie oft es riss und wie oft es der Grund des Verwerfens war).
+- Code: `W/pipeline/editorial_gates.py:run_gates` und die zehn Gates `unresolved_pronoun`, `back_reference`, `open_question_unanswered`, `boundary_negation_condition`, `reported_speech`, `forward_reference`, `speaker_turn`, `later_correction`, `embedded_instruction`, `meta_speech`; Verdrahtung `story_engine.evaluate_span`, `heal_gates`, `run`.
+- Art: deterministisch, Wortlisten sind Übertragungshypothesen (Herkunft H in `origins`). Je Gate einzeln schaltbar (`gates.<schluessel>`).
+- Reihenfolge, Heilen vor Verwerfen: (1) alle Gates laufen auf dem geheilten Kandidaten. (2) Reißt ein Gate und ist der Mangel heilbar (`healable` `front` oder `back`) und gibt es keinen unheilbaren Treffer, heilt `heal_gates`: vorn über `heal_start` mit den Gate-Mängeln als Prüfung (gleiche Grenzen wie 1.7 Schritt 2), hinten über `kontext_verlaengern` (gleiche Grenzen wie 1.7 Schritt 3). (3) Danach laufen die Gates erneut, und es folgt die Neubewertung. (4) Erst jetzt entscheidet `run_gates`: `rejected` nur, wenn die Regel `gates.discard_hard` und der Schalter `implementation.gates.discard_hard` beide an sind; mit Schalter an und Regel aus `reported`; ohne Verletzung `accepted`. (5) `story_engine.run` nimmt `rejected` aus der Liste vor `select_best` (Grund `gate:<schluessel>`, der Kandidat bleibt in `report.verworfen`). (6) Bei `rejected` werden die Befunde zusätzlich auf `standalone` und `fidelity` gefaltet (`LEGACY_GATE`).
+- `embedded_instruction` und `meta_speech` verwerfen nie, sie markieren den Kandidaten als Inhalt (`flagged`, `quotes`). Folgt die Modellantwort einer markierten Anweisung (`editorial_gates.instruction_followed`: Schemaverstoß, Zitat der Anweisung in drei aufeinanderfolgenden Wörtern oder als seltenes langes Wort, oder lauter Höchstwerte), verwirft `evaluate_span` mit `instruction_followed`. Die Prüfung läuft nur, wenn die Gates verdrahtet sind.
+- Ohne den Schalter (heutiger Stand) laufen die Gates in der Engine gar nicht: kein Bericht, keine Heilung, kein `quality_gate_*` in der Rubrik, Marker-Abgleich nach Regel v1. Einzeln aufrufbar bleiben sie (Tests, Blindvergleich).
+- Zusammenhang mit der Auswahl: `story_engine.run` ruft `select_best` bei verdrahteten Gates mit der Policy auf (Modus sperren, 1.10).
+
+### 1.9 Kürzung (nur F2, Regel und Schalter `trim.enabled`)
+- Eingabe: der Kandidat, `payoff_sent` des Vorschlags, Wortliste, Heatmap.
+- Ausgabe: `rubric.trim` (`applied`, `reason`, `reward_end`, `findings`, `composition`), `rubric.removed_spans` und `rubric.composition`; bei `applied` ersetzen `segments` und `duration_s` die ungekürzte Fassung. Mehrere `body`-Segmente sind möglich (Mehrsegment-Komposition).
+- Code: `W/pipeline/trim_plan.py` (`reward_end`, `build_composition`, `protected_spans`, `classify_pauses`, `removal_candidates`), `W/pipeline/compose.py:from_keep_ranges`, `splice_kinds`, `is_debate`; Verdrahtung `story_engine.trim_span` und `evaluate_span`.
+- Ablauf: (1) `reward_end` kappt den Nachlauf nach dem Payoff (wiederholte Pointe, schwache Zusammenfassung, Verkaufsaufruf, Verabschiedung), nie einen Satz mit Einschränkung, Bedingung, Negation, Unsicherheit, Korrektur oder Kontrastwort. (2) `build_composition` entfernt harte Füllwörter (P3, Modalpartikeln bleiben), Einwürfe des Gegenübers, abgebrochene Ansätze und Randfloskeln und kürzt nur die technische Pause (Pausenklassen `technical`, `orientation`, `dramatic`, `reaction`, `demonstration`), nie auf null und nie in Schutzbereichen (Negation, Bedingung, Einschränkung, Vergleichsmaßstab, zeitliche Einordnung, Unsicherheit, Definition, Sprecherzuordnung, Korrektur). Semantische Splices zählen getrennt von lokalen Schnitten, höchstens 2 (E6), Debatten werden nie umgeordnet, `zusammenhang.mindest_dichte` gilt. (3) `fidelity.check_cut` (Regel v2) prüft das Ergebnis gegen das ungekürzte Ende; ein Befund `protected_removed` oder `negation_removed`, eine ungültige Komposition oder eine Dauer unter `hart_min_s` setzt auf die ungekürzte Fassung zurück (`applied: false` mit Grund). (4) Reißt die Kürzung am Ende ein Gate, das vorher bestand (nur mit verdrahteten Gates), wird sie ebenfalls zurückgesetzt.
+- Schalter: `implementation.trim.enabled` ist an, die Regel `trim.enabled` aus. Wirksam ist die Kürzung nur mit beiden (`editorial.trim_settings` `enabled`); heute läuft sie also nicht (Abschnitt 8). `compose.from_keep_ranges` hat deshalb im Produktionspfad noch keinen Aufrufer außer diesem abgeschalteten.
+- Policy: Abschnitt `trim` und `zusammenhang.mindest_dichte` (Abschnitt 5).
+
+### 1.10 Auswahl (`select_best`)
 - Eingabe: alle bewerteten Spannen eines Quellvideos (`raw`), Obergrenze `MAX_CANDIDATES 20`.
-- Ausgabe: `report.candidates` nach Startzeit sortiert, `report.discarded` mit Gründen `gate`, `overlap`, `limit` (`story_engine.select_best 818-844`). `report.verworfen` hält die verworfenen Kandidaten, wird aber weder in `to_json` (131-144) noch in die Datenbank geschrieben.
-- Art: deterministisch. Sortierung `(gate_passed, total, -start_s)` absteigend. Wer ein Gate gerissen hat, wird verworfen (kein Sortiereffekt mehr). Überdeckung `gemeinsamer_anteil` (Anteil am kürzeren) ab 0,4 gilt als Dublette. Dublette `(first_sent, last_sent)` schon in `run 900-905`.
-- Policy: keine (`bewertung.modus`, `schwelle_*` werden nicht gelesen).
-- Folge: in der Tabelle `candidates` steht nie ein Kandidat mit `gate_passed = false`. Nur eine Web-Revision kann das ändern (1.8).
+- Ausgabe: `report.candidates` nach Startzeit sortiert, `report.discarded` mit Gründen `gate`, `overlap`, `limit`, F2 zusätzlich `below_threshold`. `report.verworfen` hält die verworfenen Kandidaten (F2 einschließlich der Gate-Verwerfungen vor `select_best`), wird aber weder in `to_json` noch in die Datenbank geschrieben; unter F2 stehen sie als `reject` in den ClipCandidates (1.11).
+- Art: deterministisch. Sortierung `(gate_passed, nicht proposal_missing_v2_fields, total, -start_s)` absteigend. Wer ein Tor gerissen hat, wird verworfen (kein Sortiereffekt mehr). Überdeckung `gemeinsamer_anteil` (Anteil am kürzeren) ab 0,4 gilt als Dublette. Dublette `(first_sent, last_sent)` schon in `run`.
+- Modus sperren (F2 mit verdrahteten Gates): `editorial.block_mode_settings` liefert `effective_mode`. `bewertung.modus_v2: sperren` gilt nur mit Sprachmodell (`only_with_language_model`), mit Heuristik bleibt es bei `sortieren`; im Modus `sperren` verwirft `select_best` einen Kandidaten unter `bewertung.schwelle_verwerfen` (7 von 14) mit Grund `below_threshold`. F1: `bewertung.modus` und die Schwellen werden nicht gelesen.
+- Folge: in der Tabelle `candidates` steht nie ein Kandidat mit `gate_passed = false`. Nur eine Web-Revision kann das ändern (1.12).
 - Befund 4.
 
-### 1.8 Persistenz, menschliche Freigabe, `auto_create_clips`
+### 1.11 ClipCandidate (nur F2)
+- Eingabe: `DetectReport`, Wortliste, Satzliste des Laufs, Policy, Brief.
+- Ausgabe: `report.clip_candidates` (alle angebotenen Kandidaten als `accept`, die verworfenen als `reject`, mit Alternativen aus `report.discarded`) im Vertrag `clip_candidate_v1` (`P/schema/CLIP_CANDIDATE.md`, `P/schema/clip_candidate_v1.json`), dazu additiv in jeder `rubric` die kompakte Teilmenge `versions`, `decision`, `decision_reason`, `quality_gate_results`, `editorial_subscores`, `assessment_uncertainties`, `removed_spans`, `calibration`.
+- Code: `W/pipeline/clip_candidate.py:from_report`, `from_result`, `compact_for_rubric`, `validate`; Aufruf `story_engine.attach_clip_candidates` am Ende von `run`.
+- Art: deterministischer Adapter, liest und schreibt nichts zurück. Fehlende Datenbasis ist `null` (Zeitstempel nur auf Wortgrenzen, kein Sprecher ohne Sprecherangabe, `boundary_confidence` und `externally_verified` bleiben `null`, `calibration` ist `uncalibrated`). Ein Schemaverstoß scheitert nicht: der Lauf bleibt gültig, der Verstoß steht als `clip_candidate_error` im Bericht.
+- Persistenz: der Bericht (mit `clip_candidates`) liegt im Storage unter dem Kandidaten-Key; die Web-App liest ihn nicht. In `candidates.rubric` landet nur die kompakte Teilmenge.
+
+### 1.12 Persistenz, menschliche Freigabe, `auto_create_clips`
 - Eingabe: `DetectReport` (Cache oder frischer Lauf).
-- Ausgabe: `candidates`-Zeilen (`version = 1`), je Kandidat höchstens ein `clips`-Zeile (`status draft`), `candidates.human_verdict = accepted`, `decision_log`-Zeilen, Outbox `candidates_ready`, `sources.status = ready`.
-- Code: `W/activities/analyze.py:run_detect_candidates 319-402`, `_write_rows 189-239`, `auto_create_clips 263-316`, `_drop_stale_auto_rows 179-186`.
-- Cache-Key (`candidates_key_for 145-166`): `derived_key("transcript/<tv_id>", {transcript_version, brief, prompt_versions, provider, model, weights, engine, policy}, "candidates_v1")`. Nicht enthalten: Heatmap-Inhalt, Transkriptinhalt (nur die Versionsnummer), Policy-Inhalt (nur der Name `clip_policy_v1`, `policy_version()` ist fest). `PolicyError` wird beim Key still zu `"unbekannt"` (153-155); davor wirft allerdings `resolve_weights` über `story_score.weights` schon (`analyze.py 334`).
-- Idempotenz: Re-Run löscht Automatik-Clips im Status `draft` samt Automatik-Kandidaten und Kandidaten ohne Urteil; beurteilte Zeilen bleiben, ein neuer Kandidat, der einen überlebenden zu mindestens 0,4 überdeckt, wird nicht geschrieben (`_write_rows 200-214`). Ein Fenster (Zehntelsekunde) mit bestehendem Clip bekommt keinen zweiten (`_window 242-244`).
-- Menschliche Freigabe, zwei Ebenen:
-  - Kandidat: `auto_create_clips` setzt `human_verdict = accepted`, `verdict_reason = "automatisch angenommen (ohne Auswahlschritt)"`, `verdict_by = NULL` (305-312). Der manuelle Weg bleibt in `apps/web/app/api/projects/[id]/candidates/[cid]/verdict/route.ts` (legt je gewählter Plattform einen Clip an und sendet `approve`).
-  - Clip: `clips.review` (`offen` | `bereit` | `verworfen`, Migration 0012) und Gastfreigabe. Erst diese Ebene sperrt, aber nur das Veröffentlichen (1.14). Der Worker prüft beim Veröffentlichen zusätzlich `human_verdict = accepted` (`W/activities/publish.py:check_gates 101-118`), was für Automatik-Clips immer erfüllt ist.
-- Clip-Felder: `aspect` fest `9:16`, `platform = destination` aus `brand_profiles.default_platform`, sonst `reels` (`clip_platform 247-260`), `composition = candidate.segments`, `title_card = rubric.suggested_title_card`, `ad_label` aus `brief.is_ad` und Land.
+- Ausgabe: `candidates`-Zeilen (`version = 1`), je Kandidat höchstens ein `clips`-Zeile (`status draft`), `candidates.human_verdict = accepted` oder leer (Freigabepflicht, unten), `decision_log`-Zeilen, Outbox `candidates_ready`, `sources.status = ready`.
+- Code: `W/activities/analyze.py:run_detect_candidates`, `_write_rows`, `auto_create_clips`, `auto_accept_blockers`, `_drop_stale_auto_rows`.
+- Cache-Key (`analyze.candidates_key_for`): `derived_key("transcript/<tv_id>", {transcript_version, brief, prompt_versions, provider, model, weights, engine, policy, ...}, "candidates_v1")`. `policy` ist der Name der aktiven Fassung (`clip_policy_v1` oder `clip_policy_v2`), `prompt_versions` sind die gepinnten (`story_engine.prompt_versions`). F1: sonst nichts, damit der Schlüssel und der Rollback auf vorhandene Ergebnisse unverändert bleiben; Heatmap-Inhalt und Policy-Inhalt gehören nicht dazu. F2 zusätzlich: `engine` ist `story_engine_v5` statt `story_engine_v4`, `policy_sha256` (Inhalt der YAML), `nlp_status` (spacy, heuristic, off), `signals` (`SIGNALS_VERSION`) und `heat_sha256`. Eine Änderung der YAML oder der Heatmap ergibt unter F2 also einen neuen Schlüssel. `PolicyError` beim Key wird still zu `"unbekannt"`; davor wirft allerdings `resolve_weights` über `story_score.weights` schon.
+- Idempotenz: Re-Run löscht Automatik-Clips im Status `draft` samt Automatik-Kandidaten und Kandidaten ohne Urteil; zurückgehaltene Entwürfe weichen ebenfalls, außer ein Mensch hat daran gearbeitet (`review` geändert oder Einträge in `hook_versions`, `caption_versions`, `guest_approvals`). Beurteilte Zeilen bleiben, ein neuer Kandidat, der einen überlebenden zu mindestens 0,4 überdeckt, wird nicht geschrieben (`_write_rows`). Ein Fenster (Zehntelsekunde) mit bestehendem Clip bekommt keinen zweiten.
+- Freigabe, drei Ebenen:
+  - Automatik: `auto_create_clips` legt für jeden Kandidaten einen Entwurf an und fragt `auto_accept_blockers`. Blocker sind die harten Risikohinweise `humor` und `sensitive_topic` aus `risk_flags` und eine freigaberelevante Behauptung (`claim`) nach `W/pipeline/release_gate.py:release_relevant_claims`, angewandt auf den Kandidatentext und die Titelkarte; ein leerer Text hält mit `claim_unchecked` zurück. Das breite Flag `claim` aus `story_graph.claims_in` zählt dafür nicht. Ohne Blocker: `human_verdict = accepted`, `verdict_reason = "automatisch angenommen (ohne Auswahlschritt)"`, `verdict_by = NULL`. Mit Blocker: Urteil bleibt leer, `verdict_reason` nennt die Blocker ("automatische Freigabe ausgesetzt: ..."), der Clip bleibt ein Entwurf, und kein Worker rendert ihn, bis ein Mensch ihn annimmt (P27).
+  - Kandidat im Web: der manuelle Weg bleibt `apps/web/app/api/projects/[id]/candidates/[cid]/verdict/route.ts` (legt je gewählter Plattform einen Clip an und sendet `approve`). Der Klick auf "Video clippen" an einem zurückgehaltenen Clip ist die menschliche Annahme: `apps/web/app/api/projects/[id]/clips/[clipId]/render/route.ts` setzt zuerst `accepted` mit dem Nutzer als `verdict_by`, bedingt auf ein noch offenes Urteil (`setCandidateVerdictIfOpen`), und rendert dann; einen abgelehnten oder ersetzten Kandidaten rendert sie nicht (409).
+  - Clip: `clips.review` (`offen` | `bereit` | `verworfen`, Migration 0012) und Gastfreigabe. Erst diese Ebene sperrt das Veröffentlichen (1.18). Der Worker prüft beim Veröffentlichen zusätzlich `human_verdict = accepted` (`W/activities/publish.py:check_gates`), die Web-App dieselbe Bedingung (`A/publishing/gates.ts:verdictReason`); für zurückgehaltene Entwürfe ist sie nicht mehr automatisch erfüllt.
+- Clip-Felder: `aspect` fest `9:16`, `platform = destination` aus `brand_profiles.default_platform`, sonst `reels` (`clip_platform`), `composition = candidate.segments`, `title_card = rubric.suggested_title_card`, `ad_label` aus `brief.is_ad` und Land.
 - Fehler: laut, die Schritte stehen im selben `events.step`. `decision_log.record_detect_report` ist nicht abgefangen.
 
-### 1.9 Komposition und Schnittplan
+### 1.13 Komposition und Schnittplan
 - Eingabe: `clips.composition` (Segmente in Quellzeit, Abspielreihenfolge), Wortliste.
 - Ausgabe: `render_plan` (`render_plan_v1`, Abschnitt 2), `compose.remap_words` (Wörter auf der Ausgabe-Timeline).
-- Code: `W/pipeline/compose.py:Composition 33-67`, `remap_words 86-99`; `W/pipeline/render_plan.py:normalize_segments 159-176`, `build_plan 183-258`, `plan_hash 261-264`.
+- Code: `W/pipeline/compose.py:Composition`, `remap_words`; `W/pipeline/render_plan.py:normalize_segments`, `build_plan`, `plan_hash`, `plan_versions`.
 - Art: deterministisch. Segmente werden auf ms gerundet, aneinanderliegende Segmente gleicher Rolle (Lücke unter 1 ms) verschmelzen, Länge 0 oder negativ wirft `ValueError`.
-- Key: `plan_hash(plan, hook_version, transcript_version)`, 16 Hex-Zeichen, bildet `renders/<clip_id>/<hash>.*`. Stimmt `clips.file_key` mit dem Hash überein und existiert die Datei, wird nicht neu gerendert (`W/activities/render.py 739-747`).
+- Key: `plan_hash(plan, hook_version, transcript_version)`, 16 Hex-Zeichen, bildet `renders/<clip_id>/<hash>.*`. Stimmt `clips.file_key` mit dem Hash überein und existiert die Datei, wird nicht neu gerendert (`W/activities/render.py`). Mit aktiven Caption-Regeln (F2) steht `captions_de: captions_v2` in `versions` des Plans; Umschalten ändert den Hash und rendert neu.
 - Nicht gelesen: Zeitmarken- und Effekt-Logik (`W/pipeline/effekte.py`, `musik.py`), ungeprüft.
-- `fidelity_warnings` am Clip: `render.py:fidelity_warnings 489-504` ruft `fidelity.check_cut` für Kandidatenbereich gegen die Body-Segmente. Bei der Automatik (ein Body-Segment, kein Weglassen) bleibt die Liste leer; sie wirkt nur bei Handschnitt.
+- `fidelity_warnings` am Clip: `render.py:fidelity_warnings` ruft `fidelity.check_cut` für Kandidatenbereich gegen die Body-Segmente. Bei der Automatik mit einem Body-Segment ohne Weglassen bleibt die Liste leer; sie wirkt nur bei Handschnitt. Eine Komposition aus der Kürzung (1.9) übernimmt der Plan nur über `filler_cuts` (true bei `local_cuts` größer null), und nur solange der Clip noch genau die Segmente des Kandidaten schneidet (`activities/render.py:candidate_composition`, `rubric.composition`); ohne Kürzung bleibt `filler_cuts` false.
 - Befund 5, 8.
 
-### 1.10 Copy (Hooks, Claim-Check, Linter)
-- Eingabe: Text aller Segmente einschließlich Teaser (`render.py:clip_words 480-486`), `BrandProfile` (`address`, `country`, `gender_mode`, `banned_phrases`, `protected_terms`, `tone_adjectives`, `platform = destination`).
-- Ausgabe: `hook_versions` Version 1 (`origin llm`): fünf Varianten `{pattern, spoken, onscreen, lint_notes, claim_issues}`, `spoken_hook`, `onscreen_hook`, `pattern`, `post_captions` je `tiktok|reels|shorts|linkedin`, `cta`, `lint_notes`, `claim_issues`, `model_id`, `prompt_version`.
-- Code: `W/pipeline/copy_engine.py:write_copy 264-316`, `generate_variants 127-153`, `select_variant 156-158`, `generate_post_caption 203-224`, `languagetool_check 227-261`; `W/pipeline/copy_de.py:lint 67-110`; `W/pipeline/fidelity.py:hook_claim_check 61-71`; Aufruf `W/activities/render.py 612-637`.
-- Art: Sprachmodell, danach deterministisch. Linter korrigiert nur Eindeutiges (Em-Dash, `ß` in CH, Genderzeichen), alles andere sind Hinweise. Claim-Check: jede Zahl und jeder von zehn Superlativen im Hook muss als Teilstring im Clip stehen. Auswahl: erste Variante ohne Claim-Treffer, sonst Variante 1 mit Treffern. Wortlimits (12 gesprochen, 9 im Bild) und Lint-Verstöße disqualifizieren nicht.
-- Prompt: `hooks_v1`, `post_caption_v1`, System `system_editor_v1`. Policy: keine.
-- Key: nur "existiert eine `hook_versions`-Zeile?" (`_load_hook 431-445`). Das Prompt-Ergebnis selbst wird nicht gecacht. Es werden immer vier Post-Captions erzeugt, auch für ein einziges Ziel (`copy_engine.write_copy 286-291`).
-- Verwendung: nur `onscreen_hook` geht in den Plan (Hook-Overlay, 3,0 s; Standard an für `tiktok|reels|shorts`, aus für `linkedin`, `render_plan.py 35, 55-59`). `spoken_hook` wird gespeichert und nirgends verwendet (Befund 7). `thompson_order` wird im Render nicht übergeben (`pattern_order=None`, `render.py 629`). `copy_de.generate_hooks` (Zweitpfad mit Schema-Schlüssel `hooks`) wird nie aufgerufen.
-- Fehler: Lint, Claim-Check, LanguageTool laut im Ergebnis, nie fatal. Kein Hook-Ergebnis (`variants` leer) wirft `RuntimeError`, der Render scheitert. `decision_log`-Fehler sind abgefangen (`render.py 636-637`).
+### 1.14 Copy (Hooks, Claim-Check, Linter)
+- Eingabe: Text aller Segmente einschließlich Teaser (`render.py:clip_words`), `BrandProfile` (`address`, `country`, `gender_mode`, `banned_phrases`, `protected_terms`, `tone_adjectives`, `platform = destination`); F2 zusätzlich die Wörter des Clips mit `prob` und die Thompson-Reihenfolge der Muster je Markenprofil.
+- Ausgabe: `hook_versions` Version 1 (`origin llm`): fünf Varianten `{pattern, spoken, onscreen, lint_notes, claim_issues}`, `spoken_hook`, `onscreen_hook`, `pattern` (F2 auch `native`), `post_captions` je `tiktok|reels|shorts|linkedin`, `cta`, `lint_notes`, `claim_issues`, `model_id`, `prompt_version`.
+- Code: `W/pipeline/copy_engine.py:write_copy`, `generate_variants`, `select_variant`, `select_variant_v2`, `native_variant`, `native_onscreen`, `spoken_opening`, `generate_post_caption`, `languagetool_check`; `W/pipeline/copy_de.py:lint`; `W/pipeline/fidelity.py:hook_claim_check`, `hook_claim_check_v2`; Aufruf `W/activities/render.py`.
+- Art: Sprachmodell, danach deterministisch. Linter korrigiert nur Eindeutiges (Em-Dash, `ß` in CH, Genderzeichen), alles andere sind Hinweise.
+- F1: Claim-Check: jede Zahl und jeder von zehn Superlativen im Hook muss als Teilstring im Clip stehen. Auswahl: erste Variante ohne Claim-Treffer, sonst Variante 1 mit Treffern. Wortlimits (12 gesprochen, 9 im Bild) und Lint-Verstöße disqualifizieren nicht. `spoken_hook` ist die Modellvariante.
+- F2 (Schalter `hook.native_spoken`): `hooks_v2` (fünf Varianten aus verschiedenen Originalstellen, Frage höchstens als eine Variante, Clip zwischen Begrenzern als Daten). Pro Variante zählt nur der Text-Hook: Claim-Check v2 (Zahl mit Einheit und Richtung, Mengenwörter, unsicher erkannte Zahlen aus `prob`), Lint inklusive `hook.hyperbole`, Wortlimit, keine Meta-Rede an ein Modell. Gewählt wird die erste gültige Variante in der Thompson-Reihenfolge, sonst der wörtliche Rückfall (Muster `native`): ein ganzer Originalsatz bis 9 Wörter aus den ersten vier Sätzen oder kein Overlay (`hook.allow_partial_opening` false; Teilsätze nur als Opt-in). Der gesprochene Hook ist immer der wörtliche Einstieg des Clips (der ganze erste Satz, bei mehr als 12 Wörtern ungekürzt mit Längenhinweis), nie generierter Text. Befunde dazu stehen als Hinweis in `lint_notes` und `claim_issues`.
+- Prompt: F1 `hooks_v1`, F2 `hooks_v2`; beide `post_caption_v1`, System `system_editor_v1` (F1) oder `system_editor_v2` (F2). Policy: F1 keine; F2 `hook.*`.
+- Key: nur "existiert eine `hook_versions`-Zeile?" (`_load_hook`). Das Prompt-Ergebnis selbst wird nicht gecacht. Es werden immer vier Post-Captions erzeugt, auch für ein einziges Ziel (`copy_engine.write_copy`).
+- Verwendung: nur `onscreen_hook` geht in den Plan (Hook-Overlay, 3,0 s; Standard an für `tiktok|reels|shorts`, aus für `linkedin`, `render_plan.py 35, 55-59`). `spoken_hook` wird gespeichert und nirgends verwendet (Befund 7). `thompson_order` wird nur unter F2 und mit Markenprofil übergeben (`render.py`), unter F1 ist `pattern_order` leer. `copy_de.generate_hooks` (Zweitpfad mit Schema-Schlüssel `hooks`) wird nie aufgerufen.
+- Fehler: Lint, Claim-Check, LanguageTool laut im Ergebnis, nie fatal. Kein Hook-Ergebnis (`variants` leer) wirft `RuntimeError`, der Render scheitert. `decision_log`-Fehler sind abgefangen. Das Web prüft manuelle Hooks weiter mit `hookClaimCheck` (v1), nicht mit `hookClaimCheckV2` (Abschnitt 7, Beobachtung h).
 
-### 1.11 Captions
+### 1.15 Captions
 - Eingabe: `out_words` (Ausgabe-Timeline), Preset, `caption_style` (Marke und Clip), `caption_text_field` (`text` | `text_norm`).
 - Ausgabe: `caption_versions` (`cards`, `ass_key`, `srt_key`, `cps_warnings`, `origin auto`), Dateien `.ass`, `.srt`, `.vtt`.
-- Code: `W/pipeline/captions_de.py:build_cards 438-488`, `to_ass 554-598`, `to_srt 636-646`, `cards_for 675-697`, `cps_warnings 491-516`; Presetwahl `W/activities/render.py:caption_preset_for 517-530` (Clip-Stil, dann das Preset des Markenprofils für die Standardplattform, sonst im Hochformat wortweise).
+- Code: `W/pipeline/captions_de.py:build_cards`, `to_ass`, `to_srt`, `cards_for`, `cps_warnings`, `caption_rules`, `CaptionRules`; Presetwahl `W/activities/render.py:caption_preset_for` (Clip-Stil, dann das Preset des Markenprofils für die Standardplattform, sonst im Hochformat wortweise).
 - Art: deterministisch. Karten brechen an Satzzeichen, Konjunktionen, Pausen über 0,4 s und bei überlangen Wörtern; Silbentrennung per pyphen. Lesetempo 17 Zeichen/s nur für Karten mit mindestens 2 Wörtern.
-- Key: über den Plan-Hash (die angewendeten Preset-Werte stehen im Plan, `render_plan.caption_block 62-108`).
-- Fehler: Fehlt libass oder die Schriftdatei, wird der Schritt übersprungen und als Hinweis vermerkt (`render.py` Docstring 11-14); die technische Prüfung stuft "keine Untertitel eingebrannt" dann als `fehler` ein (1.13). Befund 9.
+- F1: ein Wort-Event je Wort von `word.start` bis `word.end`, Bruch nach jedem Komma, keine Überbrückung der Lücken (Befund 9).
+- F2 (Schalter `captions.word_bridge`, Regeln aus `captions`): ein Wort-Ereignis endet erst beim Start des nächsten Wortes, wenn die Lücke höchstens `bridge_max_s` (0,4 s) beträgt, innerhalb einer Karte und von Karte zu Karte; Karten mit mehreren Wörtern stehen mindestens `min_event_s` (0,8 s), nie in die nächste Karte hinein. Bruch nach einem Komma nur, wenn die Karte sonst die Zeilenbreite überschreitet (P30). Zahl plus Einheit ("40 Prozent", "3,5 Mio. Euro") ist ein Token in einer Zeile, ein Bindestrichwort wird nur am Bindestrich getrennt, Komposita bevorzugt an Morphemgrenzen. Schrift, Farbe, Position, Größe, Wörter je Karte und Highlight bleiben gleich.
+- Key: über den Plan-Hash (die angewendeten Preset-Werte stehen im Plan, `render_plan.caption_block`).
+- Fehler: Fehlt libass oder die Schriftdatei, wird der Schritt übersprungen und als Hinweis vermerkt (`render.py` Docstring 11-14); die technische Prüfung stuft "keine Untertitel eingebrannt" dann als `fehler` ein (1.17). Befund 9.
 
-### 1.12 Reframing
+### 1.16 Reframing
 - Eingabe: Quelldatei, Segmente, Wörter (Sprecher), `clips.speaker_positions`, `reframe_override`, `zeitmarken`.
 - Ausgabe: `ReframeResult` (`strategy` `talking_head|two_speakers|neutral|slide_pip`, `detector`, `positions`, `shots[]` mit `start`, `end`, `crop_*`, `layout`, `grund`, `notes`), im Plan als `reframe` und `shots`.
 - Code: `W/pipeline/reframe.py:plan_reframe 801-948`, `plan_shots_aus_zielen 653-719`; Messung `W/pipeline/tracking.py` (nur überflogen, im Detail ungeprüft).
 - Art: deterministisch (YuNet-Gesichtsdetektion, Mundbewegung, Folienerkennung mit OpenCV). Kein Prompt, keine Policy.
 - Key: `REFRAME_VERSION = "reframe_v2"` im Plan, damit im Hash.
-- Fehler: still zurückgefallen. Fehlt YuNet-Modell oder OpenCV, oder wirft die Detektion, läuft `neutral` (mittiger Crop) mit einem Hinweis in `notes` (`reframe.py 868-872`). Geometrie wird aus der echten Datei gelesen, Abweichung zur Datenbank nur als Warnung (`render.py 644-649`). Befund 10.
+- Fehler: still zurückgefallen. Fehlt YuNet-Modell oder OpenCV, oder wirft die Detektion, läuft `neutral` (mittiger Crop) mit einem Hinweis in `notes` (`reframe.py 868-872`). Geometrie wird aus der echten Datei gelesen, Abweichung zur Datenbank nur als Warnung (`activities/render.py`). Befund 10.
+- Fassungen: gleich.
 
-### 1.13 Render und technische Prüfung
+### 1.17 Render und technische Prüfung
 - Eingabe: `render_plan`, Quelldatei, `.ass`, optional Font, Logo, Musik.
 - Ausgabe: `renders/<clip_id>/<hash>.{mp4,srt,vtt,jpg,ass,streifen.jpg}`, `clips` (`file_key`, `duration_s`, `loudness`, `provenance`, `render_plan`, `cps_warnings`, `fidelity_warnings`, `export_checks`, `status`, `render_error`).
-- Code: `W/pipeline/render.py:render_from_plan 531-601`, `input_args 214-228`, `audio_chain 237-269`, `bitstrom_pruefen 707+`; `W/pipeline/ausgabe_pruefung.py:pruefen 85-247`; Ablauf `W/activities/render.py:_render 593-941`.
+- Code: `W/pipeline/render.py:render_from_plan 531-601`, `input_args 214-228`, `audio_chain 237-269`, `bitstrom_pruefen 707+`; `W/pipeline/ausgabe_pruefung.py:pruefen 85-247`; Ablauf `W/activities/render.py:_render`.
 - Art: deterministisch (ffmpeg: H.264 High, CRF 19, AAC 192k, Loudnorm zweistufig, Preset `master` -16 LUFS / -1,5 dBTP). Ein beschädigter Bildstrom löst genau einen zweiten Render aus (`render.py 767-783`).
-- Prüfung nach dem Render: Datei, Bild, Ton, Dauer, Auflösung, Schwarzbild, Pegel, Spitze, Untertitel, Schrift mit Schwellen aus `P/schema/ausgabe_regeln_v1.json` (Abschnitt 3). `status = failed` und `render_error`, sobald ein Befund `fehler` ist; die Datei bleibt trotzdem im Storage (`render.py 871-877`). `render.regression_checks 739` und `DURATION_TOLERANCE_S` sind ungenutzt.
+- Prüfung nach dem Render: Datei, Bild, Ton, Dauer, Auflösung, Schwarzbild, Pegel, Spitze, Untertitel, Schrift mit Schwellen aus `P/schema/ausgabe_regeln_v1.json` (Abschnitt 3). `status = failed` und `render_error`, sobald ein Befund `fehler` ist; die Datei bleibt trotzdem im Storage. `render.regression_checks 739` und `DURATION_TOLERANCE_S` sind ungenutzt.
 - Fehler: laut (`clips.status = failed`, `render_error`, Event `failed`). Still: Musik fehlt, Effekte unlesbar, Marken-Font fehlt, c2patool fehlt (`provenance.c2pa = skipped`), Filmstreifen fehlt, `drawtext` fehlt (Titelkarte und Hook-Overlay fehlen dann ohne Fehler, nur Hinweis in `notes`).
-- Policy: keine. Prompts: keine.
+- Policy: keine. Prompts: keine. Fassungen: gleich.
 
-### 1.14 Ausgabeentscheidung
+### 1.18 Ausgabeentscheidung
 - Eingabe: Prüfstand des Clips (`A/clips/pruefstand.ts`: `redaktion`, `datei`, `befunde`), `clips.export_checks`, Gast- und Vertragsstatus.
-- Ausgabe: `{erlaubt, gruende[]}` für `herunterladen`, `veroeffentlichen`, `eintragen` (`A/clips/ausgabe.ts:ausgabe 115-140`), Regelkatalog `P/schema/ausgabe_regeln_v1.json`.
+- Ausgabe: `{erlaubt, gruende[]}` für `herunterladen`, `veroeffentlichen`, `eintragen` (`A/clips/ausgabe.ts:ausgabe`), Regelkatalog `P/schema/ausgabe_regeln_v1.json`.
 - Art: deterministisch, einzige serverseitige Stelle (Download-Route und `A/publishing/gates.ts`).
-- Wirkung: `inhalt_fehler` (Treuebefund mit Schwere `fehler`, also `negation_removed`, `ends_before_contrast`, `joined_statements`) und `technik_fehler` sperren das Veröffentlichen, nicht den Download. `nicht_freigegeben` verlangt `clips.review = bereit` oder Gastzusage, nur fürs Veröffentlichen. Es gibt keine Regel zu `humor`, `sensitive_topic` oder `claim` (Abschnitt 7, Beobachtung c).
-- Fehler: eine fehlende Prüfung (`technik = null`, alte Videos) sperrt nichts (`ausgabe.ts 79-85`).
+- Wirkung: `inhalt_fehler` (Treuebefund mit Schwere `fehler`, also `negation_removed`, `ends_before_contrast`, `joined_statements`) und `technik_fehler` sperren das Veröffentlichen, nicht den Download. `nicht_freigegeben` verlangt `clips.review = bereit` oder Gastzusage, nur fürs Veröffentlichen. Zusätzlich sperrt `verdictReason` das Veröffentlichen, solange der Kandidat nicht angenommen ist. Es gibt keine Regel in den Ausgaberegeln zu `humor`, `sensitive_topic` oder `claim`; die Freigabepflicht liegt am Kandidatenurteil (1.12).
+- Fehler: eine fehlende Prüfung (`technik = null`, alte Videos) sperrt nichts (`ausgabe.ts`).
 
-### 1.15 Decision Log und Lernen
+### 1.19 Decision Log und Lernen
 - Eingabe, Ausgabe: `decision_log`-Zeilen `candidate_proposed`, `candidate_scored` (aus `record_detect_report`), `hook_variant_shown`, `hook_selected`, `reframe_strategy`, `publish`, vom Web `candidate_verdict` (`W/decision_log.py 30-193`). Lernschleife `W/learning.py:fit_rubric_weights 106-137`, `update_brand_weights 172-191`: Ridge-Fit der fünf Alt-Scores auf `0,6 * Urteil + 0,4 * Reward`, ab 20 Entscheidungen, Gewichte auf 0,05 bis 0,5 begrenzt, Ergebnis in `brand_profiles.learned_weights`.
 - Art: deterministisch, nächtlicher Workflow (`LearningWorkflow`, nur im Temporal-Betrieb).
-- Wirkung: `learned_weights` ändern den Cache-Key und `rubric.scores[k].weight`, aber nicht `total` und damit nicht die Auswahl (Befund 12). Die Lernzeilen lesen `human_verdict is not null` ohne Filter auf `verdict_by` (`learning.py 38-41`), zählen also auch die automatisch angenommenen Kandidaten als `accepted`. `learning.thompson_order`, `update_hook_stats`, `dach_nlp.auto_remove_ranges`, `compose.from_keep_ranges` und `story_engine.weighted_total` haben keinen Aufrufer im Produktionspfad (per Textsuche im Quelltext geprüft).
+- Wirkung: `learned_weights` ändern den Cache-Key und `rubric.scores[k].weight`, aber nicht `total` und damit nicht die Auswahl (Befund 12, P29). Die Lernzeilen lesen `human_verdict is not null` ohne Filter auf `verdict_by` (`learning.py 38-41`), zählen also auch die automatisch angenommenen Kandidaten als `accepted`. `learning.update_hook_stats`, `dach_nlp.auto_remove_ranges` und `story_engine.weighted_total` haben keinen Aufrufer im Produktionspfad (per Textsuche im Quelltext geprüft); `learning.thompson_order` hat einen (`activities/render.py`, nur F2).
 - Fehler: im Render abgefangen, in `detect_candidates` laut.
 
-### 1.16 Eval
+### 1.20 Eval
 - Eingabe: Datenbank (letzte `transcript_versions.words`, alle `candidates` einer Quelle), optional `workers/eval/clips/*.json` (Referenzstellen).
 - Ausgabe: Konsolentabelle und JSON: Grenzprüfung je Kandidat (`satzanfang`, `satzende`, `beginnt_mit_rueckverweis`, `verneinung_am_rand`, `laenge_s`), Trefferquote und Precision@k (Abdeckung der Referenzstelle mindestens 0,5).
 - Code: `workers/eval/clip_eval.py:check_boundaries 198-249`, `main 353-431`. Aufruf `.venv/bin/python -m eval.clip_eval --titel "<Teil des Titels>"`.
 - Grenzen der Messung: liest nur `candidates` (also nach `select_best`, ohne `discarded`), prüft Satzgrenzen mit `dach_nlp.is_sentence_end` statt mit dem Wortlaut-Gate der Engine, und sieht weder Hooks noch Captions noch das gerenderte Video. Der Referenzsatz `eval/clips/referenzsatz_v1.json` wurde nicht gelesen, ungeprüft (RESEARCH Abschnitt 2 nennt ihn "nicht belastbar").
+- Blindvergleich `workers/eval/blind_compare.py` (AP11, Handbuch `workers/eval/README.md`): läuft `story_engine.run` mit Fassung 1 und 2 auf demselben Material, demselben Provider, demselben Brief und derselben Ausgabemenge und erzeugt anonymisierte Paare. Zwei getrennte Bögen: `bewertung.json` bewertet nur den Clip, `hooks_bewertung.json` die Hooks in eigener Reihenfolge und eigener A/B-Zuordnung; `quellen.json` gibt den Quellkontext (Transkript oder plus/minus fünf Sätze), das Raster `blind_compare_raster_v2` hat Anker 0 bis 4. Das Erfolgskriterium steht vorab im Schlüssel: Fassung 2 ist in Quellentreue und Eigenständigkeit nicht schlechter als Fassung 1 (Toleranz `--toleranz`), die Verwerfungsquote wird berichtet. Dazu Stil-Leck-Prüfung, Vorzeichentest und einzelne Schalter gegeneinander (`--override`). Das Ergebnis ist beobachtend, kein A/B-Test.
+- Stand der Messung (Commit 8054125, Fixtures mit `local-heuristic`, unkalibriert): Fassung 2 besteht 12 von 14 Fällen des Testsatzes `editorial_v1`, Fassung 1 besteht 11 von 14. Offen bleiben `punchline_setup` (die Heuristik setzt kein Humor-Flag) und `silent_demonstration` (der Payoff liegt nur im Bild). Ein Lauf an echtem Material mit echten Bewertenden steht aus.
 
 ## 2. Datenstrukturen
 
 **Wort** (JSON in `transcript_versions.words`, erzeugt in `transcribe.py:Word 48-57`, ergänzt in `activities/nlp.py`):
 `text`, `start`, `end` (Sekunden Originalzeit, 3 Dezimalen), `prob`, `speaker`, `filler` (`hard|soft|backchannel|modal_keep|null`), `negation` (bool), `sentence_idx`, optional `text_norm` (nur bei Schweizerdeutsch).
 
-**Satz** (`segment.Sentence 18-33`, nur im Speicher): `idx`, `text`, `start` (Start des ersten Wortes), `end` (Ende des letzten Wortes), `speaker` (des ersten Wortes), `word_range` (inklusive Wortindizes). `Wort.sentence_idx` und `Sentence.idx` kommen aus derselben Funktion mit derselben Schwelle 0,7 s und stimmen deshalb überein, solange die Wortliste gleich bleibt. Für ein im Web bearbeitetes Transkript ist das ungeprüft (`A/transcript/sentences` nicht gelesen).
+**Satz** (`segment.Sentence`, nur im Speicher): `idx`, `text`, `start` (Start des ersten Wortes), `end` (Ende des letzten Wortes), `speaker` (des ersten Wortes), `word_range` (inklusive Wortindizes). Unter Fassung 2 mit `sentence_rule` bildet `story_engine.run` die Sätze aus der `sentence_idx` der Transkriptversion (`sentences_from_annotated`) und zählt `idx` fortlaufend ab 0; Wort und Satz stimmen dann per Konstruktion überein. Unter Fassung 1 kommen beide aus `dach_nlp.is_sentence_end` mit Regel v1 und derselben Schwelle 0,7 s und stimmen überein, solange die Wortliste gleich bleibt. Für ein im Web bearbeitetes Transkript ist das ungeprüft (`A/transcript/sentences` nicht gelesen; eine gemeinsame Falldatei hält Worker und Web gleich, `P/editorial/parity/sentence_end_v1.json`).
 
-**Kapitel**: `list[Sentence]` mit mindestens 240 s Länge (letztes kürzer), nur im Speicher. Nur die Anzahl steht im Bericht.
+**Kapitel**: `list[Sentence]` mit mindestens 240 s Länge (letztes kürzer), nur im Speicher. Unter Fassung 2 mit Suche beginnt jedes folgende Kapitel mit den Sätzen aus den letzten 30 s des vorigen. Nur die Anzahl steht im Bericht.
 
-**Kandidat** (`candidates`-Zeile = `story_engine.CandidateResult 76-106`):
+**Kandidat** (`candidates`-Zeile = `story_engine.CandidateResult`):
 
 | Feld | Inhalt |
 |---|---|
-| `segments` | `[{start, end, role}]` mit `role` `teaser` oder `body` in Abspielreihenfolge, Originalzeit |
+| `segments` | `[{start, end, role}]` mit `role` `teaser` oder `body` in Abspielreihenfolge, Originalzeit. Mehrere `body`-Segmente nur bei wirksamer Kürzung (1.9) |
 | `start_s`, `end_s`, `first_sent`, `last_sent` | Grenzen des Body, Satzzeiten auf 3 Dezimalen |
 | `structure` | Vorschlag des Modells oder `payoff_first` bei Teaser |
-| `rubric` | `contract`, `text`, `speakers`, `duration_s` (Quellspanne), `scores` (fünf Alt-Schlüssel: `value` 0 bis 10, `weight`, `evidence`), `rubric_points` (sieben Policy-Schlüssel, Skala 0 bis 2, Bruchteile erlaubt), `policy_version`, `laenge_abzug`, `abspiel_dauer_s`, `teaser_satz`, `klang`, `unresolved_references`, `needs_earlier_context`, `ends_before_answer`, `is_humor`, `sensitive_topic`, `suggested_title_card`, `repair` (`rounds`, `expanded_front`, `expanded_back`, `failed`), `kontext_zugabe`, `proposal_why`, `parent_id` |
-| `gates` | `standalone`, `fidelity`, `sentence_boundaries`, `verb_bracket` (mit `available`), `no_open_loop`, je `{passed, detail}` |
+| `rubric` | `contract`, `text`, `speakers`, `duration_s` (Quellspanne), `scores` (fünf Alt-Schlüssel: `value` 0 bis 10, `weight`, `evidence`), `rubric_points` (sieben Policy-Schlüssel, Skala 0 bis 2, Bruchteile erlaubt), `policy_version`, `laenge_abzug`, `abspiel_dauer_s`, `teaser_satz`, `klang`, `unresolved_references`, `needs_earlier_context`, `ends_before_answer`, `is_humor`, `sensitive_topic`, `suggested_title_card`, `repair` (`rounds`, `expanded_front`, `expanded_back`, `failed`), `kontext_zugabe`, `proposal_why`, `parent_id`. Nur Fassung 2, additiv: `sentence_rule`, `start_heal`, `pre_heal_scores`, `heal_rounds` (mit `sentence_rule`); `quality_gate_results`, `quality_gate_decision`, `gate_heal` (mit verdrahteten Gates); `trim`, `removed_spans`, `composition` (mit wirksamer Kürzung); `proposal_missing_v2_fields`; die kompakte ClipCandidate-Teilmenge (1.11) |
+| `gates` | `standalone`, `fidelity`, `sentence_boundaries`, `verb_bracket` (mit `available`, unter Fassung 2 auch `method`), `no_open_loop`, je `{passed, detail}` |
 | `story_graph_flags` | `[{sentence_idx, seconds_after, marker, text, overlap, confirmed, reason, repair, suggestion}]` |
-| `risk_flags` | Teilmenge von `humor`, `sensitive_topic`, `claim`, `heuristic_only`. `ad` wird nirgends gesetzt |
-| `total`, `gate_passed`, `why` | `total` auf der Policy-Skala, nominal 0 bis 14, mit Klang bis 16,1 (1.6); `gate_passed` ist in der Tabelle immer `true` (1.7) |
-| `model_id`, `prompt_version` | Rubrik-Modell und `score_clip_v2`. Die Versionen der anderen beiden Stufen stehen nur im Event und im Decision Log |
+| `risk_flags` | Teilmenge von `humor`, `sensitive_topic`, `claim`, `heuristic_only`. `ad` wird nirgends gesetzt. Das Flag `claim` steuert nicht die Freigabe (1.12) |
+| `total`, `gate_passed`, `why` | `total` auf der Policy-Skala, nominal 0 bis 14, mit Klang bis 16,1 (1.7); `gate_passed` ist in der Tabelle immer `true` (1.10) |
+| `model_id`, `prompt_version` | Rubrik-Modell und `score_clip_v2`. Die Versionen der anderen Stufen stehen nur im Event und im Decision Log |
 | `policy_version` | nur als `rubric.policy_version`, keine eigene Spalte |
+
+**Bericht** (`story_engine.DetectReport`, JSON im Storage unter dem Kandidaten-Key): `contract`, `engine`, `candidates`, `discarded`, `chapters`, `chapters_with_seeds`, `proposals`, `prompt_versions`, `model_id`, `provider`, `weights`. Nur Fassung 2 und nur, wenn gefüllt: `nlp_status`, `overviews`, `llm_budget`, `gate_rejections`, `search` (Zähler je Kapitel: Modellvorschläge, Suchvorschläge, Verworfene, Dubletten), `clip_candidates`. Unter Fassung 1 stehen diese Schlüssel nicht im JSON, damit der Bericht byte-gleich bleibt.
 
 **Clip** (`clips`-Zeile): vom Worker angelegt `source_id`, `candidate_id`, `platform`, `destination`, `aspect`, `composition` (Kopie von `candidate.segments`), `title_card`, `ad_label`, `status`. Vom Render geschrieben: `file_key`, `srt_key`, `vtt_key`, `poster_key`, `filmstrip_key`, `duration_s`, `width`, `height`, `fps`, `loudness`, `provenance`, `render_plan`, `cps_warnings`, `fidelity_warnings`, `speaker_positions`, `export_checks`, `render_error`, `rendered_at`. Von Hand gesetzt: `review`, `reframe_override`, `caption_style`, `zeitmarken`, `effekte`, `musik`.
 
-**Render-Plan** (`render_plan_v1`, `render_plan.py:build_plan 183-258`): `contract`, `platform`, `aspect`, `output{width,height,fps}`, `segments[]`, `filler_cuts` (immer `false`), `reframe`, `shots[]`, `motion{zoom_to, min_shot_s}`, `effekte[]`, `musik`, `captions{...}` (Preset-Werte, Safe Zone, `cards`), `title_card{text,seconds 2.5}`, `hook_overlay{text,seconds 3.0}`, `audio{preset,lufs,true_peak,micro_fade_ms 20}`, `zeitmarken[]`, `brand{...}`, `sources{storage_key, transcript_version, hook_version, candidate_id}`, `versions`.
+**Render-Plan** (`render_plan_v1`, `render_plan.build_plan`): `contract`, `platform`, `aspect`, `output{width,height,fps}`, `segments[]`, `filler_cuts` (false, außer die Komposition einer wirksamen Kürzung hat lokale Schnitte), `reframe`, `shots[]`, `motion{zoom_to, min_shot_s}`, `effekte[]`, `musik`, `captions{...}` (Preset-Werte, Safe Zone, `cards`), `title_card{text,seconds 2.5}`, `hook_overlay{text,seconds 3.0}`, `audio{preset,lufs,true_peak,micro_fade_ms 20}`, `zeitmarken[]`, `brand{...}`, `sources{storage_key, transcript_version, hook_version, candidate_id}`, `versions`.
 
 **Originalzeit und Clipzeit**
 
@@ -196,7 +279,7 @@ im lokalen Worker und im Temporal-Workflow über dieselben `run_*`-Funktionen (U
 |---|---|
 | Wörter, Sätze, `candidates.segments`, `start_s`, `end_s`, `clips.composition`, `render_plan.segments`, `render_plan.shots`, `clips.zeitmarken` (Quellzeit, Migration 0011) | `compose.remap_words` (`out_words`), `caption_versions.cards`, `.ass/.srt/.vtt`, `clips.effekte`, Titelkarte und Hook-Overlay ab 0, `duration_s` |
 
-Nicht getrennt gespeichert: Es gibt kein Feld "Segmentgrenze in Clipzeit". Wer sie braucht, rechnet sie aus den kumulierten Längen der Plan-Segmente (`plan_duration 179-180`). `candidates.start_s/end_s` beschreibt nur den Body, nie den Teaser.
+Nicht getrennt gespeichert: Es gibt kein Feld "Segmentgrenze in Clipzeit" in der Datenbank. Wer sie braucht, rechnet sie aus den kumulierten Längen der Plan-Segmente (`render_plan.plan_duration`). Unter Fassung 2 trägt der ClipCandidate sie je Segment (`output_in`, `output_out`, berechnet von `clip_candidate.output_timeline`), aber nur im Bericht im Storage. `candidates.start_s/end_s` beschreibt nur den Body, nie den Teaser.
 
 ## 3. Zeitstempel
 
@@ -206,27 +289,33 @@ Nicht getrennt gespeichert: Es gibt kein Feld "Segmentgrenze in Clipzeit". Wer s
 
 | Stelle | Wirkung |
 |---|---|
-| `evaluate_span 719-720, 781-782` | Segment- und Kandidatenzeiten `round(..., 3)`; Schnitt exakt auf Wortgrenzen, ohne Vor- und Nachlauf |
-| `normalize_segments 159-176` | `round(..., 3)`, Verschmelzen von Segmenten ohne Lücke |
+| `story_engine.evaluate_span` | Segment- und Kandidatenzeiten `round(..., 3)`; Schnitt exakt auf Wortgrenzen, ohne Vor- und Nachlauf (die Schnittränder aus P31, `cut.lead_in_s` und `cut.lead_out_s`, sind nicht gebaut; der Schalter `cut.padding` steht auf false und kein Code liest ihn) |
+| `render_plan.normalize_segments 159-176` | `round(..., 3)`, Verschmelzen von Segmenten ohne Lücke |
 | `render.input_args 214-228` | je Shot und je Segment ein eigener Input mit `-ss {start:.3f} -t {dauer:.3f}`, Video und Audio getrennt |
 | `render.audio_chain 252-260` | 20 ms Fade-in und Fade-out innerhalb jedes Segments. Die ersten und letzten 20 ms des Segments werden abgesenkt, es wird nichts davor oder danach zugegeben |
-| `compose.LEAD_IN_S 0,05`, `LEAD_OUT_S 0,08`, `MERGE_GAP_S 0,15` | nur in `from_keep_ranges`, das nie aufgerufen wird (Befund 8) |
-| `compose.remap_words 86-99` | Wort kommt nur hinein, wenn es vollständig im Segment liegt (`start >= seg.start` und `end <= seg.end`, ohne Epsilon); Teaser-Wörter erscheinen doppelt; `round(..., 3)` |
-| `captions_de._fmt_t 519-522` | ASS-Zeit auf Hundertstel; Randfall `59.996` ergibt `0:00:60.00` (ausgeführt; Verhalten von libass ungeprüft) |
-| `captions_de._srt_t 649-654` | SRT und VTT auf ms |
-| `captions_de.to_ass 575-598` | ein Event je Karte, bei Wort-Highlight ein Event je Wort von `word.start` bis `word.end`, keine Überbrückung der Lücken (Befund 9) |
+| `compose.LEAD_IN_S 0,05`, `LEAD_OUT_S 0,08`, `MERGE_GAP_S 0,15` | nur in `from_keep_ranges`, das im Produktionspfad nur die abgeschaltete Kürzung (1.9) aufruft |
+| `compose.remap_words` | Standard: Wort kommt nur hinein, wenn es vollständig im Segment liegt (`start >= seg.start` und `end <= seg.end`, ohne Epsilon); Teaser-Wörter erscheinen doppelt; `round(..., 3)`. Die Option `by_midpoint=True` (Zuordnung nach Wortmitte, für Kompositionen mit vielen lokalen Schnitten) gibt es, `activities/render.py` ruft `remap_words` ohne sie |
+| `captions_de._fmt_t` | ASS-Zeit auf Hundertstel; Randfall `59.996` ergibt `0:00:60.00` (ausgeführt; Verhalten von libass ungeprüft) |
+| `captions_de._srt_t` | SRT und VTT auf ms |
+| `captions_de.to_ass` | ein Event je Karte, bei Wort-Highlight ein Event je Wort. Fassung 1: von `word.start` bis `word.end`, keine Überbrückung der Lücken (Befund 9). Fassung 2 mit `captions.word_bridge`: bis zum Start des nächsten Wortes, wenn die Lücke höchstens 0,4 s beträgt, Karten mit mehreren Wörtern mindestens 0,8 s |
 | `reframe.plan_shots_aus_zielen 653-719` | Shotgrenzen werden in das Segment geklemmt, lückenlos; Mindestdauer 1,2 s (`MIN_SHOT_S 38`, `tracking.MIN_ZIEL_S 78`) |
-| `signals`, `story_engine.audio_wert 190-226` | Heatmap in 1-s-Bins, `int(t / bin_s)`; die Bins des Abschnitts sind `[int(start), int(end) + 1)` |
+| `signals`, `story_engine.audio_wert` | Heatmap in 1-s-Bins, `int(t / bin_s)`; die Bins des Abschnitts sind `[int(start), int(end) + 1)` |
 
 **Toleranzen.**
 
 | Wert | Quelle |
 |---|---|
-| Satzende bei Pause ab 0,7 s | `segment.py 14`, `dach_nlp.py 125` |
-| Kartenumbruch bei Pause über 0,4 s | `captions_de.py 483` |
-| Teaser höchstens 6,0 s, aus dem Body, ein Sprecher | `compose.py 15, 48-67`, `P/editorial/clip_policy_v1.yaml:hook_vorziehen` |
-| Dublette ab Überdeckung 0,4 des kürzeren; Clip-Fenster auf 0,1 s gerundet | `story_engine.py 67`, `analyze.py 47` |
-| zusammengesetzte Aussage ab 20 s Abstand im Original | `fidelity.py 23` |
+| Satzende bei Pause ab 0,7 s | `segment.MIN_PAUSE_AS_BOUNDARY`, `dach_nlp.sentence_end_kind`; unter Regel v2 nur Kandidat |
+| Satz länger als 25 s oder 40 Wörter: nächste Pause, sonst längste Pause | `segmentation.max_sentence_s`, `max_sentence_words` (Fassung 2) |
+| Kartenumbruch bei Pause über 0,4 s | `captions_de.py` (`build_cards`) |
+| Überbrückung von Wort-Ereignissen bis 0,4 s Lücke, Mindeststandzeit 0,8 s | `captions.bridge_max_s`, `captions.min_event_s` (Fassung 2) |
+| Teaser höchstens 6,0 s, aus dem Body, ein Sprecher | `compose.MAX_TEASER_S`, `P/editorial/clip_policy_v1.yaml:hook_vorziehen` (ein Test hält beide zusammen) |
+| Dublette ab Überdeckung 0,4 des kürzeren; Clip-Fenster auf 0,1 s gerundet | `story_engine.OVERLAP_SUPPRESS_ANTEIL`, `analyze._WINDOW_DIGITS` |
+| Dublette im Payoff-Text ab Jaccard 0,8 der Inhaltswörter | `payoff_search._SAME_TEXT_JACCARD` (Fassung 2) |
+| Anfang heilen: höchstens 2 Sätze und 7 s; Ende heilen: höchstens 2 Sätze und 7 s | `laenge.context_front_*`, `laenge.kontext_zugabe_*` |
+| Kapitelüberlappung 30 s | `search.chapter_overlap_s` (Fassung 2) |
+| zusammengesetzte Aussage ab 20 s Abstand im Original | `fidelity.py` (`check_cut`) |
+| Kürzung: Zielpause 0,25 s, Mindestgewinn 0,15 s, Stille ab 1,5 s nie technisch, Mindestsegment 0,6 s (heute nicht wirksam) | `trim.*` (Fassung 2) |
 | Dauer des Videos gegen den Plan: Hinweis ab 0,3 s, Fehler ab 1,0 s | `ausgabe_regeln_v1.json` (`dauer`) |
 | Pegel: Hinweis ab 2,0 LU, Fehler ab 4,0 LU; Spitze: ab 0,5 dB, Fehler ab 2,0 dB; Schwarzbild: ab 0,5 s, Fehler ab 1,0 s | `ausgabe_regeln_v1.json`, `render.BLACK_MIN_S 49` |
 | Treffer im Eval ab Abdeckung 0,5 | `clip_eval.py` (`--schwelle`) |
@@ -236,85 +325,181 @@ Nicht getrennt gespeichert: Es gibt kein Feld "Segmentgrenze in Clipzeit". Wer s
 | Aspekt | Lokal (`W/local_worker.py`) | Temporal (`W/worker.py`, `W/workflows/clip_project.py`, `workers/Dockerfile`, `infra/docker-compose.yml`) |
 |---|---|---|
 | Start | `python -m chopstr_worker.local_worker [--once]`, Polling alle 3 s | `python -m chopstr_worker.worker --queues cpu`, `gpu` oder `cpu,gpu` |
+| Startprüfung | `worker.check_assets` vor `run_forever` und vor `--once` | `worker.check_assets` in `main`, vor dem Start der Worker |
 | Quell-Ablauf | sechs Schritte nacheinander (`SOURCE_PIPELINE 48-55`), Abbruch beim ersten Fehler | `transcribe_de`, `diarize`, `heatmap` parallel (`clip_project.py 87-92`) |
-| Heatmap | läuft nach der ASR, Textanteil enthalten | läuft parallel, der Textanteil fehlt, wenn die ASR beim Start noch nicht fertig ist (`analyze.py 86-92`) |
+| Heatmap | läuft nach der ASR, Textanteil enthalten | läuft parallel, der Textanteil fehlt, wenn die ASR beim Start noch nicht fertig ist (`analyze.py:run_heatmap`) |
 | Wiederholung | keine; gescheiterte IDs stehen nur im Speicher des Prozesses (`failed` Set 97-98) | IO 5, GPU 3, LLM 3 Versuche; nicht wiederholt: `ResidencyError`, `SchemaError`, `TranscribeError`, `NotImplementedError`, `LookupError` (`clip_project.py 25-29`). andere Fehler, etwa `PolicyError`, werden also wiederholt |
-| Render-Auslöser | jeder Clip `draft` mit Kandidat `accepted` wird gerendert (`SQL_PENDING_CLIPS 59-62`), also alle Automatik-Clips | nur das Signal `approve(candidate_id, destination)` (`clip_project.py 59-61, 108-141`). Im Web senden es nur `verdict`-, `render`- und `fassungen`-Route. Nichts im Worker sendet es nach `auto_create_clips`: Automatik-Clips bleiben `draft`, bis jemand rendert (aus dem Code gelesen, Laufzeit ungeprüft) |
+| Render-Auslöser | jeder Clip `draft` mit Kandidat `accepted` wird gerendert (`SQL_PENDING_CLIPS 59-62`); zurückgehaltene Entwürfe (kein Urteil) bleiben liegen, bis ein Mensch annimmt (1.12) | nur das Signal `approve(candidate_id, destination)` (`clip_project.py 59-61, 108-141`). Im Web senden es nur `verdict`-, `render`- und `fassungen`-Route. Nichts im Worker sendet es nach `auto_create_clips`: Automatik-Clips bleiben `draft`, bis jemand rendert (aus dem Code gelesen, Laufzeit ungeprüft) |
 | Freigabe-Warten | keines | bis 14 Tage (`REVIEW_TIMEOUT`), dann Ende |
-| LLM-Provider | `local-heuristic` per `scripts/local_env.sh` | `bedrock-eu` Standard (`config.py 74`, `docker-compose.yml 164`) |
-| Pfade | `prompts_dir()` und `policy_dir()` suchen aufwärts nach `packages/prompts`, `packages/editorial` (`editorial.py 38-48`, `prompts.py 22-32`); `ausgabe_regeln` und `caption_fonts.json` relativ zum Monorepo | `workers/Dockerfile 14-18` kopiert `packages/prompts`, `workers/chopstr_worker`, `workers/eval`, `workers/fonts`. Es fehlen `packages/editorial`, `packages/schema`, `packages/design`. `docker-compose.yml` setzt kein `EDITORIAL_DIR`, `CHOPSTR_AUSGABE_REGELN` oder `CHOPSTR_CAPTION_FONTS` |
-| Folge im Image | Policy vorhanden | `editorial.load()` wirft `PolicyError` in der Kandidatensuche; `ausgabe_pruefung.regeln()` wirft `FileNotFoundError` erst nach dem Encode (aus dem Code abgeleitet, im Container nicht ausgeführt). Befund 13 |
-| Python-Pakete | `workers/.venv` (ausgeführt): kein spaCy, kein OpenCV, `workers/models/` enthält nur `.gitkeep`. Folge: `verb_bracket` meldet `available: false`, Reframe `neutral` | CPU-Image `[nlp]`: spaCy ohne Sprachmodell (`nlp()` liefert `None`), kein OpenCV (`vision`), kein faster-whisper, kein pyannote; GPU-Image `[asr,nlp]` ohne `vision`. `docker-compose` lässt den einen `worker` mit CPU-Image beide Queues bedienen: ASR bräuchte `faster_whisper` (`transcribe.py 278-287`), das dort fehlt |
-| ffmpeg | `imageio-ffmpeg` mit libass und drawtext (`local_env.sh`) | Debian-ffmpeg (`Dockerfile 7-9`), Fähigkeiten über `render.capabilities()` |
+| LLM-Provider | `local-heuristic` per `scripts/local_env.sh` | `bedrock-eu` Standard (`config.py 74`, `docker-compose.yml`) |
+| Pfade | `prompts_dir()` und `policy_dir()` suchen aufwärts nach `packages/prompts`, `packages/editorial` (`editorial.policy_dir`, `prompts.prompts_dir`); `ausgabe_regeln` und `caption_fonts.json` relativ zum Monorepo | `workers/Dockerfile` kopiert `packages/prompts`, `packages/editorial`, `packages/design`, `packages/schema`, `workers/chopstr_worker`, `workers/eval`, `workers/fonts`. Die Worker-Dienste in `infra/docker-compose.yml` und `infra/docker-compose.sovereign.yml` setzen `PROMPTS_DIR`, `EDITORIAL_DIR`, `CHOPSTR_CAPTION_FONTS`, `CHOPSTR_AUSGABE_REGELN` auf `/app/packages/...` und reichen `CHOPSTR_POLICY_VERSION` durch (leer heißt Standard des Codes, Abschnitt 8) |
+| Folge im Image | Policy vorhanden | Fehlt eine gemeinsame Datei, bricht der Start mit einer deutschen Meldung ab, die Datei und Variable nennt (`check_assets` prüft Fassung der Policy, Policy, gepinnte Prompts, Schriftenliste und Ausgaberegeln); ohne diese Prüfung scheiterte erst die Kandidatensuche (`PolicyError`) oder der Render nach dem Encode (Befund 13) |
+| Python-Pakete | `workers/.venv` (im ersten Stand ausgeführt, nicht neu ausgeführt): kein spaCy, kein OpenCV, `workers/models/` enthält nur `.gitkeep`. Folge: Fassung 1 meldet `verb_bracket` mit `available: false` und besteht, Fassung 2 prüft mit der Heuristik (`nlp_status heuristic`), Reframe `neutral` | CPU-Image `[nlp]`: spaCy und das Sprachmodell `de_core_news_md` (P28: Release-Wheel aus `explosion/spacy-models`, im Build installiert, Version über `ARG SPACY_MODEL_VERSION`, kein Download zur Laufzeit; GPU-Image ebenso); `nlp()` lädt es, Fassung 1 prüft die Verbklammer mit spaCy, Fassung 2 meldet `nlp_status spacy`. Kein OpenCV (`vision`), kein faster-whisper, kein pyannote; GPU-Image `[asr,nlp]` ohne `vision`. `docker-compose` lässt den einen `worker` mit CPU-Image beide Queues bedienen: ASR bräuchte `faster_whisper` (`transcribe.py 278-287`), das dort fehlt |
+| ffmpeg | `imageio-ffmpeg` mit libass und drawtext (`local_env.sh`) | Debian-ffmpeg (`Dockerfile`), Fähigkeiten über `render.capabilities()` |
 | Speicher | lokaler Ordner (`S3_ENDPOINT` leer) | S3 oder MinIO |
 | Löschen, Veröffentlichen, Outbox, Lernen | im selben Poll (`process_deletions`, `process_publications`, `process_outbox`) | eigene Workflows und Schedules (`--ensure-schedules`) |
 
-## 5. Gelesene und ungelesene Policy-Schlüssel (`P/editorial/clip_policy_v1.yaml`)
+## 5. Gelesene und ungelesene Policy-Schlüssel
 
-Geladen und geprüft wird immer Version 1 (`editorial.POLICY_VERSION 26`; das YAML-Feld `version` wählt nichts). `_pruefe 279-293` verlangt die Abschnitte aus `PFLICHTFELDER 28-31`, Gewichtssumme 1,0 und aufsteigende Längengrenzen. Spalte "Wo" gilt für den Produktionspfad mit Sprachmodell; "H" = nur der Heuristik-Provider liest den Schlüssel (`heuristic_llm.py`).
+Geladen und geprüft wird die Fassung, die `CHOPSTR_POLICY_VERSION` wählt (`editorial.active_version`, ohne Wert `editorial.POLICY_VERSION`, also 1; der Wert muss zur Datei passen, `version` in der YAML wählt nichts). `editorial._pruefe` verlangt die Abschnitte aus `PFLICHTFELDER`, Gewichtssumme 1,0 und aufsteigende Längengrenzen. Fassung 2 verlangt zusätzlich die Abschnitte `prompts` (Pins für alle Prompts von Fassung 1), `implementation` (alle Schalter aus `V2_SWITCHES`) und `origins` (jede Regel mit Herkunft F, H, R oder G und Quelle; eine Regel ohne Eintrag oder ein Eintrag ohne Regel lässt das Laden scheitern).
 
-| Schlüssel | Gelesen | Wo |
-|---|---|---|
-| `version` | ja | `policy_version()` Kennung, `story_score.py 371` |
-| `stand` | nein | nur in `Policy.stand` abgelegt |
-| `laenge.ziel_s` | H und Prompt | `heuristic_llm.py 188`, `editorial.als_prompt_text 260` |
-| `laenge.gut_von_s`, `gut_bis_s` | ja | `laenge_abzug 136-144` → `story_engine.py 318, 753`; H `456-457`; Prompt |
-| `laenge.hart_min_s`, `hart_max_s` | ja | `story_engine._length_reason 585-599`, `laenge_abzug`; H `188` |
-| `laenge.kontext_zugabe_s`, `kontext_zugabe_saetze` | ja | `story_engine.py 592, 620, 653` |
-| `rubrik.skala_max` | ja | `story_score.py 138, 307-328`, `editorial.gesamtwert 198` |
-| `rubrik.kriterien[].schluessel`, `frage`, `gewicht` | ja | Antwortschema `story_score.rubric_schema 121-153`, `gesamtwert 190-198`, `legacy_weights 161-173` |
-| `rubrik.kriterien[].null_punkte`, `zwei_punkte` | Prompt | `editorial.py 265-266` |
-| `rubrik.kriterien[].herkunft`, `hinweis` | nein | nur im `Kriterium`-Objekt |
-| `bewertung.punkte_gesamt` | ja | `gesamtwert 198` |
-| `bewertung.modus` | nur Prüfung | `_pruefe 292`; die Eigenschaft `sperrt` hat keinen Aufrufer, `sperren` würde nichts ändern |
-| `bewertung.schwelle_schneiden`, `schwelle_verwerfen` | nein | Eigenschaften ohne Aufrufer |
-| `moment_typen[].marker`, `marker_regex`, `braucht_audio`, `bonus` | ja | `typen_im_text 216-219`, `story_engine.satz_staerke 229-252` (Teaser), H `154, 473` |
-| `moment_typen[].name`, `hebel` | Prompt, H | `editorial.py 270`, `heuristic_llm.py 219` |
-| `moment_typen[].schluessel` | ja | H `TYP_WIRKT_AUF 75-82` |
-| `einstieg.pronomen` | ja | `story_engine.py 244` (Teaser-Eignung), H `307` |
-| `einstieg.keine_pronomen_ohne_bezug`, `keine_gastgeberfrage`, `einleitungen_kappen`, `einleitungsfloskeln` | H | `heuristic_llm.py 279, 307, 313, 340` |
-| `einstieg.nie_mitten_im_satz`, `nie_in_selbstkorrektur` | nein | |
-| `ausstieg.satz_zu_ende`, `vor_der_abschwaechung`, `abschwaechung_marker` | H | `heuristic_llm.py 413, 419` |
-| `ausstieg.verbklammer_nicht_trennen` | nein | das Gate ist fest verdrahtet (`story_engine.py 360-373`) |
-| `zusammenhang.*` (`ein_zusammenhaengender_abschnitt`, `mindest_dichte`, `max_gedanken`) | nein | Eigenschaft `zusammenhang` ohne Aufrufer |
-| `audio.in_bewertung_verwenden`, `audio.gewicht` | ja | `policy_total 323-326` |
-| `audio.merkmale.*` | nein | `lachen`, `applaus`, `pause_vor_aussage`, `energie_anstieg` stehen nur in der Datei |
-| `hook_vorziehen.aktiv`, `mindest_vorsprung`, `max_teaser_s`, `nicht_aus_letztem_anteil` | ja | `teaser_satz 255-292`; `compose.MAX_TEASER_S 15` ist eine zweite, feste 6,0 |
-| `ausschluss.organisatorisches_gespraech`, `organisations_marker` | H | `ist_organisatorisch 246-250` → `heuristic_llm.py 458` |
-| `ausschluss.begruessung_und_abschied`, `insiderwitz_ohne_kontext` | nein | |
+**Auszählung.** Regelpfade zählt `editorial.rule_paths` (Blattwerte, Kriterien und Moment-Typen über ihren `schluessel`, Abschnitte `prompts`, `implementation`, `origins`, `version` und `stand` nicht eingerechnet). Ob und wo ein Pfad gelesen wird, wurde je Pfad im Quelltext gesucht (grep, ohne Tests). Das Ergebnis gilt für den Produktionspfad mit Sprachmodell; "nur Heuristik" heißt, dass nur `heuristic_llm.py` den Schlüssel liest. Ein Register, das das festhält, gibt es noch nicht (geplant in AP9, P44); die Zählung ist von Hand.
 
-Folge: Mit einem Sprachmodell wirken `einstieg.*` (außer `pronomen`), `ausstieg.*` und `ausschluss.*` nur als feste Textzeilen im Prompt (`editorial.py 272-275`), nicht über die YAML-Werte. Vorschlag und Bewertung des Modells kennen nur Länge, Rubrik und Moment-Typen (Prompt-Text).
+| Fassung | Regelpfade | gelesen und wirksam | gelesen, im Lauf nicht wirksam | nur Prompt-Text oder Heuristik | nicht gelesen |
+|---|---|---|---|---|---|
+| 1 (`clip_policy_v1.yaml`) | 53 | 28 | 0 | 10 | 15 |
+| 2 (`clip_policy_v2.yaml`) | 131 | 76 | 38 | 4 | 13 |
+
+"Im Lauf nicht wirksam" heißt: ein Verbraucher existiert, aber ein ausgeschalteter Schalter oder eine ausgeschaltete Regel hält ihn zurück (Abschnitt 8): die 23 Pfade `trim.*` und `zusammenhang.mindest_dichte` (Regel `trim.enabled` aus), die 11 Pfade `gates.*` sowie `bewertung.modus_v2`, `only_with_language_model` und `schwelle_verwerfen` (Schalter `gates.discard_hard` aus).
+
+Nicht gelesen unter Fassung 2 (13): `einstieg.nie_in_selbstkorrektur`, `zusammenhang.ein_zusammenhaengender_abschnitt`, `zusammenhang.max_gedanken`, `audio.merkmale.energie_anstieg`, `lachen`, `applaus`, `pause_vor_aussage`, `ausschluss.begruessung_und_abschied`, `ausschluss.insiderwitz_ohne_kontext`, `bewertung.modus` (nur Prüfung beim Laden, die Eigenschaft `sperrt` hat keinen Aufrufer), `bewertung.schwelle_schneiden` (`block_mode_settings` gibt sie als `cut_from` zurück, die Engine liest nur `discard_below`), `bewertung.begruendung` (wird geprüft und als `reason` zurückgegeben, kein Verbraucher) und `hook.question_as_variant` (wirkt nur über den Text von `hooks_v2`). Nur Heuristik unter Fassung 2 (4): `einstieg.einleitungen_kappen`, `einstieg.einleitungsfloskeln`, `ausstieg.satz_zu_ende`, `ausstieg.vor_der_abschwaechung`.
+
+Nicht gelesen unter Fassung 1 (15): `bewertung.modus`, `schwelle_schneiden`, `schwelle_verwerfen`, `einstieg.nie_mitten_im_satz`, `einstieg.nie_in_selbstkorrektur`, `ausstieg.verbklammer_nicht_trennen` (das Tor ist fest verdrahtet), die drei Schlüssel unter `zusammenhang`, die vier unter `audio.merkmale` und die zwei Ausschlüsse `begruessung_und_abschied` und `insiderwitz_ohne_kontext`. Nur Prompt-Text oder Heuristik unter Fassung 1 (10): `laenge.ziel_s` (Prompt-Text und Heuristik), `einstieg.keine_pronomen_ohne_bezug`, `keine_gastgeberfrage`, `einleitungen_kappen`, `einleitungsfloskeln`, `ausstieg.satz_zu_ende`, `vor_der_abschwaechung`, `abschwaechung_marker`, `ausschluss.organisatorisches_gespraech` und `organisations_marker`.
+
+Nach Schlüsselgruppen ("Wo" nennt die lesende Stelle; H = nur der Heuristik-Provider, `heuristic_llm.py`):
+
+| Schlüssel | Fassung 1 | Fassung 2 | Wo |
+|---|---|---|---|
+| `version` | ja | ja | `editorial.policy_version`, Kennung im Cache-Key und in `rubric.policy_version` |
+| `stand` | nein | nein | nur in `Policy.stand` abgelegt |
+| `laenge.ziel_s` | Prompt-Text und H | ja | `Policy.als_prompt_text`; H; `payoff_search` (Obergrenze der Verlängerung) |
+| `laenge.gut_von_s`, `gut_bis_s` | ja | ja | `laenge_abzug` → `story_engine.policy_total`; H; Prompt; `payoff_search` (Ziel des Rückwegs) |
+| `laenge.hart_min_s`, `hart_max_s` | ja | ja | `story_engine._length_reason`, `laenge_abzug`; H; `payoff_search` |
+| `laenge.kontext_zugabe_s`, `kontext_zugabe_saetze` | ja | ja | `story_engine.kontext_verlaengern`; `editorial_gates` (Heilreichweite) |
+| `laenge.context_front_sentences`, `context_front_s` | gibt es nicht | ja, mit `sentence_rule` | `editorial.context_front` → `story_engine.heal_start` |
+| `rubrik.skala_max` | ja | ja | `story_score` (Antwortschema, Harmonisierung), `Policy.gesamtwert` |
+| `rubrik.kriterien[].schluessel`, `frage`, `gewicht` | ja | ja | Antwortschema `story_score.rubric_schema`, `gesamtwert`, `legacy_weights` |
+| `rubrik.kriterien[].null_punkte`, `zwei_punkte` | Prompt | Prompt | `Policy.als_prompt_text` |
+| `rubrik.kriterien[].herkunft`, `hinweis` | nein | nein | nur im `Kriterium`-Objekt |
+| `bewertung.punkte_gesamt` | ja | ja | `Policy.gesamtwert` |
+| `bewertung.modus` | nur Prüfung | nur Prüfung | `_pruefe`; `sperren` würde nichts ändern |
+| `bewertung.schwelle_schneiden` | nein | nein | Eigenschaft ohne Verbraucher |
+| `bewertung.schwelle_verwerfen`, `modus_v2`, `only_with_language_model` | nein | gelesen, im Lauf nicht wirksam | `editorial.block_mode_settings` → `story_engine.select_best`, nur mit verdrahteten Gates, Modus `sperren` nur mit Sprachmodell |
+| `moment_typen[].marker`, `marker_regex`, `braucht_audio`, `bonus` | ja | ja | `Policy.typen_im_text`, `story_engine.satz_staerke` (Teaser), H; `payoff_search` (Merksatz, Zahl) |
+| `moment_typen[].name`, `hebel`, `schluessel` | Prompt, H | Prompt, H | `Policy.als_prompt_text`, `story_score.propose_policy_text`, `heuristic_llm` |
+| `einstieg.pronomen` | ja | ja | `satz_staerke` (Teaser-Eignung), `start_defects`, `editorial_gates`, H |
+| `einstieg.nie_mitten_im_satz` | nein | ja, mit `sentence_rule` | `story_engine.start_defects` |
+| `einstieg.keine_pronomen_ohne_bezug` | H | ja, mit `sentence_rule` | `start_defects`, H |
+| `einstieg.keine_gastgeberfrage` | H | ja | `story_engine.heal_start`, `payoff_search`, H |
+| `einstieg.einleitungen_kappen`, `einleitungsfloskeln` | H | H | `heuristic_llm.py` |
+| `einstieg.nie_in_selbstkorrektur` | nein | nein | |
+| `ausstieg.satz_zu_ende`, `vor_der_abschwaechung` | H | H | `heuristic_llm.py` |
+| `ausstieg.abschwaechung_marker` | H | ja | `payoff_search`, `trim_plan`, `story_engine.kontext_verlaengern`, H |
+| `ausstieg.never_end_on_qualification` | gibt es nicht | ja, mit `sentence_rule` | `editorial.never_end_on_qualification` → `kontext_verlaengern` |
+| `ausstieg.verbklammer_nicht_trennen` | nein (das Tor ist fest verdrahtet) | ja | `editorial.verb_bracket_settings` (`active`) |
+| `zusammenhang.mindest_dichte` | nein | gelesen, im Lauf nicht wirksam | `editorial.trim_settings` → `trim_plan.build_composition` |
+| `zusammenhang.ein_zusammenhaengender_abschnitt`, `max_gedanken` | nein | nein | Eigenschaft `zusammenhang` ohne weiteren Verbraucher |
+| `audio.in_bewertung_verwenden`, `audio.gewicht` | ja | ja | `story_engine.policy_total` |
+| `audio.merkmale.*` | nein | nein | stehen nur in der Datei |
+| `hook_vorziehen.aktiv`, `mindest_vorsprung`, `max_teaser_s`, `nicht_aus_letztem_anteil` | ja | ja | `story_engine.teaser_satz`; `compose.MAX_TEASER_S` ist eine zweite, feste 6,0 |
+| `ausschluss.organisatorisches_gespraech`, `organisations_marker` | H | ja | `Policy.ist_organisatorisch` → `payoff_search`, H; `organisations_marker` auch `trim_plan` |
+| `ausschluss.begruessung_und_abschied`, `insiderwitz_ohne_kontext` | nein | nein | |
+| `captions.*` (4) | gibt es nicht | ja, mit `captions.word_bridge` | `editorial.caption_settings` → `captions_de.caption_rules` |
+| `hook.native_spoken`, `hyperbole`, `allow_partial_opening` | gibt es nicht | ja | `Policy.hook_native_spoken`, `copy_de.lint`, `copy_engine.allow_partial_opening` |
+| `hook.question_as_variant` | gibt es nicht | nein | wirkt nur über den Text von `hooks_v2` |
+| `segmentation.*` (3) | gibt es nicht | ja | `editorial.sentence_rule`, `sentence_limits` → `activities/nlp.py`, `story_engine.run` |
+| `verb_bracket.*` (4) | gibt es nicht | ja | `editorial.verb_bracket_settings` → `dach_nlp.bracket_open_at_cut`, `bracket_heuristic` |
+| `search.*` (23) | gibt es nicht | ja, mit `search.payoff_first` | `editorial.search_settings` → `payoff_search`, `segment.chapterize`, `story_engine.llm_budget_for`, H |
+| `trim.*` (23) | gibt es nicht | gelesen, im Lauf nicht wirksam | `editorial.trim_settings` → `trim_plan` (Regel `trim.enabled` aus) |
+| `gates.*` (11) | gibt es nicht | gelesen, im Lauf nicht wirksam | `editorial.gates_settings` → `editorial_gates.run_gates` (Schalter `gates.discard_hard` aus) |
+| `prompts` | nicht in der Datei (Pins im Code: `V1_PROMPT_PINS`) | ja | `Policy.prompt_pins` |
+| `implementation` | gibt es nicht | ja, bis auf `cut.padding` | `_switch_value` in `editorial.py`; `cut.padding` liest kein Code |
+| `origins` | gibt es nicht | geprüft beim Laden | `editorial._check_v2`; `editorial_gates` liest `origins.gates.*` für `origin` |
+
+Folge: Mit einem Sprachmodell wirken die Zeilen zu `einstieg`, `ausstieg` und `zusammenhang` im Rubrik-Prompt nur als feste Textzeilen (`Policy.als_prompt_text`), nicht über die YAML-Werte. Die YAML-Werte wirken dort, wo Code sie liest: unter Fassung 2 in `heal_start`, `kontext_verlaengern`, `payoff_search` und `editorial_gates`.
 
 ## 6. Prompt-Versionen
 
-`prompts.load(name, version=None)` (`W/prompts.py 83-96`) sucht `<name>_v*.md` in `PROMPTS_DIR` oder `packages/prompts` und nimmt ohne Versionsangabe die höchste Nummer (numerisch sortiert). Alle Aufrufer im Worker übergeben keine Version (Suche über alle `prompts.load(`-Stellen). Eine neue `_vN+1`-Datei schaltet den Pfad deshalb sofort um, ohne Code-Änderung. Die Version erscheint als `prompt_version`: im Kandidaten (nur `score_clip`), im Cache-Key der Kandidaten (alle drei Engine-Prompts, `story_engine.prompt_versions 850-856`), in `hook_versions.prompt_version` (nur `hooks`) und im LLM-Cache-Key `llm:<sha256(provider, model, prompt_version, [system, user, schema])>` (`providers_llm.cache_key 38-40`, im Produktionspfad ohne Redis nicht aktiv). Die Version von `post_caption` wird nicht in die Zeile geschrieben (`CopyResult.post_caption_prompt_version` fehlt in `to_row 95-107` und `_write_hook_version 448-477`).
+`prompts.load_pinned(name, policy=None)` (`W/prompts.py`) lädt die Version, die die Policy pinnt: Fassung 1 aus `editorial.V1_PROMPT_PINS` (im Code eingefroren, weil die v1-Datei unverändert bleibt), Fassung 2 aus dem Abschnitt `prompts` der YAML. Alle Aufrufer im Produktionspfad nutzen `load_pinned`. Ein Name ohne Pin wirft `PolicyError`. `prompts.load(name, version=None)` ohne Versionsangabe nimmt weiter die höchste Nummer (numerisch sortiert), schreibt aber eine Warnung ins Log (`Prompt ... ohne Version geladen`); im Worker-Paket hat es keinen Aufrufer, ein Test (`workers/tests/test_prompts.py`) wacht darüber, und es ist nur für Werkzeuge und Tests gedacht. Eine neue `_vN+1`-Datei schaltet den Pfad deshalb nicht mehr um: erst der Pin tut es, und zurück geht es über den Pin oder die Fassung. Die Startprüfung `worker.check_assets` lädt jeden gepinnten Prompt, ein fehlender Pin oder eine fehlende Datei fällt also beim Start auf.
 
-| Name | Geladene Version (ausgeführt) | Tool | Wo |
-|---|---|---|---|
-| `system_editor` | `system_editor_v1` | | `story_score.system_prompt 117-118`, `copy_engine._system_prompt 123-124` |
-| `propose_moments` | `propose_moments_v1` | `propose_moments` | `story_score.propose 218-234` |
-| `score_clip` | `score_clip_v2` (`policy: clip_policy_v1` im Kopf); `_v1` bleibt als Datei, wird nicht mehr geladen | `score_clip` | `story_score.score 352-373` |
-| `story_graph_confirm` | `story_graph_confirm_v1` | `confirm_qualification` | `story_graph.build_confirm_prompt 85-87` |
-| `hooks` | `hooks_v1` | `write_hooks` | `copy_engine.generate_variants 127-153` (zweiter, ungenutzter Pfad `copy_de.py 113-124`) |
-| `post_caption` | `post_caption_v1` | `write_post_caption` | `copy_engine.generate_post_caption 203-224` |
+Die Version erscheint als `prompt_version`: im Kandidaten (nur `score_clip`), im Cache-Key der Kandidaten und im Bericht (`story_engine.prompt_versions`: `propose_moments`, `score_clip`, `story_graph_confirm`, mit verdrahteter Suche zusätzlich `episode_overview`; `system_editor` steht nicht darin, ein Wechsel seines Pins ändert den Schlüssel über den Policy-Namen und -Hash), in `hook_versions.prompt_version` (nur `hooks`) und im LLM-Cache-Key `llm:<sha256(provider, model, prompt_version, [system, user, schema])>` (`providers_llm.cache_key 38-40`, im Produktionspfad ohne Redis nicht aktiv). Die Version von `post_caption` wird nicht in die Zeile geschrieben (`CopyResult.post_caption_prompt_version` fehlt in `to_row` und `_write_hook_version`).
 
-Gewichts-Frontmatter von `score_clip_v2` ist nur Kopie; bei Abweichung gewinnt die Policy und es gibt eine Log-Warnung (`story_score.weight_drift 176-194`). Die Policy-Fassung steckt über den Namen im Cache-Key (`clip_policy_v1`), ihr Inhalt nicht.
+| Name | Pin Fassung 1 | Pin Fassung 2 | Rolle | Tool | Wo |
+|---|---|---|---|---|---|
+| `system_editor` | 1 | 2 | System | | `story_score.system_prompt`, `copy_engine._system_prompt` |
+| `propose_moments` | 1 | 2 (wirksam nur mit `search.payoff_first`, sonst lädt `propose` den Pin der Fassung 1) | Editor (ab v2) | `propose_moments` | `story_score.propose` |
+| `episode_overview` | kein Pin | 1 | Analyst | `episode_overview` | `story_score.overview` |
+| `score_clip` | 2 | 2 | Bewerter | `score_clip` | `story_score.score` |
+| `story_graph_confirm` | 1 | 1 | Prüfer | `confirm_qualification` | `story_graph.build_confirm_prompt` |
+| `hooks` | 1 | 2 | Copy | `write_hooks` | `copy_engine.generate_variants` (zweiter, ungenutzter Pfad `copy_de.py`) |
+| `post_caption` | 1 | 1 | Copy | `write_post_caption` | `copy_engine.generate_post_caption` |
+
+`score_clip_v1` bleibt als Datei liegen und wird von keiner Fassung gepinnt. Der Kopf von `score_clip_v2` nennt `policy: clip_policy_v1`; das gilt für beide Fassungen nur als Anzeige, `{policy}` wird aus der aktiven Fassung gefüllt (`Policy.als_prompt_text`). Gewichte im Frontmatter von `score_clip_v2` sind nur eine Kopie; bei Abweichung gewinnt die Policy und es gibt eine Log-Warnung (`story_score.weight_drift`). Die Tabelle mit Eingaben je Prompt steht in `packages/prompts/README.md`.
 
 ## 7. Drei Problemarten
 
-Einordnung nach Master-Prompt Abschnitt 3. Die Befundnummern sind die der Tabelle in `docs/RESEARCH-CLIPPING-KERN.md` Abschnitt 2 (dort mit Status und Schwere).
+Einordnung nach Master-Prompt Abschnitt 3. Die Befundnummern sind die der Tabelle in `docs/RESEARCH-CLIPPING-KERN.md` Abschnitt 2 (dort mit Status und Schwere). Fassung 1 bleibt absichtlich unverändert, die Befunde bestehen dort wie beschrieben; welche Fassung 2 angeht, steht mit Status in RESEARCH und im Plan.
 
 | Problemart | Frage | Stufen in diesem Dokument | Befunde (RESEARCH Abschnitt 2) |
 |---|---|---|---|
-| Auswahl | Wurde der richtige Gedanke gefunden, und wurde der falsche verworfen? | 1.4 Heatmap, 1.5 Vorschlag, 1.7 `select_best` | 3, 4, 11 |
-| Redaktion | Sind Einstieg, Kontext, Aufbau, Hook und Abschluss des gefundenen Gedankens gut? | 1.6 Bewertung, Heilung, Teaser, 1.9 Komposition, 1.10 Copy, 1.15 Lernen | 5, 6, 7, 12 |
-| Ausführung | Beschädigen Zeitstempel, Satzzerlegung, Untertitel, Reframe oder Build die gute Entscheidung? | 1.3 Segmentierung, 1.11 Captions, 1.12 Reframing, 1.13 Render, 1.2 und Abschnitt 4 (Image) | 1, 2, 8, 9, 10, 13 |
+| Auswahl | Wurde der richtige Gedanke gefunden, und wurde der falsche verworfen? | 1.4 Heatmap, 1.5 Episodenübersicht, 1.6 Kandidatensuche, 1.10 `select_best` | 3, 4, 11 |
+| Redaktion | Sind Einstieg, Kontext, Aufbau, Hook und Abschluss des gefundenen Gedankens gut? | 1.7 Bewertung und Heilung, 1.8 Gates, 1.9 Kürzung, 1.13 Komposition, 1.14 Copy, 1.19 Lernen | 5, 6, 7, 12 |
+| Ausführung | Beschädigen Zeitstempel, Satzzerlegung, Untertitel, Reframe oder Build die gute Entscheidung? | 1.3 Segmentierung, 1.15 Captions, 1.16 Reframing, 1.17 Render, 1.2 und Abschnitt 4 (Image) | 1, 2, 8, 9, 10, 13 |
 
-Beim Schreiben aufgefallen, nicht im Katalog (a bis f), je als Beobachtung am Code, nicht als Bewertung:
+Beim Schreiben aufgefallen, nicht im Katalog (a bis k), je als Beobachtung am Code, nicht als Bewertung:
 
-- a. Auswahl: Die Belegprüfung der Rubrikzitate (`_evidence_grounded`) und `rubric_guessed` haben keine Folge, nichts liest sie (1.6).
-- b. Redaktion: Die Lernzeilen zählen automatisch angenommene Kandidaten als menschliches `accepted` (`learning.py 38-41`, `analyze.py 305-312`).
-- c. Redaktion: Weder `risk_flags` (`humor`, `sensitive_topic`, `claim`) noch `needs_human` führen zu einer Regel in `ausgabe_regeln_v1.json`. Veröffentlicht wird nach `clips.review`.
-- d. Redaktion: `A/candidates/labels.ts:qualityWord 69-75` setzt Schwellen 8, 6, 4 für eine Skala 0 bis 10, `total` liegt nominal auf 0 bis 14.
-- e. Ausführung: Das Web setzt nach einer Revision `sentence_boundaries` immer auf bestanden und die Segmente auf ein einziges `body` (`A/candidates/gates.ts 59`, `revise.ts 58`); ein vorhandener Teaser geht verloren, `total` bleibt stehen.
+- a. Auswahl: Die Belegprüfung der Rubrikzitate (`_evidence_grounded`) und `rubric_guessed` haben keine Folge, nichts liest sie (1.7).
+- b. Redaktion: Die Lernzeilen zählen automatisch angenommene Kandidaten als menschliches `accepted` (`learning.py 38-41`, `analyze.auto_create_clips`).
+- c. Redaktion: Die Ausgabeunterlagen (`ausgabe_regeln_v1.json`) kennen keine Regel zu `risk_flags` (`humor`, `sensitive_topic`, `claim`) und zu `needs_human`. Die Freigabepflicht liegt am Kandidatenurteil: die Automatik nimmt keinen Kandidaten mit `humor`, `sensitive_topic` oder freigaberelevanter Behauptung an (1.12), und das Veröffentlichen verlangt ein angenommenes Urteil. Ein Mensch, der annimmt, hebt die Sperre auf. Die Heuristik setzt `is_humor` nie (Befund 11); dort ist die Sperre nur ein Teil der Wahrheit.
+- d. Redaktion: `A/candidates/labels.ts:qualityWord` setzt Schwellen 8, 6, 4 für eine Skala 0 bis 10, `total` liegt nominal auf 0 bis 14.
+- e. Ausführung: Das Web setzt nach einer Revision die Segmente auf ein einziges `body` (`A/candidates/revise.ts`); ein vorhandener Teaser oder eine Kürzung geht verloren, `total` bleibt stehen, `rubric.scores_stale` wird gesetzt. `sentence_boundaries` wird dagegen neu berechnet, an den echten Wörtern und nach der Satzende-Regel der Transkriptversion (`A/candidates/gates.ts`); `standalone`, `fidelity` und `verb_bracket` werden unverändert übernommen.
 - f. Ausführung: Im Temporal-Betrieb löst `auto_create_clips` keinen Render aus (Abschnitt 4).
+- g. Auswahl: Zwei Stellen erwarten Lachen in der Heatmap unter verschiedenen Schlüsseln: `payoff_search._laughter_after` liest `heat["laughter"]`, `trim_plan._laughter_in` liest `heat_payload["laughter_values"]`. `signals.to_payload` schreibt keinen von beiden und `signals.combined` bekommt `laughter` nie übergeben. Im Produktionspfad gilt deshalb nur das Transkript (Reaktionswörter); ein Payoff vom Typ `laughter` und eine Reaktionspause nach Lachen entstehen dort nicht.
+- h. Redaktion: Das Web prüft manuell bearbeitete Hooks weiter mit `hookClaimCheck` (v1, `A/copy/hooks.ts`); `hookClaimCheckV2` (`A/copy/claims.ts`) ist gebaut, aber nicht eingebunden, weil das Web keine Policy-Fassung kennt. Ebenso gilt die Caption-Vorschau (`A/clips/captions.ts`) unabhängig von der Fassung und kennt weder Morphemtrennung noch P30 noch die Ereigniszeiten.
+- i. Ausführung: Der Schalter `implementation.gates.discard_hard` wird von `story_engine.gates_wired` gelesen, steht aber nicht in `editorial.V2_IMPLEMENTED_SWITCHES`; der Test `test_editorial.py` verlangt, dass ein Schalter genau dann `true` ist, wenn er dort steht. Ohne den Schalter laufen die Gates in der Engine gar nicht (kein Bericht, keine Heilung); die Entscheidung `reported` gibt es nur bei eingeschaltetem Schalter und ausgeschalteter Regel `gates.discard_hard` (1.8).
+- j. Ausführung: Das Sprachmodell `de_core_news_md` fehlt im Image (Abschnitt 4), obwohl P28 es beschließt.
+- k. Auswahl: Die Obergrenze der Kandidaten ist weiter `MAX_CANDIDATES` 20 im Code; `output.max_candidates` aus dem Plan (AP9) gibt es nicht.
+
+## 8. Schalter und Rollback
+
+Fünf Ebenen, von grob zu fein. Jede lässt sich einzeln zurücknehmen; die Beschlüsse dazu stehen in `docs/ENTSCHEIDUNGEN.md` (P33 und P34 ff.).
+
+### 8.1 Fassung der Policy: `CHOPSTR_POLICY_VERSION`
+
+- `editorial.active_version` liest die Umgebungsvariable des Worker-Prozesses direkt (nicht über `config.py`). Leer oder fehlend: `editorial.POLICY_VERSION`, heute `1`. Ein Wert, der keine ganze Zahl ist, scheitert laut (`PolicyError`), ein Tippfehler fällt nicht still auf eine andere Fassung.
+- Gesetzt wird sie in `.env.example`, `workers/scripts/local_env.sh` (Kommentar) und in `infra/docker-compose.yml` und `infra/docker-compose.sovereign.yml` (`${CHOPSTR_POLICY_VERSION:-}`, ohne eigenen Standard). Zum Vergleichen den Worker mit `CHOPSTR_POLICY_VERSION=2` starten; zurück mit `1` oder leer.
+- Wirkung: Fassung, Engine-Version (`story_engine_v4` gegen `v5`), Prompt-Pins und Schlüssel gehören zusammen. Der Kandidaten-Key enthält den Namen der Fassung; ab Fassung 2 zusätzlich den Hash der YAML und der Heatmap (1.12). Ein Wechsel rechnet deshalb neu, ein Rückwechsel findet die alten Ergebnisse unter Fassung 1 wieder, weil der Schlüssel dort unverändert bleibt.
+- Beweis für den Rückweg (P33): `workers/tests/snapshots/detect_v1.json` friert `story_engine.run` unter Fassung 1 ein (Test `workers/tests/test_policy_snapshot_v1.py`, byte-gleich). Der Snapshot deckt die 14 Fälle des Testsatzes `editorial_v1` ab, rechnet ohne spaCy und belegt damit nur den Weg ohne Modell; der Weg mit geladenem Modell ist nicht eingefroren.
+- Standard: bleibt `1`, bis der Blindvergleich Fassung 2 abnimmt (P33).
+
+### 8.2 Schalter `implementation.*` in `clip_policy_v2.yaml`
+
+Jeder Schalter nennt, welcher Code ihn liest. Zusammen mit der Fassung 2 gilt: Schalter aus heißt genau das Verhalten vor diesem Paket.
+
+| Schalter | Heute | Paket | Wirkt auf | Warum so |
+|---|---|---|---|---|
+| `sentence_rule` | an | AP2 | Satzende-Regel v2 in Zerlegung, Tor und Messung, Anfang heilen, Heilung endet nie auf einer Abschwächung, Neubewertung nach Heilung (`editorial.sentence_rule`, `context_front`, `never_end_on_qualification`) | gebaut und gegen das Web durch Falldateien gesichert (Satzende-Parität); die Verbklammer über die Grenze (AP3) hängt nicht an diesem Schalter, sondern am Abschnitt `verb_bracket` (Rollback dort: `fallback: off` oder `ausstieg.verbklammer_nicht_trennen: false`) |
+| `gates.discard_hard` | aus | AP4 | Ob `story_engine` die zehn Gates anwendet (Heilen, Verwerfen vor `select_best`, Marker-Regel v2, Modus sperren, `instruction_followed`) | die Fehlalarmquote ist nur auf handgeschriebenen Proben gemessen (87 Proben, null Fehlalarme, voller Recall), nicht an echtem Material; Verwerfen kostet Clips, also bleibt der Schalter aus bis zum Blindvergleich (P38). Einschalten: Schalter `true`, `gates.discard_hard` in `V2_IMPLEMENTED_SWITCHES` aufnehmen (der Test in `test_editorial.py` verlangt es, Beobachtung i) |
+| `search.payoff_first` | an | AP5 | Kapitelüberlappung, Episodenübersicht, `propose_moments_v2`, deterministische Suche, Abgleich, Modellbudget (`story_engine.search_wired`, `story_score.propose`) | gebaut; die Fixtures (12 von 13 clipfähigen Fällen) tragen das, die Kosten sind durch das Budget von 400 Aufrufen je Quellstunde begrenzt (P41) |
+| `hook.native_spoken` | an | AP6a | Auswahl v2, wörtlicher gesprochener Hook, Claim-Check v2 (`Policy.hook_native_spoken`). Rollback gemeinsam mit dem Pin `prompts.hooks: 1` setzen, sonst läuft `hooks_v2` mit der Auswahl der Fassung 1 | gebaut; der Text-Hook ist ganzer Originalsatz oder kein Overlay im Rückfall (P34) |
+| `trim.enabled` | an | AP7 | Nur zusammen mit der Regel `trim.enabled` (steht auf `false`): Kürzung, Mehrsegment-Komposition (`editorial.trim_settings`, `story_engine.trim_wired`) | der Code ist gebaut, die Regel bleibt aus bis zum Blindvergleich; heute läuft also keine Kürzung (P39) |
+| `cut.padding` | aus | AP10b | nichts, kein Code liest den Schalter | Vor- und Nachlauf an Wortgrenzen (P31) sind nicht gebaut |
+| `captions.word_bridge` | an | AP10a | Wort-Ereignisse mit Überbrückung, Zahl plus Einheit, Komma-Bruch nur bei Überlauf (`editorial.caption_settings`, `captions_de.caption_rules`) | gebaut; Stil, Farben, Schrift und Position bleiben gleich (P30). Umschalten ändert den Plan-Hash und rendert neu |
+
+### 8.3 Regel-Schalter in den Abschnitten
+
+Neben dem Schalter hat ein Paket oft eine eigene Regel; wirksam ist es nur, wenn beide an sind.
+
+| Regel | Heute | Wirkung |
+|---|---|---|
+| `trim.enabled` | aus | Kürzung (8.2) |
+| `gates.discard_hard` | an | `rejected` statt `reported`, wenn der Schalter in 8.2 an ist |
+| `gates.<schluessel>` (zehn) | an | je Gate einzeln abschaltbar |
+| `search.payoff_first`, `search.opening_first` | an | beide Suchrichtungen einzeln |
+| `hook.native_spoken` | an | siehe 8.2 |
+| `hook.allow_partial_opening` | aus | Teilsätze als Hook (Opt-in, P34) |
+| `captions.bridge_words`, `captions.comma_break_only_on_overflow` | an | Brücke und Komma-Bruch einzeln |
+| `bewertung.modus_v2` | `sperren` | gilt nur mit Sprachmodell und verdrahteten Gates (`only_with_language_model`) |
+| `ausstieg.never_end_on_qualification` | an | wirkt mit `sentence_rule` |
+
+### 8.4 Prompt-Pins
+
+Die Pins in `V1_PROMPT_PINS` (Fassung 1, im Code) und im Abschnitt `prompts` (Fassung 2) legen fest, welche Datei gilt (Abschnitt 6). Ein Prompt-Rollback ohne Fassungswechsel ist nur durch einen anderen Pin in der YAML möglich; weil die YAML-Änderung ihren Hash im Schlüssel ändert, rechnet der nächste Lauf neu.
+
+### 8.5 Cache
+
+Alles, was das Ergebnis bestimmt, steckt im Kandidaten-Key (1.12). Wer Schalter, Regeln, Pins oder Heatmap ändert, bekommt unter Fassung 2 einen neuen Schlüssel und muss nichts löschen. Die Berichte unter Fassung 1 bleiben gültig.
+
+### 8.6 Nachweis, bevor ein Schalter wechselt
+
+`workers/eval/blind_compare.py` rechnet Fassung 1 gegen Fassung 2 und einzelne Schalter gegeneinander (`--override pfad=true`, `CHOPSTR_BLIND_OVERRIDES`); Ablauf in `workers/eval/README.md` (1.20). Bis ein Lauf an echtem Material mit echten Bewertenden vorliegt, bleiben `gates.discard_hard`, `trim.enabled` und der Standard `CHOPSTR_POLICY_VERSION=1` wie in der Tabelle.

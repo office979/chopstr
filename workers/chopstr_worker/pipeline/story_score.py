@@ -190,12 +190,23 @@ POLICY_TO_LEGACY = {
 LEGACY_TO_POLICY = {v: k for k, v in POLICY_TO_LEGACY.items()}
 LEGACY_SCALE_MAX = 10
 
+# Redaktionelle Teilwerte nach Master-Prompt Abschnitt 19 (AP9, ab score_clip_v3): Anker 0 bis 4, je mit
+# wörtlichem Beleg. Die Eigenständigkeit gegenüber anderen Kandidaten (``distinctiveness_vs_others``) misst
+# kein Modell, sie rechnet ``story_engine.select_best``.
+EDITORIAL_SUBSCORE_KEYS = (
+    "audience_relevance", "opening_clarity", "content_strength", "progress", "evidence_quality", "closing",
+    "naturalness",
+)  # fmt: skip
+SUBSCORE_SCALE_MAX = 4
+_CLIP_DELIMITER = re.compile(r"<(/?)clip>", re.IGNORECASE)
+_QUOTES = "\"'„“”‚‘’»«"
+
 
 def system_prompt() -> str:
     return prompts.load_pinned("system_editor").render()
 
 
-def rubric_schema(pol: editorial.Policy | None = None) -> dict:
+def rubric_schema(pol: editorial.Policy | None = None, subscores: bool = False) -> dict:
     """Antwortschema zur Grundlage: sieben Kriterien auf ihrer Skala, je mit Belegzitat.
 
     ``required`` enthält bewusst nur Gates und Flags, nicht die Punkte. Grund: neben dem Sprachmodell
@@ -204,6 +215,10 @@ def rubric_schema(pol: editorial.Policy | None = None) -> dict:
     sieben flachen Schlüsseln würde ihn abwürgen, ohne dass dadurch eine Bewertung besser würde.
     Dass am Ende beide Rubriken vollständig dastehen, stellt ``_harmonise`` sicher; kommt überhaupt
     keine Punktzahl, scheitert es dort laut.
+
+    ``subscores`` (ab ``score_clip_v3``, AP9): zusätzlich ``editorial_subscores`` nach Master-Prompt 19,
+    je Teilwert ``value`` 0 bis 4 und ``evidence``. Nicht in ``required``, weil die Heuristik sie nicht
+    liefert; geprüft wird in ``editorial_subscores``.
     """
     pol = pol or editorial.load()
     props: dict[str, Any] = {
@@ -220,6 +235,20 @@ def rubric_schema(pol: editorial.Policy | None = None) -> dict:
         "suggested_title_card": {"type": "string"},
         "why": {"type": "string"},
     }
+    if subscores:
+        entry = {
+            "type": "object",
+            "properties": {
+                "value": {"type": "integer", "minimum": 0, "maximum": SUBSCORE_SCALE_MAX},
+                "evidence": {"type": "string", "description": "wörtliches Zitat aus dem Kandidaten"},
+            },
+            "required": ["value", "evidence"],
+        }
+        props["editorial_subscores"] = {
+            "type": "object",
+            "properties": {k: entry for k in EDITORIAL_SUBSCORE_KEYS},
+            "required": list(EDITORIAL_SUBSCORE_KEYS),
+        }
     return {
         "type": "object",
         "properties": props,
@@ -628,17 +657,65 @@ def _harmonise(r: dict, pol: editorial.Policy) -> tuple[dict[str, float], list[s
     return punkte, geraten
 
 
+def _normalised(text: str) -> str:
+    return " ".join(str(text).lower().split())
+
+
+def editorial_subscores(raw: Any, text: str, source: str, heuristic: bool = False) -> dict[str, Any]:
+    """Teilwerte nach Master-Prompt 19 (AP9) deterministisch prüfen.
+
+    Ein Wert gilt nur als ganze Zahl von 0 bis ``SUBSCORE_SCALE_MAX``. Ab 1 braucht er ein Zitat, das
+    wörtlich im Kandidatentext steht (Groß- und Kleinschreibung, Leerraum und umschließende
+    Anführungszeichen zählen nicht); ein nicht gefundenes Zitat verwirft den Wert auch bei 0. Verworfene
+    Werte stehen auf ``null`` und in ``ungrounded``. Die Heuristik misst keinen der Teilwerte: alle
+    ``null``, ``not_measured`` nennt sie. Ohne Ergebnisdaten bleibt alles ``uncalibrated``."""
+    entries = raw if isinstance(raw, dict) and not heuristic else {}
+    haystack = _normalised(text)
+    values: dict[str, int | None] = {}
+    evidence: dict[str, str] = {}
+    ungrounded: list[str] = []
+    for key in EDITORIAL_SUBSCORE_KEYS:
+        entry = entries.get(key)
+        value = entry.get("value") if isinstance(entry, dict) else None
+        quote = str(entry.get("evidence") or "").strip().strip(_QUOTES).strip() if isinstance(entry, dict) else ""
+        if not (isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= SUBSCORE_SCALE_MAX):
+            values[key] = None
+            continue
+        if (quote and _normalised(quote) not in haystack) or (value >= 1 and not quote):
+            values[key] = None
+            ungrounded.append(key)
+            continue
+        values[key] = value
+        evidence[key] = quote
+    return {
+        "scale_max": SUBSCORE_SCALE_MAX,
+        "calibration": "uncalibrated",
+        "source": "heuristic" if heuristic else source,
+        "values": values,
+        "evidence": evidence,
+        "ungrounded": ungrounded,
+        "not_measured": [k for k, v in values.items() if v is None and k not in ungrounded],
+    }
+
+
 def score(span_sents: list[Sentence], brief: dict[str, Any], llm: LLM) -> dict:
     pol = editorial.load()
     p = prompts.load_pinned("score_clip", pol)
     text = " ".join(s.text for s in span_sents)
+    # Ab score_clip_v3 (AP9) steht der Kandidat zwischen <clip>-Begrenzern; ein Begrenzer im Transkript wird
+    # unschädlich gemacht, damit Daten den Datenblock nicht schließen (Master-Prompt 22).
+    subscores = p.version >= 3
+    candidate = numbered(span_sents)
+    if subscores:
+        candidate = _CLIP_DELIMITER.sub(lambda m: f"[{m.group(1)}clip]", candidate)
     user = p.render(
         audience=brief.get("audience"),
         platform=brief.get("platform", "linkedin"),
-        candidate_numbered=numbered(span_sents),
+        candidate_numbered=candidate,
         policy=pol.als_prompt_text(),
     )
-    r = llm.structured(system_prompt(), user, rubric_schema(pol), p.tool or "score_clip", p.prompt_version, job_type="llm_score")
+    schema = rubric_schema(pol, subscores=subscores)
+    r = llm.structured(system_prompt(), user, schema, p.tool or "score_clip", p.prompt_version, job_type="llm_score")
     punkte, geraten = _harmonise(r, pol)
     r["gate_passed"] = not (r["needs_earlier_context"] or r["ends_before_answer"] or r["unresolved_references"])
     r["rubric_points"] = punkte  # alle sieben auf der Skala der Grundlage
@@ -649,6 +726,9 @@ def score(span_sents: list[Sentence], brief: dict[str, Any], llm: LLM) -> dict:
     r["prompt_version"] = p.prompt_version
     r["policy_version"] = editorial.policy_version(pol.version)
     r["model_id"] = llm.model()
+    if subscores:
+        heuristic = bool(getattr(llm, "is_heuristic", False))
+        r["editorial_subscores"] = editorial_subscores(r.get("editorial_subscores"), text, p.prompt_version, heuristic)
     return r
 
 
@@ -674,6 +754,7 @@ def score_with_repair(sents: list[Sentence], first: int, last: int, brief: dict[
 __all__ = [
     "DEFAULT_WEIGHTS",
     "DIRECTIONS",
+    "EDITORIAL_SUBSCORE_KEYS",
     "LEGACY_KEYS",
     "LEGACY_TO_POLICY",
     "NARRATIVE_TYPES",
@@ -683,6 +764,8 @@ __all__ = [
     "PROPOSE_SCHEMA_V2",
     "RUBRIC_SCHEMA",
     "STRUCTURES",
+    "SUBSCORE_SCALE_MAX",
+    "editorial_subscores",
     "legacy_weights",
     "overview",
     "policy_weights",

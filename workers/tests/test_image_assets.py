@@ -52,6 +52,24 @@ def test_dockerfile_copies_shared_packages(dockerfile):
         assert (REPO / "packages" / pkg).is_dir()
 
 
+SPACY_MODEL_WHEEL = (
+    "de_core_news_md @ https://github.com/explosion/spacy-models/releases/download/"
+    "de_core_news_md-${SPACY_MODEL_VERSION}/de_core_news_md-${SPACY_MODEL_VERSION}-py3-none-any.whl"
+)
+
+
+@pytest.mark.parametrize("dockerfile", DOCKERFILES, ids=lambda p: p.name)
+def test_dockerfile_installs_the_spacy_model_at_build_time(dockerfile):
+    """P28: das Sprachmodell de_core_news_md liegt im Image (Release-Wheel, im selben pip-Aufruf wie das Extra
+    nlp, damit die spaCy-Version zum Modell passt); kein Download zur Laufzeit."""
+    text = dockerfile.read_text(encoding="utf-8")
+    lines = [" ".join(line.split()) for line in text.replace("\\\n", " ").splitlines()]
+    install = [line for line in lines if "pip install" in line and "nlp]" in line]
+    assert install and all(SPACY_MODEL_WHEEL in line for line in install), dockerfile.name
+    assert any(line.startswith("ARG SPACY_MODEL_VERSION=3.") for line in lines)
+    assert "spacy download" not in text
+
+
 @pytest.mark.parametrize("name,service", _services(), ids=lambda v: v if isinstance(v, str) else "")
 def test_compose_sets_path_variables_for_workers(name, service):
     env = service.get("environment") or {}

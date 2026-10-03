@@ -14,6 +14,28 @@ export interface RevisionError {
 
 export type Revision = Omit<Candidate, "id" | "created_at">;
 
+/* Rubrik-Schlüssel, die eine bestimmte Schnittfassung beschreiben (Worker, Fassung 2): die Kürzung (AP7) und
+ * die kompakte ClipCandidate-Teilmenge (AP8). Ändern sich die Grenzen, gelten sie nicht mehr und fallen weg;
+ * bei einer reinen Titeländerung bleiben sie samt den Segmenten der Kürzung. */
+export const CUT_SPECIFIC_RUBRIC_KEYS = [
+  "composition",
+  "removed_spans",
+  "trim",
+  "versions",
+  "decision",
+  "decision_reason",
+  "quality_gate_results",
+  "editorial_subscores",
+  "assessment_uncertainties",
+  "calibration",
+] as const;
+
+function withoutCutSpecificKeys(rubric: Candidate["rubric"]): Candidate["rubric"] {
+  const out: Record<string, unknown> = { ...rubric };
+  for (const key of CUT_SPECIFIC_RUBRIC_KEYS) delete out[key];
+  return out as unknown as Candidate["rubric"];
+}
+
 /* Neue Kandidaten-Version aus geänderten Grenzen oder Titelkarte (gemeinsam für Demo und Postgres).
  * Scores bleiben, rubric.scores_stale = true, Gates deterministisch neu; Story-Graph-Flags, die jetzt
  * im Clip liegen, gelten als repariert. */
@@ -66,17 +88,18 @@ export function buildRevision(
   return {
     source_id: prev.source_id,
     version: prev.version + 1,
-    segments: [{ start, end, role: "body" }],
-    start_s: start,
-    end_s: end,
+    // Neue Grenzen ergeben wieder ein Segment (Kürzungen entfallen); eine reine Titeländerung behält die Segmente.
+    segments: boundariesChanged ? [{ start, end, role: "body" }] : prev.segments.map((seg) => ({ ...seg })),
+    start_s: boundariesChanged ? start : prev.start_s,
+    end_s: boundariesChanged ? end : prev.end_s,
     first_sent,
     last_sent,
     structure: prev.structure,
     rubric: {
-      ...prev.rubric,
+      ...(boundariesChanged ? withoutCutSpecificKeys(prev.rubric) : prev.rubric),
       text: clipText(range),
       speakers: [...new Set(range.map((s) => s.speaker))],
-      duration_s: Number((end - start).toFixed(1)),
+      duration_s: boundariesChanged ? Number((end - start).toFixed(1)) : prev.rubric.duration_s,
       suggested_title_card: titleCard,
       parent_id: prev.id,
       scores_stale: boundariesChanged ? true : (prev.rubric.scores_stale ?? false),

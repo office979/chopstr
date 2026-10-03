@@ -198,3 +198,58 @@ describe("unbekannte zusätzliche Schlüssel (AP4)", () => {
     expect(countGates(rev.gates)).toEqual({ passed: 5, total: 5 });
   });
 });
+
+describe("Revision und Kürzung (AP7, AP8)", () => {
+  const SEGMENTE = [
+    { start: 9.2, end: 11.0, role: "body" as const },
+    { start: 11.3, end: 15, role: "body" as const },
+  ];
+  function gekuerzt(): Candidate {
+    const base = kandidat(3, 4);
+    return {
+      ...base,
+      segments: SEGMENTE,
+      rubric: {
+        ...base.rubric,
+        duration_s: 5.8,
+        composition: { local_cuts: 1, semantic_splices: 0, segments: SEGMENTE },
+        removed_spans: [{ source_in: 11.0, source_out: 11.3, removal_reason: "technical_pause", protected_context_check: null }],
+        trim: { applied: true, reason: null },
+        versions: { contract: "clip_candidate_v1" },
+        decision: "accept",
+        decision_reason: "x",
+        quality_gate_results: { unresolved_pronoun: { passed: true, detail: "x" } },
+        editorial_subscores: { scale_max: 2, values: {} },
+        assessment_uncertainties: [],
+        calibration: "uncalibrated",
+        sentence_rule: "v2",
+      },
+    } as unknown as Candidate;
+  }
+
+  it("neue Grenzen: ein Segment, Kürzung und ClipCandidate-Teilmenge fallen aus der Rubrik", () => {
+    const rev = buildRevision(gekuerzt(), SAETZE, { first_sent: 2, last_sent: 4 });
+    if (isRevisionError(rev)) throw new Error(rev.error);
+    expect(rev.segments).toEqual([{ start: SAETZE[2].start, end: SAETZE[4].end, role: "body" }]);
+    const rubric = rev.rubric as unknown as Record<string, unknown>;
+    for (const key of ["composition", "removed_spans", "trim", "versions", "decision", "decision_reason",
+      "quality_gate_results", "editorial_subscores", "assessment_uncertainties", "calibration"]) {
+      expect(rubric).not.toHaveProperty(key);
+    }
+    expect(rubric.sentence_rule).toBe("v2");
+    expect(rev.rubric.scores_stale).toBe(true);
+  });
+
+  it("nur neue Titelkarte: Segmente der Kürzung und Rubrik bleiben", () => {
+    const prev = gekuerzt();
+    const rev = buildRevision(prev, SAETZE, { first_sent: 3, last_sent: 4, title_card: "Zwei Jahre Rabatte" });
+    if (isRevisionError(rev)) throw new Error(rev.error);
+    expect(rev.segments).toEqual(SEGMENTE);
+    expect(rev.start_s).toBe(prev.start_s);
+    const rubric = rev.rubric as unknown as Record<string, unknown>;
+    expect(rubric.composition).toEqual({ local_cuts: 1, semantic_splices: 0, segments: SEGMENTE });
+    expect(rubric.removed_spans).toHaveLength(1);
+    expect(rev.rubric.duration_s).toBe(5.8);
+    expect(rev.rubric.suggested_title_card).toBe("Zwei Jahre Rabatte");
+  });
+});

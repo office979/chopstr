@@ -447,16 +447,18 @@ BAD = [(B, "Sie hat dann jede Schicht selbst mitgemacht.")]
 
 
 def switched(policy) -> editorial.Policy:
-    """Fassung 2 mit eingeschaltetem implementation.gates.discard_hard (erst dann wird verworfen)."""
+    """Fassung 2 mit Schalter implementation.gates.discard_hard (Gates laufen) und Regel gates.discard_hard
+    (Verletzer verwerfen); die ausgelieferte Policy steht im Berichtsmodus (Regel false)."""
     raw = copy.deepcopy(policy.roh)
     raw["implementation"]["gates"]["discard_hard"] = True
+    raw["gates"]["discard_hard"] = True
     return editorial.Policy(version=2, stand=policy.stand, roh=raw)
 
 
 def test_run_gates_rejects_only_with_rule_and_switch(v2):
     words, sents = build(*BAD)
     run = editorial_gates.run_gates(words, sents, 0, 0, v2)
-    assert run["decision"] == "reported" and run["switch"] is False and run["discard_hard"] is True
+    assert run["decision"] == "reported" and run["switch"] is True and run["discard_hard"] is False  # Berichtsmodus
     run = editorial_gates.run_gates(words, sents, 0, 0, switched(v2))
     assert run["switch"] is True and run["unhealable"] == []
     assert set(run["results"]) == set(editorial_gates.GATE_KEYS)
@@ -477,7 +479,10 @@ def test_run_gates_only_reports_without_discard_hard_or_without_policy(v2):
     raw = copy.deepcopy(v2.roh)
     raw["gates"]["discard_hard"] = False
     report_only = editorial.Policy(version=2, stand=v2.stand, roh=raw)
-    for pol in (report_only, switched(report_only), v2, editorial.load(1), None):
+    switch_off = copy.deepcopy(switched(v2).roh)
+    switch_off["implementation"]["gates"]["discard_hard"] = False
+    rule_without_switch = editorial.Policy(version=2, stand=v2.stand, roh=switch_off)
+    for pol in (report_only, rule_without_switch, v2, editorial.load(1), None):
         run = editorial_gates.run_gates(words, sents, 0, 0, pol)
         assert run["failed"] == ["unresolved_pronoun"]
         assert run["decision"] == "reported" and "nur berichtet" in run["decision_reason"]
@@ -517,9 +522,11 @@ def test_gates_settings_only_in_v2(v2):
     assert editorial.gates_settings(editorial.load(1)) is None
     cfg = editorial.gates_settings(v2)
     assert cfg["enabled"] == dict.fromkeys(editorial.GATE_RULE_KEYS, True)
-    assert cfg["discard_hard"] is True
-    assert cfg["switch"] is False  # implementation.gates.discard_hard bleibt aus, bis story_engine es liest
-    assert "gates.discard_hard" not in editorial.V2_IMPLEMENTED_SWITCHES
+    # Schalter an: story_engine lässt die Gates laufen (Bericht, Heilung, Marker v2). Regel aus: Berichtsmodus,
+    # verworfen wird erst mit gates.discard_hard true (nach dem Blindvergleich).
+    assert cfg["discard_hard"] is False
+    assert cfg["switch"] is True
+    assert "gates.discard_hard" in editorial.V2_IMPLEMENTED_SWITCHES
     assert "gates" in editorial.V2_RULE_SECTIONS
 
 

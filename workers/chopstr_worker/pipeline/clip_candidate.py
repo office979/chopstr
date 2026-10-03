@@ -6,10 +6,11 @@ geht später nur die kompakte Teilmenge aus ``compact_for_rubric`` (additive Sch
 
 Regeln (Vertrag ``packages/schema/CLIP_CANDIDATE.md``):
 
-* Fehlende Datenbasis ist ``None``. Kein Zeitstempel außerhalb von Wortgrenzen (``source_in`` ist
-  immer der Anfang eines Wortes, ``source_out`` das Ende eines Wortes), kein Sprecher ohne
-  Sprecherangabe in den Wörtern, keine Sicherheit ohne Grundlage (``boundary_confidence`` bleibt
-  ``None`` bis AP10b, ``externally_verified`` ist immer ``None``).
+* Fehlende Datenbasis ist ``None``. ``source_in``/``source_out`` sind Schnittzeiten (bei Kürzung und
+  Vor- und Nachlauf auch zwischen Wörtern), die Wortgrenzen stehen getrennt in ``word_ids``; kein Sprecher ohne
+  Sprecherangabe in den Wörtern, keine Sicherheit ohne Grundlage (``boundary_confidence`` aus
+  ``transitions.segment_confidence`` nur unter Fassung 2 mit ``cut.padding``, sonst ``None``;
+  ``externally_verified`` ist immer ``None``).
 * ``audience_context`` kommt nur aus dem Brief und trägt dann ``audience_context_provenance =
   "explicit"``.
 * ``assessment_uncertainties`` nennt, was am Audio oder von einem Menschen zu prüfen ist: Zahlen und
@@ -35,11 +36,15 @@ from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 from .. import editorial
-from . import compose, dach_nlp, fidelity, segment, story_engine
+from . import compose, dach_nlp, fidelity, segment, story_engine, story_score
 from .segment import Sentence
 from .transcribe import LOW_CONF_THRESHOLD
+from .transitions import cut_rules, segment_confidence
 
 CONTRACT = "clip_candidate_v1"
+# Teilwerte nach Master-Prompt 19 (AP9): die sieben aus story_score plus distinctiveness_vs_others aus der Auswahl.
+SUBSCORE_KEYS = (*story_score.EDITORIAL_SUBSCORE_KEYS, "distinctiveness_vs_others")
+SUBSCORE_SCALE_MAX = story_score.SUBSCORE_SCALE_MAX
 DECISIONS = ("accept", "reject")
 CALIBRATIONS = ("uncalibrated", "calibrated")
 UNCERTAINTY_KINDS = (
@@ -93,7 +98,7 @@ SCHEMA: dict[str, Any] = {
         "audience_context_provenance", "central_idea", "viewer_promise", "payoff_description",
         "narrative_type", "opening_source_span", "required_context_spans", "payoff_source_span",
         "segments", "removed_spans", "meaning_dependencies", "unresolved_questions",
-        "quality_gate_results", "editorial_subscores", "assessment_uncertainties", "decision",
+        "quality_gate_results", "editorial_subscores", "rubric_points", "assessment_uncertainties", "decision",
         "decision_reason", "alternatives_considered", "model_version", "prompt_version", "policy_version",
         "externally_verified", "calibration",
     ],
@@ -117,7 +122,26 @@ SCHEMA: dict[str, Any] = {
         "meaning_dependencies": {"type": "array", "items": {"$ref": "#/$defs/meaning_dependency"}},
         "unresolved_questions": {"type": "array", "items": {"$ref": "#/$defs/question"}},
         "quality_gate_results": {"type": "object", "additionalProperties": {"$ref": "#/$defs/gate"}},
+        # Teilwerte nach Master-Prompt 19, Anker 0 bis 4 (AP9, rubric.anchor_subscores); null, wo nicht gemessen.
         "editorial_subscores": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["scale_max", "calibration", "source", "values", "evidence"],
+            "properties": {
+                "scale_max": {"const": SUBSCORE_SCALE_MAX},
+                "calibration": {"enum": list(CALIBRATIONS)},
+                "source": _STR_OR_NULL,
+                "values": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": list(SUBSCORE_KEYS),
+                    "properties": {k: {"type": ["integer", "null"], "minimum": 0, "maximum": SUBSCORE_SCALE_MAX} for k in SUBSCORE_KEYS},
+                },
+                "evidence": {"type": "object", "additionalProperties": {"type": "string"}},
+            },
+        },
+        # Die sieben Rubrikpunkte der Richtlinie auf ihrer Skala (0 bis 2), wie rubric.rubric_points.
+        "rubric_points": {
             "type": "object",
             "additionalProperties": False,
             "required": ["scale_max", "values"],
@@ -285,6 +309,8 @@ def _check(value: Any, schema: dict[str, Any], path: str, root: dict[str, Any], 
             return
     if isinstance(value, str) and len(value) < schema.get("minLength", 0):
         errors.append(f"{path}: leer")
+    if _TYPES["number"](value) and "maximum" in schema and value > schema["maximum"]:
+        errors.append(f"{path}: {value} über {schema['maximum']}")
     if _TYPES["number"](value) and "minimum" in schema and value < schema["minimum"]:
         errors.append(f"{path}: {value} unter {schema['minimum']}")
     if isinstance(value, list):
@@ -406,6 +432,7 @@ class ClipCandidate:
     unresolved_questions: list[dict[str, Any]]
     quality_gate_results: dict[str, Any]
     editorial_subscores: dict[str, Any]
+    rubric_points: dict[str, Any]
     assessment_uncertainties: list[dict[str, Any]]
     decision: str
     decision_reason: str
@@ -450,11 +477,17 @@ def sentences_for(words: list[dict], policy: editorial.Policy | None = None) -> 
 
 
 def versions_for(policy: editorial.Policy, report: story_engine.DetectReport | None = None) -> dict[str, Any]:
-    """Versionen eines Laufs: Engine, Richtlinie, alle gepinnten Prompts, Modell und NLP-Status."""
+    """Versionen eines Laufs: Engine, Richtlinie, alle gepinnten Prompts, Modell und NLP-Status.
+
+    ``propose_moments`` nennt den tatsächlich genutzten Prompt: ohne ``implementation.search.payoff_first``
+    nutzt ``story_score.propose`` unter Fassung 2 den Pin der Fassung 1."""
+    prompt_names = {name: f"{name}_v{v}" for name, v in sorted(policy.prompt_pins.items())}
+    if "propose_moments" in prompt_names and story_engine.search_wired(policy) is None:
+        prompt_names["propose_moments"] = f"propose_moments_v{editorial.V1_PROMPT_PINS['propose_moments']}"
     return {
         "engine": (report.engine if report is not None and report.engine else story_engine.engine_version(policy)),
         "policy_version": editorial.policy_version(policy.version),
-        "prompts": {name: f"{name}_v{v}" for name, v in sorted(policy.prompt_pins.items())},
+        "prompts": prompt_names,
         "model_id": report.model_id if report is not None else None,
         "nlp_status": report.nlp_status if report is not None else "",
     }
@@ -654,12 +687,14 @@ def from_result(
     rubric = result.rubric
     first, last = result.first_sent, result.last_sent
 
+    # boundary_confidence nur unter Fassung 2 mit cut.padding (AP10b), sonst null wie bisher.
+    with_confidence = cut_rules(policy) is not None
     segs: list[ClipSegment] = []
     for n, (seg, (out_in, out_out)) in enumerate(zip(result.segments, output_timeline(result.segments)), start=1):
         ids = _word_ids_in(words, float(seg["start"]), float(seg["end"]))
         speakers = {words[i].get("speaker") for i in ids}
-        # Schnittgrenze ist die Segmentgrenze; liegt sie auf der Grenze des ersten oder letzten Wortes, gilt
-        # dessen Zeit (keine erfundene Genauigkeit), sonst die tatsächliche Schnittzeit aus der Komposition.
+        # source_in/source_out sind Schnittzeiten der Komposition (bei Kürzung und Vor- und Nachlauf zwischen
+        # Wörtern); innerhalb 1 ms an einer Wortgrenze gilt die Wortzeit. Die Wortgrenzen tragen die word_ids.
         cut_in, cut_out = float(seg["start"]), float(seg["end"])
         segs.append(ClipSegment(
             segment_id=f"s{n}",
@@ -671,7 +706,7 @@ def from_result(
             word_ids=ids,
             verbatim_text=" ".join(str(words[i].get("text") or "") for i in ids),
             editorial_role=str(seg.get("role") or "body"),
-            boundary_confidence=None,
+            boundary_confidence=segment_confidence(words, ids[0], ids[-1]) if with_confidence and ids else None,
         ))  # fmt: skip
 
     teaser = rubric.get("teaser_satz")
@@ -756,7 +791,8 @@ def from_result(
         unresolved_questions=questions,
         # Die fünf Tore und, unter Fassung 2 mit den harten Gates (AP4), deren Einzelergebnisse.
         quality_gate_results=json.loads(json.dumps({**(rubric.get("quality_gate_results") or {}), **result.gates})),
-        editorial_subscores={
+        editorial_subscores=_anchor_subscores(rubric.get("anchor_subscores")),
+        rubric_points={
             "scale_max": int(policy.skala_max),
             "values": {str(k): (float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None) for k, v in (rubric.get("rubric_points") or {}).items()},
         },
@@ -788,7 +824,7 @@ def from_report(
     versions = versions_for(policy, report)
     reasons = {
         (d.get("first_sent"), d.get("last_sent")): d for d in report.discarded
-        if d.get("reason") in ("gate", "overlap", "limit", "below_threshold") or str(d.get("reason") or "").startswith("gate:")
+        if d.get("reason") in ("gate", "overlap", "limit", "below_threshold", "redundant") or str(d.get("reason") or "").startswith(("gate:", "critic:"))
     }  # fmt: skip
     ids = {id(c): _candidate_id((source or {}).get("id"), (source or {}).get("version"), c, versions) for c in [*report.candidates, *report.verworfen]}
 
@@ -812,21 +848,48 @@ def from_report(
             alts = [alt(c, "angeboten statt dieses Kandidaten") for c in report.candidates if overlaps(c, v)]
             out.append(from_result(v, words, sents, source, versions, policy, brief, decision="reject", decision_reason=why, alternatives=alts))
             continue
+        if reason.startswith("critic:"):
+            # AP6b: vom Kritiker verworfen, mit wörtlichem Beleg.
+            why = f"Verworfen vom Kritiker, Befund {reason[7:]}: {d.get('detail') or _reject_reason(v)}"
+            out.append(from_result(v, words, sents, source, versions, policy, brief, decision="reject", decision_reason=why, alternatives=[]))
+            continue
         why = {
             "gate": _reject_reason(v),
             "below_threshold": f"Verworfen im Modus sperren: {d.get('detail') or 'unter der Schwelle'}",
             "overlap": f"Verworfen, überdeckt einen besser bewerteten Kandidaten zu mindestens {story_engine.OVERLAP_SUPPRESS_ANTEIL:.0%}",
             "limit": "Verworfen, über der Obergrenze der Kandidatenzahl",
+            "redundant": f"Verworfen, dieselbe Aussage wie ein besser bewerteter Kandidat: {d.get('detail') or 'Redundanz über Inhalt'}",
         }.get(str(d.get("reason")), _reject_reason(v))
         alts = [alt(c, "angeboten statt dieses Kandidaten") for c in report.candidates if overlaps(c, v)]
         out.append(from_result(v, words, sents, source, versions, policy, brief, decision="reject", decision_reason=why, alternatives=alts))
     return out
 
 
+# Ohne editorial_subscores und rubric_points: beide stehen schon in der Rubrik (rubric.anchor_subscores aus
+# AP9, rubric.rubric_points), ein zweiter Schlüssel gleichen Namens würde sie überschreiben oder doppeln.
 RUBRIC_KEYS = (
-    "versions", "decision", "decision_reason", "quality_gate_results", "editorial_subscores",
+    "versions", "decision", "decision_reason", "quality_gate_results",
     "assessment_uncertainties", "removed_spans", "calibration",
 )  # fmt: skip
+
+
+def _anchor_subscores(raw: Any) -> dict[str, Any]:
+    """Teilwerte 0 bis 4 aus ``rubric.anchor_subscores``: nur ganze Zahlen im Anker, sonst null; ohne Angabe
+    (Fassung 1, Heuristik) alle null. Immer ``uncalibrated``, solange es keine Ergebnisdaten gibt."""
+    raw = raw if isinstance(raw, dict) else {}
+    values = raw.get("values") if isinstance(raw.get("values"), dict) else {}
+    out = {}
+    for key in SUBSCORE_KEYS:
+        v = values.get(key)
+        out[key] = v if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= SUBSCORE_SCALE_MAX else None
+    evidence = raw.get("evidence") if isinstance(raw.get("evidence"), dict) else {}
+    return {
+        "scale_max": SUBSCORE_SCALE_MAX,
+        "calibration": "uncalibrated",
+        "source": str(raw["source"]) if raw.get("source") else None,
+        "values": out,
+        "evidence": {str(k): str(q) for k, q in evidence.items() if k in SUBSCORE_KEYS and out.get(k) is not None and isinstance(q, str)},
+    }
 
 
 def compact_for_rubric(cc: ClipCandidate) -> dict[str, Any]:
@@ -848,6 +911,8 @@ __all__ = [
     "CONTRACT",
     "DECISIONS",
     "RUBRIC_KEYS",
+    "SUBSCORE_KEYS",
+    "SUBSCORE_SCALE_MAX",
     "SCHEMA",
     "UNCERTAINTY_KINDS",
     "ClipCandidate",

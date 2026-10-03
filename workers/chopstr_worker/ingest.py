@@ -42,6 +42,9 @@ class ProbeResult:
     has_video: bool
     size_bytes: int
     format_name: str | None
+    # Variable Bildrate (AP10b): mittlere und nominelle Bildrate weichen ab; ``None``, wenn eine fehlt.
+    # Nur ein Kennzeichen für den Render-Plan, ungeprüft (Halbbildmaterial kann ebenfalls abweichen).
+    vfr: bool | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -99,8 +102,12 @@ def probe(path: str | os.PathLike) -> ProbeResult:
         duration_s = 0.0
 
     fps = None
+    vfr = None
     if video is not None:
-        fps = _parse_rate(video.get("avg_frame_rate")) or _parse_rate(video.get("r_frame_rate"))
+        avg, nominal = _parse_rate(video.get("avg_frame_rate")), _parse_rate(video.get("r_frame_rate"))
+        fps = avg or nominal
+        if avg and nominal:
+            vfr = abs(avg - nominal) > 0.01
     return ProbeResult(
         duration_s=round(duration_s, 3),
         width=int(video["width"]) if video and video.get("width") else None,
@@ -112,6 +119,7 @@ def probe(path: str | os.PathLike) -> ProbeResult:
         has_video=video is not None,
         size_bytes=int(fmt.get("size") or p.stat().st_size),
         format_name=fmt.get("format_name"),
+        vfr=vfr,
     )
 
 

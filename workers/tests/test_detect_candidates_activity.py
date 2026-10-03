@@ -121,7 +121,7 @@ def test_active_policy_version_is_part_of_the_cache_key(fake_db, fake_context, s
     fin = fake_db.events_for("detect_candidates")[-1]["payload"]
     assert fin["key"] != key_v1 and fin["cached"] is False
     # Fassung 2 mit implementation.search.payoff_first: der tatsächlich genutzte Vorschlags-Prompt und die Übersicht.
-    assert fin["prompt_versions"] == ["propose_moments_v2", "score_clip_v2", "story_graph_confirm_v1", "episode_overview_v1"]
+    assert fin["prompt_versions"] == ["propose_moments_v2", "score_clip_v3", "story_graph_confirm_v1", "episode_overview_v1", "critique_clip_v1"]
     assert fake_db.candidates
     assert {c["rubric"]["policy_version"] for c in fake_db.candidates} == {"clip_policy_v2"}
 
@@ -689,4 +689,38 @@ def test_v1_report_keeps_engine_v4_and_v2_reports_v5(fake_db, fake_context, sour
     data = fake_context.store.get_json("derived", key)
     assert data["engine"] == "story_engine_v5"
     assert data["clip_candidates"] and all(cc["contract"] == "clip_candidate_v1" for cc in data["clip_candidates"])
+    editorial.clear_cache()
+
+
+def test_v2_step_event_and_decision_log_separate_duplicates_from_rejections(fake_db, fake_context, source, monkeypatch):
+    from chopstr_worker import decision_log, editorial
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    editorial.clear_cache()
+    report = story_engine.DetectReport(engine="story_engine_v5", prompt_versions=["propose_moments_v2"])
+    report.discarded = [
+        {"reason": "too_short", "first_sent": 0, "last_sent": 1, "duration_s": 9.0},
+        {"reason": "gate:back_reference", "first_sent": 2, "last_sent": 5, "total": 7.0},
+        {"reason": "chapter_limit", "first_sent": 6, "last_sent": 8},
+        {"reason": "budget_exhausted", "limit": 4, "used": 4, "refused": 2},
+    ]
+    report.search = {"duplicate_counts": {"duplicate_payoff": 3, "same_span": 1}, "chapters": [{"model": 1, "search": 2, "search_rejected": 1, "evaluated": 2}]}
+    n = decision_log.record_detect_report(fake_db, "ws", source, None, report, [], "linkedin")
+    proposed = [d for d in fake_db.decision_log if d["decision_type"] == "candidate_proposed"]
+    rejected = [d["chosen"]["reason"] for d in proposed if d["chosen"]["kept"] is False]
+    assert rejected == ["too_short", "gate:back_reference"]
+    (summary,) = [d for d in proposed if d["chosen"]["reason"] == "summary"]
+    assert summary["features"]["not_candidates"] == {"budget_exhausted": 1, "chapter_limit": 1, "duplicate_payoff": 3, "same_span": 1}
+    assert n == 3
+
+    analyze.run_detect_candidates(fake_context, source)
+    fin = fake_db.events_for("detect_candidates")[-1]["payload"]
+    assert {"gate_rejections", "llm_budget", "duplicates", "search"} <= set(fin)
+    assert fin["llm_budget"]["limit"] >= 1 and fin["search"]["chapters"] >= 1
+    assert not [d for d in fin["discarded"] if "duplicate" in str(d.get("reason"))]
+    editorial.clear_cache()
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "1")
+    editorial.clear_cache()
+    analyze.run_detect_candidates(fake_context, source)
+    assert "gate_rejections" not in fake_db.events_for("detect_candidates")[-1]["payload"]
     editorial.clear_cache()

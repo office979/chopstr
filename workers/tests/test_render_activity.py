@@ -284,12 +284,20 @@ def test_candidate_composition_only_while_the_clip_cuts_the_same_segments():
     from chopstr_worker.activities import render as render_activity
 
     segs = [{"start": 1.0, "end": 5.0, "role": "body"}, {"start": 5.6, "end": 9.0, "role": "body"}]
-    comp = {"local_cuts": 1, "semantic_splices": 0, "density": 0.95, "is_debate": False, "valid": True, "issues": []}
+    comp = {"local_cuts": 1, "semantic_splices": 0, "density": 0.95, "is_debate": False, "valid": True, "issues": [], "segments": segs}
     cand = {"segments": segs, "rubric": {"composition": comp}}
     assert render_activity.candidate_composition(cand, [dict(s) for s in segs]) == comp
     # Die Web-Revision hat die Grenzen geändert (ein Segment): die Kürzung gilt nicht mehr.
     assert render_activity.candidate_composition(cand, [{"start": 1.0, "end": 9.0, "role": "body"}]) is None
     assert render_activity.candidate_composition({"segments": segs, "rubric": {}}, segs) is None
+    # Revidierter Kandidat: neue Segmente in der Zeile, alte Rubrik mitkopiert. Maßgeblich sind die
+    # Segmente der Komposition, nicht die der Zeile.
+    one = [{"start": 1.0, "end": 9.0, "role": "body"}]
+    revised = {"segments": one, "rubric": {"composition": comp, "removed_spans": [{"source_in": 5.0, "source_out": 5.6}]}}
+    assert render_activity.candidate_composition(revised, one) is None
+    # Komposition ohne Segmente (ältere Zeile): nicht prüfbar, gilt nicht.
+    legacy = {k: v for k, v in comp.items() if k != "segments"}
+    assert render_activity.candidate_composition({"segments": segs, "rubric": {"composition": legacy}}, segs) is None
 
 
 @requires_ffmpeg
@@ -301,9 +309,93 @@ def test_filler_cuts_follow_the_candidate_composition(fake_db, fake_context, pro
 
     monkeypatch.setenv("CHOPSTR_POLICY_VERSION", version)
     editorial.clear_cache()
-    fake_db.candidates[0]["rubric"]["composition"] = {"local_cuts": 1, "semantic_splices": 0, "valid": True}
+    fake_db.candidates[0]["rubric"]["composition"] = {"local_cuts": 1, "semantic_splices": 0, "valid": True, "segments": SEGMENTS}
     try:
         clip_id = act_render.run_render_pack(fake_context, project["cid"], "tiktok")
     finally:
         editorial.clear_cache()
     assert fake_db.clips[clip_id]["render_plan"]["filler_cuts"] is expected
+
+
+# -- AP10b: Schnittkanten und Übergangsbefunde ---------------------------------------------------------
+
+
+@requires_ffmpeg
+@pytest.mark.parametrize("version", ["2", "1"])
+def test_transition_findings_land_in_fidelity_warnings(fake_db, fake_context, project, monkeypatch, version):
+    """Fassung 2 mit cut.padding: Plan mit Herkunft und Ziel (render_v2), Captions auf der gepaddeten
+    Ausgabe-Timeline, Übergangsbefunde als transition_* in fidelity_warnings; hoch nur bei Schnitt im Wort,
+    den das Padding hier repariert. Fassung 1: nichts davon."""
+    from chopstr_worker import editorial
+    from chopstr_worker.pipeline import transitions
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", version)
+    editorial.clear_cache()
+    try:
+        clip_id = act_render.run_render_pack(fake_context, project["cid"], "tiktok")
+    finally:
+        editorial.clear_cache()
+    clip = fake_db.clips[clip_id]
+    plan = clip["render_plan"]
+    found = [f for f in clip["fidelity_warnings"] if str(f.get("type", "")).startswith("transition_")]
+    words = make_words(SCRIPT, t0=0.5, gap_s=0.5)
+    if version == "1":
+        assert found == [] and "timeline" not in plan and plan["versions"]["render"] == "render_v1"
+        assert plan["segments"] == SEGMENTS and clip["composition"] == SEGMENTS
+        return
+    # Nach dem Render stehen die gepaddeten Quellsegmente am Clip, deckungsgleich mit plan.timeline.
+    assert clip["composition"] == [{"start": e["source_in"], "end": e["source_out"], "role": e["role"]} for e in plan["timeline"]]
+    assert clip["composition"] == plan["segments"]
+    assert fake_db.candidates[0]["segments"] == SEGMENTS  # Kandidat unverändert
+    assert plan["versions"]["render"] == "render_v2" and len(plan["timeline"]) == len(plan["segments"]) == 2
+    assert plan["timebase"]["vfr"] is False and plan["timebase"]["frame_snapping"] is False
+    # Die Kanten liegen nicht mehr im Wort; die Segmente haben sich gegenüber dem Clip verschoben.
+    assert plan["segments"] != SEGMENTS
+    assert not [f for f in transitions.check_transitions(plan, words) if f["severity"] == "high"]
+    assert found and all(f["severity"] == "medium" for f in found)
+    assert found == transitions.check_transitions(plan, words)
+    # Captions auf der gepaddeten Timeline: Karten innerhalb der Ausgabe, Dauer wie der Plan.
+    caps = next(c for c in fake_db.caption_versions if c["clip_id"] == clip_id)
+    assert caps["cards"][-1]["end"] <= plan["timeline"][-1]["output_out"] + 0.01
+    assert abs(clip["duration_s"] - plan["timeline"][-1]["output_out"]) <= 0.1
+
+
+@requires_ffmpeg
+def test_revised_candidate_with_old_rubric_renders_without_filler_cuts(fake_db, fake_context, project, monkeypatch):
+    """Web-Revision: ein Segment in der Zeile, Rubrik mit Komposition und removed_spans aus der alten Zeile.
+    Die alte Komposition greift nicht, filler_cuts bleibt false (auch unter Fassung 2)."""
+    from chopstr_worker import editorial
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    editorial.clear_cache()
+    one = [{"start": 0.5, "end": 13.0, "role": "body"}]
+    cand = fake_db.candidates[0]
+    cand["segments"] = one
+    cand["rubric"]["composition"] = {"local_cuts": 1, "semantic_splices": 0, "valid": True, "segments": SEGMENTS}
+    cand["rubric"]["removed_spans"] = [{"source_in": 5.0, "source_out": 6.0, "removal_reason": "technical_pause"}]
+    try:
+        clip_id = act_render.run_render_pack(fake_context, project["cid"], "tiktok")
+    finally:
+        editorial.clear_cache()
+    assert fake_db.clips[clip_id]["render_plan"]["filler_cuts"] is False
+
+
+@requires_ffmpeg
+def test_padded_composition_rerenders_to_the_same_hash_and_keeps_the_trim(fake_db, fake_context, project, monkeypatch):
+    """AP10b: die zurückgeschriebene, gepaddete Komposition ergibt beim nächsten Render denselben Plan
+    (Padding idempotent, Render übersprungen), und die Kürzung des Kandidaten gilt weiter (filler_cuts)."""
+    from chopstr_worker import editorial
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    editorial.clear_cache()
+    fake_db.candidates[0]["rubric"]["composition"] = {"local_cuts": 1, "semantic_splices": 0, "valid": True, "segments": SEGMENTS}
+    try:
+        clip_id = act_render.run_render_pack(fake_context, project["cid"], "tiktok")
+        first = dict(fake_db.clips[clip_id])
+        assert first["composition"] != SEGMENTS and first["render_plan"]["filler_cuts"] is True
+        act_render.run_render_pack(fake_context, project["cid"], "tiktok")
+    finally:
+        editorial.clear_cache()
+    again = fake_db.clips[clip_id]
+    assert again["file_key"] == first["file_key"] and again["composition"] == first["composition"]
+    assert fake_db.events_for(STEP_RENDER)[-1]["payload"].get("skipped") is True

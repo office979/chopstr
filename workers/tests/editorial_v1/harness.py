@@ -272,13 +272,62 @@ def _share_of_shorter(a: tuple[int, int], b: tuple[int, int]) -> float:
 # -- Prüfungen gegen einen Schnittplan -------------------------------------------------------------
 
 
-def assert_clip_respects_case(case: Mapping[str, Any], segments: Sequence[Mapping[str, Any]]) -> None:
+# Entfernungsgründe, die eine Naht mitten im Satz rechtfertigen: Füllwort, Rückmeldung des Gegenübers,
+# technische Pause (``removed_spans[].removal_reason``, auch zusammengesetzt mit „+“).
+LOCAL_REMOVAL_REASONS = frozenset({"hard_filler", "backchannel", "technical_pause"})
+
+
+def _seam_is_local(
+    case: Mapping[str, Any],
+    left: Mapping[str, Any],
+    right: Mapping[str, Any],
+    gap_ids: list[int],
+    removed_spans: Sequence[Mapping[str, Any]] | None,
+) -> bool:
+    """Ist die Naht zwischen ``left`` und ``right`` laut ``removed_spans`` nur eine lokale Kürzung?
+
+    Alle entfernten Stellen zwischen den Segmenten müssen Füllwort, Rückmeldung oder technische Pause
+    sein, und jedes entfernte Wort dazwischen muss in einer solchen Stelle liegen."""
+    if not removed_spans:
+        return False
+    t0, t1 = float(left["source_out"]), float(right["source_in"])
+    if t1 < t0 - TIME_EPS_S:
+        return False  # umgestellt
+    between = [
+        r for r in removed_spans
+        if float(r["source_in"]) < t1 + TIME_EPS_S and t0 - TIME_EPS_S < float(r["source_out"])
+    ]  # fmt: skip
+    if not between:
+        return False
+    for r in between:
+        reasons = {x for x in str(r.get("removal_reason") or "").split("+") if x}
+        if not reasons or not reasons <= LOCAL_REMOVAL_REASONS:
+            return False
+    words = case["words"]
+    for i in gap_ids:
+        mid = (float(words[i]["start"]) + float(words[i]["end"])) / 2.0
+        if not any(float(r["source_in"]) - TIME_EPS_S <= mid <= float(r["source_out"]) + TIME_EPS_S for r in between):
+            return False
+    return True
+
+
+def assert_clip_respects_case(
+    case: Mapping[str, Any],
+    segments: Sequence[Mapping[str, Any]],
+    removed_spans: Sequence[Mapping[str, Any]] | None = None,
+) -> None:
     """Prüft einen Schnittplan (``ClipCandidate.segments`` in Abspielreihenfolge) gegen den Fall.
 
-    Geprüft werden: Pflichtbereiche vollständig enthalten, kein Segment beginnt auf einem verbotenen
-    In-Point oder endet auf einem verbotenen Out-Point, Schutzbereiche nicht teilweise geschnitten,
-    Pronomen nur mit Bezug, Pausen und stilles Zeigen nicht herausgeschnitten, keine falsche
-    Frage-Antwort-Zuordnung, Pointe samt Setup enthalten."""
+    Geprüft werden: Pflichtbereiche vollständig enthalten, der Clip beginnt nicht auf einem verbotenen
+    In-Point (Anfang des ersten Segments) und endet nicht auf einem verbotenen Out-Point (Ende des
+    letzten Segments), Schutzbereiche nicht teilweise geschnitten, Pronomen nur mit Bezug, Pausen und
+    stilles Zeigen nicht herausgeschnitten, keine falsche Frage-Antwort-Zuordnung, Pointe samt Setup
+    enthalten.
+
+    Innere Nähte: eine Naht darf keinen Wort-Schutzbereich teilen. Eine Naht mitten im Satz (an einem
+    verbotenen In- oder Out-Point) ist nur zulässig, wenn ``removed_spans`` (``ClipCandidate``) die
+    entfernten Stellen dazwischen als Füllwort, Rückmeldung oder technische Pause ausweist; ohne
+    ``removed_spans`` gilt sie als Verstoß."""
     cid = case["id"]
     exp = case["expected"]
     assert segments, f"{cid}: Schnittplan ohne Segmente"
@@ -295,17 +344,29 @@ def assert_clip_respects_case(case: Mapping[str, Any], segments: Sequence[Mappin
 
     forbidden_in = set(exp.get("forbidden_in_points", []))
     forbidden_out = set(exp.get("forbidden_out_points", []))
-    for seg in segments:
-        ids = segment_word_ids(case, seg)
-        if not ids:
-            continue
-        first, last = ids[0], ids[-1]
-        assert first not in forbidden_in, (
-            f"{cid}: Segment beginnt auf verbotenem In-Point „{case['words'][first]['text']}“ (Wort {first})"
-        )
-        assert last not in forbidden_out, (
-            f"{cid}: Segment endet auf verbotenem Out-Point „{case['words'][last]['text']}“ (Wort {last})"
-        )
+    with_ids = [(seg, segment_word_ids(case, seg)) for seg in segments]
+    with_ids = [(seg, ids) for seg, ids in with_ids if ids]
+    first, last = with_ids[0][1][0], with_ids[-1][1][-1]
+    assert first not in forbidden_in, (
+        f"{cid}: Segment beginnt auf verbotenem In-Point „{case['words'][first]['text']}“ (Wort {first})"
+    )
+    assert last not in forbidden_out, (
+        f"{cid}: Segment endet auf verbotenem Out-Point „{case['words'][last]['text']}“ (Wort {last})"
+    )
+    word_spans = [p["word_range"] for p in exp.get("protected_spans", []) if p["type"] in WORD_SPAN_TYPES]
+    for (left, lids), (right, rids) in zip(with_ids, with_ids[1:]):
+        out_pt, in_pt = lids[-1], rids[0]
+        gap_ids = [i for i in range(out_pt + 1, in_pt) if i not in kept] if in_pt > out_pt else []
+        for a, b in word_spans:
+            split = a <= out_pt and in_pt <= b and in_pt > out_pt
+            assert not split and not any(a <= i <= b for i in gap_ids), (
+                f"{cid}: Naht zwischen Wort {out_pt} und {in_pt} teilt den Schutzbereich „{_text(case, a, b)}“"
+            )
+        if out_pt in forbidden_out or in_pt in forbidden_in:
+            assert _seam_is_local(case, left, right, gap_ids, removed_spans), (
+                f"{cid}: Naht mitten im Satz zwischen „{case['words'][out_pt]['text']}“ (Wort {out_pt}) und "
+                f"„{case['words'][in_pt]['text']}“ (Wort {in_pt}) ohne lokale Entfernung (Füllwort, Rückmeldung, Pause)"
+            )
 
     for span in exp.get("protected_spans", []):
         a, b = span["word_range"]
@@ -541,6 +602,7 @@ __all__ = [
     "ACCEPT_DECISIONS",
     "CANDIDATE_FIELDS",
     "CASES_DIR",
+    "LOCAL_REMOVAL_REASONS",
     "PROTECTED_SPAN_TYPES",
     "REJECT_DECISIONS",
     "REMOVED_SPAN_FIELDS",

@@ -429,6 +429,10 @@ def _aufloesung(m: _Merkmale, p: editorial.Policy, laenge_ok: bool) -> float:
 
     Die Abschwächungsmarker aus ``ausstieg.abschwaechung_marker`` im letzten Satz kosten: dort hätte
     der Schnitt davor sitzen müssen.
+
+    Mit ``bewertung.length_only_as_penalty`` (Fassung 2, AP9) gibt es keinen Längenbonus: die Länge wirkt
+    dann nur noch über ``laenge_abzug`` mit der gemessenen Abspieldauer (``story_engine.policy_total``),
+    nicht ein zweites Mal geschätzt (RESEARCH-CLIPPING-KERN Abschnitt 2, weitere Befunde).
     """
     aus = p.ausstieg
     letzter = m.last["text"].rstrip()
@@ -441,7 +445,7 @@ def _aufloesung(m: _Merkmale, p: editorial.Policy, laenge_ok: bool) -> float:
         a -= 0.15
     if aus.get("vor_der_abschwaechung") and any(w in letzter.lower() for w in aus.get("abschwaechung_marker", [])):
         a -= 0.20
-    if laenge_ok:
+    if laenge_ok and not editorial.length_only_as_penalty(p):
         a += 0.20
     if m.markers:
         a += 0.10
@@ -455,8 +459,12 @@ def _zielgruppe(m: _Merkmale, p: editorial.Policy, laenge_ok: bool) -> float:
     neutralen Mittelwert und korrigiert ihn nur um das eine, was sie wirklich sieht: ob die Länge
     zum Format passt. Alles andere wäre vorgetäuschte Genauigkeit. Ein Sprachmodell mit Brief kann
     das beantworten, diese Funktion nicht.
+
+    Mit ``bewertung.length_only_as_penalty`` (Fassung 2, AP9) entfällt auch diese Korrektur: die Länge
+    wirkt nur über ``laenge_abzug``, der Wert bleibt der neutrale Mittelwert.
     """
-    return _anteil(NEUTRAL + (0.10 if laenge_ok else 0.0))
+    bonus = 0.10 if laenge_ok and not editorial.length_only_as_penalty(p) else 0.0
+    return _anteil(NEUTRAL + bonus)
 
 
 def score_clip(user: str) -> dict:
@@ -840,11 +848,78 @@ def episode_overview(user: str) -> dict:
     }
 
 
+# -- AP6b: Kritiker ohne Sprachmodell -------------------------------------------------------------------
+# Welche Gate-Verletzung welcher Art des Kritikers entspricht (critic.CRITIC_KINDS) und mit welcher Schwere.
+# Andere Gates (offene Frage, Vorverweis, Sprecherwechsel, Markierungen) sind keine Fragen des Kritikers; sie
+# stehen ohnehin in rubric.quality_gate_results.
+CRITIC_GATE_KINDS = {
+    "unresolved_pronoun": ("unclear_pronoun", "clarity"),
+    "back_reference": ("unclear_pronoun", "clarity"),
+    "boundary_negation_condition": ("removed_condition", "fidelity"),
+    "reported_speech": ("reported_position", "fidelity"),
+    "later_correction": ("claim_contradicted", "fidelity"),
+}
+
+
+def _block(user: str, tag: str) -> list[dict]:
+    open_at, close_at = user.find(f"<{tag}>"), user.find(f"</{tag}>")
+    if open_at < 0 or close_at <= open_at:
+        return []
+    return parse_numbered(user[open_at + len(tag) + 2 : close_at])
+
+
+def critique_clip(user: str) -> dict:
+    """Kritiker als Heuristik, gekennzeichnet mit ``heuristic: true``: die harten Gates
+    (``editorial_gates.run_gates``) über Clip und Kontext aus dem Prompt und spätere Einschränkungen
+    (``story_graph.find_later_qualifications``, Regel v2). Jeder Befund zitiert einen ganzen Satz aus dem
+    Prompt; erfunden wird nichts. ``confirmed`` ist immer false: die Heuristik ist unkalibriert und verwirft
+    nie, ihre Befunde sind nur Bericht. Einen Text-Hook prüft sie nicht (das kann sie ohne Sprachmodell nicht)."""
+    from .pipeline import editorial_gates, story_graph
+
+    before, clip, after = _block(user, "context_before"), _block(user, "clip"), _block(user, "context_after")
+    if not clip:
+        return {"findings": [], "confirmed": False, "heuristic": True}
+    items = [*before, *clip, *after]
+    words, sents = editorial_gates.from_sentence_texts(items)
+    if len(sents) != len(items):  # leere Zeilen: dann lieber kein Befund als ein falsch zugeordneter
+        return {"findings": [], "confirmed": False, "heuristic": True}
+    original = [s["idx"] for s in items]
+    first, last = len(before), len(before) + len(clip) - 1
+
+    def sentence_of(word_id: int) -> int | None:
+        return next((n for n, s in enumerate(sents) if s.word_range[0] <= word_id <= s.word_range[1]), None)
+
+    findings: list[dict] = []
+    res = editorial_gates.run_gates(words, sents, first, last, policy(), context_before=len(before), context_after=len(after))
+    for key in res["failed"]:
+        if key not in CRITIC_GATE_KINDS:
+            continue
+        kind, severity = CRITIC_GATE_KINDS[key]
+        result = res["results"][key]
+        ids = [sentence_of(i) for i in result.get("evidence_word_ids") or []]
+        n = next((x for x in ids if x is not None), first if result.get("healable") != "back" else last)
+        findings.append({
+            "kind": kind, "severity": severity, "evidence_quote": sents[n].text, "sentence_refs": [original[n]],
+            "explanation": f"Heuristik, Gate {key}: {result.get('detail') or ''}".strip(),
+        })  # fmt: skip
+    seen = {f["sentence_refs"][0] for f in findings if f["kind"] == "claim_contradicted"}
+    for hit in story_graph.find_later_qualifications(sents, first, last, rule="v2"):
+        n = int(hit["sentence_idx"])
+        if original[n] in seen:
+            continue
+        findings.append({
+            "kind": "claim_contradicted", "severity": "fidelity", "evidence_quote": sents[n].text, "sentence_refs": [original[n]],
+            "explanation": f"Heuristik, spätere Einschränkung mit dem Marker „{hit['marker']}“, Überlappung {hit['overlap']}",
+        })  # fmt: skip
+    return {"findings": findings, "confirmed": False, "heuristic": True}
+
+
 HANDLERS = {
     "propose_moments": propose_moments,
     "episode_overview": episode_overview,
     "score_clip": score_clip,
     "confirm_qualification": confirm_qualification,
+    "critique_clip": critique_clip,
     "write_hooks": write_hooks,
     "write_post_caption": write_post_caption,
 }
@@ -861,6 +936,7 @@ def answer(tool_name: str, user: str, schema: dict | None = None) -> dict:
 __all__ = [
     "ALT_AUS_NEU",
     "ALT_SKALA_MAX",
+    "CRITIC_GATE_KINDS",
     "HANDLERS",
     "HOOK_PATTERNS",
     "MODEL_ID",
@@ -873,6 +949,7 @@ __all__ = [
     "answer",
     "clip_text_of",
     "confirm_qualification",
+    "critique_clip",
     "episode_overview",
     "estimate_seconds",
     "parse_numbered",

@@ -90,7 +90,7 @@ ATTRIBUTION_TRIGGERS = (
 )  # fmt: skip
 CORRECTION_TRIGGERS = (
     "ich meine", "beziehungsweise", "bzw", "besser gesagt", "genauer gesagt", "korrektur", "vielmehr",
-    "sondern", "korrigiere", "korrigieren", "stimmt nicht", "stimmt so nicht", "falsch",
+    "sondern", "stattdessen", "korrigiere", "korrigieren", "stimmt nicht", "stimmt so nicht", "falsch",
 )  # fmt: skip
 TRIGGERS: dict[str, tuple[str, ...]] = {
     "negation": tuple(sorted(NEGATION_TRIGGERS)),
@@ -430,6 +430,7 @@ def classify_pauses(
       „Bloß“ am Satzanfang);
     * lange Stille ab ``trim.long_silence_s``: im laufenden Satz ``dramatic`` (Innehalten), sonst
       ``demonstration`` (mögliche Demonstration ohne Sprache);
+    * Pause in einem Korrektursatz (Satz mit Korrekturauslöser oder unmittelbar danach): ``dramatic``;
     * Pause im Satz ab ``orientation_min_s``: ``dramatic`` (Innehalten, nie technisch);
     * ``orientation``: an einer Satzgrenze ab ``orientation_min_s`` oder vor einem Gliederungswort;
     * sonst ``technical``. Nur diese Klasse wird gekürzt.
@@ -444,7 +445,19 @@ def classify_pauses(
     punch_inner = {i: cue for a, b, cue in punch for i in range(a - 1, b)}  # Lücke nach Wort i
     punch_after = {b: cue for _a, b, cue in punch}
     events = [e for e in (visual_events or []) if e.get("start") is not None and e.get("end") is not None]
-    ctx = {"ends": ends, "punch_inner": punch_inner, "punch_after": punch_after, "events": events, "heat": heat_payload}
+    # Korrektursätze: Satz mit Korrekturauslöser und der Satz unmittelbar danach. Wer sich korrigiert,
+    # zögert; das Zögern gehört zur Aussage (Master-Prompt 13, Korrekturen sind Schutzbereich).
+    tokens = [_tok(w) for w in words]
+    corr_starts = {a for kind, a, _b in _trigger_hits(tokens, words) if kind == "correction"}
+    correcting: set[int] = set()
+    for k, (a, b) in enumerate(sentences):
+        if any(a <= x <= b for x in corr_starts):
+            for s_a, s_b in sentences[k : k + 2]:
+                correcting.update(range(s_a, s_b + 1))
+    ctx = {
+        "ends": ends, "punch_inner": punch_inner, "punch_after": punch_after, "events": events, "heat": heat_payload,
+        "correcting": correcting,
+    }  # fmt: skip
     out: list[dict] = []
     for i in range(len(words) - 1):
         g = _gap(words, i)
@@ -492,6 +505,8 @@ def _pause_class(
         return "dramatic", f"Pause vor der Negation „{_text(nxt)}“"
     if "contrast" in dramatic_before and (tok in CONTRAST_WORDS or (i in ends and tok in CONTRAST_SENTENCE_START)):
         return "dramatic", f"Pause vor dem Kontrastwort „{_text(nxt)}“"
+    if i in ctx["correcting"] and i + 1 in ctx["correcting"]:
+        return "dramatic", "Pause im Korrektursatz"
     in_sentence = i not in ends and nxt.get("speaker") == prev.get("speaker")
     if g >= float(cfg["long_silence_s"]):
         if in_sentence:

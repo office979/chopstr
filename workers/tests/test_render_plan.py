@@ -227,3 +227,80 @@ def test_filler_cuts_and_hash_unchanged_under_v1(monkeypatch):
         assert plan == before and plan["filler_cuts"] is False
         assert render_plan.plan_hash(plan, 1, 3) == render_plan.plan_hash(before, 1, 3)
     editorial.clear_cache()
+
+
+# -- AP10b: Schnittkanten, Herkunft und Ziel, Render-Version ------------------------------------------
+
+
+def _cut_words() -> list[dict]:
+    """Je Segment ein Wort genau am Anfang und am Ende, dazwischen Füllwörter; 0,3 s Stille zu den Nachbarn
+    außerhalb der Segmente."""
+    words = []
+    for s in SEGMENTS:
+        a, b = s["start"], s["end"]
+        words.append({"text": "davor", "start": round(a - 0.7, 3), "end": round(a - 0.3, 3), "prob": 0.95, "speaker": "S0"})
+        t = a
+        while t + 0.4 <= b - 0.5:
+            words.append({"text": "wort", "start": round(t, 3), "end": round(t + 0.4, 3), "prob": 0.95, "speaker": "S0"})
+            t += 0.5
+        words.append({"text": "ende.", "start": round(b - 0.4, 3), "end": round(b, 3), "prob": 0.95, "speaker": "S0"})
+        words.append({"text": "danach", "start": round(b + 0.3, 3), "end": round(b + 0.7, 3), "prob": 0.95, "speaker": "S0"})
+    return words
+
+
+def _policy_v2(padding: bool = True):
+    import copy
+
+    from chopstr_worker import editorial
+
+    v2 = editorial.load(2)
+    raw = copy.deepcopy(v2.roh)
+    raw["implementation"]["cut"]["padding"] = padding
+    return editorial.Policy(version=2, stand=v2.stand, roh=raw)
+
+
+def test_padded_plan_carries_source_and_output_per_segment():
+    plan = _plan("tiktok", policy=_policy_v2(), words=_cut_words(), src_vfr=False)
+    assert plan["segments"] == [
+        {"start": 812.34, "end": 830.28, "role": "body"},
+        {"start": 839.94, "end": 861.18, "role": "body"},
+    ]
+    assert [{k: e[k] for k in ("source_in", "source_out", "output_in", "output_out")} for e in plan["timeline"]] == [
+        {"source_in": 812.34, "source_out": 830.28, "output_in": 0.0, "output_out": 17.94},
+        {"source_in": 839.94, "source_out": 861.18, "output_in": 17.94, "output_out": 39.18},
+    ]
+    assert all(e["boundary_confidence"] > 0.9 and e["low_confidence"] is False for e in plan["timeline"])
+    assert plan["timebase"] == {"unit": "s", "reference": "source_audio", "frame_snapping": False, "vfr": False, "vfr_verified": False}
+    assert plan["versions"]["render"] == "render_v2"
+    assert render_plan.plan_duration(plan) == pytest.approx(39.18)
+    assert set(plan) == CONTRACT_KEYS | {"timeline", "timebase"}
+    json.dumps(plan)
+
+
+def test_hash_changes_only_with_the_active_switch(monkeypatch):
+    from chopstr_worker import editorial
+
+    words = _cut_words()
+    off = _plan("tiktok", policy=_policy_v2(padding=False), words=words)
+    on = _plan("tiktok", policy=_policy_v2(), words=words)
+    assert "timeline" not in off and off["versions"]["render"] == "render_v1" and off["segments"] == SEGMENTS
+    assert render_plan.plan_hash(off, 1, 3) != render_plan.plan_hash(on, 1, 3)
+    # Fassung 1: Wörter und VFR-Kennzeichen ändern nichts, Plan und Hash byte-gleich wie ohne sie.
+    monkeypatch.delenv("CHOPSTR_POLICY_VERSION", raising=False)
+    editorial.clear_cache()
+    try:
+        plain = _plan("tiktok")
+        with_words = _plan("tiktok", words=words, src_vfr=True)
+        assert with_words == plain and set(plain) == CONTRACT_KEYS
+        assert render_plan.plan_hash(with_words, 1, 3) == render_plan.plan_hash(plain, 1, 3)
+        assert plain["versions"]["render"] == "render_v1"
+    finally:
+        editorial.clear_cache()
+
+
+def test_cut_segments_match_the_plan_segments():
+    words = _cut_words()
+    policy = _policy_v2()
+    plan = _plan("tiktok", policy=policy, words=words)
+    assert render_plan.cut_segments(SEGMENTS, words, policy) == plan["segments"]
+    assert render_plan.cut_segments(SEGMENTS, words, _policy_v2(padding=False)) == SEGMENTS

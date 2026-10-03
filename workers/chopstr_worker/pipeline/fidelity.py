@@ -64,8 +64,13 @@ def check_cut(
     removed_text = " ".join(str(w["text"]) for w in removed).lower()
     removed_tokens = set(_tokens(removed_text))
 
-    if removed_tokens & NEGATIONS:
-        warnings.append({"type": "negation_removed", "severity": "high", "detail": sorted(removed_tokens & NEGATIONS)})
+    negations = NEGATIONS
+    if rule == "v2":
+        # Unter Regel v2 dieselbe Liste wie die Schutzbereiche (AP7): „noch“ ist keine Negation
+        # („Wir rechnen alles noch zweimal durch“), „nein“ ist eine.
+        from .trim_plan import NEGATION_TRIGGERS as negations
+    if removed_tokens & negations:
+        warnings.append({"type": "negation_removed", "severity": "high", "detail": sorted(removed_tokens & negations)})
     hits = [q for q in sorted(QUALIFIERS) if f" {q} " in f" {removed_text} "]
     if hits:
         warnings.append({"type": "qualifier_removed", "severity": "medium", "detail": hits})

@@ -293,6 +293,7 @@ def _run_gates(cid: str, a: int, b: int) -> dict:
     pol = editorial.load()
     raw = copy.deepcopy(pol.roh)
     raw["implementation"]["gates"]["discard_hard"] = True  # verworfen wird nur mit Regel und Schalter
+    raw["gates"]["discard_hard"] = True  # die ausgelieferte Policy steht im Berichtsmodus (Regel false)
     pol = editorial.Policy(version=pol.version, stand=pol.stand, roh=raw)
     return editorial_gates.run_gates(w, sents, sentence_containing(sents, a), sentence_containing(sents, b), pol)
 
@@ -434,6 +435,7 @@ def wired_v2(monkeypatch, tmp_path):
     target = tmp_path / "clip_policy_v2.yaml"
     data = yaml.safe_load(target.read_text(encoding="utf-8"))
     data["implementation"]["gates"]["discard_hard"] = True
+    data["gates"]["discard_hard"] = True  # Regel: Verletzer verwerfen (ausgeliefert ist der Berichtsmodus)
     data["implementation"]["search"]["payoff_first"] = True
     target.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
     monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path))
@@ -451,21 +453,24 @@ def _heuristic():
 
 
 def _run_case(cid: str, spans: list[tuple[int, int]] | None, monkeypatch) -> tuple[story_engine.DetectReport, list[dict]]:
-    """``story_engine.run`` auf dem Fall. Mit ``spans`` (Wortbereiche) sind genau das die Vorschläge des Modells,
-    die deterministische Suche schweigt; ohne ``spans`` laufen Heuristik und Suche wie im Betrieb."""
-    from chopstr_worker.pipeline import payoff_search, story_score
+    """``story_engine.run`` auf dem Fall. Mit ``spans`` (Wortbereiche) sind genau das die Vorschläge der Suche
+    (der Heuristik-Provider hat mit verdrahteter Suche keine zweite Quelle); ohne ``spans`` laufen Heuristik und
+    Suche wie im Betrieb."""
+    from chopstr_worker.pipeline import payoff_search
 
     w = words_of(cid)
     if spans is not None:
         sents = story_engine.sentences_from_annotated(w) or segment.sentences_from_words(w, rule=rule())
-        moments = [
-            {"first_sent": sentence_containing(sents, a), "last_sent": sentence_containing(sents, b), "structure": "hook_build_payoff", "why": "Fall"}
-            for a, b in spans
-        ]  # fmt: skip
-        monkeypatch.setattr(story_score, "propose", lambda *a, **kw: [dict(m) for m in moments])
+        props = []
+        for a, b in spans:
+            first, last = sentence_containing(sents, a), sentence_containing(sents, b)
+            props.append({
+                "first_sent": first, "last_sent": last, "opening_sent": first, "payoff_sent": last, "required_context_sents": [],
+                "direction": "payoff_only", "payoff_type": None, "hook_type": None, "evidence_sent": last, "narrative_type": "insight",
+            })  # fmt: skip
         monkeypatch.setattr(
             payoff_search, "search_moments",
-            lambda *a, **kw: {"proposals": [], "rejected": [], "duplicates": [], "payoffs": [], "openings": []},
+            lambda *a, **kw: {"proposals": [dict(p) for p in props], "rejected": [], "duplicates": [], "payoffs": [], "openings": []},
         )  # fmt: skip
     report = story_engine.run(w, {"platform": "linkedin"}, {}, None, _heuristic())
     offered = [cc for cc in report.clip_candidates if cc["decision"] == "accept"]
@@ -541,3 +546,135 @@ def test_fidelity_gate_does_not_read_ausserdem_as_contrast_under_v2(wired_v2):
     a, b = c["expected"]["near_duplicate_candidates"]["spans"][0]["word_range"]
     w = words_of("near_duplicate_candidates")
     assert story_engine._fidelity_gate(w, [span_sentence(w, a, b)], 0, 0)["passed"] is True
+
+
+# -- AP7 mit Regel trim.enabled an: innere Nähte gegen Schutzbereiche, nicht gegen In- und Out-Points --
+
+
+TRIMMED_CASES = ("instruction_in_transcript", "later_self_correction", "speaker_turn_attribution")
+
+
+def _run_with_trim(monkeypatch, cid: str):
+    import copy
+
+    from chopstr_worker import config, providers_llm
+    from chopstr_worker.providers_llm import LLM
+    from chopstr_worker.residency import Tenant
+
+    base = editorial.load(2)
+    raw = copy.deepcopy(base.roh)
+    raw["trim"]["enabled"] = True
+    on = editorial.Policy(2, base.stand, raw)
+    assert editorial.trim_settings(on)["enabled"] is True
+    original = editorial.load
+    monkeypatch.setattr(editorial, "load", lambda version=None: on if version in (None, 2) else original(version))
+    llm = LLM(Tenant(id="ws", tier="standard"), provider=providers_llm.HEURISTIC_PROVIDER, s=config.settings())
+    brief = {"audience": "Gründer im DACH-Raum", "wanted": "Fehler mit Zahlen", "exclude": "Werbung", "platform": "linkedin"}
+    return story_engine.run(words_of(cid), brief, {"country": "AT"}, None, llm)
+
+
+@pytest.mark.parametrize("cid", TRIMMED_CASES)
+def test_trimmed_candidates_respect_the_case(monkeypatch, cid):
+    report = _run_with_trim(monkeypatch, cid)
+    trimmed = [c for c in report.candidates if (c.rubric.get("removed_spans") or [])]
+    if cid == "later_self_correction":
+        # Die Pause nach „stattdessen“ steht im Korrektursatz und bleibt: nichts zu kürzen.
+        assert trimmed == []
+    else:
+        assert trimmed, f"{cid}: kein gekürzter Kandidat"
+    for cand in report.candidates:
+        segs = [{"segment_id": f"s{k}", "source_in": s["start"], "source_out": s["end"]} for k, s in enumerate(cand.segments)]
+        removed = cand.rubric.get("removed_spans") or []
+        harness.assert_protected_spans_kept(CASES[cid], removed)
+        harness.assert_clip_respects_case(CASES[cid], segs, removed)
+        for r in removed:
+            assert set(r["removal_reason"].split("+")) <= harness.LOCAL_REMOVAL_REASONS
+
+
+def test_inner_seam_mid_sentence_needs_a_local_removal():
+    c = CASES["speaker_turn_attribution"]
+    w = c["words"]
+    segs = [
+        {"segment_id": "a", "source_in": w[11]["start"], "source_out": w[32]["end"]},
+        {"segment_id": "b", "source_in": w[34]["start"], "source_out": w[54]["end"]},
+    ]
+    with pytest.raises(AssertionError, match="Naht mitten im Satz"):
+        harness.assert_clip_respects_case(c, segs)  # ohne removed_spans kein Nachweis
+    okay = [{"source_in": w[32]["end"], "source_out": w[34]["start"], "removal_reason": "backchannel", "protected_context_check": None}]
+    harness.assert_clip_respects_case(c, segs, okay)
+    semantic = [{**okay[0], "removal_reason": "keep_decision"}]
+    with pytest.raises(AssertionError, match="Naht mitten im Satz"):
+        harness.assert_clip_respects_case(c, segs, semantic)
+    # Eine Naht darf keinen Schutzbereich teilen, auch nicht über eine technische Pause.
+    split = [
+        {"segment_id": "a", "source_in": w[11]["start"], "source_out": w[47]["end"]},
+        {"segment_id": "b", "source_in": w[48]["start"], "source_out": w[54]["end"]},
+    ]
+    pause = [{"source_in": w[47]["end"], "source_out": w[48]["start"], "removal_reason": "technical_pause", "protected_context_check": None}]
+    with pytest.raises(AssertionError, match="teilt den Schutzbereich"):
+        harness.assert_clip_respects_case(c, split, pause)
+    # Anfang und Ende des Clips bleiben an die verbotenen Punkte gebunden.
+    with pytest.raises(AssertionError, match="verbotenem Out-Point"):
+        harness.assert_clip_respects_case(c, [{"segment_id": "x", "source_in": w[11]["start"], "source_out": w[32]["end"]}])
+
+
+# -- AP9: Fall 12 über story_engine.run, Redundanz über Inhalt statt nur über die Zeit -----------------------------
+def test_run_case_12_near_duplicates_ap9_one_survivor_and_duplicate_in_report(wired_v2, monkeypatch):
+    """Fall 12 mit beiden Spannen des Falls als Vorschläge der Suche (der Heuristik-Provider hat keine zweite
+    Quelle): die enthaltene Spanne fällt schon im Abgleich der Vorschläge (Dublette ``duplicate_payoff`` in
+    ``search.duplicates``, getrennt von den Verwerfungen) oder über die
+    zeitliche Überdeckung. Dieselbe Geschichte noch einmal 60 s später (gleiche Wörter, eigener Payoff, keine
+    zeitliche Überdeckung) übersteht beides und fällt erst in ``select_best`` mit Grund ``redundant``
+    (Lemma-Jaccard ab ``output.redundancy_jaccard``). Genau ein Kandidat der Gruppe bleibt, beide Dubletten
+    stehen im Bericht."""
+    from chopstr_worker.pipeline import payoff_search
+
+    case = CASES["near_duplicate_candidates"]
+    base = words_of("near_duplicate_candidates")
+    words = [dict(w) for w in base] + [dict(w, start=w["start"] + 60.0, end=w["end"] + 60.0) for w in base]
+    n = len(base)
+    sents = story_engine.sentences_from_annotated(words) or segment.sentences_from_words(words, rule=rule())
+    spans = [tuple(s["word_range"]) for s in case["expected"]["near_duplicate_candidates"]["spans"]]
+    spans.append((n + spans[0][0], n + spans[0][1]))  # die Wiederholung von with_advice
+    props = []
+    for a, b in spans:
+        first, last = sentence_containing(sents, a), sentence_containing(sents, b)
+        props.append({
+            "first_sent": first, "last_sent": last, "opening_sent": first, "payoff_sent": last, "required_context_sents": [],
+            "direction": "payoff_only", "payoff_type": None, "hook_type": None, "evidence_sent": last, "narrative_type": "insight",
+        })  # fmt: skip
+
+    def search(chapter, *a, **kw):
+        idx = {x.idx for x in chapter}
+        own = [dict(p) for p in props if p["first_sent"] in idx and p["last_sent"] in idx]
+        return {"proposals": own, "rejected": [], "duplicates": [], "payoffs": [], "openings": []}
+
+    monkeypatch.setattr(payoff_search, "search_moments", search)
+    assert editorial.output_settings(wired_v2) == {"max_candidates": 10, "redundancy_jaccard": 0.6}
+    report = story_engine.run(words, {"platform": "linkedin"}, {}, None, _heuristic())
+    offered = [cc for cc in report.clip_candidates if cc["decision"] == "accept"]
+    ranges = [[min(ids), max(ids)] for ids in ([i for s in cc["segments"] for i in s["word_ids"]] for cc in offered) if ids]
+    harness.assert_single_survivor(case, ranges)
+    assert all(r[0] < n for r in ranges), "die Wiederholung wird nicht zusätzlich angeboten"
+    reasons = [d for d in report.discarded if d.get("reason") in ("duplicate_payoff", "overlap", "redundant")]
+    redundant = [d for d in reasons if d["reason"] == "redundant"]
+    assert len(redundant) == 1 and redundant[0]["first_sent"] >= sentence_containing(sents, n), report.discarded
+    assert redundant[0]["jaccard"] >= 0.6 and redundant[0]["kept"][0] < sentence_containing(sents, n)
+    duplicates = (report.search or {}).get("duplicates") or []
+    assert len(reasons) + len(duplicates) == 2, (report.discarded, duplicates)
+    assert [c.first_sent for c in report.verworfen] == [redundant[0]["first_sent"]], "die Wiederholung steht als verworfener Kandidat im Bericht"
+    (kept,) = report.candidates
+    assert kept.rubric["anchor_subscores"]["values"]["distinctiveness_vs_others"] == 0, "der nächste Nachbar ist die Dublette"
+    (rejected,) = [cc for cc in report.clip_candidates if cc["decision"] == "reject"]
+    assert rejected["decision_reason"].startswith("Verworfen, dieselbe Aussage wie ein besser bewerteter Kandidat: Lemma-Jaccard")
+
+
+def test_pause_in_the_correction_sentence_of_case_3_is_dramatic():
+    from chopstr_worker.pipeline import trim_plan
+
+    w = words_of("later_self_correction")
+    i = next(k for k, x in enumerate(w) if x["text"] == "stattdessen")
+    pause = next(p for p in trim_plan.classify_pauses(w, None, editorial.load()) if p["after_word"] == i)
+    assert pause["class"] == "dramatic" and pause["reason"] == "Pause im Korrektursatz"
+    r = _trim("later_self_correction")
+    assert r["removed_spans"] == [] and r["local_cuts"] == 0

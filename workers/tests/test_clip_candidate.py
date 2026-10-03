@@ -129,8 +129,15 @@ def test_heuristic_is_uncalibrated_and_says_so(version):
         assert cc.calibration == "uncalibrated"
         assert cc.model_version == providers_llm.HEURISTIC_MODEL_ID
         kinds = {u["kind"] for u in cc.assessment_uncertainties}
-        assert {"heuristic_only", "nlp_unavailable", "boundary_confidence_missing"} <= kinds
-        assert all(s.boundary_confidence is None for s in cc.segments)
+        assert {"heuristic_only", "nlp_unavailable"} <= kinds
+        # Fassung 1: keine Sicherheit der Schnittkanten (null, als fehlend markiert); Fassung 2 mit
+        # cut.padding (AP10b): aus transitions.segment_confidence, die Markierung entfällt.
+        if version == 1:
+            assert "boundary_confidence_missing" in kinds
+            assert all(s.boundary_confidence is None for s in cc.segments)
+        else:
+            assert "boundary_confidence_missing" not in kinds
+            assert all(isinstance(s.boundary_confidence, float) and 0.0 <= s.boundary_confidence <= 1.0 for s in cc.segments)
 
 
 def test_versions_name_every_pinned_prompt(version):
@@ -442,3 +449,106 @@ def test_segments_off_sentence_and_word_boundaries_are_accepted(version):
     for seg in data["segments"]:
         assert seg["output_out"] - seg["output_in"] == pytest.approx(seg["source_out"] - seg["source_in"], abs=2e-3)
     assert data["removed_spans"] == [{"source_in": cut_mid, "source_out": restart, "removal_reason": "technical_pause", "protected_context_check": None}]
+
+
+# -- AP10b: boundary_confidence aus transitions ------------------------------------------------------
+
+
+def test_boundary_confidence_is_set_under_v2_from_transitions(monkeypatch):
+    """Fassung 2 mit cut.padding: je Segment die schwächere Kante aus ``transitions.segment_confidence``;
+    im unsicheren Bereich von Fall 13 ehrlich niedrig. Schalter aus: wieder ``None`` (Rollback)."""
+    from chopstr_worker.pipeline import transitions
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    editorial.clear_cache()
+    try:
+        words, report, ccs = _run("imprecise_timestamps")
+        case = next(c for c in harness.load_cases() if c["id"] == "imprecise_timestamps")
+        assert ccs
+        for cc in ccs:
+            for s in cc.segments:
+                assert s.boundary_confidence == transitions.segment_confidence(words, s.word_ids[0], s.word_ids[-1])
+            harness.assert_boundary_confidence_honest(case, [dataclasses.asdict(s) for s in cc.segments])
+        policy = editorial.load()
+        raw = copy.deepcopy(policy.roh)
+        raw["implementation"]["cut"]["padding"] = False
+        off = editorial.Policy(version=2, stand=policy.stand, roh=raw)
+        for cc in clip_candidate.from_report(report, words, off, source={"id": "x", "version": 3}, brief=BRIEF):
+            assert all(s.boundary_confidence is None for s in cc.segments)
+    finally:
+        editorial.clear_cache()
+
+
+# -- Teilwerte nach Master-Prompt 19 (editorial_subscores) und Rubrikpunkte (rubric_points) -----------
+
+
+def test_heuristic_subscores_are_null_and_rubric_points_keep_the_seven(version):
+    for cc in _run("demo")[2]:
+        sub = cc.editorial_subscores
+        assert sub["scale_max"] == 4 and sub["calibration"] == "uncalibrated"
+        assert set(sub["values"]) == set(clip_candidate.SUBSCORE_KEYS)
+        measured = {k: v for k, v in sub["values"].items() if v is not None}
+        # Die Heuristik misst keinen Teilwert; nur die Eigenständigkeit rechnet die Auswahl (Fassung 2).
+        assert set(measured) <= {"distinctiveness_vs_others"}
+        assert cc.rubric_points["scale_max"] == editorial.load().skala_max
+        assert len(cc.rubric_points["values"]) == 7
+
+
+def test_compact_does_not_write_subscores_or_rubric_points(version):
+    compact = clip_candidate.compact_for_rubric(_run("demo")[2][0])
+    assert "editorial_subscores" not in compact and "rubric_points" not in compact
+
+
+def test_subscore_schema_rejects_values_outside_the_anchor(version):
+    data = _run("demo")[2][0].to_dict()
+    sub = data["editorial_subscores"]
+    for broken, message in (
+        ({**sub, "values": {**sub["values"], "closing": 5}}, "über 4"),
+        ({**sub, "values": {k: v for k, v in sub["values"].items() if k != "closing"}}, "closing: Pflichtfeld fehlt"),
+        ({**sub, "scale_max": 2}, "erwartet 4"),
+        ({**sub, "values": {**sub["values"], "closing": 2.5}}, "Typ float"),
+    ):
+        with pytest.raises(SchemaError, match=message):
+            ClipCandidate.from_dict({**data, "editorial_subscores": broken})
+
+
+class _SubscoreLLM(LLM):
+    """Fake-Sprachmodell: Antwort der Heuristik, dazu Teilwerte 3 mit einem wörtlichen Zitat aus dem Clip."""
+
+    @property
+    def is_heuristic(self) -> bool:
+        return False
+
+    def structured(self, system, user, schema, tool_name, prompt_version, job_type="llm_score"):
+        out = super().structured(system, user, schema, tool_name, prompt_version, job_type)
+        if "editorial_subscores" in (schema.get("properties") or {}):
+            block = user.split("<clip>", 1)[1].split("</clip>", 1)[0].strip()
+            first = block.splitlines()[0].split(") ", 1)[1]
+            quote = " ".join(first.split()[:3])
+            from chopstr_worker.pipeline import story_score
+
+            out["editorial_subscores"] = {k: {"value": 3, "evidence": quote} for k in story_score.EDITORIAL_SUBSCORE_KEYS}
+        return out
+
+
+def test_v2_run_with_model_subscores_fills_editorial_subscores(monkeypatch):
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    editorial.clear_cache()
+    pol = editorial.load()
+    assert pol.prompt_pins["score_clip"] >= 3, "Teilwerte gibt es ab score_clip_v3"
+    llm = _SubscoreLLM(Tenant(id="ws", tier="standard"), provider=providers_llm.HEURISTIC_PROVIDER, s=config.settings())
+    words = demo_words()
+    report = story_engine.run(words, dict(BRIEF), {}, None, llm)
+    assert report.clip_candidates, "unter Fassung 2 hängt der Lauf die ClipCandidates an"
+    results = [*report.candidates, *report.verworfen]
+    for data, result in zip(report.clip_candidates, results):
+        sub = data["editorial_subscores"]
+        assert all(sub["values"][k] == 3 for k in clip_candidate.SUBSCORE_KEYS if k != "distinctiveness_vs_others")
+        assert isinstance(sub["values"]["distinctiveness_vs_others"], int)
+        assert set(sub["evidence"]) >= {"opening_clarity", "closing"} and sub["calibration"] == "uncalibrated"
+        assert data["rubric_points"]["values"] == {k: float(v) for k, v in result.rubric["rubric_points"].items()}
+        # Die Rubrik behält AP9s anchor_subscores und die sieben Punkte; compact überschreibt keins von beiden.
+        assert result.rubric["anchor_subscores"]["values"]["closing"] == 3
+        assert "editorial_subscores" not in result.rubric
+        assert ClipCandidate.from_dict(data).to_dict() == data
+    editorial.clear_cache()

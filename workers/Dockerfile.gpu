@@ -19,9 +19,11 @@ COPY workers/chopstr_worker /app/workers/chopstr_worker
 COPY workers/eval /app/workers/eval
 COPY workers/fonts /app/workers/fonts
 
-# torch mit CUDA-Wheels; Version an das Basis-Image anpassen
+# torch mit CUDA-Wheels; Version an das Basis-Image anpassen. spaCy-Sprachmodell für die Verbklammer (P28):
+# Release-Wheel aus explosion/spacy-models im selben pip-Aufruf wie das Extra nlp, nie zur Laufzeit geladen.
+ARG SPACY_MODEL_VERSION=3.8.0
 RUN python3 -m pip install --no-cache-dir --upgrade pip \
- && python3 -m pip install --no-cache-dir "/app/workers[asr,nlp]"
+ && python3 -m pip install --no-cache-dir "/app/workers[asr,nlp]" "de_core_news_md @ https://github.com/explosion/spacy-models/releases/download/de_core_news_md-${SPACY_MODEL_VERSION}/de_core_news_md-${SPACY_MODEL_VERSION}-py3-none-any.whl"
 
 # Modelle werden zur Laufzeit geladen (ASR_MODEL_DE, ASR_MODEL_CH, HF_TOKEN); Cache als Volume mounten:
 #   -v /srv/hf-cache:/home/worker/.cache

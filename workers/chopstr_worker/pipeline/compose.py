@@ -93,9 +93,22 @@ class Composition:
         return issues
 
 
-def from_keep_ranges(words: list[dict], keep: list[tuple[int, int]]) -> Composition:
-    """Füller-Schnitte: Wortindex-Bereiche zu Segmenten (Pausen am Rand leicht mitnehmen)."""
-    segs = [Segment(max(0.0, float(words[a]["start"]) - LEAD_IN_S), float(words[b]["end"]) + LEAD_OUT_S) for a, b in keep]
+def from_keep_ranges(words: list[dict], keep: list[tuple[int, int]], clamp: bool | None = None) -> Composition:
+    """Füller-Schnitte: Wortindex-Bereiche zu Segmenten (Pausen am Rand leicht mitnehmen).
+
+    ``clamp`` (AP10b): Vor- und Nachlauf reichen nie vor das Ende des Vorworts und nie in das Folgewort
+    (``transitions.clamp_to_neighbors``). Ohne Angabe gilt das genau dann, wenn die aktive Fassung
+    ``cut.padding`` hat (Fassung 2 mit Schalter); unter Fassung 1 bleibt die Rechnung wie vorher."""
+    from . import transitions
+
+    if clamp is None:
+        clamp = transitions.cut_rules() is not None
+    segs = []
+    for a, b in keep:
+        start, end = max(0.0, float(words[a]["start"]) - LEAD_IN_S), float(words[b]["end"]) + LEAD_OUT_S
+        if clamp:
+            start, end = transitions.clamp_to_neighbors(words, a, b, start, end)
+        segs.append(Segment(start, end))
     merged = [segs[0]] if segs else []
     for s in segs[1:]:
         if s.start - merged[-1].end < MERGE_GAP_S:

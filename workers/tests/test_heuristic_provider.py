@@ -85,7 +85,7 @@ def test_score_fields_ranges_and_grounded_evidence(no_network):
     for k in ("hook", "payoff", "specificity", "tension", "audience_fit"):
         assert isinstance(r[k], int) and 0 <= r[k] <= 10
     assert r["ungrounded_evidence"] == []  # Belege sind wörtliche Satzanfänge
-    assert r["model_id"] == "heuristic-v1" and r["prompt_version"] == "score_clip_v2"
+    assert r["model_id"] == "heuristic-v1" and r["prompt_version"] == ("score_clip_v3" if editorial.load().version >= 2 else "score_clip_v2")
     assert r["is_humor"] is False and r["gate_passed"] is True
     assert r["specificity"] >= 6  # 40 Prozent, 2019, 30 Prozent
     assert costs and costs[0]["in"] == 0 and costs[0]["provider"] == "local-heuristic"
@@ -114,14 +114,20 @@ def test_confirm_returns_no_verdict(no_network):
 
 def test_engine_with_heuristic_marks_results(no_network, active_policy):
     report = story_engine.run(demo_words(), BRIEF, {}, {"seeds": [2]}, _llm("sovereign"))
-    overview = ["episode_overview_v1"] if active_policy == 2 else []  # Fassung 2 mit verdrahteter Suche
-    assert report.prompt_versions == [f"propose_moments_v{1 if active_policy == 1 else 2}", "score_clip_v2", "story_graph_confirm_v1", *overview]
+    # Fassung 2 mit verdrahteter Suche und Kritiker (AP6b)
+    overview = ["episode_overview_v1", "critique_clip_v1"] if active_policy == 2 else []
+    score_clip = "score_clip_v2" if active_policy == 1 else "score_clip_v3"  # AP9
+    assert report.prompt_versions == [f"propose_moments_v{1 if active_policy == 1 else 2}", score_clip, "story_graph_confirm_v1", *overview]
     assert report.provider == "local-heuristic" and report.model_id == "heuristic-v1"
     assert report.candidates, report.discarded
     for c in report.candidates:
         assert c.model_id == "heuristic-v1"
-        assert c.prompt_version == "score_clip_v2"
+        assert c.prompt_version == score_clip
         assert c.rubric["policy_version"] == f"clip_policy_v{active_policy}"
+        if active_policy == 2:  # AP9: die Heuristik misst keinen Teilwert nach Master-Prompt 19
+            sub = c.rubric["anchor_subscores"]
+            assert sub["source"] == "heuristic" and sub["calibration"] == "uncalibrated"
+            assert all(sub["values"][k] is None for k in story_score.EDITORIAL_SUBSCORE_KEYS)
         assert "heuristic_only" in c.risk_flags
         assert c.why.endswith("Bewertung ohne Sprachmodell.")
         assert 12.0 <= c.duration_s <= 90.0

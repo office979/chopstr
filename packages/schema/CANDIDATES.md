@@ -10,9 +10,9 @@ Vertragsversion: `candidates_v1`
 | Spalte | Inhalt |
 |---|---|
 | `id`, `source_id`, `version` | Version zählt pro Kandidat hoch, wenn Grenzen im Review geändert werden (neue Zeile mit gleicher `first_sent`-Herkunft in `rubric.parent_id`). |
-| `segments` | `[{ "start": 812.4, "end": 861.0, "role": "body" }]` in Abspielreihenfolge, Originalzeit. Ein `body`-Segment, davor optional ein Teaser (`role: "teaser"`, höchstens 6 s, ein Satz aus dem Body, `structure = payoff_first`, `rubric.teaser_satz`), wenn `compose.Composition.validate` ihn annimmt. `start_s`/`end_s` beschreiben nur den Body. |
+| `segments` | `[{ "start": 812.4, "end": 861.0, "role": "body" }]` in Abspielreihenfolge, Originalzeit. Ein `body`-Segment (mehrere nur bei wirksamer Kürzung unter Fassung 2, heute nicht der Fall), davor optional ein Teaser (`role: "teaser"`, höchstens 6 s, ein Satz aus dem Body, `structure = payoff_first`, `rubric.teaser_satz`), wenn `compose.Composition.validate` ihn annimmt. `start_s`/`end_s` beschreiben nur den Body. |
 | `start_s`, `end_s` | Erstes Segment-Start, letztes Segment-Ende (Sekunden im Original). |
-| `first_sent`, `last_sent` | Satzindizes (aus `segment.sentences_from_words` über das aktuelle Transkript). |
+| `first_sent`, `last_sent` | Satzindizes des Laufs. Unter Fassung 1 aus `segment.sentences_from_words`, unter Fassung 2 aus der `sentence_idx` der Transkriptversion (`segment.sentences_from_annotated`); das Web zählt gleich. |
 | `structure` | eine von `payoff_first`, `tension_first`, `hook_build_payoff`, `decision_story`, `how_to_list`, `loop`. |
 | `rubric` | siehe unten. |
 | `gates` | siehe unten. |
@@ -21,8 +21,8 @@ Vertragsversion: `candidates_v1`
 | `total` | Gesamtwert auf der Skala der Richtlinie (`story_engine.policy_total`): `Policy.gesamtwert(rubric_points)` über sieben Kriterien zu je 0 bis 2, also nominal 0 bis 14, mal `(1 - laenge_abzug)`, danach Klang-Faktor (mit Heatmap bis 16,1 möglich). Kein Wert auf 0 bis 10. Die fünf alten Schlüssel in `rubric.scores` (0 bis 10) und die Gewichte aus `brand_profiles.learned_weights` gehen nicht in `total` ein. |
 | `gate_passed` | alle Pflichtkriterien erfüllt. `story_engine.select_best` verwirft jeden Kandidaten mit gerissenem Tor (Grund `gate` in `report.discarded`), deshalb schreibt der Worker nur Zeilen mit `gate_passed = true`. `false` entsteht nur durch eine Revision in der Web-App. |
 | `why` | ein Satz Klartext, z. B. „Kernaussage in 38 Sekunden vollständig, Einstieg mit klarer Gegenposition, keine spätere Relativierung gefunden, passt für LinkedIn.“ |
-| `model_id`, `prompt_version` | z. B. `eu.anthropic...` und `score_clip_v1`; Heuristik ohne Sprachmodell (Provider `local-heuristic`, nur Entwicklung und Demo): `model_id = "heuristic-v1"`, `prompt_version` bleibt gesetzt (der Heuristik-Provider liest den gerenderten Prompt), `risk_flags` enthält `heuristic_only`. |
-| `human_verdict` | `accepted`, `rejected`, `edited` oder null. `verdict_reason`, `verdict_by`, `verdict_at`. |
+| `model_id`, `prompt_version` | z. B. `eu.anthropic...` und `score_clip_v2` (der gepinnte Prompt der Bewertung, `docs/PIPELINE.md` Abschnitt 6); Heuristik ohne Sprachmodell (Provider `local-heuristic`, nur Entwicklung und Demo): `model_id = "heuristic-v1"`, `prompt_version` bleibt gesetzt (der Heuristik-Provider liest den gerenderten Prompt), `risk_flags` enthält `heuristic_only`. |
+| `human_verdict` | `accepted`, `rejected`, `edited` oder null. `verdict_reason`, `verdict_by`, `verdict_at`. Die Automatik setzt `accepted` mit `verdict_by = NULL`, außer sie hält den Kandidaten zurück (`humor`, `sensitive_topic`, freigaberelevante Behauptung, `claim_unchecked`): dann bleibt das Urteil null und `verdict_reason` beginnt mit „automatische Freigabe ausgesetzt“ (P27, P36). |
 
 ## `rubric`
 
@@ -51,22 +51,33 @@ Vertragsversion: `candidates_v1`
 }
 ```
 
+### Additive Rubrik-Schlüssel aus der Policy-Fassung 2
+
+Nur unter Fassung 2 und nur, wenn der jeweilige Schalter wirkt (`docs/PIPELINE.md` Abschnitt 8). Keiner der obigen Schlüssel ändert sich; wer die neuen nicht kennt, ignoriert sie. Unter Fassung 1 fehlen sie, die Rubrik bleibt byte-gleich.
+
+| Schlüssel | Wann | Inhalt |
+|---|---|---|
+| `sentence_rule`, `start_heal`, `pre_heal_scores`, `heal_rounds` | `implementation.sentence_rule` | Satzende-Regel des Laufs (`v2` oder `v1_fallback_no_punct`), Notiz zum Heilen des Anfangs (`healed`, `sentences`, `seconds`, `defects`), die Werte vor der Neubewertung, Zahl der Heilungen |
+| `quality_gate_results`, `quality_gate_decision`, `gate_heal` | `implementation.gates.discard_hard` (heute aus) | Ergebnis je hartem Gate, Entscheidung (`accepted`, `reported`, `rejected`) mit Grund, Heilnotizen |
+| `trim`, `removed_spans`, `composition` | Regel und Schalter `trim.enabled` (Regel heute aus) | Ergebnis der Kürzung (`applied`, `reason`, `reward_end`, `findings`, `composition`), entfernte Stellen, Komposition |
+| `proposal_missing_v2_fields` | Suche (`search.payoff_first`) | Felder, die dem Modellvorschlag aus `propose_moments_v2` fehlten (der Vorschlag wurde abgewertet) |
+
 ### Additive Rubrik-Schlüssel aus dem ClipCandidate (`clip_candidate_v1`)
 
-Vorgesehen für AP8, noch nicht verdrahtet: `clip_candidate.compact_for_rubric` liefert diese Schlüssel
-zusätzlich zur bestehenden Rubrik. Keiner der obigen Schlüssel ändert sich; wer sie nicht kennt,
-ignoriert sie. Inhalt und Null-Regeln stehen in `packages/schema/CLIP_CANDIDATE.md`.
+Verdrahtet unter Fassung 2: `story_engine.attach_clip_candidates` ruft am Ende von `run` `clip_candidate.compact_for_rubric` auf und schreibt diese Schlüssel zusätzlich in die Rubrik jedes angebotenen und jedes verworfenen Kandidaten; der vollständige ClipCandidate steht nur im Bericht im Storage (`clip_candidates`), nicht in der Datenbank. Unter Fassung 1 fehlen die Schlüssel. Inhalt und Null-Regeln stehen in `packages/schema/CLIP_CANDIDATE.md`.
 
 | Schlüssel | Inhalt |
 |---|---|
 | `versions` | `{ "contract": "clip_candidate_v1", "model_version", "prompt_version" (alle gepinnten Prompts), "policy_version" }` |
 | `decision` | `accept` oder `reject` |
 | `decision_reason` | Grund der Entscheidung, nie leer |
-| `quality_gate_results` | die fünf Tore wie in `gates` |
-| `editorial_subscores` | `{ "scale_max", "values" }` mit den sieben Kriterien der Richtlinie, nicht messbare Werte `null` |
+| `quality_gate_results` | die fünf Tore wie in `gates`, dazu die Ergebnisse der harten Gates, wenn sie liefen (die Schlüssel werden zusammengeführt) |
 | `assessment_uncertainties` | Liste `{ "kind", "detail", "word_id", "text", "prob" }`, etwa unsicher erkannte Zahlen und Namen |
-| `removed_spans` | Entfernungen im Clip, heute leer |
+| `removed_spans` | Entfernungen im Clip; leer, solange die Kürzung nicht wirkt |
 | `calibration` | `uncalibrated` |
+
+Nicht in dieser Teilmenge: die Teilwerte 0 bis 4 stehen als `rubric.anchor_subscores` (AP9), die sieben
+Rubrikpunkte als `rubric.rubric_points`; der ClipCandidate führt sie als `editorial_subscores` und `rubric_points`.
 
 ## `gates`
 
@@ -80,8 +91,8 @@ ignoriert sie. Inhalt und Null-Regeln stehen in `packages/schema/CLIP_CANDIDATE.
 }
 ```
 
-`gate_passed = alle passed`. Fehlt spaCy, ist `verb_bracket.available = false` und `passed = true`
-mit Hinweis (kein Blocker, aber sichtbar).
+`gate_passed = alle passed`. Fassung 1: Fehlt spaCy, ist `verb_bracket.available = false` und `passed = true`
+mit Hinweis (kein Blocker, aber sichtbar). Fassung 2: `verb_bracket` prüft über die Schnittgrenze und trägt `method` (`spacy`, `heuristic` oder `off`); ohne spaCy entscheidet die Heuristik, nur mit `verb_bracket.fallback: off` bleibt das Tor ungeprüft und sagt es. Das Tor `sentence_boundaries` meldet unter Fassung 2 „Grenze nur aus Pause“, wenn ein Pause-Kandidat die Grenze bildet.
 
 ## `story_graph_flags`
 
@@ -109,6 +120,7 @@ mit Hinweis (kein Blocker, aber sichtbar).
 | Aktion | Wirkung |
 |---|---|
 | annehmen | `human_verdict = 'accepted'`, `audit_log candidate.accepted`; wenn Temporal erreichbar: Signal `approve(candidate_id, destination)` an `project-<source_id>` (Render folgt in Phase 3). |
+| „Video clippen“ an einem zurückgehaltenen Clip | gilt als Annahme: erst `human_verdict = 'accepted'` mit dem Nutzer als `verdict_by`, bedingt auf ein noch offenes Urteil, dann der Render; ein abgelehnter oder ersetzter Kandidat wird nicht gerendert (P37). |
 | ablehnen | `human_verdict = 'rejected'` mit `verdict_reason` (Pflicht, kurzer Grund: Lernsignal). |
 | verlängern / kürzen | neue Zeile `version + 1` mit angepassten `first_sent`/`last_sent`, `segments`, `start_s`/`end_s`, `rubric.parent_id = <alte id>`, Gates werden deterministisch neu berechnet (Satzgrenzen, Open-Loop); Scores bleiben, `rubric.scores_stale = true`. Alte Zeile bekommt `human_verdict = 'edited'`. |
 | Kontext ergänzen | `rubric.suggested_title_card` überschreiben (max. 8 Wörter), neue Version. |
@@ -116,5 +128,5 @@ mit Hinweis (kein Blocker, aber sichtbar).
 ## Ereignisse
 
 `pipeline_events.step = 'detect_candidates'` mit `progress` pro Kapitel; `finished`-Payload:
-`{ "candidates": 12, "gate_passed": 9, "chapters": 15, "provider": "bedrock-eu", "model_id": "...", "prompt_versions": ["propose_moments_v1", "score_clip_v1", "story_graph_confirm_v1"] }`.
+`{ "candidates": 12, "clips": 12, "gate_passed": 12, "chapters": 15, "provider": "bedrock-eu", "model_id": "...", "prompt_versions": ["propose_moments_v1", "score_clip_v2", "story_graph_confirm_v1"], "discarded": [...], "proposals": 40, "cached": false, "nlp_status": null }`. Unter Fassung 2 steht `propose_moments_v2` und mit der Suche zusätzlich `episode_overview_v1` in `prompt_versions`, und `nlp_status` ist `spacy`, `heuristic` oder `off`.
 `sources.status` läuft `analyzing → scoring → ready`.

@@ -174,6 +174,10 @@ bewertung:
   modus_v2: sperren
   only_with_language_model: true
   begruendung: "Aufmerksamkeit darf eine falsche Aussage nicht ausgleichen. Erst die harten Prüfungen, dann die Bewertung; unter der Schwelle verwerfen wird nur mit Sprachmodell."
+  # Neu in Fassung 2 (AP9): Die Länge wirkt nur als Abzug (laenge_abzug mit der gemessenen Abspieldauer in
+  # story_engine.policy_total), nicht zusätzlich als Bonus in aufloesung und zielgruppe der Heuristik, die
+  # sie dort aus der Wortzahl schätzt. Gelesen von editorial.length_only_as_penalty. Rollback: false.
+  length_only_as_penalty: true
 
 # ------------------------------------------------------------------------------------------------
 # Moment-Typen
@@ -408,6 +412,25 @@ captions:
   comma_break_only_on_overflow: true
 
 # ------------------------------------------------------------------------------------------------
+# Schnittkanten (neu in Fassung 2, AP10b)
+# ------------------------------------------------------------------------------------------------
+# Vor- und Nachlauf an Wortgrenzen statt Schnitt exakt auf den Satzzeiten (RK 2 Befund 8). Gelesen
+# über editorial.cut_settings von pipeline.transitions (pad_segments, check_transitions) im Render
+# (render_plan.build_plan, render_v2). Wirksam nur zusammen mit implementation.cut.padding; steht eins
+# auf false, schneidet der Render wie in Fassung 1 (Rollback, Render-Plan-Hash wie vorher).
+cut:
+  padding: true
+  # Vorlauf in Sekunden vor dem ersten Wort eines Segments, nie vor dem Ende des vorigen Wortes.
+  lead_in_s: 0.06
+  # Nachlauf in Sekunden nach dem letzten Wort eines Segments, nie in das nächste Wort.
+  lead_out_s: 0.18
+  # Kleinste Restpause an einer Klebestelle (Nachlauf plus Vorlauf); darunter ein Hinweis (mittel).
+  min_gap_s: 0.1
+  # Unter dieser Sicherheit liegt die Kante konservativ in der Mitte der Stille und wird markiert.
+  # Verweis auf die Schwelle der Transkription (keine eigene Zahl).
+  low_confidence_threshold: transcribe.LOW_CONF_THRESHOLD
+
+# ------------------------------------------------------------------------------------------------
 # Hook (neu in Fassung 2, AP6a)
 # ------------------------------------------------------------------------------------------------
 # Der Text-Hook darf verdichten, aber nicht mehr behaupten als der Clip trägt (Master-Prompt 8).
@@ -558,6 +581,12 @@ search:
   payoff_first: true
   # Gegenrichtung: starke Einstiege finden und prüfen, ob das Material einlöst (sonst promise_unfulfilled).
   opening_first: true
+  # Einstiege vergleichen (AP6b): story_engine.evaluate_span bewertet bis zu drei substanziell verschiedene
+  # Originaleinstiege (payoff_search.alternative_openings, verschiedene Sätze) mit den Gates aus
+  # editorial_gates, satz_staerke und der Länge im Fenster, wählt einen und schreibt die anderen mit Grund nach
+  # rubric.alternatives_considered. Ein Einstieg, der ein Gate reißt, wird nie gewählt, wenn ein anderer alle
+  # besteht. Rollback: false.
+  compare_openings: true
   # Überlappung benachbarter Kapitel in Sekunden, damit ein Moment an der Kapitelgrenze nicht zerfällt
   # (segment.chapterize, gelesen von story_engine.run).
   chapter_overlap_s: 30
@@ -565,12 +594,18 @@ search:
   # Rechnung: Kapitel von 240 s mit 30 s Überlappung ergeben etwa 17 Kapitel je Stunde. Je Kapitel eine
   # Übersicht und ein Vorschlag (2), höchstens vier Kandidaten mit je bis zu vier Bewertungen (erste
   # Bewertung, zwei Reparaturrunden, eine Neubewertung nach dem Heilen des Anfangs) und einer
-  # Gegenprüfung einer späteren Einschränkung (je 5, zusammen 20): 22 je Kapitel, 17 mal 22 sind 374;
-  # 400 ist die Obergrenze. Erschöpfung: Kapitel laufen in der Reihenfolge von story_engine.chapter_order
+  # Gegenprüfung einer späteren Einschränkung (je 5, zusammen 20): 22 je Kapitel, 17 mal 22 sind 374.
+  # Dazu der Kritiker (AP6b) je Quelle für höchstens output.max_candidates angebotene Kandidaten plus drei
+  # Nachrücker aus der Reserve (13): 387; 400 ist die Obergrenze. Aufrufe des Heuristik-Providers zählen
+  # mit, werden aber nie verweigert (kein Modell, keine Kosten). Erschöpfung: Kapitel laufen in der Reihenfolge von story_engine.chapter_order
   # (Kapitel mit Seed zuerst); ist das Budget erschöpft, bekommen die übrigen Kapitel keinen Modellaufruf
   # mehr, und der Report nennt sie (budget_exhausted mit den übersprungenen Kapiteln). Durchsetzung im
   # Lauf mit der Verdrahtung in story_engine.run.
   max_llm_calls_per_source_hour: 400
+  # Mindestdauer, mit der eine Quelle ins Budget eingeht: so lang wie ein Kapitel (story_engine.CHAPTER_SECONDS).
+  # Ein Ausschnitt von 25 Sekunden braucht dieselben Schritte wie ein Kapitel (Übersicht, Vorschlag,
+  # Bewertung); ohne diese Untergrenze bekäme er rechnerisch nur zwei Aufrufe.
+  budget_min_source_s: 240
   # Woran ein Payoff im Text erkennbar ist (payoff_search.find_payoffs). Kleingeschrieben, als ganze Wörter
   # im kleingeschriebenen Satz. Ergebnis mit Zahl kommt aus moment_typen.zahl, Merksatz zusätzlich aus
   # moment_typen.merksatz; Auflösung nach Frage, Pointe nach Setup und Lachen erkennt der Code aus der
@@ -614,8 +649,12 @@ search:
 # ------------------------------------------------------------------------------------------------
 # Feststellbare Verletzungen der Eigenständigkeit und Originaltreue verwerfen einen Kandidaten vor dem
 # Ranking (Master-Prompt 19). Jede Regel ist einzeln schaltbar; die Prüfungen stehen in
-# chopstr_worker/pipeline/editorial_gates.py. discard_hard: true verwirft Verletzer, false berichtet
-# sie nur. Wirksam im Lauf erst mit implementation.gates.discard_hard; das ist der Rollback.
+# chopstr_worker/pipeline/editorial_gates.py. Zwei Werte mit verschiedener Bedeutung:
+#   implementation.gates.discard_hard (Schalter): die Gates laufen in story_engine (Bericht in
+#     rubric.quality_gate_results, Heilung vor dem Verwerfen, Marker-Regel v2 in Sinntreue-Tor und
+#     Story-Graph, Quote je Gate im DetectReport). false ist der Rollback auf das Verhalten vor AP4.
+#   gates.discard_hard (Regel, hier): Verletzer verwerfen (true) oder nur berichten (false, Entscheidung
+#     reported, keine Faltung in die fünf Tore). Bis zum Blindvergleich (AP11) false: Berichtsmodus.
 # embedded_instruction und meta_speech verwerfen nie: der Kandidat bleibt Inhalt und wird markiert.
 gates:
   unresolved_pronoun: true
@@ -628,7 +667,32 @@ gates:
   later_correction: true
   embedded_instruction: true
   meta_speech: true
-  discard_hard: true
+  discard_hard: false
+
+# ------------------------------------------------------------------------------------------------
+# Ausgabeumfang (neu in Fassung 2, AP9)
+# ------------------------------------------------------------------------------------------------
+# max_candidates: höchstens so viele Kandidaten je Quelle bietet story_engine.select_best an (vorher 20 fest im
+# Code). Keine feste Clipanzahl pro Stunde, Verwerfen bleibt zulässig (Master-Prompt Abschnitt 7).
+# redundancy_jaccard: ab diesem Anteil gemeinsamer Inhaltswörter (Lemma-Jaccard aus story_graph._lemmas) gilt
+# ein Kandidat als dieselbe Aussage wie ein schon behaltener und fällt mit Grund redundant, auch ohne zeitliche
+# Überdeckung. Wirksam mit implementation.output.max_candidates. Rollback: max_candidates: 20 oder der Schalter
+# auf false.
+output:
+  max_candidates: 10
+  redundancy_jaccard: 0.6
+
+# ------------------------------------------------------------------------------------------------
+# Getrennte Rollen (neu in Fassung 2, AP6b)
+# ------------------------------------------------------------------------------------------------
+# Analyst ist episode_overview (AP5), Editor propose_moments_v2 und die Einstiegswahl, Evaluator die
+# deterministischen Gates und Teilwerte (kein Modell). critic: der Kritiker (critique_clip_v1,
+# chopstr_worker/pipeline/critic.py) prüft nur die Überlebenden von select_best, höchstens so viele wie
+# angeboten werden, innerhalb von search.max_llm_calls_per_source_hour. Ein bestätigter Befund der Schwere
+# fidelity mit wörtlichem Beleg verwirft (critic:<kind>); andere Befunde stehen in rubric.critic_findings.
+# Befunde der Heuristik verwerfen nie (unkalibriert). Wirksam erst mit implementation.roles.critic.
+roles:
+  critic: true
 
 # ------------------------------------------------------------------------------------------------
 # Prompt-Pins (neu in Fassung 2)
@@ -639,11 +703,12 @@ gates:
 prompts:
   system_editor: 2               # AP4: system_editor_v2 (Transkript, Titel, Metadaten sind Daten; Begrenzer)
   propose_moments: 2          # AP5: propose_moments_v2 (Payoff zuerst, Übersicht, Seeds, Policy im Prompt)
-  score_clip: 2
+  score_clip: 3               # AP9: score_clip_v3 (sieben Kriterien wie v2 plus editorial_subscores 0 bis 4 mit Beleg, Kandidat als Daten)
   story_graph_confirm: 1
   hooks: 2                    # AP6a: hooks_v2 (verschiedene Originalstellen, Frage als Variante, Clip als Daten)
   post_caption: 1
   episode_overview: 1         # AP5: Übersicht je Kapitel, nur für die Suche
+  critique_clip: 1            # AP6b: Kritiker, sucht gezielt Widerlegung, unklares Pronomen, entfernte Bedingung, falschen Übergang, fremde Position
 
 # ------------------------------------------------------------------------------------------------
 # Schalter der Arbeitspakete (neu in Fassung 2)
@@ -655,7 +720,7 @@ prompts:
 implementation:
   sentence_rule: true         # AP2: eine Satzende-Funktion, Anfang heilen (gebaut, liest segmentation)
   gates:
-    discard_hard: false       # AP4: harte Gates vor dem Ranking verwerfen statt sortieren
+    discard_hard: true        # AP4: Gates laufen (Bericht, Heilung, Marker v2); verworfen wird erst mit der Regel gates.discard_hard
   search:
     payoff_first: true        # AP5: Suche vom Payoff rückwärts zum Einstieg (gebaut, story_engine.run liest search)
   hook:
@@ -663,9 +728,160 @@ implementation:
   trim:
     enabled: true             # AP7: Remove- und Keep-Logik (gebaut); wirksam erst mit der Regel trim.enabled, die bis zum Blindvergleich false bleibt
   cut:
-    padding: false            # AP10b: Vor- und Nachlauf an Wortgrenzen
+    padding: true             # AP10b: Vor- und Nachlauf an Wortgrenzen (gebaut, liest Abschnitt cut)
   captions:
     word_bridge: true         # AP10a: Wort-Events bis zum nächsten Wort (gebaut, liest Abschnitt captions)
+  output:
+    max_candidates: true      # AP9: Obergrenze und Redundanz über Inhalt in select_best (gebaut, liest Abschnitt output)
+  # Register der Schlüssel (AP9): Status je Regel aus origins (implemented, partial, not_implemented), Grund
+  # bei partial und not_implemented. Die lesende Funktion steht in editorial.IMPLEMENTED_KEYS. Ein Verhalten
+  # ohne eigenen Schlüssel: Neubewertung nach der Verlängerung (AP2, story_engine.evaluate_span), siehe
+  # editorial.IMPLEMENTED_BEHAVIOURS.
+  keys:
+    laenge.ziel_s: {status: implemented}
+    laenge.gut_von_s: {status: implemented}
+    laenge.gut_bis_s: {status: implemented}
+    laenge.hart_min_s: {status: implemented}
+    laenge.hart_max_s: {status: implemented}
+    laenge.kontext_zugabe_s: {status: implemented}
+    laenge.kontext_zugabe_saetze: {status: implemented}
+    laenge.context_front_sentences: {status: implemented}
+    laenge.context_front_s: {status: implemented}
+    rubrik.skala_max: {status: implemented}
+    rubrik.kriterien.standalone: {status: implemented}
+    rubrik.kriterien.hook: {status: implemented}
+    rubrik.kriterien.offene_frage: {status: implemented}
+    rubrik.kriterien.spezifitaet: {status: implemented}
+    rubrik.kriterien.emotion: {status: implemented}
+    rubrik.kriterien.aufloesung: {status: implemented}
+    rubrik.kriterien.zielgruppe: {status: implemented}
+    bewertung.modus: {status: not_implemented, reason: "Regel der Fassung 1: nur von _pruefe geprüft, die Eigenschaft sperrt hat keinen Aufrufer; ab Fassung 2 gilt bewertung.modus_v2"}
+    bewertung.schwelle_schneiden: {status: not_implemented, reason: "block_mode_settings gibt den Wert als cut_from zurück, kein Aufrufer wertet ihn aus"}
+    bewertung.schwelle_verwerfen: {status: partial, reason: "select_best verwirft darunter (below_threshold) nur mit Sprachmodell (Modus sperren); mit dem Heuristik-Provider bleibt es bei sortieren (AP4)"}
+    bewertung.punkte_gesamt: {status: implemented}
+    bewertung.modus_v2: {status: implemented}
+    bewertung.only_with_language_model: {status: implemented}
+    bewertung.begruendung: {status: partial, reason: "Begründungstext, nur als Pflichtfeld geprüft und als reason zurückgegeben, keine wirkende Regel"}
+    bewertung.length_only_as_penalty: {status: implemented}
+    moment_typen.contrarian: {status: implemented}
+    moment_typen.zahl: {status: implemented}
+    moment_typen.ministory: {status: implemented}
+    moment_typen.gestaendnis: {status: implemented}
+    moment_typen.merksatz: {status: implemented}
+    moment_typen.konflikt: {status: partial, reason: "braucht_audio: lauter werdende Stimme wird nicht erkannt, deshalb wirkt der Typ weder in Bewertung noch Teaser; nur die Heuristik-Übersicht liest die Marker als Einwände"}
+    einstieg.nie_mitten_im_satz: {status: implemented}
+    einstieg.nie_in_selbstkorrektur: {status: not_implemented, reason: "kein Code liest den Schlüssel, nur fester Prompt-Text in Policy.als_prompt_text; das Gate later_correction (AP4) prüft spätere Korrekturen nach dem Clip, nicht einen Einstieg in einer Selbstkorrektur"}
+    einstieg.keine_pronomen_ohne_bezug: {status: implemented}
+    einstieg.pronomen: {status: implemented}
+    einstieg.keine_gastgeberfrage: {status: implemented}
+    einstieg.einleitungen_kappen: {status: partial, reason: "nur Punktabzug im Heuristik-Provider, gekappt wird nichts; mit Sprachmodell nur Prompt-Text"}
+    einstieg.einleitungsfloskeln: {status: partial, reason: "nur Punktabzug im Heuristik-Provider (_standalone, _hook), gekappt wird nichts"}
+    ausstieg.satz_zu_ende: {status: partial, reason: "nur der Heuristik-Provider liest den Schalter; das Tor sentence_boundaries prüft Satzenden immer, ohne den Schlüssel zu lesen"}
+    ausstieg.verbklammer_nicht_trennen: {status: implemented}
+    ausstieg.vor_der_abschwaechung: {status: partial, reason: "nur Punktabzug im Heuristik-Provider; die Heilung des Endes folgt ausstieg.never_end_on_qualification"}
+    ausstieg.abschwaechung_marker: {status: implemented}
+    ausstieg.never_end_on_qualification: {status: implemented}
+    zusammenhang.ein_zusammenhaengender_abschnitt: {status: not_implemented, reason: "kein Code liest den Schlüssel, nur fester Prompt-Text; die Kürzung (AP7) misst stattdessen zusammenhang.mindest_dichte"}
+    zusammenhang.mindest_dichte: {status: implemented}
+    zusammenhang.max_gedanken: {status: not_implemented, reason: "nur mit Sprachmodell beurteilbar, kein Code zählt Gedanken"}
+    audio.in_bewertung_verwenden: {status: implemented}
+    audio.gewicht: {status: implemented}
+    audio.merkmale.energie_anstieg: {status: not_implemented, reason: "der Schlüssel wird nicht gelesen; audio_wert rechnet den Anstieg im Audioanteil unabhängig davon"}
+    audio.merkmale.lachen: {status: not_implemented, reason: "Lachen wird nicht berechnet, signals.combined bekommt laughter=None; der Schlüssel wird nicht gelesen"}
+    audio.merkmale.applaus: {status: not_implemented, reason: "Applaus wird nicht berechnet, kein Code liest den Schlüssel"}
+    audio.merkmale.pause_vor_aussage: {status: not_implemented, reason: "kein Bewertungsmerkmal im Code; AP7 schützt Pausen vor Zahl, Negation, Kontrast und Pointe über trim.pause_classes, liest diesen Schlüssel aber nicht"}
+    hook_vorziehen.aktiv: {status: implemented}
+    hook_vorziehen.mindest_vorsprung: {status: implemented}
+    hook_vorziehen.max_teaser_s: {status: implemented}
+    hook_vorziehen.nicht_aus_letztem_anteil: {status: implemented}
+    ausschluss.organisatorisches_gespraech: {status: partial, reason: "kein hartes Verwerfen: die Suche stoppt an solchen Sätzen (payoff_search), die Heuristik wertet ab"}
+    ausschluss.organisations_marker: {status: partial, reason: "kein hartes Verwerfen: die Suche stoppt an solchen Sätzen (payoff_search), die Heuristik wertet ab"}
+    ausschluss.begruessung_und_abschied: {status: not_implemented, reason: "kein Code liest den Schlüssel; ähnliche Wortlisten stehen in search.stop_markers.farewell und trim.removal.edge_markers"}
+    ausschluss.insiderwitz_ohne_kontext: {status: not_implemented, reason: "nur mit Sprachmodell beurteilbar, kein Code liest den Schlüssel"}
+    captions.bridge_words: {status: implemented}
+    captions.bridge_max_s: {status: implemented}
+    captions.min_event_s: {status: implemented}
+    captions.comma_break_only_on_overflow: {status: implemented}
+    hook.native_spoken: {status: implemented}
+    hook.hyperbole: {status: implemented}
+    hook.allow_partial_opening: {status: implemented}
+    hook.question_as_variant: {status: not_implemented, reason: "kein Code liest den Schlüssel; die Regel steht nur als Text im gepinnten Prompt hooks_v2"}
+    segmentation.sentence_rule: {status: implemented}
+    segmentation.max_sentence_s: {status: implemented}
+    segmentation.max_sentence_words: {status: implemented}
+    verb_bracket.fallback: {status: implemented}
+    verb_bracket.particles: {status: implemented}
+    verb_bracket.subordinators: {status: implemented}
+    verb_bracket.auxiliaries: {status: implemented}
+    search.payoff_first: {status: implemented}
+    search.opening_first: {status: implemented}
+    search.chapter_overlap_s: {status: implemented}
+    search.max_llm_calls_per_source_hour: {status: implemented}
+    search.budget_min_source_s: {status: implemented}
+    search.payoff_markers.rule: {status: implemented}
+    search.payoff_markers.consequence: {status: implemented}
+    search.payoff_markers.explanation: {status: implemented}
+    search.payoff_markers.lesson: {status: implemented}
+    search.payoff_markers.emotional: {status: implemented}
+    search.hedge_markers: {status: implemented}
+    search.stop_markers.sponsor: {status: implemented}
+    search.stop_markers.farewell: {status: implemented}
+    search.stop_markers.topic_change: {status: implemented}
+    search.hook_type_markers.concrete_contradiction: {status: implemented}
+    search.hook_type_markers.mistake_with_consequence: {status: implemented}
+    search.hook_type_markers.result_with_open_cause: {status: implemented}
+    search.hook_type_markers.scene_with_stakes: {status: implemented}
+    search.hook_type_markers.decision_rule: {status: implemented}
+    search.hook_type_markers.demonstration: {status: implemented}
+    search.hook_type_markers.self_correction: {status: implemented}
+    search.hook_type_markers.recognizable_problem: {status: implemented}
+    search.hook_type_markers.perspective_shift: {status: implemented}
+    search.hook_type_markers.punchline: {status: implemented}
+    search.compare_openings: {status: implemented}
+    trim.enabled: {status: implemented}
+    trim.pause_target_s: {status: implemented}
+    trim.min_trim_gain_s: {status: implemented}
+    trim.long_silence_s: {status: implemented}
+    trim.min_segment_s: {status: implemented}
+    trim.max_semantic_splices: {status: implemented}
+    trim.debate_no_reorder: {status: implemented}
+    trim.pause_classes.dramatic_before: {status: implemented}
+    trim.pause_classes.reaction_after: {status: implemented}
+    trim.pause_classes.reaction_words: {status: implemented}
+    trim.pause_classes.punchline_window_s: {status: implemented}
+    trim.pause_classes.orientation_min_s: {status: implemented}
+    trim.pause_classes.orientation_markers: {status: implemented}
+    trim.removal.fillers: {status: implemented}
+    trim.removal.backchannel: {status: implemented}
+    trim.removal.restarts: {status: implemented}
+    trim.removal.edge_markers: {status: implemented}
+    trim.removal.organisation_markers: {status: implemented}
+    trim.removal.never_remove: {status: implemented}
+    trim.reward_end.weak_summary: {status: implemented}
+    trim.reward_end.sales_call: {status: implemented}
+    trim.reward_end.farewell: {status: implemented}
+    trim.reward_end.repeat_overlap: {status: implemented}
+    gates.unresolved_pronoun: {status: implemented}
+    gates.back_reference: {status: implemented}
+    gates.open_question_unanswered: {status: implemented}
+    gates.boundary_negation_condition: {status: implemented}
+    gates.reported_speech: {status: implemented}
+    gates.forward_reference: {status: implemented}
+    gates.speaker_turn: {status: implemented}
+    gates.later_correction: {status: implemented}
+    gates.embedded_instruction: {status: implemented}
+    gates.meta_speech: {status: implemented}
+    gates.discard_hard: {status: implemented}
+    cut.padding: {status: implemented}
+    cut.lead_in_s: {status: implemented}
+    cut.lead_out_s: {status: implemented}
+    cut.min_gap_s: {status: implemented}
+    cut.low_confidence_threshold: {status: implemented}
+    roles.critic: {status: implemented}
+    output.max_candidates: {status: implemented}
+    output.redundancy_jaccard: {status: implemented}
+  roles:
+    critic: true              # AP6b: Kritiker nach select_best (gebaut, story_engine.run liest roles.critic)
 
 # ------------------------------------------------------------------------------------------------
 # Herkunft je Regel (neu in Fassung 2)
@@ -733,6 +949,11 @@ origins:
   captions.bridge_max_s: {origin: H, source: "Startwert aus dem Entscheidungsregister (offene Fragen, Startwerte); RK 2 Befund 9; nicht gemessen"}
   captions.min_event_s: {origin: H, source: "Startwert aus dem Entscheidungsregister, nur für Karten mit mehreren Wörtern; RK 5 Netflix German Timed Text Style Guide als Orientierung; RK 2 Befund 9 (keine Mindestanzeigedauer)"}
   captions.comma_break_only_on_overflow: {origin: R, source: "Entscheidung P30 (Komma-Bruch nur bei Überlauf); RK 2 Befund 9 (Bruch nach jedem Komma); RK 5 Netflix German Timed Text Style Guide (zusammenhängende grammatische Einheit je Zeile)"}
+  cut.padding: {origin: R, source: "RK 2 Befund 8 (Schnittkanten exakt auf Satzzeiten, kein Vor- und Nachlauf); Master-Prompt Abschnitt 20 (Schneiden auf echten Zeitstempeln, unsichere Grenzen konservativer schneiden); Rollback über implementation.cut.padding"}
+  cut.lead_in_s: {origin: H, source: "Entscheidung P31 (Startwert 0,06 s, auf das Ende des vorigen Wortes begrenzt); DSCVRY-Richtwert Auslaut plus 60 bis 120 ms; nicht gemessen"}
+  cut.lead_out_s: {origin: H, source: "Entscheidung P31 (Startwert 0,18 s, auf den Beginn des nächsten Wortes begrenzt); RK 2 Befund 8 (Referenzsatz: Nachlauf 0,63 s im Median bei guten gegen 0,19 s bei schlechten Clips, als nicht belastbar markiert); DSCVRY-Richtwert Auslaut plus 60 bis 120 ms"}
+  cut.min_gap_s: {origin: H, source: "RK 7, Zeile „Pausen“ (Median 288 ms Wortlücke, DSCVRY n = 62); Startwert deutlich darunter, damit nur aneinanderstoßende Wörter auffallen; nicht gemessen"}
+  cut.low_confidence_threshold: {origin: H, source: "Verweis auf transcribe.LOW_CONF_THRESHOLD (0,5, dieselbe Schwelle wie für unsichere Wörter im ClipCandidate); Master-Prompt Abschnitt 20 (unsichere Grenzen kennzeichnen); Formel in pipeline/transitions.py, nicht gemessen"}
   hook.native_spoken: {origin: R, source: "Master-Prompt Abschnitt 8 (gesprochener Hook muss im Original vorhanden sein); RK 2 Befund 7 (spoken_hook wird nie verwendet); RK 7, Zeile „Clickbait“ (Sinntreue)"}
   hook.hyperbole: {origin: R, source: "RK 7, Tabelle Zeile „Niemand redet darüber“ (Anti-Hyperbel, leere Intensivierung ersetzt keine Substanz); Masterfile 3.3; Master-Prompt Abschnitt 9"}
   hook.allow_partial_opening: {origin: R, source: "Master-Prompt Abschnitt 8 (gesprochener Hook im Original, keine sinnverändernde Montage) und Abschnitt 20 (Schneiden auf echten Grenzen); RK 2 Befund 7 (Hook gehört nicht zum Clip); Produktentscheidung nach Review AP6a: ganzer Satz oder kein Overlay statt Bruchstück"}
@@ -771,8 +992,11 @@ origins:
   trim.reward_end.farewell: {origin: H, source: "Wortliste ohne Messung; Master-Prompt Abschnitt 12 und 13 (Verabschiedung ohne Nutzen)"}
   trim.reward_end.repeat_overlap: {origin: H, source: "Startwert ohne Messung; Master-Prompt Abschnitt 12 (keine wiederholte Pointe)"}
   search.payoff_first: {origin: H, source: "Master-Prompt Abschnitt 7 (zuerst Payoffs suchen, dann rückwärts zum Einstieg); RK 3, Absatz nach der Tabelle (Spotify: mit vollständigen Gedanken starten und enden, F); Übertrag auf Clips nicht gemessen"}
+  search.compare_openings: {origin: R, source: "Master-Prompt Abschnitt 8 (intern mehrere substanziell unterschiedliche Einstiege erzeugen, nicht nur Adjektive variieren; verkauft der Einstieg genau das, was der Clip liefert) und Abschnitt 22 (Editor wählt, Evaluator prüft deterministisch); nicht gemessen"}
+  roles.critic: {origin: R, source: "Master-Prompt Abschnitt 22 (Rollen trennen; Kritiker sucht gezielt: welche Stelle widerlegt die Hook, welches Pronomen ist unklar, welche entfernte Bedingung verändert die Aussage, welcher Übergang behauptet eine Beziehung, die nicht existiert; Modellprüfung mit deterministischen Kontrollen kombinieren) und Abschnitt 27 (keine unkontrollierten Modellaufrufe)"}
   search.opening_first: {origin: H, source: "Master-Prompt Abschnitt 7 (Gegenrichtung: starke Einstiege finden und prüfen, ob das Material einlöst) und Abschnitt 9; nicht gemessen"}
   search.chapter_overlap_s: {origin: H, source: "RK 6, letzter Absatz (ClipsAI-JP: Themenwechsel-Erkennung plus LLM mit überlappendem Chunking); Wert 30 s nicht gemessen"}
+  search.budget_min_source_s: {origin: R, source: "Master-Prompt Abschnitt 27 (keine unkontrollierten Modellaufrufe); Untergrenze gleich der Kapitellänge der Budgetrechnung (story_engine.CHAPTER_SECONDS), nicht gemessen"}
   search.max_llm_calls_per_source_hour: {origin: R, source: "Master-Prompt Abschnitt 27 (Kosten und Laufzeit geprüft, keine unkontrollierten Modellaufrufe); Wert aus Kapitelrechnung (17 Kapitel je Stunde, 22 Aufrufe je Kapitel), nicht gemessen"}
   search.payoff_markers.rule: {origin: H, source: "Master-Prompt Abschnitt 7 (anwendbares Vorgehen als Payoff); RK 3, Zeile „Processing Fluency“; Wortliste ohne Messung"}
   search.payoff_markers.consequence: {origin: H, source: "Master-Prompt Abschnitt 6 (Abhängigkeit Behauptung, Begründung, Schlussfolgerung) und Abschnitt 7; Wortliste ohne Messung"}
@@ -793,6 +1017,9 @@ origins:
   search.hook_type_markers.recognizable_problem: {origin: H, source: "Master-Prompt Abschnitt 9 (Hook-Taxonomie, fiktive Muster; Erforderlicher Inhalt prüft forward_payoff); Wortliste ohne Messung"}
   search.hook_type_markers.perspective_shift: {origin: H, source: "Master-Prompt Abschnitt 9 (Hook-Taxonomie, fiktive Muster; Erforderlicher Inhalt prüft forward_payoff); Wortliste ohne Messung"}
   search.hook_type_markers.punchline: {origin: H, source: "Master-Prompt Abschnitt 9 (Hook-Taxonomie, fiktive Muster; Erforderlicher Inhalt prüft forward_payoff); Wortliste ohne Messung"}
+  bewertung.length_only_as_penalty: {origin: R, source: "RK 2, weitere Befunde (die Heuristik zählt die Länge doppelt: als Bonus in aufloesung und zielgruppe und noch einmal als laenge_abzug, einmal geschätzt, einmal gemessen); RK 2 Befund 11 (Länge mit 2,5 Wörtern je Sekunde geschätzt, gemessen etwa 3)"}
+  output.max_candidates: {origin: R, source: "RK 8 Prio 8 (höchstens zehn Kandidaten); Master-Prompt Abschnitt 7 (Kandidaten aus unterschiedlichen Themen und Funktionen, nicht zehn Varianten derselben Aussage; Verwerfen zulässig); Wert 10 ist Produktregel, nicht gemessen"}
+  output.redundancy_jaccard: {origin: H, source: "Master-Prompt Abschnitt 7 (nicht zehn Varianten derselben Aussage); editorial_v1 Fall 12 near_duplicate_candidates; Startwert 0,6 wie trim.reward_end.repeat_overlap, nicht gemessen"}
   bewertung.modus_v2: {origin: R, source: "Master-Prompt Abschnitt 19 (harte Prüfungen vor dem Ranking, kein Score, mit dem Aufmerksamkeit eine falsche Aussage ausgleicht); RK 2 Befund 4 (Schwellen liest kein Code)"}
   bewertung.only_with_language_model: {origin: R, source: "RK 2 Befund 11 (Heuristik-Summen 12,0 bis 12,7 von 14, scheingenau und unkalibriert); Entscheidung vom 24.09.2026 (mit Heuristik nicht sperren)"}
   bewertung.begruendung: {origin: R, source: "Master-Prompt Abschnitt 19 (Aufmerksamkeit darf eine falsche Aussage nicht ausgleichen); Schwellen 10 und 7 bleiben H aus der Masterclass [M]"}

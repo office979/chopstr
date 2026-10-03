@@ -221,6 +221,26 @@ def candidates_key_for(
     return storage.derived_key(f"transcript/{tv_id}", params, story_engine.CONTRACT, "json", prefix="candidates")
 
 
+def step_summary(report: story_engine.DetectReport) -> dict[str, Any]:
+    """Zusätzliche Werte für das Step-Event unter Fassung 2 (leer unter Fassung 1): Quote je Gate, Modellbudget,
+    Dubletten je Art (getrennt von den Verwerfungen) und eine Zusammenfassung der Suche je Kapitel."""
+    if not report.engine:
+        return {}
+    chapters = list((report.search or {}).get("chapters") or [])
+    return {
+        "gate_rejections": report.gate_rejections or None,
+        "llm_budget": report.llm_budget or None,
+        "duplicates": dict((report.search or {}).get("duplicate_counts") or {}),
+        "search": {
+            "chapters": len(chapters),
+            "model": sum(int(c.get("model") or 0) for c in chapters),
+            "search": sum(int(c.get("search") or 0) for c in chapters),
+            "search_rejected": sum(int(c.get("search_rejected") or 0) for c in chapters),
+            "evaluated": sum(int(c.get("evaluated") or 0) for c in chapters),
+        },
+    }
+
+
 def heat_hash(heat: dict | None) -> str | None:
     """sha256 über Seeds und ``audio_values`` der Heatmap (die Teile, die die Engine liest), ``None`` ohne."""
     if not heat:
@@ -527,6 +547,7 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
             decisions=decisions,
             # Verbklammer-Prüfung unter Fassung 2: spacy, heuristic oder off; unter Fassung 1 null.
             nlp_status=report.nlp_status or None,
+            **step_summary(report),
         )
     return ids
 

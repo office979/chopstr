@@ -780,3 +780,33 @@ def test_review_probe_temporal_triggers(pol):
     ]:
         spans = [p for p in trim_plan.protected_spans(SPEC(text), pol) if p["type"] == "temporal"]
         assert spans and spans[0]["text"] == trigger, text
+
+
+# -- Folgepunkte aus dem Review der Verdrahtung ---------------------------------------------------------
+
+
+def test_check_cut_v2_negations_follow_the_trim_list():
+    w = SPEC("Wir haben die Preise erhöht. Kurz gesagt, wir rechnen jetzt alles noch zweimal durch.")
+    cut = [(0, 4)]
+    assert any(x["type"] == "negation_removed" for x in fidelity.check_cut(w, cut))  # v1 unverändert
+    assert any(x["type"] == "negation_removed" for x in fidelity.check_cut(w, cut, rule="v1"))
+    assert not any(x["type"] == "negation_removed" for x in fidelity.check_cut(w, cut, rule="v2"))
+    w = SPEC("Wir haben die Preise erhöht. Das hat nicht geklappt.")
+    v2 = next(x for x in fidelity.check_cut(w, [(0, 4)], rule="v2") if x["type"] == "negation_removed")
+    assert v2["severity"] == "high" and v2["detail"] == ["nicht"]
+    assert "noch" not in trim_plan.NEGATION_TRIGGERS and "nein" in trim_plan.NEGATION_TRIGGERS
+
+
+def test_pauses_in_and_right_after_a_correction_sentence_are_dramatic(pol):
+    w = SPEC(
+        "Wir hatten damals [0.6] vierzehn Leute im Team. Wir haben dann stattdessen [0.6] Newsletter gemacht. "
+        "Ich muss das [0.6] korrigieren. Es waren vier [0.6] Newsletter. Danach lief [0.6] alles ruhig weiter."
+    )
+    classes = {p["after_word"]: (p["class"], p["reason"]) for p in trim_plan.classify_pauses(w, None, pol)}
+    assert classes[2][0] == "dramatic" and "Zahl" in classes[2][1]  # vor „vierzehn“
+    assert classes[10] == ("dramatic", "Pause im Korrektursatz")  # nach „stattdessen“
+    assert classes[15] == ("dramatic", "Pause im Korrektursatz")  # „Ich muss das [0,6] korrigieren.“
+    assert classes[19] == ("dramatic", "Pause im Korrektursatz")  # Satz unmittelbar nach der Korrektur
+    assert classes[22] == ("technical", "technische Leerstelle")  # zwei Sätze danach wieder technisch
+    spans = [p for p in trim_plan.protected_spans(w, pol) if p["type"] == "correction"]
+    assert any(p["text"] == "stattdessen" for p in spans)

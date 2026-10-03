@@ -66,7 +66,7 @@ V2_SWITCHES = (
 # Schalter, deren Code gebaut ist und den Schalter liest. Jedes Arbeitspaket trägt seinen Schalter
 # ein, sobald der Code ihn liest; nur diese stehen in v2 auf true, alle anderen auf false.
 V2_IMPLEMENTED_SWITCHES = frozenset({
-    "captions.word_bridge", "hook.native_spoken", "search.payoff_first", "sentence_rule",
+    "captions.word_bridge", "cut.padding", "gates.discard_hard", "hook.native_spoken", "search.payoff_first", "sentence_rule",
     "trim.enabled",
 })  # fmt: skip
 # Regelabschnitte, die es nur in v2 gibt. rule_paths und die Herkunftsprüfung laufen zusätzlich über
@@ -775,6 +775,49 @@ def trim_settings(policy: Policy) -> dict[str, Any] | None:
 __all__ += ["TRIM_SWITCH", "trim_settings"]
 
 
+# -- AP10b: Schnittkanten an Wortgrenzen (Abschnitt ``cut``, nur Fassung 2) ------------------------
+CUT_SWITCH = "cut.padding"
+# Der Abschnitt ``cut`` ist ein Regelabschnitt: jede Regel darin braucht eine Herkunft in ``origins``.
+V2_RULE_SECTIONS = (*V2_RULE_SECTIONS, "cut")
+# ``cut.low_confidence_threshold`` verweist auf die Schwelle der Transkription statt sie zu kopieren.
+CUT_LOW_CONF_REFERENCE = "transcribe.LOW_CONF_THRESHOLD"
+
+
+def cut_settings(policy: Policy) -> dict[str, Any] | None:
+    """Einstellungen für ``pipeline.transitions`` aus ``cut``.
+
+    ``None`` heißt: kein Padding, Schnitt exakt auf den Segmentzeiten (Fassung 1, Schalter
+    ``implementation.cut.padding`` aus oder Regel ``cut.padding`` false; das ist der Rollback). Fehlt der
+    Abschnitt bei eingeschaltetem Schalter oder ist ein Wert unbrauchbar, scheitert das laut."""
+    if policy.version < 2 or _switch_value(policy.roh.get("implementation") or {}, CUT_SWITCH) is not True:
+        return None
+    name = f"clip_policy_v{policy.version}"
+    raw = policy.roh.get("cut")
+    if not isinstance(raw, dict):
+        raise PolicyError(f"{name}: {CUT_SWITCH} ist an, der Abschnitt cut fehlt.")
+    if not isinstance(raw.get("padding"), bool):
+        raise PolicyError(f"{name}: cut.padding ist true oder false.")
+    if raw["padding"] is not True:
+        return None
+    try:
+        settings = {k: float(raw[k]) for k in ("lead_in_s", "lead_out_s", "min_gap_s")}
+        threshold = raw["low_confidence_threshold"]
+    except (KeyError, TypeError, ValueError):
+        raise PolicyError(f"{name}: cut braucht padding, lead_in_s, lead_out_s, min_gap_s und low_confidence_threshold.") from None
+    if threshold == CUT_LOW_CONF_REFERENCE:
+        from .pipeline import transcribe
+
+        threshold = transcribe.LOW_CONF_THRESHOLD
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not 0.0 <= float(threshold) <= 1.0:
+        raise PolicyError(f"{name}: cut.low_confidence_threshold ist {CUT_LOW_CONF_REFERENCE} oder eine Zahl von 0 bis 1.")
+    if any(v < 0 for v in settings.values()):
+        raise PolicyError(f"{name}: cut.lead_in_s, lead_out_s und min_gap_s dürfen nicht negativ sein.")
+    return {**settings, "low_confidence_threshold": float(threshold)}
+
+
+__all__ += ["CUT_LOW_CONF_REFERENCE", "CUT_SWITCH", "cut_settings"]
+
+
 # -- AP4: Harte Gates (Abschnitt ``gates``) und Modus sperren (``bewertung.modus_v2``), nur Fassung 2 --------
 GATES_SWITCH = "gates.discard_hard"
 GATE_RULE_KEYS = (
@@ -847,3 +890,260 @@ def block_mode_settings(policy: Policy, heuristic: bool | None = None) -> dict[s
 
 
 __all__ += ["GATES_SWITCH", "GATE_RULE_KEYS", "block_mode_settings", "gates_settings"]
+
+
+# -- AP6b: Rollen (Abschnitt ``roles``) und Einstiegsvergleich (``search.compare_openings``), nur Fassung 2 ---
+# Analyst ist episode_overview (AP5), Editor propose_moments_v2 und die Einstiegswahl, Kritiker critique_clip,
+# Evaluator deterministisch (Gates und Teilwerte). Nur der Kritiker hat eine eigene Regel und einen Schalter.
+CRITIC_SWITCH = "roles.critic"
+V2_SWITCHES = (*V2_SWITCHES, CRITIC_SWITCH)
+V2_IMPLEMENTED_SWITCHES = V2_IMPLEMENTED_SWITCHES | {CRITIC_SWITCH}
+V2_RULE_SECTIONS = (*V2_RULE_SECTIONS, "roles")
+V2_PIN_CHANGES.update({"critique_clip": 1})
+
+
+def critic_enabled(policy: Policy) -> bool:
+    """Läuft der Kritiker (``critique_clip``) für die Überlebenden von ``select_best``?
+
+    Nur in Fassung 2 und nur, wenn die Regel ``roles.critic`` und der Schalter ``implementation.roles.critic``
+    beide true sind; einer auf false ist der Rollback. Ohne Abschnitt ``roles`` false; ein Wert, der kein
+    Wahrheitswert ist, scheitert laut."""
+    if policy.version < 2 or "roles" not in policy.roh:
+        return False
+    raw = policy.roh["roles"]
+    if not isinstance(raw, dict) or not isinstance(raw.get("critic"), bool):
+        raise PolicyError(f"clip_policy_v{policy.version}: roles.critic ist true oder false.")
+    return raw["critic"] is True and _switch_value(policy.roh.get("implementation") or {}, CRITIC_SWITCH) is True
+
+
+def compare_openings_enabled(policy: Policy) -> bool:
+    """``search.compare_openings``: ``story_engine.evaluate_span`` vergleicht bis zu drei Originaleinstiege
+    (``payoff_search.alternative_openings``) und wählt einen. Fassung 1 und ohne Wert false (Rollback: false);
+    ein Wert, der kein Wahrheitswert ist, scheitert laut."""
+    raw = policy.roh.get("search")
+    if policy.version < 2 or not isinstance(raw, dict) or "compare_openings" not in raw:
+        return False
+    if not isinstance(raw["compare_openings"], bool):
+        raise PolicyError(f"clip_policy_v{policy.version}: search.compare_openings ist true oder false.")
+    return raw["compare_openings"]
+
+
+__all__ += ["CRITIC_SWITCH", "compare_openings_enabled", "critic_enabled"]
+
+
+# -- AP9: Ausgabeumfang und Redundanz (Abschnitt ``output``), Länge nur als Abzug, Register der Schlüssel ---
+OUTPUT_SWITCH = "output.max_candidates"
+V2_SWITCHES = (*V2_SWITCHES, OUTPUT_SWITCH)
+V2_IMPLEMENTED_SWITCHES = V2_IMPLEMENTED_SWITCHES | {OUTPUT_SWITCH}
+V2_RULE_SECTIONS = (*V2_RULE_SECTIONS, "output")
+# score_clip_v3: sieben Kriterien wie v2 plus Teilwerte nach Master-Prompt 19 (``story_score.editorial_subscores``).
+V2_PIN_CHANGES.update({"score_clip": 3})
+KEY_STATUSES = ("implemented", "partial", "not_implemented")
+
+
+def output_settings(policy: Policy) -> dict[str, Any] | None:
+    """Obergrenze und Redundanzschwelle für ``story_engine.select_best`` aus ``output`` (AP9).
+
+    ``None`` in Fassung 1 und bei ausgeschaltetem ``implementation.output.max_candidates`` (Rollback: Verhalten
+    vor AP9, höchstens ``story_engine.MAX_CANDIDATES``). Fehlt der Abschnitt bei eingeschaltetem Schalter
+    oder ist ein Wert unbrauchbar, scheitert das laut."""
+    if policy.version < 2 or _switch_value(policy.roh.get("implementation") or {}, OUTPUT_SWITCH) is not True:
+        return None
+    name = f"clip_policy_v{policy.version}"
+    raw = policy.roh.get("output")
+    try:
+        limit, jaccard = raw["max_candidates"], float(raw["redundancy_jaccard"])
+    except (KeyError, TypeError, ValueError):
+        raise PolicyError(f"{name}: {OUTPUT_SWITCH} ist an, output braucht max_candidates und redundancy_jaccard.") from None
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise PolicyError(f"{name}: output.max_candidates ist eine ganze Zahl ab 1.")
+    if not 0.0 < jaccard <= 1.0:
+        raise PolicyError(f"{name}: output.redundancy_jaccard liegt über 0 und höchstens bei 1.")
+    return {"max_candidates": limit, "redundancy_jaccard": jaccard}
+
+
+def length_only_as_penalty(policy: Policy) -> bool:
+    """``bewertung.length_only_as_penalty``: kein Längenbonus in der Heuristik, Länge nur über ``laenge_abzug``.
+
+    Fassung 1 und ohne Wert false (Verhalten vor AP9); ein Wert, der kein Wahrheitswert ist, scheitert laut."""
+    raw = (policy.roh.get("bewertung") or {}).get("length_only_as_penalty")
+    if policy.version < 2 or raw is None:
+        return False
+    if not isinstance(raw, bool):
+        raise PolicyError(f"clip_policy_v{policy.version}: bewertung.length_only_as_penalty ist true oder false.")
+    return raw
+
+
+__all__ += ["KEY_STATUSES", "OUTPUT_SWITCH", "length_only_as_penalty", "output_settings"]
+
+# Register der Schlüssel (AP9): Schlüsselpfad (``rule_paths`` der Fassung 2) zu der Funktion, die ihn liest
+# (``modul:qualname``). Status und Grund je Schlüssel stehen in ``implementation.keys`` der Fassung 2; hier
+# stehen nur Schlüssel mit Status ``implemented`` oder ``partial``. Jeder Eintrag ist per grep geprüft, der Test
+# verlangt, dass die Funktion existiert und den Schlüssel im Quelltext nennt. Ein Verhalten ohne eigenen
+# Schlüssel steht in ``IMPLEMENTED_BEHAVIOURS``.
+_E, _SE, _H = "chopstr_worker.editorial:", "chopstr_worker.pipeline.story_engine:", "chopstr_worker.heuristic_llm:"
+IMPLEMENTED_KEYS: dict[str, str] = {
+    "laenge.ziel_s": "chopstr_worker.pipeline.payoff_search:_extend",
+    "laenge.gut_von_s": _E + "Policy.laenge_abzug",
+    "laenge.gut_bis_s": _E + "Policy.laenge_abzug",
+    "laenge.hart_min_s": _SE + "_length_reason",
+    "laenge.hart_max_s": _SE + "_length_reason",
+    "laenge.kontext_zugabe_s": _SE + "kontext_verlaengern",
+    "laenge.kontext_zugabe_saetze": _SE + "kontext_verlaengern",
+    "laenge.context_front_sentences": _E + "context_front",
+    "laenge.context_front_s": _E + "context_front",
+    "rubrik.skala_max": _E + "Policy.gesamtwert",
+    "rubrik.kriterien.standalone": _E + "Policy.kriterien",
+    "rubrik.kriterien.hook": _E + "Policy.kriterien",
+    "rubrik.kriterien.offene_frage": _E + "Policy.kriterien",
+    "rubrik.kriterien.spezifitaet": _E + "Policy.kriterien",
+    "rubrik.kriterien.emotion": _E + "Policy.kriterien",
+    "rubrik.kriterien.aufloesung": _E + "Policy.kriterien",
+    "rubrik.kriterien.zielgruppe": _E + "Policy.kriterien",
+    "bewertung.schwelle_verwerfen": _E + "block_mode_settings",
+    "bewertung.punkte_gesamt": _E + "Policy.gesamtwert",
+    "bewertung.modus_v2": _E + "block_mode_settings",
+    "bewertung.only_with_language_model": _E + "block_mode_settings",
+    "bewertung.begruendung": _E + "block_mode_settings",
+    "bewertung.length_only_as_penalty": _H + "_aufloesung",
+    "moment_typen.contrarian": _SE + "satz_staerke",
+    "moment_typen.zahl": _SE + "satz_staerke",
+    "moment_typen.ministory": _SE + "satz_staerke",
+    "moment_typen.gestaendnis": _SE + "satz_staerke",
+    "moment_typen.merksatz": _SE + "satz_staerke",
+    "moment_typen.konflikt": _H + "episode_overview",
+    "einstieg.nie_mitten_im_satz": _SE + "start_defects",
+    "einstieg.keine_pronomen_ohne_bezug": _SE + "start_defects",
+    "einstieg.pronomen": _SE + "start_defects",
+    "einstieg.keine_gastgeberfrage": _SE + "heal_start",
+    "einstieg.einleitungen_kappen": _H + "_standalone",
+    "einstieg.einleitungsfloskeln": _H + "_standalone",
+    "ausstieg.satz_zu_ende": _H + "_aufloesung",
+    "ausstieg.verbklammer_nicht_trennen": _E + "verb_bracket_settings",
+    "ausstieg.vor_der_abschwaechung": _H + "_aufloesung",
+    "ausstieg.abschwaechung_marker": _SE + "_qualification_markers",
+    "ausstieg.never_end_on_qualification": _E + "never_end_on_qualification",
+    "zusammenhang.mindest_dichte": _E + "trim_settings",
+    "audio.in_bewertung_verwenden": _SE + "policy_total",
+    "audio.gewicht": _SE + "policy_total",
+    "hook_vorziehen.aktiv": _SE + "teaser_satz",
+    "hook_vorziehen.mindest_vorsprung": _SE + "teaser_satz",
+    "hook_vorziehen.max_teaser_s": _SE + "teaser_satz",
+    "hook_vorziehen.nicht_aus_letztem_anteil": _SE + "teaser_satz",
+    "ausschluss.organisatorisches_gespraech": _E + "Policy.ist_organisatorisch",
+    "ausschluss.organisations_marker": _E + "Policy.ist_organisatorisch",
+    "captions.bridge_words": _E + "caption_settings",
+    "captions.bridge_max_s": _E + "caption_settings",
+    "captions.min_event_s": _E + "caption_settings",
+    "captions.comma_break_only_on_overflow": _E + "caption_settings",
+    "hook.native_spoken": _E + "Policy.hook_native_spoken",
+    "hook.hyperbole": _E + "Policy.hyperbole",
+    "hook.allow_partial_opening": _E + "Policy.allow_partial_opening",
+    "segmentation.sentence_rule": _E + "sentence_rule",
+    "segmentation.max_sentence_s": _E + "sentence_limits",
+    "segmentation.max_sentence_words": _E + "sentence_limits",
+    "verb_bracket.fallback": _E + "verb_bracket_settings",
+    "verb_bracket.particles": _E + "verb_bracket_settings",
+    "verb_bracket.subordinators": _E + "verb_bracket_settings",
+    "verb_bracket.auxiliaries": _E + "verb_bracket_settings",
+    "search.payoff_first": _E + "search_settings",
+    "search.opening_first": _E + "search_settings",
+    "search.chapter_overlap_s": _E + "search_settings",
+    "search.max_llm_calls_per_source_hour": _E + "search_settings",
+    "search.budget_min_source_s": _E + "budget_min_source_s",
+    "search.payoff_markers.rule": _E + "search_settings",
+    "search.payoff_markers.consequence": _E + "search_settings",
+    "search.payoff_markers.explanation": _E + "search_settings",
+    "search.payoff_markers.lesson": _E + "search_settings",
+    "search.payoff_markers.emotional": _E + "search_settings",
+    "search.hedge_markers": _E + "search_settings",
+    "search.stop_markers.sponsor": _E + "search_settings",
+    "search.stop_markers.farewell": _E + "search_settings",
+    "search.stop_markers.topic_change": _E + "search_settings",
+    "search.hook_type_markers.concrete_contradiction": _E + "search_settings",
+    "search.hook_type_markers.mistake_with_consequence": _E + "search_settings",
+    "search.hook_type_markers.result_with_open_cause": _E + "search_settings",
+    "search.hook_type_markers.scene_with_stakes": _E + "search_settings",
+    "search.hook_type_markers.decision_rule": _E + "search_settings",
+    "search.hook_type_markers.demonstration": _E + "search_settings",
+    "search.hook_type_markers.self_correction": _E + "search_settings",
+    "search.hook_type_markers.recognizable_problem": _E + "search_settings",
+    "search.hook_type_markers.perspective_shift": _E + "search_settings",
+    "search.hook_type_markers.punchline": _E + "search_settings",
+    "search.compare_openings": _E + "compare_openings_enabled",
+    "trim.enabled": _E + "trim_settings",
+    "trim.pause_target_s": _E + "trim_settings",
+    "trim.min_trim_gain_s": _E + "trim_settings",
+    "trim.long_silence_s": _E + "trim_settings",
+    "trim.min_segment_s": _E + "trim_settings",
+    "trim.max_semantic_splices": _E + "trim_settings",
+    "trim.debate_no_reorder": _E + "trim_settings",
+    "trim.pause_classes.dramatic_before": _E + "trim_settings",
+    "trim.pause_classes.reaction_after": _E + "trim_settings",
+    "trim.pause_classes.reaction_words": _E + "trim_settings",
+    "trim.pause_classes.punchline_window_s": _E + "trim_settings",
+    "trim.pause_classes.orientation_min_s": _E + "trim_settings",
+    "trim.pause_classes.orientation_markers": _E + "trim_settings",
+    "trim.removal.fillers": _E + "trim_settings",
+    "trim.removal.backchannel": _E + "trim_settings",
+    "trim.removal.restarts": _E + "trim_settings",
+    "trim.removal.edge_markers": _E + "trim_settings",
+    "trim.removal.organisation_markers": _E + "trim_settings",
+    "trim.removal.never_remove": _E + "trim_settings",
+    "trim.reward_end.weak_summary": _E + "trim_settings",
+    "trim.reward_end.sales_call": _E + "trim_settings",
+    "trim.reward_end.farewell": _E + "trim_settings",
+    "trim.reward_end.repeat_overlap": _E + "trim_settings",
+    "gates.unresolved_pronoun": _E + "gates_settings",
+    "gates.back_reference": _E + "gates_settings",
+    "gates.open_question_unanswered": _E + "gates_settings",
+    "gates.boundary_negation_condition": _E + "gates_settings",
+    "gates.reported_speech": _E + "gates_settings",
+    "gates.forward_reference": _E + "gates_settings",
+    "gates.speaker_turn": _E + "gates_settings",
+    "gates.later_correction": _E + "gates_settings",
+    "gates.embedded_instruction": _E + "gates_settings",
+    "gates.meta_speech": _E + "gates_settings",
+    "gates.discard_hard": _E + "gates_settings",
+    "cut.padding": _E + "cut_settings",
+    "cut.lead_in_s": _E + "cut_settings",
+    "cut.lead_out_s": _E + "cut_settings",
+    "cut.min_gap_s": _E + "cut_settings",
+    "cut.low_confidence_threshold": _E + "cut_settings",
+    "roles.critic": _E + "critic_enabled",
+    "output.max_candidates": _E + "output_settings",
+    "output.redundancy_jaccard": _E + "output_settings",
+}
+# Neubewertung nach der Verlängerung (Heilung vorn oder hinten, AP2): genau eine Neubewertung der neuen Spanne.
+IMPLEMENTED_BEHAVIOURS: dict[str, str] = {"rescore_after_extension": _SE + "evaluate_span"}
+
+
+def key_register(policy: Policy) -> dict[str, dict[str, str]]:
+    """``implementation.keys`` der Fassung (Schlüsselpfad zu ``{status, reason}``); leer in Fassung 1."""
+    if policy.version < 2:
+        return {}
+    raw = (policy.roh.get("implementation") or {}).get("keys") or {}
+    return {str(k): dict(v) for k, v in raw.items() if isinstance(v, dict)}
+
+
+__all__ += ["IMPLEMENTED_BEHAVIOURS", "IMPLEMENTED_KEYS", "key_register"]
+
+
+# -- Verdrahtung AP4 und AP5 in story_engine (Budget-Untergrenze) ------------------------------------------
+
+
+def budget_min_source_s(policy: Policy) -> float:
+    """Mindestdauer in Sekunden, mit der eine Quelle in das Modellbudget eingeht (``search.budget_min_source_s``,
+    Fassung 2). Fehlt der Wert, scheitert das laut; in Fassung 1 gibt es kein Budget (0)."""
+    if policy.version < 2 or "search" not in policy.roh:
+        return 0.0
+    try:
+        value = float(policy.roh["search"]["budget_min_source_s"])
+    except (KeyError, TypeError, ValueError):
+        raise PolicyError(f"clip_policy_v{policy.version}: search.budget_min_source_s fehlt oder ist keine Zahl.") from None
+    if value < 0:
+        raise PolicyError(f"clip_policy_v{policy.version}: search.budget_min_source_s ab 0.")
+    return value
+
+
+__all__ += ["budget_min_source_s"]

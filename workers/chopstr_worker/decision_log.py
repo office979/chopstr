@@ -121,7 +121,14 @@ def record_detect_report(
             prompt_version=cand.prompt_version, **common,
         )  # fmt: skip
         n += 2
+    counters: dict[str, int] = {}
     for d in report.discarded:
+        reason = str(d.get("reason") or "")
+        # Fassung 1 (kein ``engine`` im Bericht) wie bisher: jeder Eintrag als verworfener Vorschlag.
+        if report.engine and not is_candidate_rejection(reason):
+            # Kein verworfener Kandidat (Dublette, Budget, Kapitelgrenze, Vertragsfehler): nur gezählt.
+            counters[reason] = counters.get(reason, 0) + 1
+            continue
         record(
             conn, decision_type="candidate_proposed",
             features={k: d.get(k) for k in ("first_sent", "last_sent", "duration_s", "total") if k in d},
@@ -129,7 +136,30 @@ def record_detect_report(
             prompt_version=report.prompt_versions[0] if report.prompt_versions else None, **common,
         )  # fmt: skip
         n += 1
+    for kind, count in sorted(((report.search or {}).get("duplicate_counts") or {}).items()):
+        counters[kind] = counters.get(kind, 0) + int(count)
+    if counters:
+        record(
+            conn, decision_type="candidate_proposed", features={"not_candidates": dict(sorted(counters.items()))},
+            alternatives=[], chosen={"kept": None, "reason": "summary"},
+            prompt_version=report.prompt_versions[0] if report.prompt_versions else None, **common,
+        )  # fmt: skip
+        n += 1
     return n
+
+
+# Gründe in ``DetectReport.discarded``, die keinen Kandidaten verwerfen, sondern einen Schritt auslassen oder
+# eine Dublette zusammenführen. Sie stehen im Decision Log nur als Zähler (ein Eintrag ``summary``).
+NOT_CANDIDATE_REASONS = frozenset({
+    "duplicate", "duplicate_payoff", "same_span", "same_opening", "same_statement", "chapter_overlap",
+    "same_result", "budget_exhausted", "llm_budget", "chapter_limit", "clip_candidate_error",
+})  # fmt: skip
+
+
+def is_candidate_rejection(reason: str) -> bool:
+    """Verwirft dieser Grund einen Kandidaten (gate, overlap, redundant, too_short, promise_unfulfilled, critic,
+    below_threshold und alle übrigen Verwerfungen), oder ist er nur ein Zähler (``NOT_CANDIDATE_REASONS``)?"""
+    return reason not in NOT_CANDIDATE_REASONS
 
 
 def record_copy_result(
@@ -197,7 +227,9 @@ __all__ = [
     "ACTOR_TYPES",
     "DECISION_TYPES",
     "REFRAME_STRATEGIES",
+    "NOT_CANDIDATE_REASONS",
     "candidate_features",
+    "is_candidate_rejection",
     "record",
     "record_copy_result",
     "record_detect_report",

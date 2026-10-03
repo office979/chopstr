@@ -337,3 +337,37 @@ def test_v2_pronomen_kostet_weiter(policy_v2):
     mit_pronomen = heuristic_llm.score_clip(_clip(REFERENZ_MEDIAN_S, PRONOMEN_START))
     mit_aufschlag = heuristic_llm.score_clip(_clip(REFERENZ_MEDIAN_S, AUFSCHLAG))
     assert mit_pronomen["rubrik"]["standalone"] < mit_aufschlag["rubrik"]["standalone"] == policy_v2.skala_max
+
+
+# -- AP9: Länge nur als Abzug (bewertung.length_only_as_penalty, nur Fassung 2) --------------------------------
+def _merkmale(p: editorial.Policy, text: str = AUFSCHLAG):
+    return heuristic_llm._merkmale(heuristic_llm.parse_numbered(_clip(REFERENZ_MEDIAN_S, text)), p)
+
+
+def test_ap9_v1_still_gives_the_length_bonus(policy):
+    assert editorial.length_only_as_penalty(policy) is False
+    m = _merkmale(policy)
+    assert heuristic_llm._aufloesung(m, policy, True) == pytest.approx(heuristic_llm._aufloesung(m, policy, False) + 0.20)
+    assert heuristic_llm._zielgruppe(m, policy, True) == pytest.approx(heuristic_llm.NEUTRAL + 0.10)
+
+
+def test_ap9_no_length_bonus_under_v2(policy_v2):
+    """Länge wirkt unter Fassung 2 nur über laenge_abzug mit gemessener Abspieldauer, nicht zusätzlich geschätzt."""
+    assert editorial.length_only_as_penalty(policy_v2) is True
+    m = _merkmale(policy_v2)
+    assert heuristic_llm._aufloesung(m, policy_v2, True) == heuristic_llm._aufloesung(m, policy_v2, False)
+    assert heuristic_llm._zielgruppe(m, policy_v2, True) == heuristic_llm._zielgruppe(m, policy_v2, False) == heuristic_llm.NEUTRAL
+    im_fenster = heuristic_llm.score_clip(_clip(REFERENZ_MEDIAN_S, AUFSCHLAG))
+    zu_kurz = heuristic_llm.score_clip(_clip(HEUTIGER_MEDIAN_S, AUFSCHLAG))
+    assert im_fenster["rubrik"]["aufloesung"] == zu_kurz["rubrik"]["aufloesung"]
+    assert im_fenster["rubrik"]["zielgruppe"] == zu_kurz["rubrik"]["zielgruppe"] == policy_v2.skala_max * heuristic_llm.NEUTRAL
+    assert zu_kurz["laenge_abzug"] > 0 == im_fenster["laenge_abzug"], "der Abzug bleibt"
+
+
+def test_ap9_length_only_as_penalty_rejects_non_bool(policy_v2):
+    import copy
+
+    roh = copy.deepcopy(policy_v2.roh)
+    roh["bewertung"]["length_only_as_penalty"] = "ja"
+    with pytest.raises(editorial.PolicyError, match="length_only_as_penalty"):
+        editorial.length_only_as_penalty(editorial.Policy(version=2, stand="", roh=roh))

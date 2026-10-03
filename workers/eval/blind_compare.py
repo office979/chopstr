@@ -19,8 +19,10 @@ Ablauf und Raster stehen in ``eval/README.md``. Kurz:
    Schlüssel; ``--auswerten`` urteilt danach: Erfüllt, Nicht erfüllt oder Nicht bewertet.
 
 Die Schalter-Varianten entstehen über eine Kopie der Richtlinie mit geänderten Schaltern in
-``implementation`` (``EDITORIAL_DIR`` zeigt für die Dauer des Laufs darauf). Eigene Overrides:
-``--override pfad=true`` (mehrfach) oder ``CHOPSTR_BLIND_OVERRIDES="pfad=true,pfad=false"``.
+``implementation`` und, wo nötig, der Regel (``EDITORIAL_DIR`` zeigt für die Dauer des Laufs darauf). Overrides:
+Schalter ``--override pfad=true``, Regeln aus ``RULE_OVERRIDES`` ``--override regel:pfad=wert`` (mehrfach)
+oder ``CHOPSTR_BLIND_OVERRIDES="pfad=true,regel:trim.enabled=true"``. Dubletten zählen nicht in die
+Verwerfungsquote (``discard_summary``).
 
 Das Ergebnis ist beobachtend, kein A/B-Test, kein Viralitätsmaß.
 """
@@ -95,7 +97,24 @@ REASON_LABELS = {
     "same_payoff": "gleicher Payoff",
     "no_opening": "kein Einstieg",
     "instruction_followed": "Anweisung befolgt",
+    "below_threshold": "unter der Schwelle",
+    "redundant": "redundant zu einem angebotenen Kandidaten",
+    "chapter_limit": "über der Grenze je Kapitel",
+    "llm_budget": "Modellbudget erreicht",
+    "budget_exhausted": "Modellbudget erschöpft",
+    "clip_candidate_error": "ClipCandidate verletzt den Vertrag",
+    "duplicate_payoff": "Dublette, gleicher Payoff",
+    "same_span": "gleiche Spanne",
+    "same_opening": "gleicher Einstieg",
+    "same_statement": "gleiche Aussage",
 }
+# Dubletten: derselbe Moment, mehrfach gefunden. Sie stehen getrennt im Bericht und zählen weder in der
+# Verwerfungsquote noch in ihrem Nenner, damit Fassung 1 (Vorschläge des Modells) und Fassung 2
+# (Vorschläge der Suche, die denselben Payoff oft mehrfach findet) vergleichbar bleiben.
+DUPLICATE_REASONS = frozenset({"duplicate", "duplicate_payoff", "same_span", "same_opening", "same_statement", "same_payoff"})
+# Ereignisse des Laufs, die keinen einzelnen Vorschlag betreffen (Budget, Vertragsfehler).
+RUN_EVENT_REASONS = frozenset({"budget_exhausted", "clip_candidate_error"})
+STAGE_LABELS = {"search": "Suche", "propose": "Vorschlag", "critic": "Kritiker"}
 
 ANCHORS_TEXT = "0 nicht vorhanden oder kritisch verletzt, 1 schwach, 2 brauchbar, 3 stark und begründet, 4 besonders überzeugend"
 
@@ -245,47 +264,81 @@ SWITCH_GROUPS: dict[str, tuple[str, ...]] = {
     "hooks": ("hook.native_spoken",),
     "kuerzung": ("trim.enabled",),
 }
+# Regeln, die eine Gruppe zusätzlich zum Schalter einschaltet (sonst bliebe sie wirkungslos).
+GROUP_RULES: dict[str, tuple[tuple[str, Any], ...]] = {"kuerzung": (("trim.enabled", True),)}
+# Regelpfade, die ein Override erreichen darf, mit den erlaubten Werten (Whitelist).
+RULE_PREFIX = "regel:"
+RULE_OVERRIDES: dict[str, tuple[Any, ...]] = {
+    "trim.enabled": (True, False),
+    "gates.discard_hard": (True, False),
+    "hook.allow_partial_opening": (True, False),
+    "bewertung.modus_v2": ("sortieren", "sperren"),
+}
 GROUP_TITLES = {"basis": "Basis", "auswahl": "Auswahl", "hooks": "Hooks", "kuerzung": "Kürzung", "kombination": "Kombination", "override": "Override"}
 
 
 @dataclasses.dataclass(frozen=True)
 class Variant:
-    """Ein Lauf: Richtlinien-Fassung plus Schalter-Overrides (Pfad in ``implementation`` zu bool)."""
+    """Ein Lauf: Richtlinien-Fassung, Schalter-Overrides (Pfad in ``implementation`` zu bool) und
+    Regel-Overrides (Pfad einer Regel, nur aus ``RULE_OVERRIDES``)."""
 
     name: str
     version: int
     overrides: tuple[tuple[str, bool], ...] = ()
     group: str | None = None
+    rules: tuple[tuple[str, Any], ...] = ()
 
 
 BASE_VARIANTS = (Variant("v1", 1), Variant("v2", 2))
 
 
-def switch_variants(extra: dict[str, bool] | None = None) -> list[Variant]:
-    """Basis (alle Gruppenschalter aus), je Gruppe einzeln an, Kombination (alle Gruppen an)."""
+def switch_variants(extra: dict[str, bool] | None = None, extra_rules: dict[str, Any] | None = None) -> list[Variant]:
+    """Basis (alle Gruppenschalter aus), je Gruppe einzeln an, Kombination (alle Gruppen an).
+
+    Eine Gruppe, deren Regel in der Richtlinie aus steht (``GROUP_RULES``, etwa ``trim.enabled: false``
+    bis zur Abnahme), setzt zusätzlich die Regel; sonst wäre sie gleich der Basis."""
     all_switches = [s for group in SWITCH_GROUPS.values() for s in group]
+    all_rules = {path: value for group in GROUP_RULES.values() for path, value in group}
     base = {s: False for s in all_switches}
     out = [Variant("v2_basis", 2, tuple(sorted(base.items())), "basis")]
     for group, switches in SWITCH_GROUPS.items():
-        out.append(Variant(f"v2_{group}", 2, tuple(sorted({**base, **dict.fromkeys(switches, True)}.items())), group))
-    out.append(Variant("v2_kombination", 2, tuple(sorted(dict.fromkeys(all_switches, True).items())), "kombination"))
-    if extra:
-        out.append(Variant("v2_override", 2, tuple(sorted(extra.items())), "override"))
+        out.append(Variant(f"v2_{group}", 2, tuple(sorted({**base, **dict.fromkeys(switches, True)}.items())), group, GROUP_RULES.get(group, ())))
+    out.append(Variant("v2_kombination", 2, tuple(sorted(dict.fromkeys(all_switches, True).items())), "kombination", tuple(sorted(all_rules.items()))))
+    if extra or extra_rules:
+        out.append(Variant("v2_override", 2, tuple(sorted((extra or {}).items())), "override", tuple(sorted((extra_rules or {}).items()))))
     return out
 
 
-def parse_overrides(items: list[str] | None, env: str | None = None) -> dict[str, bool]:
-    """``pfad=true`` oder ``pfad=false``; Pfade müssen Schalter aus ``editorial.V2_SWITCHES`` sein."""
+def _parse_value(text: str) -> Any:
+    low = text.strip().lower()
+    return {"true": True, "false": False}.get(low, text.strip())
+
+
+def parse_overrides(items: list[str] | None, env: str | None = None) -> tuple[dict[str, bool], dict[str, Any]]:
+    """Schalter ``pfad=true|false`` (Pfade aus ``editorial.V2_SWITCHES``) und Regeln ``regel:pfad=wert``
+    (nur Pfade und Werte aus ``RULE_OVERRIDES``). Gibt (Schalter, Regeln)."""
     raw = [*(env or "").split(","), *(items or [])]
-    out: dict[str, bool] = {}
+    switches: dict[str, bool] = {}
+    rules: dict[str, Any] = {}
     for item in (x.strip() for x in raw):
         if not item:
             continue
         path, _, value = item.partition("=")
+        if path.startswith(RULE_PREFIX):
+            rule = path.removeprefix(RULE_PREFIX)
+            parsed = _parse_value(value)
+            if rule not in RULE_OVERRIDES or parsed not in RULE_OVERRIDES[rule]:
+                allowed = "; ".join(f"{RULE_PREFIX}{p}={'|'.join(str(v).lower() for v in vals)}" for p, vals in RULE_OVERRIDES.items())
+                raise SystemExit(f"Override {item!r} ungültig: erlaubte Regeln sind {allowed}.")
+            rules[rule] = parsed
+            continue
         if path not in editorial.V2_SWITCHES or value.lower() not in ("true", "false"):
-            raise SystemExit(f"Override {item!r} ungültig: erlaubt sind {', '.join(editorial.V2_SWITCHES)} mit =true oder =false.")
-        out[path] = value.lower() == "true"
-    return out
+            raise SystemExit(
+                f"Override {item!r} ungültig: erlaubt sind {', '.join(editorial.V2_SWITCHES)} mit =true oder =false, "
+                f"oder Regeln mit {RULE_PREFIX}pfad=wert."
+            )
+        switches[path] = value.lower() == "true"
+    return switches, rules
 
 
 @contextlib.contextmanager
@@ -295,7 +348,7 @@ def policy_variant(variant: Variant) -> Iterator[editorial.Policy]:
     tmp: str | None = None
     try:
         os.environ[editorial.POLICY_VERSION_ENV] = str(variant.version)
-        if variant.overrides:
+        if variant.overrides or variant.rules:
             import yaml
 
             tmp = tempfile.mkdtemp(prefix="blind_compare_policy_")
@@ -306,6 +359,12 @@ def policy_variant(variant: Variant) -> Iterator[editorial.Policy]:
             for switch, value in variant.overrides:
                 node = data.setdefault("implementation", {})
                 *parents, leaf = switch.split(".")
+                for part in parents:
+                    node = node.setdefault(part, {})
+                node[leaf] = value
+            for rule, value in variant.rules:
+                node = data
+                *parents, leaf = rule.split(".")
                 for part in parents:
                     node = node.setdefault(part, {})
                 node[leaf] = value
@@ -394,14 +453,60 @@ def source_hours(words: list[dict]) -> float:
 
 def reason_label(code: str) -> str:
     """Deutsche Bezeichnung mit Code in Klammern, etwa „Überdeckung (overlap)“."""
-    label = REASON_LABELS.get(code)
+    if code.startswith("ohne_grund/"):
+        stage = code.split("/", 1)[1]
+        return f"ohne Grundangabe, Stufe {STAGE_LABELS.get(stage, stage)} ({code})"
+    base, _, sub = code.partition("/")
+    if base.startswith("critic:"):
+        return f"Kritiker: {base.split(':', 1)[1]} ({code})"
+    label = REASON_LABELS.get(base)
+    if label and sub and REASON_LABELS.get(sub, sub) not in label:
+        label = f"{label}, {REASON_LABELS.get(sub, sub)}"
     return f"{label} ({code})" if label else f"unbekannter Grund ({code})"
 
 
-def rejection_rates(discarded: list[dict], proposals: int) -> dict[str, dict[str, float | int]]:
-    """Verwerfungen je Grund: Anzahl und Anteil an allen Vorschlägen (``DetectReport.proposals``)."""
-    counts = Counter(str(d.get("reason") or "unbekannt") for d in discarded)
-    return {reason: {"anzahl": n, "quote": round(n / proposals, 4) if proposals else 0.0} for reason, n in sorted(counts.items())}
+def discard_code(d: dict) -> str:
+    """Code eines Eintrags aus ``DetectReport.discarded``. Dubletten der Suche tragen ihre Art im Detail
+    (``duplicate_payoff/same_span``); ein Eintrag ohne Grund heißt nach seiner Stufe (``ohne_grund/search``)."""
+    reason = str(d.get("reason") or "")
+    if not reason:
+        return f"ohne_grund/{d.get('stage') or 'unbekannt'}"
+    if reason == "duplicate_payoff" and d.get("detail") in DUPLICATE_REASONS:
+        return f"{reason}/{d['detail']}"
+    return reason
+
+
+def _kind(code: str, d: dict | None = None) -> str:
+    base = code.split("/", 1)[0]
+    if base in DUPLICATE_REASONS:
+        return "dublette"
+    if base in RUN_EVENT_REASONS or (base == "llm_budget" and (d or {}).get("stage") == "propose"):
+        return "ereignis"
+    return "verworfen"
+
+
+def rejection_rates(discarded: list[dict], denominator: int) -> dict[str, dict[str, float | int]]:
+    """Anzahl je Code und Anteil am Nenner, für alle übergebenen Einträge."""
+    counts = Counter(discard_code(d) for d in discarded)
+    return {code: {"anzahl": n, "quote": round(n / denominator, 4) if denominator else 0.0} for code, n in sorted(counts.items())}
+
+
+def discard_summary(discarded: list[dict], proposals: int) -> dict[str, Any]:
+    """Verwerfungen getrennt nach echten Verwerfungen, Dubletten und Laufereignissen.
+
+    Nenner der Quote: Vorschläge der Stufe 2 (``DetectReport.proposals``, Modell beziehungsweise Suche)
+    ohne Dubletten. Dubletten und Laufereignisse zählen nicht in die Quote."""
+    groups: dict[str, list[dict]] = {"verworfen": [], "dublette": [], "ereignis": []}
+    for d in discarded:
+        groups[_kind(discard_code(d), d)].append(d)
+    denominator = max(0, proposals - len(groups["dublette"]))
+    return {
+        "nenner": denominator,
+        "verworfen": rejection_rates(groups["verworfen"], denominator),
+        "verworfen_gesamt": len(groups["verworfen"]),
+        "dubletten": {code: v["anzahl"] for code, v in rejection_rates(groups["dublette"], 0).items()},
+        "laufereignisse": {code: v["anzahl"] for code, v in rejection_rates(groups["ereignis"], 0).items()},
+    }
 
 
 def case_result(case: dict, offered: list[dict], rows: dict[str, dict], hooks: dict[str, dict]) -> dict[str, Any]:
@@ -539,11 +644,11 @@ def run_variant(
         "variante": variant.name,
         "fassung": variant.version,
         "schalter": dict(variant.overrides),
+        "regeln": dict(variant.rules),
         "quelle": source["name"],
         "quelle_stunden": source_hours(source["words"]),
         "vorschlaege": report.proposals,
-        "verworfen": rejection_rates(report.discarded, report.proposals),
-        "verworfen_gesamt": len(report.discarded),
+        **discard_summary(report.discarded, report.proposals),
         "modellaufrufe": len(calls),
         "modellaufrufe_je_prompt": dict(sorted(Counter(str(c.get("prompt")) for c in calls).items())),
         "laufzeit_s": round(runtime, 4),
@@ -791,7 +896,7 @@ def success_criterion(tolerance: float) -> dict[str, Any]:
 
 
 def generate(sources: list[dict], out_dir: str | Path, seed: int = DEFAULT_SEED, k: int = DEFAULT_K, provider: str = providers_llm.HEURISTIC_PROVIDER,
-             brief: dict[str, Any] | None = None, switches: bool = True, overrides: dict[str, bool] | None = None,
+             brief: dict[str, Any] | None = None, switches: bool = True, overrides: dict[str, bool] | None = None, rule_overrides: dict[str, Any] | None = None,
              pairing: str = "ueberdeckung", tolerance: float = 0.0, llm_factory: LLMFactory | None = None) -> dict[str, Path]:  # fmt: skip
     """Alle Läufe, Bögen, Quellen, Raster und Schlüssel; schreibt die Dateien aus ``FILES`` (ohne Bericht)."""
     if pairing not in PAIRINGS:
@@ -799,7 +904,7 @@ def generate(sources: list[dict], out_dir: str | Path, seed: int = DEFAULT_SEED,
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     brief = dict(DEFAULT_BRIEF if brief is None else brief)
-    variants = [*BASE_VARIANTS, *(switch_variants(overrides) if switches else [])]
+    variants = [*BASE_VARIANTS, *(switch_variants(overrides, rule_overrides) if switches else [])]
     runs = {src["name"]: {v.name: run_variant(v, src, brief, provider, k, llm_factory) for v in variants} for src in sources}
     sentences = {src["name"]: neutral_sentences(src["words"]) for src in sources}
     sheet, hook_sheet, key = make_pairs(runs, seed, pairing=pairing, sentences=sentences)
@@ -809,7 +914,7 @@ def generate(sources: list[dict], out_dir: str | Path, seed: int = DEFAULT_SEED,
         "provider": provider,
         "k": k,
         "brief": brief,
-        "varianten": [{"name": v.name, "fassung": v.version, "gruppe": v.group, "schalter": dict(v.overrides)} for v in variants],
+        "varianten": [{"name": v.name, "fassung": v.version, "gruppe": v.group, "schalter": dict(v.overrides), "regeln": dict(v.rules)} for v in variants],
         "gebaute_schalter": sorted(editorial.V2_IMPLEMENTED_SWITCHES),
         "stil_leck": style_leak(runs, key),
         "quellen": runs,
@@ -910,14 +1015,18 @@ def evaluate(out_dir: str | Path) -> dict[str, Any]:
     for name_src, runs in run_doc["quellen"].items():
         for name, r in runs.items():
             agg = per_variant.setdefault(name, {
-                "vorschlaege": 0, "verworfen": Counter(), "verworfen_gesamt": 0, "angeboten": 0, "modellaufrufe": 0,
+                "vorschlaege": 0, "nenner": 0, "verworfen": Counter(), "verworfen_gesamt": 0, "dubletten": Counter(),
+                "laufereignisse": Counter(), "angeboten": 0, "modellaufrufe": 0,
                 "laufzeit_s": 0.0, "stunden": 0.0, "hooks": Counter(), "faelle": 0, "bestanden": 0,
                 "ohne_vorschlag": [], "ohne_kandidat": [],
             })  # fmt: skip
             agg["vorschlaege"] += r["vorschlaege"]
+            agg["nenner"] += r["nenner"]
             agg["verworfen_gesamt"] += r["verworfen_gesamt"]
             for reason, v in r["verworfen"].items():
                 agg["verworfen"][reason] += v["anzahl"]
+            agg["dubletten"].update(r["dubletten"])
+            agg["laufereignisse"].update(r["laufereignisse"])
             agg["angeboten"] += len(r["angeboten"])
             agg["modellaufrufe"] += r["modellaufrufe"]
             agg["laufzeit_s"] += r["laufzeit_s"]
@@ -931,8 +1040,10 @@ def evaluate(out_dir: str | Path) -> dict[str, Any]:
                 agg["faelle"] += 1
                 agg["bestanden"] += int(r["editorial_v1"]["bestanden"])
     for agg in per_variant.values():
-        props, hours = agg["vorschlaege"], agg["stunden"]
+        props, hours = agg["nenner"], agg["stunden"]
         agg["verworfen"] = {r: {"anzahl": n, "quote": round(n / props, 4) if props else 0.0} for r, n in sorted(agg["verworfen"].items())}
+        agg["dubletten"] = dict(sorted(agg["dubletten"].items()))
+        agg["laufereignisse"] = dict(sorted(agg["laufereignisse"].items()))
         agg["hooks"] = dict(agg["hooks"])
         agg["verwerfungsquote"] = round(agg["verworfen_gesamt"] / props, 4) if props else 0.0
         agg["modellaufrufe_je_stunde"] = round(agg["modellaufrufe"] / hours, 1) if hours else None
@@ -1060,7 +1171,9 @@ def report_markdown(result: dict[str, Any]) -> str:
     lines += _rating_table(result["hook"], HOOK_CRITERIA, left, right) if result["hook"] else ["Kein Hook-Bogen vorhanden."]
 
     reasons = sorted({r for v in (left, right) for r in var[v]["verworfen"]})
-    lines += ["", "## Verwerfungsquote je Grund und Version", "", "Anteil an allen Vorschlägen der Stufe 2 (`DetectReport.proposals`).", "",
+    lines += ["", "## Verwerfungsquote je Grund und Version", "",
+              "Nenner: Vorschläge der Stufe 2 (Modell beziehungsweise Suche, `DetectReport.proposals`) ohne Dubletten. "
+              "Dubletten und Laufereignisse stehen getrennt darunter und zählen nicht in die Quote.", "",
               f"| Grund | {left} | {right} |", "|---|---|---|"]  # fmt: skip
     for reason in reasons:
         cells = []
@@ -1068,8 +1181,19 @@ def report_markdown(result: dict[str, Any]) -> str:
             entry = var[v]["verworfen"].get(reason)
             cells.append(f"{entry['anzahl']} ({_pct(entry['quote'])})" if entry else "0")
         lines.append(f"| {reason_label(reason)} | {cells[0]} | {cells[1]} |")
-    lines.append(f"| gesamt | {var[left]['verworfen_gesamt']} von {var[left]['vorschlaege']} ({_pct(var[left]['verwerfungsquote'])}) "
-                 f"| {var[right]['verworfen_gesamt']} von {var[right]['vorschlaege']} ({_pct(var[right]['verwerfungsquote'])}) |")  # fmt: skip
+    lines.append(f"| gesamt | {var[left]['verworfen_gesamt']} von {var[left]['nenner']} ({_pct(var[left]['verwerfungsquote'])}) "
+                 f"| {var[right]['verworfen_gesamt']} von {var[right]['nenner']} ({_pct(var[right]['verwerfungsquote'])}) |")  # fmt: skip
+    lines += ["", f"Vorschläge vor dem Abzug der Dubletten: {left} {var[left]['vorschlaege']}, {right} {var[right]['vorschlaege']}.", "",
+              "### Dubletten (nicht in der Quote)", "", f"| Art | {left} | {right} |", "|---|---|---|"]  # fmt: skip
+    dup_codes = sorted({c for v in (left, right) for c in var[v]["dubletten"]})
+    for code in dup_codes:
+        lines.append(f"| {reason_label(code)} | {var[left]['dubletten'].get(code, 0)} | {var[right]['dubletten'].get(code, 0)} |")
+    lines.append(f"| gesamt | {sum(var[left]['dubletten'].values())} | {sum(var[right]['dubletten'].values())} |")
+    event_codes = sorted({c for v in (left, right) for c in var[v]["laufereignisse"]})
+    if event_codes:
+        lines += ["", "### Laufereignisse (betreffen keinen einzelnen Vorschlag)", "", f"| Ereignis | {left} | {right} |", "|---|---|---|"]
+        for code in event_codes:
+            lines.append(f"| {reason_label(code)} | {var[left]['laufereignisse'].get(code, 0)} | {var[right]['laufereignisse'].get(code, 0)} |")
 
     lines += ["", "## Modellaufrufe und Laufzeit je Quellstunde", "", "Gezählt am Provider (jeder strukturierte Aufruf, auch Hooks).", "",
               f"| Kennzahl | {left} | {right} |", "|---|---|---|",
@@ -1094,13 +1218,16 @@ def report_markdown(result: dict[str, Any]) -> str:
     if switch_rows:
         lines += ["", "## Einzelne Schalter (Auswahl, Hooks, Kürzung, Kombination)", "",
                   "Fassung 2, Basis: alle Gruppenschalter aus. Hook-Kennzahlen je angebotenem Kandidaten.", "",
-                  "| Variante | Schalter an (gebaut) | Kandidaten | Verwerfungsquote | Modellaufrufe je Quellstunde | Hooks native | ohne Overlay | ganzer Satz | mit Claim-Befund | editorial_v1 |",
+                  "| Variante | Schalter an (gebaut); Regeln | Kandidaten | Verwerfungsquote | Modellaufrufe je Quellstunde | Hooks native | ohne Overlay | ganzer Satz | mit Claim-Befund | editorial_v1 |",
                   "|---|---|---|---|---|---|---|---|---|---|"]  # fmt: skip
         for name in switch_rows:
             info, agg = result["varianten_info"][name], var[name]
             on = [s for s, value in info["schalter"].items() if value]
             title = GROUP_TITLES.get(info["gruppe"], str(info["gruppe"]))
             switches = ", ".join(f"{s} ({'ja' if s in built else 'nein'})" for s in on) or "keiner"
+            rules = info.get("regeln") or {}
+            if rules:
+                switches += "; Regel " + ", ".join(f"{p}={str(v).lower()}" for p, v in rules.items())
             h = agg["hooks"]
             total = int(h.get("gesamt", 0))
             lines.append(
@@ -1137,7 +1264,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--quelle", action="append", default=[], help="UUID einer Quelle aus der Datenbank (braucht DATABASE_URL), mehrfach")
     ap.add_argument("--ohne-fixtures", action="store_true", help="Demo-Skript und editorial_v1 nicht verwenden")
     ap.add_argument("--ohne-schalter", action="store_true", help="keine Schalter-Varianten rechnen")
-    ap.add_argument("--override", action="append", default=[], help=f"zusätzliche Variante: Schalter pfad=true|false, mehrfach; auch {OVERRIDES_ENV}")
+    ap.add_argument("--override", action="append", default=[], help=f"zusätzliche Variante: Schalter pfad=true|false oder Regel {RULE_PREFIX}pfad=wert (Whitelist), mehrfach; auch {OVERRIDES_ENV}")
     ap.add_argument("--brief", help="Brief als JSON-Datei (gleich für beide Versionen, platform steuert die Hooks)")
     ap.add_argument("--bericht", help="Pfad des Berichts, Standard <ordner>/bericht.md")
     args = ap.parse_args(argv)
@@ -1157,9 +1284,9 @@ def main(argv: list[str] | None = None) -> None:
     if not sources:
         raise SystemExit("Keine Quellen: Fixtures, --transkripte oder --quelle angeben.")
     brief = json.loads(Path(args.brief).read_text(encoding="utf-8")) if args.brief else None
-    overrides = parse_overrides(args.override, os.environ.get(OVERRIDES_ENV))
+    overrides, rule_overrides = parse_overrides(args.override, os.environ.get(OVERRIDES_ENV))
     paths = generate(sources, args.out, seed=args.seed, k=args.k, provider=args.provider, brief=brief,
-                     switches=not args.ohne_schalter, overrides=overrides, pairing=args.paarung, tolerance=args.toleranz)  # fmt: skip
+                     switches=not args.ohne_schalter, overrides=overrides, rule_overrides=rule_overrides, pairing=args.paarung, tolerance=args.toleranz)  # fmt: skip
     print(f"{len(sources)} Quellen gerechnet.")
     print(f"An die Bewertenden: {paths['sheet']}, {paths['hook_sheet']}, {paths['sources']}, {paths['rubric']}")
     print(f"Nicht weitergeben: {paths['key']}, {paths['run']}")

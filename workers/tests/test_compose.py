@@ -129,3 +129,59 @@ def test_remap_words_by_midpoint_keeps_words_that_graze_a_boundary():
     assert (b["start"], b["end"]) == (0.5, 0.8)  # auf das Segmentende gekürzt
     assert (c["start"], c["end"]) == (0.8, 1.1)  # Segment 2 beginnt bei 0,8 s Ausgabezeit
     assert all(x["end"] >= x["start"] for x in out)
+
+
+def test_output_timeline_with_padding():
+    """AP10b: gepaddete Segmente; die Ausgabezeit summiert die gepaddeten Längen, die Wörter bleiben mit
+    ihrem Abstand zum Vorlauf an derselben Stelle und keins geht an der Grenze verloren."""
+    from chopstr_worker.pipeline import transitions
+
+    words = _words(["a", "b", "c", "d", "e", "f"], gap=0.4)  # a 0,0 bis 0,4, b 0,8 bis 1,2, ...
+    rules = transitions.CutRules(lead_in_s=0.06, lead_out_s=0.18, min_gap_s=0.1, low_confidence_threshold=0.5)
+    raw = [{"start": 0.8, "end": 2.0, "role": "body"}, {"start": 3.2, "end": 4.4, "role": "body"}]
+    padded = transitions.pad_segments(raw, words, rules)
+    comp = compose.Composition.from_json([{k: s[k] for k in ("start", "end", "role")} for s in padded])
+    timeline = compose.output_timeline(comp)
+    assert timeline == [
+        {"segment_index": 0, "role": "body", "source_in": 0.74, "source_out": 2.18, "output_in": 0.0, "output_out": 1.44},
+        {"segment_index": 1, "role": "body", "source_in": 3.14, "source_out": 4.58, "output_in": 1.44, "output_out": 2.88},
+    ]
+    assert compose.output_timeline(comp) == timeline  # deterministisch
+    out = compose.remap_words(words, comp, by_midpoint=True)
+    assert [(x["text"], x["start"], x["end"]) for x in out] == [
+        ("b", 0.06, 0.46), ("c", 0.86, 1.26), ("e", 1.5, 1.9), ("f", 2.3, 2.7),
+    ]
+    assert out[-1]["end"] <= timeline[-1]["output_out"]
+
+
+def test_from_keep_ranges_clamps_to_neighbor_words_under_cut_padding():
+    """AP10b: lückenlose ASR-Zeiten (Probe aus dem Review: Segment begann bei 4,95, Vorwort endete bei 4,98).
+    Mit ``clamp`` reicht kein Vor- oder Nachlauf in ein Nachbarwort; ohne (Fassung 1) bleibt es wie vorher."""
+    words = [
+        {"text": "vor", "start": 4.5, "end": 4.98},
+        {"text": "a", "start": 5.0, "end": 5.4},
+        {"text": "b", "start": 5.4, "end": 5.8},
+        {"text": "nach", "start": 5.84, "end": 6.2},
+    ]
+    old = compose.from_keep_ranges(words, [(1, 2)], clamp=False)
+    assert [(s.start, s.end) for s in old.segments] == [(4.95, 5.88)]  # ragt in „vor“ und „nach“
+    new = compose.from_keep_ranges(words, [(1, 2)], clamp=True)
+    assert [(s.start, s.end) for s in new.segments] == [(4.98, 5.84)]
+    # Überlappende Wortzeiten: das eigene Wort bleibt ganz drin.
+    overlap = [dict(words[0], end=5.1), *words[1:]]
+    seg = compose.from_keep_ranges(overlap, [(1, 2)], clamp=True).segments[0]
+    assert seg.start == 5.0 and seg.end == 5.84
+
+
+def test_from_keep_ranges_clamp_follows_the_active_policy(monkeypatch):
+    from chopstr_worker import editorial
+
+    words = [{"text": "vor", "start": 4.5, "end": 4.98}, {"text": "a", "start": 5.0, "end": 5.4}, {"text": "n", "start": 5.42, "end": 5.8}]
+    for version, expected in (("1", (4.95, 5.48)), ("2", (4.98, 5.42))):
+        monkeypatch.setenv("CHOPSTR_POLICY_VERSION", version)
+        editorial.clear_cache()
+        try:
+            (seg,) = compose.from_keep_ranges(words, [(1, 1)]).segments
+        finally:
+            editorial.clear_cache()
+        assert (seg.start, round(seg.end, 3)) == expected

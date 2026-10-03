@@ -26,6 +26,7 @@
     "unresolved_questions",
     "quality_gate_results",
     "editorial_subscores",
+    "rubric_points",
     "assessment_uncertainties",
     "decision",
     "decision_reason",
@@ -156,6 +157,120 @@
       }
     },
     "editorial_subscores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scale_max",
+        "calibration",
+        "source",
+        "values",
+        "evidence"
+      ],
+      "properties": {
+        "scale_max": {
+          "const": 4
+        },
+        "calibration": {
+          "enum": [
+            "uncalibrated",
+            "calibrated"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "audience_relevance",
+            "opening_clarity",
+            "content_strength",
+            "progress",
+            "evidence_quality",
+            "closing",
+            "naturalness",
+            "distinctiveness_vs_others"
+          ],
+          "properties": {
+            "audience_relevance": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 4
+            },
+            "opening_clarity": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 4
+            },
+            "content_strength": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 4
+            },
+            "progress": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 4
+            },
+            "evidence_quality": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 4
+            },
+            "closing": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 4
+            },
+            "naturalness": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 4
+            },
+            "distinctiveness_vs_others": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 4
+            }
+          }
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "rubric_points": {
       "type": "object",
       "additionalProperties": false,
       "required": [

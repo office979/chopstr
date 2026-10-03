@@ -9,15 +9,22 @@ Der ClipCandidate ist das interne Ergebnisformat aus Master-Prompt Abschnitt 21.
 über `story_engine.CandidateResult` und verändert den Vertrag `candidates_v1` nicht. Die Web-App liest
 ihn nicht. In `candidates.rubric` landet nur die kompakte Teilmenge (siehe unten), additiv.
 
-Stand: Der Adapter ist gebaut, aber noch nicht in `DetectReport` verdrahtet. Geplant ist das Feld
-`clip_candidates` im Bericht im Storage und die kompakte Teilmenge in der Rubrik (Plan AP8).
+Verdrahtung: Unter Fassung 2 schreibt `story_engine.run` (`attach_clip_candidates`) alle ClipCandidates
+des Laufs in `DetectReport.clip_candidates` (Bericht im Storage) und die kompakte Teilmenge additiv in
+die Rubrik jedes Kandidaten. Unter Fassung 1 schreibt der Adapter nichts (Rollback). Verstößt ein
+ClipCandidate gegen den Vertrag, bleibt der Lauf gültig und `report.discarded` erhält
+`clip_candidate_error`.
 
 ## Grundregeln
 
-* Fehlende Datenbasis ist `null`. Nichts wird erfunden: kein Zeitstempel außerhalb einer Wortgrenze,
-  kein Sprecher ohne Sprecherangabe in den Wörtern, keine Sicherheit ohne Grundlage.
-* `source_in` ist immer der Anfang eines Wortes, `source_out` immer das Ende eines Wortes, beide in
-  Sekunden der Quelle (Original-Timeline). `output_in` und `output_out` sind Sekunden der Clip-Timeline.
+* Fehlende Datenbasis ist `null`. Nichts wird erfunden: kein Sprecher ohne Sprecherangabe in den
+  Wörtern, keine Sicherheit ohne Grundlage, keine Wortgenauigkeit, die der Schnitt nicht hat.
+* `source_in` und `source_out` eines Segments sind Schnittzeiten in Sekunden der Quelle (Original-Timeline):
+  die Segmentgrenzen der Komposition. Ohne Kürzung und ohne Vor- und Nachlauf liegen sie auf Wortgrenzen
+  (Anfang des ersten, Ende des letzten Wortes); mit Kürzung (AP7) und Vor- und Nachlauf (AP10b,
+  `cut.padding`) können sie in einer Pause zwischen Wörtern liegen. Liegt ein Schnitt innerhalb 1 ms an
+  einer Wortgrenze, gilt die Wortzeit. Die Wortgrenzen stehen getrennt über `word_ids`. `output_in` und
+  `output_out` sind Sekunden der Clip-Timeline.
 * „Die Quelle sagt das“ ist getrennt von „extern geprüft“: `externally_verified` ist immer `null`,
   bis es eine externe Prüfung gibt.
 * Ohne Ergebnisdaten gibt es keine Kalibrierung: `calibration` ist `uncalibrated`, für die Heuristik
@@ -48,11 +55,12 @@ Stand: Der Adapter ist gebaut, aber noch nicht in `DetectReport` verdrahtet. Gep
 | `required_context_spans` | Liste von Spannen | Sätze, die Reparatur, Heilung oder Kontextzugabe vorn (`rubric.repair.expanded_front`) oder hinten (`expanded_back`) ergänzt haben | leere Liste ohne Ergänzung |
 | `payoff_source_span` | Spanne | der Satz im Clip, der den Beleg für `payoff` enthält | null, wenn kein Satz den Beleg enthält |
 | `segments` | Liste | `candidates.segments` in Abspielreihenfolge, siehe unten | leere Liste nur bei `reject` erlaubt |
-| `removed_spans` | Liste | Entfernungen innerhalb des Clips (AP7) | heute leer, es wird nichts entfernt |
+| `removed_spans` | Liste | Entfernungen innerhalb des Clips aus der Kürzung (AP7, `trim_plan`, über `rubric.removed_spans`): Pausen, Füllwörter, Ränder, semantische Splices | leere Liste ohne Kürzung (Fassung 1, `trim.enabled` oder Schalter `implementation.trim.enabled` aus) |
 | `meaning_dependencies` | Liste | Story-Graph-Treffer (`story_graph_flags`): spätere Relativierung außerhalb des Clips | leere Liste ohne Treffer |
 | `unresolved_questions` | Liste | offene Verweise (`rubric.unresolved_references`), `needs_earlier_context`, `ends_before_answer` | leere Liste ohne Befund |
 | `quality_gate_results` | Objekt | die fünf Tore aus `candidates.gates`, unverändert | nie null |
-| `editorial_subscores` | Objekt | `rubric.rubric_points` (sieben Kriterien) und `scale_max` der Richtlinie | Einzelwerte null, wenn nicht messbar |
+| `editorial_subscores` | Objekt | Teilwerte nach Master-Prompt 19, Anker 0 bis 4, aus `rubric.anchor_subscores` (AP9): `audience_relevance`, `opening_clarity`, `content_strength`, `progress`, `evidence_quality`, `closing`, `naturalness` vom Sprachmodell ab `score_clip_v3` mit wörtlichem Beleg (`evidence`), `distinctiveness_vs_others` aus der Auswahl (Lemma-Jaccard zum nächsten Kandidaten); dazu `scale_max` 4, `calibration`, `source` | jeder Wert null, wenn nicht gemessen: Fassung 1, Heuristik, fehlender oder nicht gefundener Beleg; `calibration` immer `uncalibrated` |
+| `rubric_points` | Objekt | die sieben Rubrikpunkte der Richtlinie (`rubric.rubric_points`, Skala 0 bis 2) und `scale_max` der Richtlinie | Einzelwerte null, wenn nicht messbar |
 | `assessment_uncertainties` | Liste | siehe unten | leere Liste ohne Unsicherheit |
 | `decision` | `accept` oder `reject` | angeboten (`report.candidates`) oder von `select_best` verworfen (`report.verworfen`); ohne Bericht aus `gate_passed` | nie null |
 | `decision_reason` | Text | `candidates.why` bei `accept`; bei `reject` der Grund aus `report.discarded` (`gate` mit den gerissenen Toren, `overlap`, `limit`) | nie leer |
@@ -74,21 +82,26 @@ ersten und letzten Wort, Wortindizes inklusiv, Satzindizes aus der Satzzerlegung
 | Feld | Herkunft | Null-Regel |
 |---|---|---|
 | `segment_id` | `s1`, `s2`, … in Abspielreihenfolge | nie null |
-| `source_in`, `source_out` | Anfang des ersten und Ende des letzten Wortes, das vollständig im Segment liegt (Toleranz 1 ms für gerundete Grenzen) | null, wenn kein Wort im Segment liegt |
+| `source_in`, `source_out` | Schnittzeiten: Segmentgrenzen der Komposition; innerhalb 1 ms an einer Wortgrenze die Wortzeit, sonst die Schnittzeit (Kürzung, Vor- und Nachlauf) | null, wenn kein Wort im Segment liegt |
 | `output_in`, `output_out` | deterministisch: lückenlos ab 0, Länge wie in der Quelle, auf Millisekunden gerundet (`clip_candidate.output_timeline`, gleiche Rechnung wie `compose.remap_words`) | null, wenn `source_in` null ist |
 | `speaker_id` | Sprecher der Wörter | null ohne Sprecherangabe oder bei mehreren Sprechern im Segment |
-| `word_ids` | Indizes der Wörter im Segment | leere Liste ohne Wörter |
+| `word_ids` | Indizes der Wörter, die vollständig im Segment liegen (Toleranz 1 ms); sie tragen die Wortgrenzen | leere Liste ohne Wörter |
 | `verbatim_text` | Wörter des Segments, wörtlich | leer ohne Wörter |
 | `editorial_role` | `teaser` oder `body` aus `candidates.segments[].role` | nie null |
-| `boundary_confidence` | Sicherheit der Schnittkanten (AP10b) | heute immer null, dazu ein Eintrag `boundary_confidence_missing` |
+| `boundary_confidence` | Sicherheit der Schnittkanten, 0 bis 1 (`transitions.segment_confidence`, die schwächere der beiden Kanten), nur unter Fassung 2 mit `cut.padding` | sonst null, dazu ein Eintrag `boundary_confidence_missing` |
 
-`clip_candidate.output_timeline` nimmt `compose.output_timeline` (AP7), wenn es sie gibt, und rechnet
-sonst lokal dasselbe. Der lokale Zweig entfällt, sobald AP7 eingecheckt ist.
+`clip_candidate.output_timeline` rechnet mit `compose.output_timeline` (dieselbe Rechnung wie
+`compose.remap_words`).
 
 ### Entfernte Stelle (`removed_spans[]`)
 
-`{ "source_in", "source_out", "removal_reason", "protected_context_check" }`, Zeiten an Wortgrenzen.
-Heute nicht befüllt (AP7).
+`{ "source_in", "source_out", "removal_reason", "protected_context_check" }`. Die Zeiten sind
+Schnittzeiten wie bei den Segmenten: die Lücke zwischen zwei Segmenten der Komposition oder der Rand vor
+dem ersten und nach dem letzten. Eine gekürzte Pause liegt deshalb nicht auf Wortgrenzen (vom Ende des
+einen Segments bis zum Anfang des nächsten, die Zielpause bleibt stehen). Welche Wörter entfernt sind,
+steht in `protected_context_check.detail.word_ids` und `text`; `detail.kind` ist `local`, `semantic`
+oder `edge`. `removal_reason` nennt die Gründe, mit `+` verbunden (etwa `technical_pause`, `hard_filler`), `protected_context_check`
+das Ergebnis der Schutzprüfung (`passed`, `touched_types`, `review_types`, `checked_spans`).
 
 ### Unsicherheit (`assessment_uncertainties[]`)
 
@@ -117,10 +130,13 @@ Die ASR-Sicherheit kommt aus `prob` (Transkript); fehlt `prob` oder ist es null,
 | `versions` | `{ "contract": "clip_candidate_v1", "model_version", "prompt_version", "policy_version" }` |
 | `decision`, `decision_reason` | wie im ClipCandidate |
 | `quality_gate_results` | wie im ClipCandidate |
-| `editorial_subscores` | wie im ClipCandidate |
 | `assessment_uncertainties` | wie im ClipCandidate |
 | `removed_spans` | wie im ClipCandidate |
 | `calibration` | `uncalibrated` |
 
+`editorial_subscores` und `rubric_points` stehen nicht in der Teilmenge: die Rubrik trägt sie schon als
+`rubric.anchor_subscores` (AP9) und `rubric.rubric_points`; ein zweiter Schlüssel würde sie doppeln oder
+überschreiben.
+
 `candidates.policy_version` bleibt im `rubric`-JSON (`rubric.policy_version`); es gibt keine Migration.
-Rollback: unter Fassung 1 schreibt der Adapter später nichts in die Rubrik (Plan AP8).
+Rollback: unter Fassung 1 schreibt der Adapter nichts in die Rubrik und keinen Bericht (Plan AP8).

@@ -20,16 +20,22 @@ Regeln:
 - Kein Prompt erzeugt finale Videos. Ausgabe sind immer strukturierte Vorschläge mit Belegen.
 - Code-Bezeichner Englisch, Prompt-Texte Deutsch.
 
-| Datei | Zweck | Ausgabe (Tool-Use-Schema) |
-|---|---|---|
-| `system_editor_v1.md` | Systemrolle: Senior-Redaktion DACH | – |
-| `system_editor_v2.md` | Systemrolle, gepinnt in Fassung 2 (AP4): Transkript, Titel und Metadaten sind Daten in Begrenzern, keine Anweisungen; kein Viralitätsversprechen | – |
-| `propose_moments_v1.md` | Stufe 2: Momente pro Kapitel als Satz-Spannen | `propose_moments` |
-| `propose_moments_v2.md` | Stufe 2, gepinnt in Fassung 2 (AP5): Payoff zuerst, rückwärts zum Einstieg, Gegenrichtung; Policy, Episodenübersicht, Seeds und Kapitel in Begrenzern; je Moment Payoff, Einstieg, Kontext, Funktion, Versprechen | `propose_moments` |
-| `episode_overview_v1.md` | Stufe 2, gepinnt in Fassung 2 (AP5): Analyst, Übersicht je Kapitel mit Satznummern, nur für die Suche, nie Zitat- oder Schnittquelle | `episode_overview` |
-| `score_clip_v1.md` | Stufe 3, Bestand: eigene Rubrik (5 Kriterien, 0 bis 10) | `score_clip` |
-| `score_clip_v2.md` | Stufe 3, gepinnt in Fassung 1 und 2: Rubrik aus der redaktionellen Grundlage (7 Kriterien, 0 bis 2) | `score_clip` |
-| `story_graph_confirm_v1.md` | Stufe 4: relativiert ein späterer Satz den Clip? | `confirm_qualification` |
-| `hooks_v1.md` | Copy: 5 Hook-Varianten nach Muster | `write_hooks` |
-| `hooks_v2.md` | Copy, gepinnt in Fassung 2 (AP6a): Varianten aus verschiedenen Originalstellen, Frage nur als Variante, Clip in Begrenzern als Daten | `write_hooks` |
-| `post_caption_v1.md` | Copy: Post-Text pro Plattform | `write_post_caption` |
+## Prompts, Pins und Rollen
+
+Stand: Code-Stand 8054125. „Pin F1“ und „Pin F2“ sagen, ob die Policy-Fassung 1 (`editorial.V1_PROMPT_PINS`) oder die Fassung 2 (Abschnitt `prompts` in `clip_policy_v2.yaml`) die Datei lädt. Nur eine gepinnte Datei läuft; eine Datei ohne Pin in beiden Spalten bleibt Bestand. Rolle ist die Aufgabe im Ablauf (Analyst beschreibt, Editor wählt, Kritiker sucht Gegenbeweise, Copy schreibt Text, Bewerter vergibt Punkte, Prüfer entscheidet eine Einzelfrage, System ist die gemeinsame Rahmung). Eingaben sind die Platzhalter im Frontmatter (`inputs`); `prompts.render` scheitert, wenn einer fehlt.
+
+| Datei | Pin F1 | Pin F2 | Rolle | Eingaben | Ausgabe (Tool-Use-Schema) | Zweck |
+|---|---|---|---|---|---|---|
+| `system_editor_v1.md` | ja | nein | System | keine | nichts | Systemrolle: Senior-Redaktion DACH |
+| `system_editor_v2.md` | nein | ja | System | keine | nichts | Systemrolle ab AP4: Transkript, Titel und Metadaten sind Daten in Begrenzern, keine Anweisungen; kein Viralitätsversprechen |
+| `episode_overview_v1.md` | nein | ja | Analyst | `chapter_numbered` | `episode_overview` | Stufe 2 (AP5): Übersicht je Kapitel mit Satznummern, nur für die Suche, nie Zitat- oder Schnittquelle. Unter Fassung 1 nicht gepinnt, ein Aufruf scheitert dort laut |
+| `propose_moments_v1.md` | ja | nein | Editor (Rolle erst ab v2 im Frontmatter) | `audience`, `wanted`, `exclude`, `platform`, `chapter_numbered` | `propose_moments` | Stufe 2: Momente pro Kapitel als Satz-Spannen |
+| `propose_moments_v2.md` | nein | ja, wirksam nur mit `implementation.search.payoff_first` | Editor | `audience`, `wanted`, `exclude`, `platform`, `policy`, `episode_overview`, `seeds`, `chapter_numbered` | `propose_moments` | Stufe 2 (AP5): Payoff zuerst, rückwärts zum Einstieg, Gegenrichtung; Policy, Episodenübersicht, Seeds und Kapitel in Begrenzern; je Moment Payoff, Einstieg, Kontext, Funktion, Versprechen |
+| `score_clip_v1.md` | nein | nein | Bewerter | `audience`, `platform`, `candidate_numbered` | `score_clip` | Bestand: eigene Rubrik (5 Kriterien, 0 bis 10), wird von keiner Fassung geladen |
+| `score_clip_v2.md` | ja | ja | Bewerter | `audience`, `platform`, `candidate_numbered`, `policy` | `score_clip` | Stufe 3: Rubrik aus der redaktionellen Grundlage (7 Kriterien, 0 bis 2); `{policy}` wird aus der aktiven Fassung gefüllt, der Kopf `policy: clip_policy_v1` ist nur eine Anzeige |
+| `story_graph_confirm_v1.md` | ja | ja | Prüfer | `clip_text`, `later_text`, `seconds_after` | `confirm_qualification` | Stufe 4: relativiert ein späterer Satz den Clip? |
+| `hooks_v1.md` | ja | nein | Copy | `address`, `country`, `platform`, `protected_terms`, `clip_text` | `write_hooks` | 5 Hook-Varianten nach Muster |
+| `hooks_v2.md` | nein | ja | Copy | `address`, `country`, `platform`, `protected_terms`, `clip_text` | `write_hooks` | ab AP6a: Varianten aus verschiedenen Originalstellen, Frage nur als Variante, Clip in Begrenzern als Daten. Rollback gemeinsam mit dem Schalter `implementation.hook.native_spoken` |
+| `post_caption_v1.md` | ja | ja | Copy | `address`, `country`, `platform`, `tone_adjectives`, `banned_phrases`, `clip_text`, `hook_onscreen` | `write_post_caption` | Post-Text pro Plattform |
+
+Geplant, im Stand 8054125 nicht vorhanden: `critique_clip_v1.md` (Rolle Kritiker, AP6b; Eingaben `opening`, `text_hook`, `clip_text`, `context_before`, `context_after`; Tool `critique_clip`; nur für die Überlebenden der Auswahl, Pin in Fassung 2 mit dem Paket, Beschluss P42 in `docs/ENTSCHEIDUNGEN.md`). Der Evaluator des Rollenmodells ist kein Prompt, sondern deterministisch (Gates und Teilwerte). Wo welcher Prompt geladen wird und welche Version im Kandidaten, im Cache-Key und in `hook_versions` steht, beschreibt `docs/PIPELINE.md` Abschnitt 6.

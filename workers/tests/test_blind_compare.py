@@ -69,13 +69,14 @@ def _clip(cid: str, start: float = 0.0, end: float = 30.0, hook: str = "Satz ein
     }  # fmt: skip
 
 
-def _synthetic_run(version: str, clips: list[dict], reasons: list[str], passed: bool | None, proposals: int | None = None) -> dict:
-    props = len(clips) + len(reasons) if proposals is None else proposals
+def _synthetic_run(version: str, clips: list[dict], reasons: list, passed: bool | None, proposals: int | None = None) -> dict:
+    entries = [r if isinstance(r, dict) else {"reason": r} for r in reasons]
+    events = sum(1 for e in entries if e.get("reason") in bc.RUN_EVENT_REASONS)
+    props = len(clips) + len(entries) - events if proposals is None else proposals
     native = sum(1 for c in clips if c["hook"]["muster"] == "native")
     return {
         "variante": version, "fassung": 1 if version == "v1" else 2, "schalter": {}, "quelle": "q", "quelle_stunden": 0.25,
-        "vorschlaege": props, "verworfen": bc.rejection_rates([{"reason": r} for r in reasons], props),
-        "verworfen_gesamt": len(reasons), "modellaufrufe": 2 * len(clips) + 3, "modellaufrufe_je_prompt": {}, "laufzeit_s": 0.1,
+        "vorschlaege": props, **bc.discard_summary(entries, props), "modellaufrufe": 2 * len(clips) + 3, "modellaufrufe_je_prompt": {}, "laufzeit_s": 0.1,
         "hooks": {"gesamt": len(clips), "native": native, "ohne_overlay": sum(1 for c in clips if not c["hook"]["text"]),
                   "ganzer_satz": len(clips), "mit_befund": 0},
         "editorial_v1": None if passed is None else {"bestanden": passed, "gruende": [] if passed else ["Segment endet auf verbotenem Out-Point „nicht“"]},
@@ -92,14 +93,15 @@ def _synthetic_dir(tmp_path, pairing="ueberdeckung", tolerance=0.0):
     tmp_path.mkdir(parents=True, exist_ok=True)
     runs = {
         "fall_a": {
-            "v1": _synthetic_run("v1", [_v1_clip("cc_a1", 0, 30), _v1_clip("cc_a2", 40, 70), _v1_clip("cc_a3", 80, 100)], ["gate", "too_long"], False),
-            "v2": _synthetic_run("v2", [_clip("cc_b1", 41, 69), _clip("cc_b2", 1, 29, overlay="")], ["gate"], True),
+            "v1": _synthetic_run("v1", [_v1_clip("cc_a1", 0, 30), _v1_clip("cc_a2", 40, 70), _v1_clip("cc_a3", 80, 100)], ["gate", "too_long", {"stage": "search"}], False),
+            "v2": _synthetic_run("v2", [_clip("cc_b1", 41, 69), _clip("cc_b2", 1, 29, overlay="")],
+                                ["gate", {"reason": "duplicate_payoff", "detail": "same_span"}, {"reason": "duplicate_payoff", "detail": "same_opening"}], True),
             "v2_basis": _synthetic_run("v2", [_clip("cc_c1", 0, 30, pattern="identity_call")], ["gate"], True),
             "v2_hooks": _synthetic_run("v2", [_clip("cc_d1", 0, 30, overlay="")], [], True),
         },
         "fall_b": {
             "v1": _synthetic_run("v1", [_v1_clip("cc_a4"), _v1_clip("cc_a5", 50, 80)], [], True),
-            "v2": _synthetic_run("v2", [_clip("cc_b3"), _clip("cc_b4", 50, 80)], ["overlap"], True),
+            "v2": _synthetic_run("v2", [_clip("cc_b3"), _clip("cc_b4", 50, 80)], ["overlap", "budget_exhausted"], True),
             "v2_basis": _synthetic_run("v2", [_clip("cc_c2", pattern="identity_call")], [], True),
             "v2_hooks": _synthetic_run("v2", [_clip("cc_d2")], [], True),
         },
@@ -288,18 +290,33 @@ def test_generated_pairs_respect_the_smaller_output(generated):
 # -- Verwerfungsquote und Modellaufrufe ------------------------------------------------------------
 
 
-def test_rejection_rate_counts_each_reason():
-    discarded = [{"reason": "gate"}, {"reason": "gate"}, {"reason": "too_short"}, {"reason": "overlap"}, {}]
-    assert bc.rejection_rates(discarded, proposals=10) == {
+def test_rejection_rate_separates_duplicates_and_events():
+    discarded = [
+        {"reason": "gate", "first_sent": 0, "last_sent": 3}, {"reason": "gate"}, {"reason": "too_short", "stage": "search"},
+        {"reason": "promise_unfulfilled", "opening_sent": 4, "stage": "search"}, {"stage": "search"},
+        {"reason": "duplicate_payoff", "detail": "same_span", "stage": "search"}, {"reason": "duplicate_payoff", "detail": "same_opening"},
+        {"reason": "duplicate", "first_sent": 0, "last_sent": 5}, {"reason": "budget_exhausted"},
+        {"reason": "llm_budget", "stage": "propose", "first_sent": 0, "last_sent": 9},
+    ]  # fmt: skip
+    summary = bc.discard_summary(discarded, proposals=13)
+    assert summary["nenner"] == 10
+    assert summary["verworfen"] == {
         "gate": {"anzahl": 2, "quote": 0.2},
-        "overlap": {"anzahl": 1, "quote": 0.1},
+        "ohne_grund/search": {"anzahl": 1, "quote": 0.1},
+        "promise_unfulfilled": {"anzahl": 1, "quote": 0.1},
         "too_short": {"anzahl": 1, "quote": 0.1},
-        "unbekannt": {"anzahl": 1, "quote": 0.1},
     }
-    assert bc.rejection_rates([], proposals=0) == {}
+    assert summary["verworfen_gesamt"] == 5
+    assert summary["dubletten"] == {"duplicate": 1, "duplicate_payoff/same_opening": 1, "duplicate_payoff/same_span": 1}
+    assert summary["laufereignisse"] == {"budget_exhausted": 1, "llm_budget": 1}
+    assert bc.discard_summary([], proposals=0) == {"nenner": 0, "verworfen": {}, "verworfen_gesamt": 0, "dubletten": {}, "laufereignisse": {}}
     assert bc.reason_label("overlap") == "Überdeckung (overlap)"
     assert bc.reason_label("too_short") == "zu kurz (too_short)"
     assert bc.reason_label("gate") == "Tor (gate)"
+    assert bc.reason_label("duplicate_payoff") == "Dublette, gleicher Payoff (duplicate_payoff)"
+    assert bc.reason_label("duplicate_payoff/same_span") == "Dublette, gleicher Payoff, gleiche Spanne (duplicate_payoff/same_span)"
+    assert bc.reason_label("ohne_grund/search") == "ohne Grundangabe, Stufe Suche (ohne_grund/search)"
+    assert bc.reason_label("critic:distortion") == "Kritiker: distortion (critic:distortion)"
     assert bc.reason_label("neu") == "unbekannter Grund (neu)"
 
 
@@ -311,11 +328,18 @@ def test_rejection_rate_of_a_run_matches_report_discarded(version):
     with bc.policy_variant(variant):
         llm = LLM(Tenant(id="t", tier="standard"), provider=providers_llm.HEURISTIC_PROVIDER, s=config.settings())
         report = story_engine.run(copy.deepcopy(source["words"]), dict(bc.DEFAULT_BRIEF), {}, None, llm, max_candidates=1)
-    expected = Counter(str(d.get("reason") or "unbekannt") for d in report.discarded)
-    assert {r: v["anzahl"] for r, v in run["verworfen"].items()} == dict(expected)
-    assert run["verworfen_gesamt"] == len(report.discarded) and run["vorschlaege"] == report.proposals
+    codes = Counter(bc.discard_code(d) for d in report.discarded)
+    duplicates = {c: n for c, n in codes.items() if c.split("/", 1)[0] in bc.DUPLICATE_REASONS}
+    events = {c: n for c, n in codes.items() if c in bc.RUN_EVENT_REASONS}
+    rejected = {c: n for c, n in codes.items() if c not in duplicates and c not in events}
+    denominator = report.proposals - sum(duplicates.values())
+    assert run["vorschlaege"] == report.proposals and run["nenner"] == denominator
+    assert run["dubletten"] == duplicates and run["laufereignisse"] == events
+    assert {r: v["anzahl"] for r, v in run["verworfen"].items()} == rejected
+    assert run["verworfen_gesamt"] == sum(rejected.values())
     for reason, v in run["verworfen"].items():
-        assert v["quote"] == round(expected[reason] / report.proposals, 4)
+        assert v["quote"] == round(rejected[reason] / denominator, 4)
+    assert "unbekannt" not in json.dumps(run["verworfen"])
     spans = {(c["first_sent"], c["last_sent"]) for c in run["angeboten"]}
     assert spans == {(c.first_sent, c.last_sent) for c in report.candidates}
 
@@ -393,8 +417,12 @@ def test_evaluation_of_a_filled_rating(tmp_path):
     assert res["urteil"]["urteil"] == "Erfüllt"
     assert [(i["quelle"], i["version"], i["rang"]) for i in res["nicht_gepaart"]] == [("fall_a", "v1", 3)]
     v1, v2 = res["varianten"]["v1"], res["varianten"]["v2"]
-    assert v1["verworfen"] == {"gate": {"anzahl": 1, "quote": 0.1429}, "too_long": {"anzahl": 1, "quote": 0.1429}}
+    assert v1["verworfen"] == {"gate": {"anzahl": 1, "quote": 0.125}, "ohne_grund/search": {"anzahl": 1, "quote": 0.125},
+                               "too_long": {"anzahl": 1, "quote": 0.125}}  # fmt: skip
+    assert v1["nenner"] == 8 and v2["nenner"] == 6 and v2["vorschlaege"] == 8
     assert v2["verwerfungsquote"] == 0.3333
+    assert v2["dubletten"] == {"duplicate_payoff/same_opening": 1, "duplicate_payoff/same_span": 1}
+    assert v2["laufereignisse"] == {"budget_exhausted": 1}
     assert v1["ohne_vorschlag"] == ["quelle_leer"] and v2["ohne_kandidat"] == ["quelle_leer"]
     assert v1["bestehensquote"] == 0.5 and v2["bestehensquote"] == 1.0
 
@@ -408,10 +436,15 @@ def test_evaluation_of_a_filled_rating(tmp_path):
         "| Quellentreue | 2,00 (0,00, n = 4) | 3,00 (0,00, n = 4) |",
         "| Natürlichkeit | nicht bewertet (keine, n = 0) | nicht bewertet (keine, n = 0) |",
         "Präferenz: v1 0, v2 3, gleich 1, offen 0. Vorzeichentest (zweiseitig, ohne Gleichstände): p = 0,250.",
-        "| Tor (gate) | 1 (14,3 %) | 1 (16,7 %) |",
-        "| zu lang (too_long) | 1 (14,3 %) | 0 |",
+        "| Tor (gate) | 1 (12,5 %) | 1 (16,7 %) |",
+        "| zu lang (too_long) | 1 (12,5 %) | 0 |",
+        "| ohne Grundangabe, Stufe Suche (ohne_grund/search) | 1 (12,5 %) | 0 |",
         "| Überdeckung (overlap) | 0 | 1 (16,7 %) |",
-        "| gesamt | 2 von 7 (28,6 %) | 2 von 6 (33,3 %) |",
+        "| gesamt | 3 von 8 (37,5 %) | 2 von 6 (33,3 %) |",
+        "Vorschläge vor dem Abzug der Dubletten: v1 8, v2 8.",
+        "| Dublette, gleicher Payoff, gleiche Spanne (duplicate_payoff/same_span) | 0 | 1 |",
+        "| gesamt | 0 | 2 |",
+        "| Modellbudget erschöpft (budget_exhausted) | 0 | 1 |",
         "**Warnung: Die Verblindung ist gefährdet.**",
         "| Hooks | hook.native_spoken (ja) | 2 | 0,0 % | 17,3 | 2 von 2 (100,0 %) | 1 von 2 (50,0 %) | 2 von 2 (100,0 %) | 0 von 2 (0,0 %) | 2 von 2 |",
         "| Basis | keiner | 2 | 33,3 % | 17,3 | 0 von 2 (0,0 %) | 0 von 2 (0,0 %) | 2 von 2 (100,0 %) | 0 von 2 (0,0 %) | 2 von 2 |",
@@ -479,7 +512,11 @@ def test_rubric_template_has_anchors_0_to_4(generated):
 
 
 def test_switch_variants_are_built_from_policy_overrides():
-    variants = {v.name: v for v in bc.switch_variants({"cut.padding": True})}
+    variants = {v.name: v for v in bc.switch_variants({"cut.padding": True}, {"bewertung.modus_v2": "sortieren"})}
+    assert variants["v2_kuerzung"].rules == (("trim.enabled", True),)
+    assert variants["v2_kombination"].rules == (("trim.enabled", True),)
+    assert variants["v2_basis"].rules == () and variants["v2_hooks"].rules == ()
+    assert variants["v2_override"].rules == (("bewertung.modus_v2", "sortieren"),)
     assert dict(variants["v2_basis"].overrides) == dict.fromkeys(["gates.discard_hard", "hook.native_spoken", "search.payoff_first", "trim.enabled"], False)
     assert dict(variants["v2_hooks"].overrides)["hook.native_spoken"] is True
     assert dict(variants["v2_hooks"].overrides)["trim.enabled"] is False
@@ -490,11 +527,12 @@ def test_switch_variants_are_built_from_policy_overrides():
 def test_policy_variant_applies_and_restores(monkeypatch):
     monkeypatch.setenv(editorial.POLICY_VERSION_ENV, "1")
     monkeypatch.delenv("EDITORIAL_DIR", raising=False)
-    variant = bc.Variant("x", 2, (("hook.native_spoken", False), ("trim.enabled", True)))
+    variant = bc.Variant("x", 2, (("hook.native_spoken", False), ("trim.enabled", True)), rules=(("trim.enabled", True), ("bewertung.modus_v2", "sortieren")))
     with bc.policy_variant(variant) as pol:
         assert pol.version == 2 and editorial.load().version == 2
         assert pol.roh["implementation"]["hook"]["native_spoken"] is False
         assert pol.roh["implementation"]["trim"]["enabled"] is True
+        assert pol.roh["trim"]["enabled"] is True and pol.roh["bewertung"]["modus_v2"] == "sortieren"
         assert pol.hook_native_spoken is False
     assert os.environ[editorial.POLICY_VERSION_ENV] == "1"
     assert "EDITORIAL_DIR" not in os.environ
@@ -502,11 +540,24 @@ def test_policy_variant_applies_and_restores(monkeypatch):
 
 
 def test_parse_overrides():
-    assert bc.parse_overrides(["trim.enabled=true"], "hook.native_spoken=false, ") == {"hook.native_spoken": False, "trim.enabled": True}
-    with pytest.raises(SystemExit, match="ungültig"):
-        bc.parse_overrides(["trim.enabled=ja"])
-    with pytest.raises(SystemExit, match="ungültig"):
-        bc.parse_overrides(["laenge.ziel_s=true"])
+    assert bc.parse_overrides(["trim.enabled=true"], "hook.native_spoken=false, ") == ({"hook.native_spoken": False, "trim.enabled": True}, {})
+    switches, rules = bc.parse_overrides(["regel:trim.enabled=true", "regel:bewertung.modus_v2=sortieren"], "regel:hook.allow_partial_opening=true")
+    assert switches == {} and rules == {"trim.enabled": True, "bewertung.modus_v2": "sortieren", "hook.allow_partial_opening": True}
+    assert bc.parse_overrides(["regel:gates.discard_hard=false"]) == ({}, {"gates.discard_hard": False})
+    for bad in ("trim.enabled=ja", "laenge.ziel_s=true", "regel:laenge.ziel_s=30", "regel:bewertung.modus_v2=raten", "regel:trim.enabled=ja"):
+        with pytest.raises(SystemExit, match="ungültig"):
+            bc.parse_overrides([bad])
+
+
+def test_kuerzung_variant_removes_what_the_basis_keeps():
+    """Ohne die Regel trim.enabled wäre die Variante Kürzung gleich der Basis (nur der Schalter stand an)."""
+    variants = {v.name: v for v in bc.switch_variants()}
+    source = _sources(("demo_script",))[0]
+    runs = {n: bc.run_variant(variants[n], source, dict(bc.DEFAULT_BRIEF), providers_llm.HEURISTIC_PROVIDER, 5) for n in ("v2_basis", "v2_kuerzung")}
+    removed = {n: [r for c in run["clip_candidates"] for r in c["removed_spans"]] for n, run in runs.items()}
+    assert removed["v2_basis"] == []
+    assert removed["v2_kuerzung"]
+    assert runs["v2_kuerzung"]["regeln"] == {"trim.enabled": True}
 
 
 def test_case_result_for_weak_material():

@@ -654,3 +654,87 @@ def test_v2_origins_name_matching_sources_for_scale_and_standalone():
         if "weight_origin" in entry:
             assert entry["weight_origin"] in editorial.ORIGIN_VALUES, path
             assert str(entry.get("weight_source") or "").strip(), path
+
+
+# -- AP9: Register der Schlüssel, Ausgabeumfang, Pin score_clip_v3 ----------------------------------------------
+def _reader(ref: str):
+    import importlib
+
+    module, qualname = ref.split(":")
+    obj = importlib.import_module(module)
+    for part in qualname.split("."):
+        obj = getattr(obj, part)
+    return obj
+
+
+def test_ap9_every_v2_rule_leaf_is_registered(v2_raw):
+    """Jeder Blattschlüssel der Fassung 2 steht in implementation.keys mit Status; implemented und partial nennen
+    eine lesende Funktion in IMPLEMENTED_KEYS, partial und not_implemented einen Grund."""
+    register = editorial.key_register(editorial.load(2))
+    paths = editorial.rule_paths(v2_raw)
+    assert set(register) == set(paths)
+    for path in paths:
+        entry = register[path]
+        assert entry["status"] in editorial.KEY_STATUSES, path
+        if entry["status"] == "not_implemented":
+            assert path not in editorial.IMPLEMENTED_KEYS, path
+        else:
+            assert path in editorial.IMPLEMENTED_KEYS, path
+        if entry["status"] != "implemented":
+            reason = str(entry.get("reason") or "")
+            assert reason.strip(), path
+            assert "–" not in reason and "—" not in reason and " - " not in reason, path
+    assert set(editorial.IMPLEMENTED_KEYS) <= set(paths), "keine Funktion für einen Schlüssel, den es nicht gibt"
+
+
+def test_ap9_every_registered_reader_exists_and_names_its_key():
+    """Die Funktion existiert und nennt den Schlüssel (letzter oder vorletzter Pfadteil) im Quelltext."""
+    import inspect
+
+    for path, ref in {**editorial.IMPLEMENTED_KEYS, **editorial.IMPLEMENTED_BEHAVIOURS}.items():
+        obj = _reader(ref)
+        func = obj.fget if isinstance(obj, property) else obj
+        assert callable(func), (path, ref)
+        if path in editorial.IMPLEMENTED_KEYS:
+            source = inspect.getsource(func)
+            assert any(part in source for part in path.split(".")[-2:]), (path, ref)
+    rescore = inspect.getsource(_reader(editorial.IMPLEMENTED_BEHAVIOURS["rescore_after_extension"]))
+    assert "story_score.score(" in rescore and "heal_rounds" in rescore
+
+
+def test_ap9_register_names_the_dead_keys_from_the_plan():
+    register = editorial.key_register(editorial.load(2))
+    for path in (
+        "zusammenhang.max_gedanken", "ausschluss.insiderwitz_ohne_kontext", "audio.merkmale.lachen",
+        "audio.merkmale.applaus", "audio.merkmale.pause_vor_aussage",
+    ):  # fmt: skip
+        assert register[path]["status"] == "not_implemented", path
+    for path in ("einstieg.nie_mitten_im_satz", "ausstieg.verbklammer_nicht_trennen", "zusammenhang.mindest_dichte"):
+        assert register[path]["status"] == "implemented", path
+    assert editorial.key_register(editorial.load(1)) == {}
+
+
+def test_ap9_output_settings_and_rollback(v2_raw, tmp_path, monkeypatch):
+    assert editorial.output_settings(editorial.load(2)) == {"max_candidates": 10, "redundancy_jaccard": 0.6}
+    assert editorial.output_settings(editorial.load(1)) is None
+    assert "output.max_candidates" in editorial.V2_IMPLEMENTED_SWITCHES
+    v2_raw["output"]["max_candidates"] = 20
+    _write_v2(tmp_path, monkeypatch, v2_raw)
+    assert editorial.output_settings(editorial.load(2))["max_candidates"] == 20
+    v2_raw["implementation"]["output"]["max_candidates"] = False
+    _write_v2(tmp_path, monkeypatch, v2_raw)
+    assert editorial.output_settings(editorial.load(2)) is None
+    v2_raw["implementation"]["output"]["max_candidates"] = True
+    v2_raw["output"]["redundancy_jaccard"] = 0
+    _write_v2(tmp_path, monkeypatch, v2_raw)
+    with pytest.raises(editorial.PolicyError, match="redundancy_jaccard"):
+        editorial.output_settings(editorial.load(2))
+    editorial.clear_cache()
+
+
+def test_ap9_v2_pins_score_clip_v3_and_v1_keeps_v2():
+    from chopstr_worker import prompts
+
+    assert editorial.V2_PIN_CHANGES["score_clip"] == 3
+    assert prompts.load_pinned("score_clip", editorial.load(2)).prompt_version == "score_clip_v3"
+    assert prompts.load_pinned("score_clip", editorial.load(1)).prompt_version == "score_clip_v2"

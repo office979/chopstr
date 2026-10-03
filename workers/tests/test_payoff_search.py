@@ -81,7 +81,7 @@ def test_resolution_and_punchline_from_fixtures(pol):
 def test_laughter_counts_only_when_the_heatmap_has_it(pol):
     rows = sents_of([("A", "Wir standen also mit drei Leuten vor einer leeren Halle.", 4.0)])
     assert payoff_search.find_payoffs(rows, pol) == []
-    hit = payoff_search.find_payoffs(rows, pol, heat={"bin_s": 1.0, "laughter": [0, 0, 0, 0, 1]})
+    hit = payoff_search.find_payoffs(rows, pol, heat={"bin_s": 1.0, "laughter_values": [0, 0, 0, 0, 1]})
     assert hit[0]["payoff_type"] == "laughter"
 
 

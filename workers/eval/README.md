@@ -202,7 +202,7 @@ Die Anker je Kriterium stehen in `raster.json`.
 Urteil zum vorab festgelegten Erfolgskriterium (Erfüllt, Nicht erfüllt oder Nicht bewertet). Danach:
 Material und Ausgabemenge, Stil-Leck-Prüfung, Clip- und Hook-Bewertung (Mittel, Streuung und Anzahl je
 Kriterium, Präferenz mit zweiseitigem Vorzeichentest), Verwerfungsquote je Grund und Fassung (deutsche
-Bezeichnung mit Code, Anteil an allen Vorschlägen der Stufe 2), Modellaufrufe und Laufzeit je
+Bezeichnung mit Code in Klammern), Dubletten und Laufereignisse getrennt, Modellaufrufe und Laufzeit je
 Quellstunde (jeder strukturierte Aufruf am Provider gezählt, auch Hooks), editorial_v1-Bestehensquote
 je Fassung und Fall (geprüft mit `tests/editorial_v1/harness.py`) und getrennt die einzelnen Schalter.
 
@@ -211,15 +211,29 @@ die häufigsten Hook-Anfänge je Fassung. Weicht ein Merkmal deutlich ab (Anteil
 Prozentpunkte, Dauer um mehr als 25 Prozent, ein Hook-Anfang bei mindestens der Hälfte einer Fassung
 und unter 20 Prozent der anderen), warnt der Bericht: Bewertende könnten die Fassung erkennen.
 
+Verwerfungsquote: Zähler sind die Verwerfungen aus `DetectReport.discarded`, Nenner die Vorschläge der
+Stufe 2 (`DetectReport.proposals`, bei Fassung 1 vom Modell, bei Fassung 2 von der Suche) ohne Dubletten.
+Dubletten (`duplicate`, `duplicate_payoff` mit `same_span`, `same_opening`, `same_statement`,
+`same_payoff`) sind derselbe Moment, mehrfach gefunden; die Suche der Fassung 2 findet einen Payoff oft
+mehrfach, deshalb stehen Dubletten in einer eigenen Tabelle und zählen weder im Zähler noch im Nenner.
+Laufereignisse (`budget_exhausted`, `clip_candidate_error`, `llm_budget` beim Vorschlag) betreffen keinen
+einzelnen Vorschlag und stehen ebenfalls getrennt. Ein Eintrag ohne Grund heißt nach seiner Stufe
+(`ohne_grund/search`).
+
 Schalter: Fassung 2 mit allen Gruppenschaltern aus (Basis), je eine Gruppe an (Auswahl:
 `gates.discard_hard`, `search.payoff_first`; Hooks: `hook.native_spoken`; Kürzung: `trim.enabled`)
 und alle zusammen (Kombination), je mit Kandidaten, Verwerfungsquote, Modellaufrufen und den
-Hook-Kennzahlen (Anteil native, ohne Overlay, gesprochener Hook als ganzer Satz, mit Claim-Befund). Die
-Varianten entstehen über eine Kopie der Richtlinie mit geänderten Schaltern, auf die `EDITORIAL_DIR`
-für die Dauer des Laufs zeigt. Eigene Overrides: `--override trim.enabled=true` (mehrfach) oder
-`CHOPSTR_BLIND_OVERRIDES="trim.enabled=true,cut.padding=false"`. Ob ein Schalter laut
-`editorial.V2_IMPLEMENTED_SWITCHES` gebaut ist, steht in Klammern. `--ohne-schalter` rechnet nur
-Fassung 1 und 2.
+Hook-Kennzahlen (Anteil native, ohne Overlay, gesprochener Hook als ganzer Satz, mit Claim-Befund).
+Kürzung und Kombination setzen zusätzlich die Regel `trim.enabled: true`, weil sie in der Richtlinie bis
+zur Abnahme aus steht; nur der Schalter allein ergäbe die Basis. Die Varianten entstehen über eine Kopie
+der Richtlinie, auf die `EDITORIAL_DIR` für die Dauer des Laufs zeigt. Eigene Overrides mit `--override`
+(mehrfach) oder `CHOPSTR_BLIND_OVERRIDES` (durch Komma getrennt): Schalter als `pfad=true|false` (Pfade
+aus `editorial.V2_SWITCHES`), Regeln als `regel:pfad=wert`, erlaubt nur `regel:trim.enabled`,
+`regel:gates.discard_hard`, `regel:hook.allow_partial_opening` (je `true` oder `false`) und
+`regel:bewertung.modus_v2` (`sortieren` oder `sperren`). Beispiel:
+`CHOPSTR_BLIND_OVERRIDES="cut.padding=true,regel:trim.enabled=true"`. Ob ein Schalter laut
+`editorial.V2_IMPLEMENTED_SWITCHES` gebaut ist, steht in Klammern, gesetzte Regeln stehen dahinter.
+`--ohne-schalter` rechnet nur Fassung 1 und 2.
 
 ### Was der Vergleich nicht leistet
 

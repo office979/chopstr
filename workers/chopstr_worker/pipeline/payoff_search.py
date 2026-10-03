@@ -438,12 +438,13 @@ def _context_needs(ctx: _Ctx, a: int, b: int) -> set[int]:
 
 
 def _laughter_after(heat: Mapping[str, Any] | None, s: _S) -> bool:
-    """Lachen in der Heatmap (``heat["laughter"]`` je Bin) im Bin des Satzendes oder im nächsten."""
-    if not heat or not heat.get("laughter"):
+    """Lachen in der Heatmap (``heat["laughter_values"]`` je Bin, derselbe Schlüssel wie in ``trim_plan`` und
+    ``signals.to_payload``) im Bin des Satzendes oder im nächsten."""
+    if not heat or not heat.get("laughter_values"):
         return False
     bin_s = float(heat.get("bin_s") or 1.0) or 1.0
     b = int(s.end / bin_s)
-    return any(float(x) > 0 for x in heat["laughter"][max(0, b) : b + 2])
+    return any(float(x) > 0 for x in heat["laughter_values"][max(0, b) : b + 2])
 
 
 def _number_token(tok: str, core: str) -> bool:
@@ -567,7 +568,7 @@ def find_payoffs(sents: Sequence[Any], policy: editorial.Policy, heat: Mapping[s
     (Zahl aus ``moment_typen.zahl`` oder Zahlwort mit Ergebnisverb, mit Nomen im Satz); ``resolution`` (Antwort auf eine
     W-Frage oder begründete Ja-Nein-Antwort auf die Frage eines anderen Sprechers; Beleg ist die Frage);
     ``punchline`` (Nomen mit bestimmtem Artikel greift ein Setup in einer erzählten Szene auf, plus Lachen,
-    Kontrast oder Erzählende danach; Beleg ist das Setup); ``laughter`` (nur mit ``heat["laughter"]``).
+    Kontrast oder Erzählende danach; Beleg ist das Setup); ``laughter`` (nur mit ``heat["laughter_values"]``).
     Nie Payoff: Fragen, Sätze mit Heckenwörtern (``search.hedge_markers``), Aufzählungsanfang, Moderation
     („Darum geht es heute“), Stoppsätze, vorgelesene oder an ein Modell gerichtete Sätze.
     ``needs_sents`` nennt die Sätze, ohne die der Payoff nicht verständlich ist."""

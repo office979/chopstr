@@ -1,0 +1,543 @@
+{
+  "id": "later_self_correction",
+  "version": "editorial_v1",
+  "title": "Spätere Selbstkorrektur",
+  "description": "Der Sprecher behauptet zuerst, Werbung brauche man nicht, und korrigiert sich zwei Sätze später selbst. Die frühere Aussage darf nicht isoliert werden. Die Pause in der Verbklammer „haben dann stattdessen … gemacht“ ist kein Satzende.",
+  "source": "fiktiv, für den Testsatz geschrieben; keine realen Personen oder Firmen",
+  "language": "de",
+  "words": [
+    {
+      "text": "Wir",
+      "start": 0.4,
+      "end": 0.62,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "haben",
+      "start": 0.67,
+      "end": 0.95,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "im",
+      "start": 1.0,
+      "end": 1.18,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Frühjahr",
+      "start": 1.23,
+      "end": 1.61,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "komplett",
+      "start": 1.66,
+      "end": 2.03,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "auf",
+      "start": 2.08,
+      "end": 2.3,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "bezahlte",
+      "start": 2.35,
+      "end": 2.72,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Werbung",
+      "start": 2.77,
+      "end": 3.12,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "verzichtet,",
+      "start": 3.17,
+      "end": 3.61,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "und",
+      "start": 3.75,
+      "end": 3.96,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "der",
+      "start": 4.01,
+      "end": 4.23,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Umsatz",
+      "start": 4.28,
+      "end": 4.59,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ist",
+      "start": 4.64,
+      "end": 4.86,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "trotzdem",
+      "start": 4.91,
+      "end": 5.28,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "gestiegen.",
+      "start": 5.33,
+      "end": 5.74,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Werbung",
+      "start": 6.06,
+      "end": 6.41,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "braucht",
+      "start": 6.46,
+      "end": 6.8,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "man",
+      "start": 6.85,
+      "end": 7.07,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "also",
+      "start": 7.12,
+      "end": 7.36,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "eigentlich",
+      "start": 7.41,
+      "end": 7.85,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "gar",
+      "start": 7.9,
+      "end": 8.12,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "nicht.",
+      "start": 8.17,
+      "end": 8.45,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Wir",
+      "start": 8.77,
+      "end": 8.99,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "haben",
+      "start": 9.04,
+      "end": 9.32,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "dann",
+      "start": 9.37,
+      "end": 9.61,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "stattdessen",
+      "start": 9.66,
+      "end": 10.14,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Newsletter",
+      "start": 11.04,
+      "end": 11.48,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "gemacht",
+      "start": 11.53,
+      "end": 11.87,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "und",
+      "start": 11.92,
+      "end": 12.14,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "mehr",
+      "start": 12.19,
+      "end": 12.43,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Zeit",
+      "start": 12.48,
+      "end": 12.73,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "in",
+      "start": 12.78,
+      "end": 12.97,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "den",
+      "start": 13.02,
+      "end": 13.23,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Kundenservice",
+      "start": 13.28,
+      "end": 13.82,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "gesteckt.",
+      "start": 13.87,
+      "end": 14.24,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Moment,",
+      "start": 14.56,
+      "end": 14.88,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "das",
+      "start": 15.02,
+      "end": 15.23,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "muss",
+      "start": 15.28,
+      "end": 15.53,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ich",
+      "start": 15.58,
+      "end": 15.8,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "korrigieren.",
+      "start": 15.85,
+      "end": 16.32,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Das",
+      "start": 16.64,
+      "end": 16.85,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "heißt",
+      "start": 16.9,
+      "end": 17.18,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "aber",
+      "start": 17.23,
+      "end": 17.48,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "nicht,",
+      "start": 17.53,
+      "end": 17.81,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "dass",
+      "start": 17.95,
+      "end": 18.2,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Werbung",
+      "start": 18.25,
+      "end": 18.59,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "überflüssig",
+      "start": 18.64,
+      "end": 19.12,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "ist.",
+      "start": 19.17,
+      "end": 19.38,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Im",
+      "start": 19.7,
+      "end": 19.89,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Frühjahr",
+      "start": 19.94,
+      "end": 20.31,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "hatten",
+      "start": 20.36,
+      "end": 20.67,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wir",
+      "start": 20.72,
+      "end": 20.94,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "noch",
+      "start": 20.99,
+      "end": 21.24,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "die",
+      "start": 21.29,
+      "end": 21.5,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Aufträge",
+      "start": 21.55,
+      "end": 21.93,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "von",
+      "start": 21.98,
+      "end": 22.2,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "der",
+      "start": 22.25,
+      "end": 22.46,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Messe",
+      "start": 22.51,
+      "end": 22.79,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "im",
+      "start": 22.84,
+      "end": 23.03,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Winter,",
+      "start": 23.08,
+      "end": 23.39,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "die",
+      "start": 23.53,
+      "end": 23.74,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "haben",
+      "start": 23.79,
+      "end": 24.07,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "den",
+      "start": 24.12,
+      "end": 24.34,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Umsatz",
+      "start": 24.39,
+      "end": 24.7,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "getragen.",
+      "start": 24.75,
+      "end": 25.13,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Ohne",
+      "start": 25.45,
+      "end": 25.7,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "diese",
+      "start": 25.75,
+      "end": 26.03,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Aufträge",
+      "start": 26.08,
+      "end": 26.45,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "wäre",
+      "start": 26.5,
+      "end": 26.75,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "der",
+      "start": 26.8,
+      "end": 27.02,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "Umsatz",
+      "start": 27.07,
+      "end": 27.38,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "bei",
+      "start": 27.43,
+      "end": 27.64,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "uns",
+      "start": 27.69,
+      "end": 27.91,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "deutlich",
+      "start": 27.96,
+      "end": 28.34,
+      "speaker": "SPEAKER_00"
+    },
+    {
+      "text": "eingebrochen.",
+      "start": 28.39,
+      "end": 28.89,
+      "speaker": "SPEAKER_00"
+    }
+  ],
+  "expected": {
+    "must_include_word_ranges": [
+      [
+        40,
+        47
+      ]
+    ],
+    "forbidden_out_points": [
+      21,
+      25,
+      34,
+      39
+    ],
+    "forbidden_in_points": [
+      26,
+      35,
+      40
+    ],
+    "expect_reject": {
+      "value": false,
+      "reason": "Clipfähig, wenn Behauptung und Korrektur zusammen bleiben."
+    },
+    "protected_spans": [
+      {
+        "type": "correction",
+        "word_range": [
+          35,
+          47
+        ],
+        "note": "Der Sprecher nimmt seine eigene Zuspitzung zurück."
+      },
+      {
+        "type": "condition",
+        "word_range": [
+          65,
+          74
+        ],
+        "note": "Gegenprobe: ohne die Messeaufträge wäre der Umsatz eingebrochen."
+      }
+    ],
+    "pronouns_to_resolve": [
+      {
+        "word": 60,
+        "text": "die",
+        "antecedent_word_range": [
+          53,
+          59
+        ]
+      }
+    ],
+    "instruction_must_be_ignored": null,
+    "boundary_confidence": null,
+    "near_duplicate_candidates": null,
+    "later_qualification": {
+      "claim_word_range": [
+        15,
+        21
+      ],
+      "qualification_word_range": [
+        40,
+        47
+      ],
+      "marker": "das heißt aber nicht"
+    },
+    "verb_brackets": [
+      {
+        "finite": 23,
+        "nonfinite": 27
+      }
+    ],
+    "sentence_end_after": [
+      14,
+      21,
+      34,
+      39,
+      47,
+      64,
+      74
+    ],
+    "no_sentence_end_after": [
+      25
+    ]
+  }
+}

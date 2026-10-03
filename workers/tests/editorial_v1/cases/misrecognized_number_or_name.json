@@ -1,0 +1,516 @@
+{
+  "id": "misrecognized_number_or_name",
+  "version": "editorial_v1",
+  "title": "Zahl oder Name falsch transkribiert",
+  "description": "Die Spracherkennung schreibt „Meier“, die Sprecherin buchstabiert aber „mit a i“. Die Zahl 40.000 hat eine niedrige Erkennungssicherheit. Unsicherheit markieren, am Audio prüfen, keine Hook mit einer Zahl, die so nicht im Clip steht.",
+  "source": "fiktiv, für den Testsatz geschrieben; keine realen Personen oder Firmen",
+  "language": "de",
+  "words": [
+    {
+      "text": "Wer",
+      "start": 0.4,
+      "end": 0.62,
+      "speaker": "SPEAKER_01",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "hat",
+      "start": 0.67,
+      "end": 0.88,
+      "speaker": "SPEAKER_01",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "bei",
+      "start": 0.93,
+      "end": 1.15,
+      "speaker": "SPEAKER_01",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "euch",
+      "start": 1.2,
+      "end": 1.45,
+      "speaker": "SPEAKER_01",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "den",
+      "start": 1.5,
+      "end": 1.71,
+      "speaker": "SPEAKER_01",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "Einkauf",
+      "start": 1.76,
+      "end": 2.11,
+      "speaker": "SPEAKER_01",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "neu",
+      "start": 2.16,
+      "end": 2.37,
+      "speaker": "SPEAKER_01",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "aufgestellt?",
+      "start": 2.42,
+      "end": 2.89,
+      "speaker": "SPEAKER_01",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "Das",
+      "start": 3.29,
+      "end": 3.51,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "war",
+      "start": 3.56,
+      "end": 3.78,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "Frau",
+      "start": 3.83,
+      "end": 4.07,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "Meier,",
+      "start": 4.12,
+      "end": 4.4,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.38
+    },
+    {
+      "text": "das",
+      "start": 4.54,
+      "end": 4.76,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "schreibt",
+      "start": 4.81,
+      "end": 5.19,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "man",
+      "start": 5.24,
+      "end": 5.45,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "mit",
+      "start": 5.5,
+      "end": 5.72,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "a",
+      "start": 5.77,
+      "end": 5.92,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "i.",
+      "start": 5.97,
+      "end": 6.12,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "Sie",
+      "start": 6.44,
+      "end": 6.66,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "hat",
+      "start": 6.71,
+      "end": 6.92,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "die",
+      "start": 6.97,
+      "end": 7.19,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "Zahl",
+      "start": 7.24,
+      "end": 7.49,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "der",
+      "start": 7.54,
+      "end": 7.75,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "Lieferanten",
+      "start": 7.8,
+      "end": 8.28,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "von",
+      "start": 8.33,
+      "end": 8.54,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "zwölf",
+      "start": 8.59,
+      "end": 8.87,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "auf",
+      "start": 8.92,
+      "end": 9.14,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "vier",
+      "start": 9.19,
+      "end": 9.44,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "reduziert.",
+      "start": 9.49,
+      "end": 9.89,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "Bei",
+      "start": 10.21,
+      "end": 10.43,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "uns",
+      "start": 10.48,
+      "end": 10.7,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "hat",
+      "start": 10.75,
+      "end": 10.96,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "das",
+      "start": 11.01,
+      "end": 11.23,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "im",
+      "start": 11.28,
+      "end": 11.46,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "ersten",
+      "start": 11.51,
+      "end": 11.82,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "Jahr",
+      "start": 11.87,
+      "end": 12.12,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "rund",
+      "start": 12.17,
+      "end": 12.42,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "40.000",
+      "start": 12.47,
+      "end": 12.75,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.46
+    },
+    {
+      "text": "Euro",
+      "start": 12.8,
+      "end": 13.05,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "gespart.",
+      "start": 13.1,
+      "end": 13.44,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "Das",
+      "start": 13.76,
+      "end": 13.98,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "war",
+      "start": 14.03,
+      "end": 14.24,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "2024,",
+      "start": 14.29,
+      "end": 14.54,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "also",
+      "start": 14.68,
+      "end": 14.93,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "bevor",
+      "start": 14.98,
+      "end": 15.26,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "die",
+      "start": 15.31,
+      "end": 15.53,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "Preise",
+      "start": 15.58,
+      "end": 15.89,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "nochmal",
+      "start": 15.94,
+      "end": 16.28,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "angezogen",
+      "start": 16.33,
+      "end": 16.74,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "haben.",
+      "start": 16.79,
+      "end": 17.07,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "Für",
+      "start": 17.39,
+      "end": 17.61,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "einen",
+      "start": 17.66,
+      "end": 17.94,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "Betrieb",
+      "start": 17.99,
+      "end": 18.33,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "mit",
+      "start": 18.38,
+      "end": 18.6,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "vierzig",
+      "start": 18.65,
+      "end": 18.99,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "Leuten",
+      "start": 19.04,
+      "end": 19.35,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "ist",
+      "start": 19.4,
+      "end": 19.62,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "das",
+      "start": 19.67,
+      "end": 19.88,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.96
+    },
+    {
+      "text": "viel",
+      "start": 19.93,
+      "end": 20.18,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    },
+    {
+      "text": "Geld.",
+      "start": 20.23,
+      "end": 20.48,
+      "speaker": "SPEAKER_00",
+      "asr_confidence": 0.93
+    }
+  ],
+  "expected": {
+    "must_include_word_ranges": [
+      [
+        29,
+        39
+      ]
+    ],
+    "forbidden_out_points": [
+      36,
+      42
+    ],
+    "forbidden_in_points": [
+      18,
+      29
+    ],
+    "expect_reject": {
+      "value": false,
+      "reason": "Clipfähig, aber Name und Zahl müssen am Audio geprüft werden."
+    },
+    "protected_spans": [
+      {
+        "type": "condition",
+        "word_range": [
+          29,
+          30
+        ],
+        "note": "Ersparnis nur bei uns, keine allgemeine Zusage."
+      }
+    ],
+    "pronouns_to_resolve": [
+      {
+        "word": 18,
+        "text": "Sie",
+        "antecedent_word_range": [
+          10,
+          11
+        ]
+      }
+    ],
+    "instruction_must_be_ignored": null,
+    "boundary_confidence": null,
+    "near_duplicate_candidates": null,
+    "uncertain_words": [
+      {
+        "word": 11,
+        "text": "Meier,",
+        "reason": "Die buchstabierte Form „mit a i“ widerspricht der Transkription mit e i; am Audio prüfen."
+      },
+      {
+        "word": 37,
+        "text": "40.000",
+        "reason": "Niedrige Erkennungssicherheit; vierzigtausend oder vierzehntausend am Audio prüfen."
+      }
+    ],
+    "hook_claims": {
+      "must_flag": [
+        {
+          "hook": "Bei uns 40 Euro gespart",
+          "unsupported_numbers": [
+            "40"
+          ],
+          "note": "„40“ ist nicht „40.000“."
+        },
+        {
+          "hook": "In 4 Wochen den Einkauf umgebaut",
+          "unsupported_numbers": [
+            "4"
+          ],
+          "note": "„4“ steckt nur in „2024“."
+        }
+      ],
+      "must_pass": [
+        {
+          "hook": "Seit 2024 weniger Lieferanten",
+          "note": "Die Jahreszahl steht wörtlich im Clip."
+        }
+      ]
+    },
+    "sentence_end_after": [
+      17,
+      28,
+      39,
+      49,
+      59
+    ]
+  }
+}

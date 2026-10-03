@@ -1,0 +1,62 @@
+{
+  "quelle": "schnitte/tipp1.mp4",
+  "originalaufnahme": "aufnahmen/beispielaufnahme-9-16.mp4",
+  "quelleOffsetZumOriginal": 0,
+  "transkript": "schnitte/tipp1.transcript.json",
+  "schnittgefuehl": "kompakt",
+  "erstelltAm": "2026-09-26",
+  "hinweis": "Alle Grenzen wurden am Ton nachgemessen (volumedetect, 120-ms-Fenster) und liegen beidseitig unter -45 dB. Die Entwurfsgrenzen aus silencedetect lagen teils im Wortanlauf bzw. am Wortende und wurden verschoben.",
+
+  "behalten": [
+    { "start": 2.50,  "ende": 6.58,  "grund": "Kernaussage: die Ankündigung der drei Schritte", "unsicherheit": "keine" },
+    { "start": 8.36,  "ende": 11.04, "grund": "Schritt eins", "unsicherheit": "keine" },
+    { "start": 11.58, "ende": 14.41, "grund": "Schritt zwei", "unsicherheit": "keine" },
+    { "start": 14.80, "ende": 17.22, "grund": "Schritt drei, Abschluss", "unsicherheit": "keine" }
+  ],
+
+  "entfernt": [
+    {
+      "start": 0.0, "ende": 2.50,
+      "grund": "Fehlstart — der Satz wird nach einer Pause von 1,09 s neu begonnen",
+      "beleg": "Ton: Sprache 0–1,55 s, dann Stille 1,55–2,63 s, danach derselbe Satzanfang. Im Transkript NICHT sichtbar, weil Whisper beide Anläufe zu einer Äußerung zusammengezogen hat.",
+      "unsicherheit": "gering",
+      "grenzePrueft": "2,50 s: davor -67,4 dB, danach -58,7 dB — beidseitig still. Die Entwurfsgrenze 2,63 s lag im Wortanlauf (-2,7 dB) und hätte das erste Wort angeschnitten."
+    },
+    {
+      "start": 6.58, "ende": 8.36,
+      "grund": "Pause von 2,19 s auf 0,26 s gekürzt",
+      "beleg": "silencedetect 6,43–8,62 s, zwischen \"Video\" und dem ersten Schritt",
+      "unsicherheit": "gering",
+      "grenzePrueft": "6,58 s: davor -65,7 dB, danach -57,8 dB. Entwurfsgrenze 6,49 s lag am Wortende (-22,2 dB davor) und hätte den Ausklang abgeschnitten."
+    },
+    {
+      "start": 11.04, "ende": 11.58,
+      "grund": "Pause von 0,95 s auf 0,26 s gekürzt",
+      "beleg": "silencedetect 10,89–11,84 s, zwischen Schritt eins und zwei",
+      "unsicherheit": "keine",
+      "grenzePrueft": "11,04 s: davor -66,8 dB, danach -60,5 dB"
+    },
+    {
+      "start": 14.41, "ende": 14.80,
+      "grund": "Pause von 0,80 s auf 0,26 s gekürzt",
+      "beleg": "silencedetect 14,26–15,06 s, zwischen Schritt zwei und drei",
+      "unsicherheit": "keine",
+      "grenzePrueft": "14,41 s: davor -68,0 dB, danach -58,3 dB"
+    }
+  ],
+
+  "zurPruefung": [
+    {
+      "zeit": 0.0,
+      "frage": "Der Fehlstart am Anfang (0–2,50 s) wird entfernt. Diese Entscheidung stützt sich auf die Tonmessung, nicht auf das Transkript — Whisper hat den Fehlstart verschluckt. Bitte einmal anhören und bestätigen.",
+      "vorschlag": "entfernt, bitte gegenhören",
+      "status": "angewendet, wartet auf Bestätigung"
+    },
+    {
+      "zeit": 6.58,
+      "frage": "Die 2,19-s-Pause vor der Aufzählung könnte eine bewusste Betonungspause sein. Bei 'kompakt' wurde sie auf 0,26 s gekürzt. Wirkt die Aufzählung dadurch gehetzt?",
+      "vorschlag": "gekürzt — bei 'ruhig' bliebe hier 0,45 s stehen",
+      "status": "angewendet, wartet auf Bestätigung"
+    }
+  ]
+}

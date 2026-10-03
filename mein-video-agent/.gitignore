@@ -1,0 +1,15 @@
+# Medien und Zwischenstände sind reproduzierbar und gehören nicht ins Repository.
+# Die Werkzeuge in werkzeuge/ erzeugen sie aus einer Aufnahme neu.
+aufnahmen/
+schnitte/
+pruefung/
+assets/
+node_modules/
+.thumbnails/
+.hyperframes/
+.waveform-cache/
+transcript.json
+*.mp4
+*.webm
+*.wav
+*.aiff

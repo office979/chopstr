@@ -40,6 +40,7 @@ from ..pipeline import (
     compose,
     copy_de,
     copy_engine,
+    dach_nlp,
     fidelity,
     reframe,
     render,
@@ -501,6 +502,34 @@ def clip_words(words: list[dict], segments: list[dict]) -> list[dict]:
     return out
 
 
+# Kontext nach dem Clip für den Copy-Schritt (Fassung 2): die nächsten Sätze, höchstens so viele Sekunden.
+CONTEXT_AFTER_SENTENCES = 5
+CONTEXT_AFTER_MAX_S = 60.0
+
+
+def context_after_text(
+    words: list[dict], segments: list[dict], sentences: int = CONTEXT_AFTER_SENTENCES, max_s: float = CONTEXT_AFTER_MAX_S
+) -> str:
+    """Transkripttext nach dem letzten Clip-Segment (in Quellzeit): Wörter, deren Mitte hinter dem Ende liegt,
+    bis ``sentences`` Satzenden (``dach_nlp.sentence_end_kinds`` mit Regel v2) oder ``max_s`` Sekunden ab dem
+    Ende erreicht sind. Leer, wenn danach nichts mehr gesagt wird."""
+    if not segments or not words:
+        return ""
+    end = max(float(seg["end"]) for seg in segments)
+    tail = [w for w in words if (float(w["start"]) + float(w["end"])) / 2.0 > end and float(w["start"]) - end <= max_s]
+    if not tail:
+        return ""
+    kinds = dach_nlp.sentence_end_kinds(tail, rule="v2")
+    out, ends = [], 0
+    for w, kind in zip(tail, kinds):
+        out.append(str(w["text"]))
+        if kind != "none":
+            ends += 1
+            if ends >= sentences:
+                break
+    return " ".join(out)
+
+
 def fidelity_warnings(words: list[dict], segments: list[dict], cand_start: float | None, cand_end: float | None) -> list[dict]:
     """``fidelity.check_cut`` über den Kandidatenbereich: was die Komposition weglässt, wird geprüft."""
     body = sorted((s for s in segments if s.get("role", "body") != "teaser"), key=lambda s: float(s["start"]))
@@ -683,9 +712,12 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
                 pattern_order = learning.thompson_order(learning.load_hook_stats(conn, str(src["brand_profile_id"])))
             except Exception as exc:  # Lernstatistik darf den Render nie stoppen
                 log.warning("hook stats unavailable clip=%s error=%s: %s", clip_id, exc.__class__.__name__, str(exc)[:200])
+        # Fassung 2: Transkript nach dem Clip, damit eine spätere Korrektur oder Relativierung die Aussage
+        # nicht zum Text-Hook macht (copy_engine.retracted_statements).
+        after = {"context_after": context_after_text(words, segments)} if policy.version >= 2 else {}
         copy = copy_engine.write_copy(
             llm, text, brand, PLATFORMS, s,
-            pattern_order=pattern_order, words=clip_words(words, segments) if native_hooks else None,
+            pattern_order=pattern_order, words=clip_words(words, segments) if native_hooks else None, **after,
         )  # fmt: skip
         hook = _write_hook_version(ctx, clip_id, copy)
         try:

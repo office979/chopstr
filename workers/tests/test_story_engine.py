@@ -979,7 +979,7 @@ SEARCH_SCRIPT = [
 
 
 def _fixed_search(proposals, rejected=(), duplicates=()):
-    return lambda chapter, pol, heat=None, gate_fn=None: {
+    return lambda chapter, pol, heat=None, gate_fn=None, words=None: {
         "proposals": [dict(p) for p in proposals], "rejected": [dict(r) for r in rejected],
         "duplicates": [dict(d) for d in duplicates], "payoffs": [], "openings": [],
     }  # fmt: skip
@@ -1383,7 +1383,7 @@ def test_opening_rule_of_the_engine_goes_into_the_search(brain, llm, wired, monk
     wired(**{**GATES_ON, **SEARCH_ON})
     seen = []
 
-    def capture(chapter, pol, heat=None, gate_fn=None):
+    def capture(chapter, pol, heat=None, gate_fn=None, words=None):
         seen.append(gate_fn)
         return {"proposals": [], "rejected": [], "duplicates": [], "payoffs": [], "openings": []}
 
@@ -1463,3 +1463,48 @@ def test_versions_name_the_propose_prompt_actually_used(wired):
     assert clip_candidate.versions_for(pol)["prompts"]["propose_moments"] == "propose_moments_v1"
     pol = wired(**SEARCH_ON)
     assert clip_candidate.versions_for(pol)["prompts"]["propose_moments"] == "propose_moments_v2"
+
+
+def test_chapter_without_any_proposal_is_rejected_with_a_reason(brain, llm, wired, monkeypatch):
+    wired(**SEARCH_ON)
+    monkeypatch.setattr(payoff_search, "search_moments", _fixed_search([], [{"opening_sent": 0, "hook_type": "x", "reason": "promise_unfulfilled"}]))
+    w = make_words(SEARCH_SCRIPT)
+    report = story_engine.run(w, BRIEF, {}, None, llm)
+    (entry,) = report.rejected_chapters
+    assert entry == {
+        "reason": "no_viable_moment", "chapter": 0, "first_sent": 0, "last_sent": 3, "start_s": 0.0,
+        "end_s": round(w[-1]["end"], 2), "detail": "keine tragfähige Spanne, Vorschläge der Suche verworfen (promise_unfulfilled)",
+    }  # fmt: skip
+    assert entry in report.discarded
+    assert story_engine.DetectReport.from_json(report.to_json()).rejected_chapters == [entry]
+
+
+def test_no_rejected_chapters_under_v1(brain, llm):
+    report = story_engine.run(demo_words(), BRIEF, {}, None, llm)
+    assert report.rejected_chapters == [] and "rejected_chapters" not in report.to_json()
+
+
+def test_block_mode_only_reports_without_the_gate_rule(brain, llm, wired):
+    """Berichtsmodus (Regel gates.discard_hard false): auch Modus sperren verwirft nichts, rubric.block_mode
+    nennt Modus, Schwelle und ob der Kandidat darunter läge."""
+    pol = wired(**{**GATES_ON, "gates.discard_hard": False})
+    w = make_words(HEALABLE_SCRIPT)
+    sents = segment.sentences_from_words(w, rule="v2")
+    good = story_engine.evaluate_span(w, sents, {"first_sent": 0, "last_sent": 3}, BRIEF, llm, DEFAULT_WEIGHTS)
+    low = dataclasses.replace(good, rubric={**good.rubric, "rubric_points": dict.fromkeys(good.rubric["rubric_points"], 0)})
+    kept, dropped = story_engine.select_best([low], pol=pol, heuristic=False)
+    assert kept == [low] and not [d for d in dropped if d["reason"] == "below_threshold"]
+    bm = low.rubric["block_mode"]
+    assert bm["effective_mode"] == "sperren" and bm["below"] is True and bm["applied"] is False
+    assert bm["discard_below"] == pol.schwelle_verwerfen and bm["points"] == 0.0
+
+
+def test_instruction_followed_still_discards_in_report_mode(brain, llm, wired):
+    """Originaltreue, keine Bewertung: eine Antwort, die der Anweisung im Transkript folgt, fällt auch im
+    Berichtsmodus der Gates."""
+    wired(**{**GATES_ON, "gates.discard_hard": False})
+    w = make_words(INSTRUCTION_SCRIPT)
+    sents = segment.sentences_from_words(w, rule="v2")
+    brain.rubrics[(0, 3)] = {"suggested_title_card": "GRATISGUTSCHEIN"}
+    out = story_engine.evaluate_span(w, sents, {"first_sent": 0, "last_sent": 3, "why": "x"}, BRIEF, llm, DEFAULT_WEIGHTS)
+    assert isinstance(out, dict) and out["reason"] == "instruction_followed"

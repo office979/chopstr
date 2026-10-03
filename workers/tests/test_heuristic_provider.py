@@ -255,3 +255,29 @@ def test_overview_marks_itself_and_leaves_unknowns_null(no_network, policy_v2):
     assert all(e["supports_sent"] is None for e in ov["evidence"]) and {1, 3} <= {e["sent"] for e in ov["evidence"]}
     assert {x["sent"] for x in ov["limitations"]} == {11}  # „Allerdings …“
     assert all(x["limits_sent"] is None for x in ov["limitations"])
+
+
+@pytest.mark.parametrize(("cid", "humor"), [("punchline_setup", True), ("conditional_recommendation", False)])
+def test_humor_is_flagged_under_v2_only(no_network, active_policy, cid, humor):
+    """Pointe mit Setup (payoff_search) setzt is_humor ab Fassung 2; damit risk_flags humor und menschliche
+    Prüfung (P27). Fassung 1 bleibt unverändert (is_humor false)."""
+    import copy
+
+    from tests.editorial_v1 import harness
+
+    case = harness.load_case(cid)
+    sents = segment.sentences_from_words(case["words"], rule="v2")
+    assert heuristic_llm.score_clip(segment.numbered(sents))["is_humor"] is (humor and active_policy == 2)
+    if active_policy == 2:
+        report = story_engine.run(copy.deepcopy(case["words"]), BRIEF, {}, None, _llm())
+        assert report.candidates
+        for c in report.candidates:
+            assert ("humor" in c.risk_flags) is humor
+            if humor:
+                harness.assert_humor_flagged(case, {"risk_flags": c.risk_flags, "rubric": c.rubric})
+
+
+def test_laugh_reaction_of_the_other_speaker_flags_humor(policy_v2):
+    text = "[0] (A) Am Ende kam nur ein einziger Besucher an den Stand.\n[1] (B) Haha.\n[2] (A) Das war unsere ganze Messe."
+    assert heuristic_llm.score_clip(text)["is_humor"] is True
+    assert heuristic_llm.score_clip(text.replace("Haha.", "Okay."))["is_humor"] is False

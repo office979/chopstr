@@ -143,6 +143,8 @@ class DetectReport:
     gate_rejections: dict = field(default_factory=dict)
     search: dict = field(default_factory=dict)
     clip_candidates: list[dict] = field(default_factory=list)
+    # Fassung 2 mit Suche: Kapitel ohne tragfähigen Moment (weder Modell- noch Suchvorschlag), je mit Grund.
+    rejected_chapters: list[dict] = field(default_factory=list)
 
     @property
     def gate_passed(self) -> int:
@@ -164,7 +166,7 @@ class DetectReport:
         }
         if self.nlp_status:
             out["nlp_status"] = self.nlp_status
-        for key in ("overviews", "llm_budget", "gate_rejections", "search", "clip_candidates"):
+        for key in ("overviews", "llm_budget", "gate_rejections", "search", "clip_candidates", "rejected_chapters"):
             if getattr(self, key):
                 out[key] = getattr(self, key)
         return out
@@ -188,6 +190,7 @@ class DetectReport:
             gate_rejections=dict(data.get("gate_rejections") or {}),
             search=dict(data.get("search") or {}),
             clip_candidates=list(data.get("clip_candidates") or []),
+            rejected_chapters=list(data.get("rejected_chapters") or []),
         )
 
 
@@ -1639,7 +1642,11 @@ def select_with_reserve(
     ``reserve``: die ersten ``reserve_size`` Kandidaten, die nur an der Obergrenze scheiterten (Grund ``limit``,
     im Eintrag ``reserve`` true), in Rangfolge; der Kritiker lässt sie nachrücken."""
     reserve: list[CandidateResult] = []
-    block = editorial.block_mode_settings(pol, heuristic=heuristic) if gates_wired(pol) is not None else None
+    gcfg = gates_wired(pol)
+    block = editorial.block_mode_settings(pol, heuristic=heuristic) if gcfg is not None else None
+    # Modus sperren verwirft nur mit Schalter UND Regel gates.discard_hard UND Sprachmodell (effective_mode);
+    # im Berichtsmodus (Regel false) steht das Ergebnis nur in rubric.block_mode.
+    block_discards = block is not None and bool(gcfg and gcfg["discard_hard"]) and block["effective_mode"] == "sperren"
     active = pol if pol is not None else _active_policy()
     output = editorial.output_settings(active) if active is not None else None
     lemmas: dict[int, set[str]] = {}
@@ -1653,9 +1660,14 @@ def select_with_reserve(
     kept: list[CandidateResult] = []
     dropped: list[dict] = []
     for c in ordered:
-        if block is not None and block["effective_mode"] == "sperren" and pol is not None:
+        if block is not None and pol is not None:
             points = pol.gesamtwert(c.rubric.get("rubric_points") or {}) if c.rubric.get("rubric_points") else 0.0
-            if points < float(block["discard_below"]):
+            below = points < float(block["discard_below"])
+            c.rubric["block_mode"] = {
+                "mode": block["mode"], "effective_mode": block["effective_mode"], "discard_below": block["discard_below"],
+                "points": round(points, 2), "below": below, "applied": block_discards,
+            }  # fmt: skip
+            if block_discards and below:
                 dropped.append({
                     "reason": "below_threshold", "first_sent": c.first_sent, "last_sent": c.last_sent, "total": c.total,
                     "detail": f"{points:.1f} Punkte unter der Schwelle {block['discard_below']} (Modus sperren)",
@@ -1791,7 +1803,9 @@ def run(
         refused_before = llm.refused if isinstance(llm, BudgetLLM) else 0
         if search_cfg is not None:
             gate_fn = opening_gate(words, sents, chapter, pol)
-            moments = _propose_v2(chapter, brief, llm, pol, seeds, heat_payload, report, heuristic=heuristic, gate_fn=gate_fn)
+            moments = _propose_v2(chapter, brief, llm, pol, seeds, heat_payload, report, heuristic=heuristic, gate_fn=gate_fn, words=words)
+            if not moments:
+                no_viable_moment(report, chapter_no, chapter)
         else:
             moments = story_score.propose(chapter, brief, llm)[:MAX_PER_CHAPTER]
             report.proposals += len(moments)
@@ -1891,6 +1905,25 @@ def run(
 CHAPTER_DUPLICATE_SHARE = 0.8
 # Gründe in ``discarded``, die keine Dubletten sind; Dubletten stehen getrennt in ``search.duplicates``.
 DUPLICATE_KINDS = ("duplicate_payoff", "same_span", "same_opening", "same_statement", "chapter_overlap", "same_result")
+
+
+def no_viable_moment(report: DetectReport, chapter_no: int, chapter: list[Sentence]) -> None:
+    """Ein Kapitel ohne tragfähigen Moment (Fassung 2 mit Suche): weder Modell noch Suche liefern einen
+    Vorschlag. Das ist ein Verwerfen mit Grund (``no_viable_moment`` in ``discarded`` und ``rejected_chapters``),
+    nicht bloß eine leere Liste; Fall 11 (schwaches Material) wird so ehrlich verworfen."""
+    stats = (report.search.get("chapters") or [{}])[-1]
+    if stats.get("rejected_reasons"):
+        detail = "keine tragfähige Spanne, Vorschläge der Suche verworfen (" + ", ".join(stats["rejected_reasons"]) + ")"
+    elif not stats.get("payoffs") and not stats.get("openings") and stats.get("search") == 0:
+        detail = "nur Organisatorisches oder Füllgespräch, keine Behauptung mit Beleg und kein Einstieg mit Einlösung"
+    else:
+        detail = "keine Vorschläge"
+    entry = {
+        "reason": "no_viable_moment", "chapter": int(chapter_no), "first_sent": chapter[0].idx, "last_sent": chapter[-1].idx,
+        "start_s": round(chapter[0].start, 2), "end_s": round(chapter[-1].end, 2), "detail": detail,
+    }  # fmt: skip
+    report.discarded.append(entry)
+    report.rejected_chapters.append(dict(entry))
 
 
 def note_duplicate(report: DetectReport, kind: str, dropped: list[int], kept: list[int], **extra: Any) -> None:
@@ -2076,6 +2109,7 @@ def _propose_v2(
     report: DetectReport,
     heuristic: bool = False,
     gate_fn: Callable[[int], bool] | None = None,
+    words: list[dict] | None = None,
 ) -> list[dict]:
     """Vorschläge eines Kapitels unter AP5: Episodenübersicht, Modellvorschläge mit Übersicht und Seeds,
     deterministische Suche, Abgleich über ``payoff_search.reconcile``.
@@ -2102,7 +2136,7 @@ def _propose_v2(
             model = story_score.propose(chapter, brief, llm, overview=overview, seeds=seeds, policy=pol)[:MAX_PER_CHAPTER]
         except LLMBudgetExceeded:
             report.discarded.append({"reason": "llm_budget", "stage": "propose", **span})
-    found = payoff_search.search_moments(chapter, pol, heat_payload, gate_fn=gate_fn)
+    found = payoff_search.search_moments(chapter, pol, heat_payload, gate_fn=gate_fn, words=words)
     payoff_first: list[dict] = []
     duplicates = list(found.get("duplicates") or [])
     for p in found["proposals"]:
@@ -2159,7 +2193,8 @@ def _propose_v2(
         **span, "model": len(model), "model_skipped": "heuristic" if heuristic else None,
         "search": len(found["proposals"]), "search_rejected": len(found["rejected"]) + len(res["rejected"]),
         "duplicates": sum(len(d.get("dropped") or []) for d in duplicates), "evaluated": len(kept),
-        "overview": overview is not None,
+        "overview": overview is not None, "payoffs": len(found.get("payoffs") or []),
+        "openings": len(found.get("openings") or []), "rejected_reasons": sorted({str(d.get("reason")) for d in [*found["rejected"], *res["rejected"]]}),
     })  # fmt: skip
     return kept
 

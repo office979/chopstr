@@ -107,11 +107,15 @@ REASON_LABELS = {
     "same_span": "gleiche Spanne",
     "same_opening": "gleicher Einstieg",
     "same_statement": "gleiche Aussage",
+    "chapter_overlap": "Kapitelüberlappung",
+    "same_result": "gleiches Ergebnis nach der Bewertung",
 }
 # Dubletten: derselbe Moment, mehrfach gefunden. Sie stehen getrennt im Bericht und zählen weder in der
 # Verwerfungsquote noch in ihrem Nenner, damit Fassung 1 (Vorschläge des Modells) und Fassung 2
 # (Vorschläge der Suche, die denselben Payoff oft mehrfach findet) vergleichbar bleiben.
-DUPLICATE_REASONS = frozenset({"duplicate", "duplicate_payoff", "same_span", "same_opening", "same_statement", "same_payoff"})
+DUPLICATE_REASONS = frozenset({
+    "duplicate", "duplicate_payoff", "same_span", "same_opening", "same_statement", "same_payoff", "chapter_overlap", "same_result",
+})  # fmt: skip
 # Ereignisse des Laufs, die keinen einzelnen Vorschlag betreffen (Budget, Vertragsfehler).
 RUN_EVENT_REASONS = frozenset({"budget_exhausted", "clip_candidate_error"})
 STAGE_LABELS = {"search": "Suche", "propose": "Vorschlag", "critic": "Kritiker"}
@@ -491,20 +495,24 @@ def rejection_rates(discarded: list[dict], denominator: int) -> dict[str, dict[s
     return {code: {"anzahl": n, "quote": round(n / denominator, 4) if denominator else 0.0} for code, n in sorted(counts.items())}
 
 
-def discard_summary(discarded: list[dict], proposals: int) -> dict[str, Any]:
+def discard_summary(discarded: list[dict], offered: int, duplicate_counts: dict[str, int] | None = None) -> dict[str, Any]:
     """Verwerfungen getrennt nach echten Verwerfungen, Dubletten und Laufereignissen.
 
-    Nenner der Quote: Vorschläge der Stufe 2 (``DetectReport.proposals``, Modell beziehungsweise Suche)
-    ohne Dubletten. Dubletten und Laufereignisse zählen nicht in die Quote."""
+    Nenner der Quote: alle Vorschläge mit Ergebnis, also verworfen oder angeboten (``offered``), ohne
+    Dubletten; das ist für Fassung 1 (Vorschläge des Modells) und Fassung 2 (Vorschläge der Suche) gleich
+    gebildet. Dubletten kommen ab Fassung 2 aus ``report.search["duplicate_counts"]`` (je Art), ältere aus
+    ``discarded`` (``duplicate``); sie zählen wie Laufereignisse nicht in die Quote."""
     groups: dict[str, list[dict]] = {"verworfen": [], "dublette": [], "ereignis": []}
     for d in discarded:
         groups[_kind(discard_code(d), d)].append(d)
-    denominator = max(0, proposals - len(groups["dublette"]))
+    denominator = len(groups["verworfen"]) + int(offered)
+    duplicates = Counter(discard_code(d) for d in groups["dublette"])
+    duplicates.update({str(k): int(n) for k, n in (duplicate_counts or {}).items()})
     return {
         "nenner": denominator,
         "verworfen": rejection_rates(groups["verworfen"], denominator),
         "verworfen_gesamt": len(groups["verworfen"]),
-        "dubletten": {code: v["anzahl"] for code, v in rejection_rates(groups["dublette"], 0).items()},
+        "dubletten": dict(sorted(duplicates.items())),
         "laufereignisse": {code: v["anzahl"] for code, v in rejection_rates(groups["ereignis"], 0).items()},
     }
 
@@ -525,7 +533,11 @@ def case_result(case: dict, offered: list[dict], rows: dict[str, dict], hooks: d
         row = rows[cc["candidate_id"]]
         hook = hooks.get(cc["candidate_id"]) or {}
         checks = [
-            lambda cc=cc: harness.assert_clip_respects_case(case, cc["segments"]),
+            # Die entfernten Stellen der Kürzung aus der Rubrik: lokale Nähte (technische Pause, Füllwort,
+            # Einwurf) sind dann keine „Naht mitten im Satz ohne lokale Entfernung“.
+            lambda cc=cc, row=row: harness.assert_clip_respects_case(
+                case, cc["segments"], removed_spans=(row.get("rubric") or {}).get("removed_spans") or cc["removed_spans"]
+            ),
             lambda cc=cc: harness.assert_protected_spans_kept(case, cc["removed_spans"]),
         ]
         if exp.get("uncertain_words"):
@@ -648,7 +660,7 @@ def run_variant(
         "quelle": source["name"],
         "quelle_stunden": source_hours(source["words"]),
         "vorschlaege": report.proposals,
-        **discard_summary(report.discarded, report.proposals),
+        **discard_summary(report.discarded, len(report.candidates), (getattr(report, "search", None) or {}).get("duplicate_counts")),
         "modellaufrufe": len(calls),
         "modellaufrufe_je_prompt": dict(sorted(Counter(str(c.get("prompt")) for c in calls).items())),
         "laufzeit_s": round(runtime, 4),
@@ -1172,7 +1184,7 @@ def report_markdown(result: dict[str, Any]) -> str:
 
     reasons = sorted({r for v in (left, right) for r in var[v]["verworfen"]})
     lines += ["", "## Verwerfungsquote je Grund und Version", "",
-              "Nenner: Vorschläge der Stufe 2 (Modell beziehungsweise Suche, `DetectReport.proposals`) ohne Dubletten. "
+              "Nenner: alle Vorschläge der Stufe 2 (Modell beziehungsweise Suche) mit Ergebnis, also verworfen oder angeboten, ohne Dubletten. "
               "Dubletten und Laufereignisse stehen getrennt darunter und zählen nicht in die Quote.", "",
               f"| Grund | {left} | {right} |", "|---|---|---|"]  # fmt: skip
     for reason in reasons:
@@ -1183,7 +1195,7 @@ def report_markdown(result: dict[str, Any]) -> str:
         lines.append(f"| {reason_label(reason)} | {cells[0]} | {cells[1]} |")
     lines.append(f"| gesamt | {var[left]['verworfen_gesamt']} von {var[left]['nenner']} ({_pct(var[left]['verwerfungsquote'])}) "
                  f"| {var[right]['verworfen_gesamt']} von {var[right]['nenner']} ({_pct(var[right]['verwerfungsquote'])}) |")  # fmt: skip
-    lines += ["", f"Vorschläge vor dem Abzug der Dubletten: {left} {var[left]['vorschlaege']}, {right} {var[right]['vorschlaege']}.", "",
+    lines += ["", f"Zum Vergleich `DetectReport.proposals`: {left} {var[left]['vorschlaege']}, {right} {var[right]['vorschlaege']}.", "",
               "### Dubletten (nicht in der Quote)", "", f"| Art | {left} | {right} |", "|---|---|---|"]  # fmt: skip
     dup_codes = sorted({c for v in (left, right) for c in var[v]["dubletten"]})
     for code in dup_codes:

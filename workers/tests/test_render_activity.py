@@ -399,3 +399,61 @@ def test_padded_composition_rerenders_to_the_same_hash_and_keeps_the_trim(fake_d
     again = fake_db.clips[clip_id]
     assert again["file_key"] == first["file_key"] and again["composition"] == first["composition"]
     assert fake_db.events_for(STEP_RENDER)[-1]["payload"].get("skipped") is True
+
+
+# -- Kontext nach dem Clip für den Copy-Schritt (Fassung 2) ---------------------------------------------
+
+RETRACT_SCRIPT = [
+    ("SPEAKER_00", "Werbung braucht man gar nicht.", 2.0),
+    ("SPEAKER_00", "Wir verkaufen über Empfehlungen und Messen in der ganzen Region.", 4.0),
+    ("SPEAKER_00", "Moment, das muss ich korrigieren.", 2.0),
+    ("SPEAKER_00", "Ohne Werbung wäre es nicht gegangen.", 2.5),
+]
+
+
+def test_context_after_text_takes_the_next_sentences_after_the_last_segment():
+    words = make_words(RETRACT_SCRIPT, t0=0.5, gap_s=0.5)
+    clip_end = words[14]["end"]  # „Region.“
+    after = act_render.context_after_text(words, [{"start": 0.5, "end": clip_end, "role": "body"}])
+    assert after == "Moment, das muss ich korrigieren. Ohne Werbung wäre es nicht gegangen."
+    assert act_render.context_after_text(words, [{"start": 0.5, "end": clip_end, "role": "body"}], sentences=1) == "Moment, das muss ich korrigieren."
+    assert act_render.context_after_text(words, [{"start": 0.5, "end": clip_end, "role": "body"}], max_s=0.1) == ""
+    assert act_render.context_after_text(words, [{"start": 0.5, "end": words[-1]["end"], "role": "body"}]) == ""
+
+
+@requires_ffmpeg
+def test_correction_after_the_clip_end_never_becomes_the_overlay(fake_db, fake_context, tmp_path, monkeypatch):
+    """Fassung 2: der Clip endet vor „Moment, das muss ich korrigieren.“; die korrigierte Aussage wird kein
+    Text-Hook und kein Overlay. Ohne den Kontext nach dem Clip wäre sie der erste kurze Satz gewesen."""
+    from chopstr_worker import editorial
+    from chopstr_worker.pipeline import copy_engine
+
+    monkeypatch.setenv("LLM_PROVIDER", "local-heuristic")
+    monkeypatch.setenv("RENDER_X264_PRESET", "ultrafast")
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    config.reload()
+    editorial.clear_cache()
+    fake_context.settings = config.settings()
+    video = make_test_video(tmp_path / "in.mp4", seconds=12.5)
+    fake_context.store.put_file("sources", "uploads/in.mp4", video)
+    wid = fake_db.add_workspace()
+    pid = fake_db.add_brand_profile(wid, country="DE", address="du", default_platform="tiktok", caption_preset="tiktok_words")
+    sid = fake_db.add_source(
+        wid, "uploads/in.mp4", brand_profile_id=pid, width=640, height=360, fps=25.0, duration_s=12.5, status="ready",
+        brief={}, rights_status="own", source_owner=None, source_title="Folge 1", source_url=None,
+    )  # fmt: skip
+    words = make_words(RETRACT_SCRIPT, t0=0.5, gap_s=0.5)
+    fake_db.add_transcript_version(sid, words)
+    cid = fake_db.add_candidate(sid, [{"start": 0.5, "end": words[14]["end"], "role": "body"}], rubric={})
+    clip_text = " ".join(w["text"] for w in words[:15])
+    assert copy_engine.native_onscreen(clip_text)[0] == "Werbung braucht man gar nicht."  # ohne Kontext
+    calls = _spy_write_copy(monkeypatch)
+    try:
+        clip_id = act_render.run_render_pack(fake_context, cid, "tiktok")
+    finally:
+        editorial.clear_cache()
+    assert calls[0]["context_after"] == "Moment, das muss ich korrigieren. Ohne Werbung wäre es nicht gegangen."
+    hook = next(h for h in fake_db.hook_versions if h["clip_id"] == clip_id)
+    overlay = fake_db.clips[clip_id]["render_plan"]["hook_overlay"]
+    assert "Werbung braucht man" not in str(hook["onscreen_hook"])
+    assert overlay is None or "Werbung braucht man" not in overlay["text"]

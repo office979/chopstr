@@ -50,10 +50,12 @@ from . import dach_nlp, editorial_gates
 
 PAYOFF_TYPES = (
     "rule", "result", "consequence", "explanation", "lesson", "emotional", "resolution", "punchline", "laughter",
+    "demonstration",
 )  # fmt: skip
 # Trägt ein Satz mehrere Arten, gilt die spezifischere als ``payoff_type``.
 TYPE_PRIORITY = (
-    "punchline", "resolution", "result", "rule", "lesson", "emotional", "explanation", "consequence", "laughter",
+    "demonstration", "punchline", "resolution", "result", "rule", "lesson", "emotional", "explanation",
+    "consequence", "laughter",
 )  # fmt: skip
 DIRECTIONS = ("both", "payoff_only", "opening_only")
 NARRATIVE_TYPES = ("insight", "problem_solution", "story", "demonstration", "debate", "comedy", "how_to")
@@ -67,7 +69,7 @@ HOOK_FULFILLED_BY: dict[str, tuple[str, ...]] = {
     "result_with_open_cause": ("explanation", "consequence", "lesson"),  # Erklärung
     "scene_with_stakes": ("result", "lesson", "punchline", "consequence", "resolution", "laughter", "emotional"),
     "decision_rule": ("explanation", "consequence", "result", "lesson"),  # Bedingung und Begründung
-    "demonstration": ("result", "explanation"),  # sichtbarer Vergleich
+    "demonstration": ("demonstration", "result", "explanation"),  # sichtbarer Vergleich
     "self_correction": ("lesson", "explanation", "result", "emotional"),  # tatsächlicher Lernprozess
     "recognizable_problem": ("explanation", "rule", "resolution", "consequence", "lesson"),  # Erklärung, Handlung
     "perspective_shift": ("explanation", "consequence", "rule"),  # Abgrenzung und Begründung
@@ -83,6 +85,7 @@ _NARRATIVE_BY_HOOK = {
     "punchline": "comedy",
 }
 _NARRATIVE_BY_PAYOFF = {
+    "demonstration": "demonstration",
     "punchline": "comedy",
     "laughter": "comedy",
     "resolution": "debate",
@@ -191,6 +194,10 @@ class _Ctx:
     stop: list[bool] = field(default_factory=list)
     no_host_question: bool = True
     front_s: float | None = None
+    # Stilles Zeigen (Master-Prompt 6 und 18): Stillen ab ``trim.long_silence_s`` zwischen Wörtern oder
+    # Sätzen und sichtbare Ereignisse aus ``heat["visual_events"]``, je ``(von, bis)`` in Sekunden.
+    silences: list[tuple[float, float]] = field(default_factory=list)
+    demo: list[str | None] = field(default_factory=list)
 
     def duration(self, a: int, b: int) -> float:
         return max(0.0, self.v[b].end - self.v[a].start)
@@ -243,7 +250,44 @@ def _any(low: str, markers: Iterable[str]) -> bool:
     return any(_has(low, m) for m in markers)
 
 
-def _ctx(sents: Sequence[Any], policy: editorial.Policy) -> _Ctx:
+def _silences(
+    v: list[_S], policy: editorial.Policy, words: Sequence[Mapping[str, Any]] | None, heat: Mapping[str, Any] | None
+) -> list[tuple[float, float]]:
+    """Stillen ab ``trim.long_silence_s`` (zwischen Sätzen und, mit ``words``, zwischen Wörtern) und
+    sichtbare Ereignisse aus ``heat["visual_events"]`` (``{start, end}``) im Bereich der Sätze."""
+    if not v:
+        return []
+    trim = policy.roh.get("trim") if isinstance(policy.roh.get("trim"), dict) else {}
+    threshold = trim.get("long_silence_s")
+    lo, hi = v[0].start, v[-1].end
+    out: list[tuple[float, float]] = []
+    if threshold is not None:
+        threshold = float(threshold)
+        out += [(a.end, b.start) for a, b in zip(v, v[1:]) if b.start - a.end >= threshold]
+        ws = [w for w in words or () if w.get("start") is not None and lo <= float(w["start"]) <= hi]
+        out += [
+            (float(a["end"]), float(b["start"]))
+            for a, b in zip(ws, ws[1:])
+            if float(b["start"]) - float(a["end"]) >= threshold
+        ]
+    # Ein Ereignis zählt, wenn es vor dem Ende des letzten Satzes beginnt oder höchstens eine lange Stille danach.
+    reach = hi + (float(threshold) if threshold is not None else 0.0)
+    for e in (heat or {}).get("visual_events") or ():
+        try:
+            a, b = float(e["start"]), float(e["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if b > a and a < reach and b > lo:
+            out.append((a, b))
+    return sorted(set(out))
+
+
+def _ctx(
+    sents: Sequence[Any],
+    policy: editorial.Policy,
+    words: Sequence[Mapping[str, Any]] | None = None,
+    heat: Mapping[str, Any] | None = None,
+) -> _Ctx:
     cfg = _settings(policy)
     v = _views(sents)
     typen = {t.schluessel: t for t in policy.moment_typen}
@@ -258,6 +302,7 @@ def _ctx(sents: Sequence[Any], policy: editorial.Policy) -> _Ctx:
         story=(typen["ministory"].marker if "ministory" in typen else ()) + cfg["hook_type_markers"]["scene_with_stakes"],
         no_host_question=bool(policy.einstieg.get("keine_gastgeberfrage")),
         front_s=float(laenge["context_front_s"]) if laenge.get("context_front_s") is not None else None,
+        silences=_silences(v, policy, words, heat),
     )
     # Wort- und Satzliste für die Gates aus editorial_gates (Pronomen, Anweisung, Meta-Rede).
     gw, gs = editorial_gates.from_sentence_texts([{"text": s.text.strip() or "-", "speaker": s.speaker} for s in v])
@@ -287,6 +332,8 @@ def _ctx(sents: Sequence[Any], policy: editorial.Policy) -> _Ctx:
         ctx.stop.append(
             policy.ist_organisatorisch(s.text) or _any(s.low, stops) or (ctx.addressed[k] and not ctx.quoted[k])
         )
+    demo_markers = cfg["hook_type_markers"]["demonstration"]
+    ctx.demo = [(_marker_hit(ctx, k, demo_markers, clause_start=False) or (None,))[0] for k in range(len(v))]
     return ctx
 
 
@@ -496,6 +543,30 @@ def _excluded_payoff(ctx: _Ctx, i: int) -> bool:
     return bool(ctx.cores[i]) and ctx.cores[i][0] in ENUMERATION_STARTS
 
 
+_EPS_S = 0.05
+
+
+def _demonstration(ctx: _Ctx, i: int) -> tuple[int, str, tuple[int, ...]] | None:
+    """Stilles Zeigen: ein Satz mit Demonstrations-Marker, danach eine Stille oder ein sichtbares Ereignis.
+
+    Payoff ist der erste Satz nach der Stille (die Auflösung nach dem Zeigen) oder, wenn danach kein Satz
+    mehr folgt, der Satz, in oder nach dem die Stille liegt. Beleg ist der Satz mit dem Beginn der Stille,
+    Kontext der ankündigende Satz. Rückgabe ``(beleg, marker, kontext)`` oder ``None``."""
+    s = ctx.v[i]
+    last = i == len(ctx.v) - 1
+    for t0, t1 in reversed(ctx.silences):
+        before = t1 <= s.start + _EPS_S and (i == 0 or ctx.v[i - 1].start < t1 - _EPS_S)
+        within = last and t0 >= s.start - _EPS_S
+        if not (before or within):
+            continue
+        j = next((m for m in range(i, -1, -1) if ctx.demo[m] and ctx.v[m].start <= t0 + _EPS_S), None)
+        if j is None or ctx.v[i].end - ctx.v[j].start > ctx.policy.hart_max_s or (before and j == i):
+            continue
+        ev = next((k for k in range(len(ctx.v)) if ctx.v[k].start - _EPS_S <= t0 <= ctx.v[k].end + _EPS_S), j)
+        return ev, str(ctx.demo[j]), (j,) if j != i else ()
+    return None
+
+
 def _payoff_at(ctx: _Ctx, i: int, heat: Mapping[str, Any] | None = None) -> dict | None:
     if _excluded_payoff(ctx, i):
         return None
@@ -545,6 +616,9 @@ def _payoff_at(ctx: _Ctx, i: int, heat: Mapping[str, Any] | None = None) -> dict
             break
     if _laughter_after(heat, s):
         found["laughter"] = (i, "lachen", ())
+    demo = _demonstration(ctx, i)
+    if demo is not None:
+        found["demonstration"] = demo
     if not found:
         return None
     primary = next(t for t in TYPE_PRIORITY if t in found)
@@ -559,7 +633,12 @@ def _payoff_at(ctx: _Ctx, i: int, heat: Mapping[str, Any] | None = None) -> dict
     }
 
 
-def find_payoffs(sents: Sequence[Any], policy: editorial.Policy, heat: Mapping[str, Any] | None = None) -> list[dict]:
+def find_payoffs(
+    sents: Sequence[Any],
+    policy: editorial.Policy,
+    heat: Mapping[str, Any] | None = None,
+    words: Sequence[Mapping[str, Any]] | None = None,
+) -> list[dict]:
     """Sätze, die etwas einlösen, je mit ``payoff_type`` und Beleg-Satznummer ``evidence_sent``.
 
     Arten: ``rule`` (Merksatz), ``consequence`` („deshalb“), ``explanation`` („das heißt“, „der Grund
@@ -568,11 +647,14 @@ def find_payoffs(sents: Sequence[Any], policy: editorial.Policy, heat: Mapping[s
     (Zahl aus ``moment_typen.zahl`` oder Zahlwort mit Ergebnisverb, mit Nomen im Satz); ``resolution`` (Antwort auf eine
     W-Frage oder begründete Ja-Nein-Antwort auf die Frage eines anderen Sprechers; Beleg ist die Frage);
     ``punchline`` (Nomen mit bestimmtem Artikel greift ein Setup in einer erzählten Szene auf, plus Lachen,
-    Kontrast oder Erzählende danach; Beleg ist das Setup); ``laughter`` (nur mit ``heat["laughter_values"]``).
+    Kontrast oder Erzählende danach; Beleg ist das Setup); ``laughter`` (nur mit ``heat["laughter_values"]``);
+    ``demonstration`` (stilles Zeigen: Demonstrations-Marker, dann eine Stille ab ``trim.long_silence_s``
+    zwischen Sätzen oder, mit ``words``, zwischen Wörtern, oder ein Ereignis aus ``heat["visual_events"]``;
+    Payoff ist der erste Satz danach, sonst der letzte Satz, und die Spanne endet nach der Stille).
     Nie Payoff: Fragen, Sätze mit Heckenwörtern (``search.hedge_markers``), Aufzählungsanfang, Moderation
     („Darum geht es heute“), Stoppsätze, vorgelesene oder an ein Modell gerichtete Sätze.
     ``needs_sents`` nennt die Sätze, ohne die der Payoff nicht verständlich ist."""
-    ctx = _ctx(sents, policy)
+    ctx = _ctx(sents, policy, words, heat)
     return [hit for i in range(len(ctx.v)) if (hit := _payoff_at(ctx, i, heat)) is not None]
 
 
@@ -655,14 +737,21 @@ def _extend(ctx: _Ctx, a: int, b: int, p: int) -> int:
 
 
 def _span(ctx: _Ctx, a: int, b: int, p: int, needs: set[int]) -> dict:
+    """Spanne ``a`` bis ``b`` mit Payoff ``p``. Endet sie mit dem letzten Satz und reicht eine Stille oder ein
+    sichtbares Ereignis darüber hinaus, endet sie erst danach (``end_s``, stilles Zeigen nicht abschneiden)."""
     req = needs | _context_needs(ctx, a, b)
+    end_s = None
+    if b == len(ctx.v) - 1:
+        tails = [t1 for t0, t1 in ctx.silences if t0 >= ctx.v[b].start - _EPS_S and t1 > ctx.v[b].end]
+        end_s = round(max(tails), 2) if tails else None
     return {
         "opening_sent": ctx.v[a].idx,
         "payoff_sent": ctx.v[p].idx,
         "first_sent": ctx.v[a].idx,
         "last_sent": ctx.v[b].idx,
         "required_context_sents": sorted(ctx.v[r].idx for r in req if a <= r <= b and r != p),
-        "duration_s": round(ctx.duration(a, b), 2),
+        "duration_s": round((end_s if end_s is not None else ctx.v[b].end) - ctx.v[a].start, 2),
+        "end_s": end_s,
     }
 
 
@@ -749,6 +838,10 @@ def _forward(ctx: _Ctx, a: int, hook_type: str | None, heat: Mapping[str, Any] |
             first_hit = cand
         if dur >= ctx.policy.hart_min_s:
             return cand
+    if first_hit is None and hook_type == "demonstration" and "demonstration" in (_payoff_at(ctx, a, heat) or {}).get("types", []):
+        pay = _payoff_at(ctx, a, heat)
+        first_hit = {**_span(ctx, a, a, a, set()), "hook_type": hook_type, "payoff_type": "demonstration",
+                     "evidence_sent": pay["evidence_sent"], "missing_context_sents": []}  # fmt: skip
     return first_hit
 
 
@@ -758,6 +851,7 @@ def forward_payoff(
     policy: editorial.Policy,
     hook_type: str | None = None,
     heat: Mapping[str, Any] | None = None,
+    words: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict | None:
     """Löst das Material den Einstieg ``opening_idx`` ein? Erster Payoff nach dem Einstieg, dessen Art
     zum Hook-Typ passt (``HOOK_FULFILLED_BY``), bevorzugt der erste, mit dem der Abschnitt
@@ -765,8 +859,9 @@ def forward_payoff(
 
     Rückgabe ``{opening_sent, hook_type, payoff_sent, payoff_type, evidence_sent, first_sent, last_sent,
     required_context_sents, missing_context_sents, duration_s}`` (``last_sent`` gleich Payoff) oder
-    ``None`` (Versprechen nicht eingelöst). ``missing_context_sents`` sind nötige Sätze vor dem Einstieg."""
-    ctx = _ctx(sents, policy)
+    ``None`` (Versprechen nicht eingelöst). ``missing_context_sents`` sind nötige Sätze vor dem Einstieg.
+    Ein Demonstrations-Einstieg mit Stille danach ist nie uneingelöst (Payoff ``demonstration``)."""
+    ctx = _ctx(sents, policy, words, heat)
     a = ctx.pos[opening_idx]
     if hook_type is None:
         hit = _hook_at(ctx, a)
@@ -798,6 +893,7 @@ def _proposal(span: Mapping[str, Any], direction: str, hook_type: str | None, pa
         "hook_type": hook_type,
         "evidence_sent": span.get("evidence_sent"),
         "duration_s": span.get("duration_s"),
+        "end_s": span.get("end_s"),
         "narrative_type": narrative_type(payoff_type, hook_type),
     }
 
@@ -981,6 +1077,7 @@ def search_moments(
     policy: editorial.Policy,
     heat: Mapping[str, Any] | None = None,
     gate_fn: Callable[[int], bool] | None = None,
+    words: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict:
     """Payoff zuerst und Einstieg zuerst (je nach ``search.payoff_first`` und ``search.opening_first``),
     jede Spanne nach dem Payoff verlängert (siehe Moduldoku), dann über ``reconcile`` mit
@@ -989,8 +1086,9 @@ def search_moments(
 
     Rückgabe ``{proposals, rejected, duplicates, payoffs, openings}``. Schwaches Material (nur
     Organisatorisches oder Füllgespräch, keine Behauptung mit Beleg) hat keinen Payoff und ergibt keinen
-    Vorschlag."""
-    ctx = _ctx(sents, policy)
+    Vorschlag. ``words`` (Wortliste mit Zeiten) macht Stillen zwischen Wörtern sichtbar (stilles Zeigen);
+    ``heat["visual_events"]`` liefert sichtbare Ereignisse."""
+    ctx = _ctx(sents, policy, words, heat)
     gate = gate_fn or _default_gate(ctx)
     cfg = ctx.cfg
     payoffs = [h for i in range(len(ctx.v)) if (h := _payoff_at(ctx, i, heat)) is not None] if cfg["payoff_first"] else []

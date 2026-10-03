@@ -14,9 +14,10 @@ export interface RevisionError {
 
 export type Revision = Omit<Candidate, "id" | "created_at">;
 
-/* Rubrik-Schlüssel, die eine bestimmte Schnittfassung beschreiben (Worker, Fassung 2): die Kürzung (AP7) und
- * die kompakte ClipCandidate-Teilmenge (AP8). Ändern sich die Grenzen, gelten sie nicht mehr und fallen weg;
- * bei einer reinen Titeländerung bleiben sie samt den Segmenten der Kürzung. */
+/* Rubrik-Schlüssel, die eine bestimmte Schnittfassung beschreiben (Worker, Fassung 2): Kürzung (AP7),
+ * kompakte ClipCandidate-Teilmenge (AP8), harte Gates und ihre Heilung (AP4), Einstiegswahl, Kritiker und
+ * Nachrücken (AP6b), Teilwerte (AP9). Ändern sich die Grenzen, beschreiben sie die alte Spanne und fallen
+ * weg; bei einer reinen Titeländerung bleiben sie samt den Segmenten der Kürzung. */
 export const CUT_SPECIFIC_RUBRIC_KEYS = [
   "composition",
   "removed_spans",
@@ -25,9 +26,16 @@ export const CUT_SPECIFIC_RUBRIC_KEYS = [
   "decision",
   "decision_reason",
   "quality_gate_results",
-  "editorial_subscores",
+  "quality_gate_decision",
+  "gate_heal",
   "assessment_uncertainties",
   "calibration",
+  "anchor_subscores",
+  "critic",
+  "critic_findings",
+  "opening_choice",
+  "alternatives_considered",
+  "promoted",
 ] as const;
 
 function withoutCutSpecificKeys(rubric: Candidate["rubric"]): Candidate["rubric"] {

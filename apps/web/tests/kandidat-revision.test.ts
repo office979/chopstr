@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildRevision, isRevisionError } from "@/lib/candidates/revise";
+import { buildRevision, CUT_SPECIFIC_RUBRIC_KEYS, isRevisionError } from "@/lib/candidates/revise";
 import { allGatesPassed, countGates, recomputeGates, sentenceBoundariesGate } from "@/lib/candidates/gates";
 import type { Candidate, CandidateGates } from "@/lib/repo/types";
 import type { Sentence, WordLike } from "@/lib/transcript/sentences";
@@ -219,9 +219,16 @@ describe("Revision und Kürzung (AP7, AP8)", () => {
         decision: "accept",
         decision_reason: "x",
         quality_gate_results: { unresolved_pronoun: { passed: true, detail: "x" } },
-        editorial_subscores: { scale_max: 2, values: {} },
+        quality_gate_decision: { decision: "accepted" },
+        gate_heal: null,
         assessment_uncertainties: [],
         calibration: "uncalibrated",
+        anchor_subscores: { values: {} },
+        critic: { status: "checked" },
+        critic_findings: [],
+        opening_choice: { chosen: 3 },
+        alternatives_considered: [],
+        promoted: { from: "reserve" },
         sentence_rule: "v2",
       },
     } as unknown as Candidate;
@@ -232,10 +239,10 @@ describe("Revision und Kürzung (AP7, AP8)", () => {
     if (isRevisionError(rev)) throw new Error(rev.error);
     expect(rev.segments).toEqual([{ start: SAETZE[2].start, end: SAETZE[4].end, role: "body" }]);
     const rubric = rev.rubric as unknown as Record<string, unknown>;
-    for (const key of ["composition", "removed_spans", "trim", "versions", "decision", "decision_reason",
-      "quality_gate_results", "editorial_subscores", "assessment_uncertainties", "calibration"]) {
+    for (const key of CUT_SPECIFIC_RUBRIC_KEYS) {
       expect(rubric).not.toHaveProperty(key);
     }
+    expect(CUT_SPECIFIC_RUBRIC_KEYS).not.toContain("editorial_subscores");
     expect(rubric.sentence_rule).toBe("v2");
     expect(rev.rubric.scores_stale).toBe(true);
   });
@@ -249,6 +256,9 @@ describe("Revision und Kürzung (AP7, AP8)", () => {
     const rubric = rev.rubric as unknown as Record<string, unknown>;
     expect(rubric.composition).toEqual({ local_cuts: 1, semantic_splices: 0, segments: SEGMENTE });
     expect(rubric.removed_spans).toHaveLength(1);
+    for (const key of CUT_SPECIFIC_RUBRIC_KEYS) {
+      expect(rubric).toHaveProperty(key);
+    }
     expect(rev.rubric.duration_s).toBe(5.8);
     expect(rev.rubric.suggested_title_card).toBe("Zwei Jahre Rabatte");
   });

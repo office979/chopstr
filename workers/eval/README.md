@@ -211,14 +211,20 @@ die häufigsten Hook-Anfänge je Fassung. Weicht ein Merkmal deutlich ab (Anteil
 Prozentpunkte, Dauer um mehr als 25 Prozent, ein Hook-Anfang bei mindestens der Hälfte einer Fassung
 und unter 20 Prozent der anderen), warnt der Bericht: Bewertende könnten die Fassung erkennen.
 
-Verwerfungsquote: Zähler sind die Verwerfungen aus `DetectReport.discarded`, Nenner die Vorschläge der
-Stufe 2 (`DetectReport.proposals`, bei Fassung 1 vom Modell, bei Fassung 2 von der Suche) ohne Dubletten.
-Dubletten (`duplicate`, `duplicate_payoff` mit `same_span`, `same_opening`, `same_statement`,
-`same_payoff`) sind derselbe Moment, mehrfach gefunden; die Suche der Fassung 2 findet einen Payoff oft
-mehrfach, deshalb stehen Dubletten in einer eigenen Tabelle und zählen weder im Zähler noch im Nenner.
-Laufereignisse (`budget_exhausted`, `clip_candidate_error`, `llm_budget` beim Vorschlag) betreffen keinen
-einzelnen Vorschlag und stehen ebenfalls getrennt. Ein Eintrag ohne Grund heißt nach seiner Stufe
+Verwerfungsquote: Zähler sind die Verwerfungen aus `DetectReport.discarded`, Nenner alle Vorschläge der
+Stufe 2 mit Ergebnis (verworfen oder angeboten), bei Fassung 1 vom Modell, bei Fassung 2 von der Suche,
+ohne Dubletten. `DetectReport.proposals` steht zum Vergleich daneben. Dubletten sind derselbe Moment,
+mehrfach gefunden; ab Fassung 2 stehen sie nicht in `discarded`, sondern in `report.search["duplicates"]`
+und je Art in `report.search["duplicate_counts"]` (`duplicate_payoff`, `same_span`, `same_opening`,
+`same_statement`, `chapter_overlap`, `same_result`), unter Fassung 1 als `duplicate` in `discarded`. Sie
+stehen in einer eigenen Tabelle und zählen weder im Zähler noch im Nenner. Laufereignisse
+(`budget_exhausted`, `clip_candidate_error`, `llm_budget` beim Vorschlag) betreffen keinen einzelnen
+Vorschlag und stehen ebenfalls getrennt. Ein Eintrag ohne Grund heißt nach seiner Stufe
 (`ohne_grund/search`).
+
+editorial_v1 im Blindvergleich: geprüft wird jeder angebotene Kandidat mit dem Harness, Schnittplan und
+entfernte Stellen der Kürzung (`rubric.removed_spans`) zusammen, damit eine lokale Naht (technische Pause,
+Füllwort, Einwurf) nicht als Naht mitten im Satz zählt.
 
 Schalter: Fassung 2 mit allen Gruppenschaltern aus (Basis), je eine Gruppe an (Auswahl:
 `gates.discard_hard`, `search.payoff_first`; Hooks: `hook.native_spoken`; Kürzung: `trim.enabled`)

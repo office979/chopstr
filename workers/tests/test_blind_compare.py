@@ -71,12 +71,15 @@ def _clip(cid: str, start: float = 0.0, end: float = 30.0, hook: str = "Satz ein
 
 def _synthetic_run(version: str, clips: list[dict], reasons: list, passed: bool | None, proposals: int | None = None) -> dict:
     entries = [r if isinstance(r, dict) else {"reason": r} for r in reasons]
+    # Dubletten stehen ab Fassung 2 in report.search["duplicate_counts"], nicht in discarded.
+    duplicates = Counter(e["kind"] for e in entries if "kind" in e)
+    entries = [e for e in entries if "kind" not in e]
     events = sum(1 for e in entries if e.get("reason") in bc.RUN_EVENT_REASONS)
-    props = len(clips) + len(entries) - events if proposals is None else proposals
+    props = len(clips) + len(entries) - events + sum(duplicates.values()) if proposals is None else proposals
     native = sum(1 for c in clips if c["hook"]["muster"] == "native")
     return {
         "variante": version, "fassung": 1 if version == "v1" else 2, "schalter": {}, "quelle": "q", "quelle_stunden": 0.25,
-        "vorschlaege": props, **bc.discard_summary(entries, props), "modellaufrufe": 2 * len(clips) + 3, "modellaufrufe_je_prompt": {}, "laufzeit_s": 0.1,
+        "vorschlaege": props, **bc.discard_summary(entries, len(clips), dict(duplicates)), "modellaufrufe": 2 * len(clips) + 3, "modellaufrufe_je_prompt": {}, "laufzeit_s": 0.1,
         "hooks": {"gesamt": len(clips), "native": native, "ohne_overlay": sum(1 for c in clips if not c["hook"]["text"]),
                   "ganzer_satz": len(clips), "mit_befund": 0},
         "editorial_v1": None if passed is None else {"bestanden": passed, "gruende": [] if passed else ["Segment endet auf verbotenem Out-Point „nicht“"]},
@@ -95,7 +98,7 @@ def _synthetic_dir(tmp_path, pairing="ueberdeckung", tolerance=0.0):
         "fall_a": {
             "v1": _synthetic_run("v1", [_v1_clip("cc_a1", 0, 30), _v1_clip("cc_a2", 40, 70), _v1_clip("cc_a3", 80, 100)], ["gate", "too_long", {"stage": "search"}], False),
             "v2": _synthetic_run("v2", [_clip("cc_b1", 41, 69), _clip("cc_b2", 1, 29, overlay="")],
-                                ["gate", {"reason": "duplicate_payoff", "detail": "same_span"}, {"reason": "duplicate_payoff", "detail": "same_opening"}], True),
+                                ["gate", {"kind": "same_span"}, {"kind": "chapter_overlap"}], True),
             "v2_basis": _synthetic_run("v2", [_clip("cc_c1", 0, 30, pattern="identity_call")], ["gate"], True),
             "v2_hooks": _synthetic_run("v2", [_clip("cc_d1", 0, 30, overlay="")], [], True),
         },
@@ -298,8 +301,8 @@ def test_rejection_rate_separates_duplicates_and_events():
         {"reason": "duplicate", "first_sent": 0, "last_sent": 5}, {"reason": "budget_exhausted"},
         {"reason": "llm_budget", "stage": "propose", "first_sent": 0, "last_sent": 9},
     ]  # fmt: skip
-    summary = bc.discard_summary(discarded, proposals=13)
-    assert summary["nenner"] == 10
+    summary = bc.discard_summary(discarded, offered=5, duplicate_counts={"chapter_overlap": 2, "same_span": 1})
+    assert summary["nenner"] == 10  # 5 verworfen plus 5 angeboten, ohne Dubletten und Laufereignisse
     assert summary["verworfen"] == {
         "gate": {"anzahl": 2, "quote": 0.2},
         "ohne_grund/search": {"anzahl": 1, "quote": 0.1},
@@ -307,14 +310,15 @@ def test_rejection_rate_separates_duplicates_and_events():
         "too_short": {"anzahl": 1, "quote": 0.1},
     }
     assert summary["verworfen_gesamt"] == 5
-    assert summary["dubletten"] == {"duplicate": 1, "duplicate_payoff/same_opening": 1, "duplicate_payoff/same_span": 1}
+    assert summary["dubletten"] == {"chapter_overlap": 2, "duplicate": 1, "duplicate_payoff/same_opening": 1, "duplicate_payoff/same_span": 1, "same_span": 1}
     assert summary["laufereignisse"] == {"budget_exhausted": 1, "llm_budget": 1}
-    assert bc.discard_summary([], proposals=0) == {"nenner": 0, "verworfen": {}, "verworfen_gesamt": 0, "dubletten": {}, "laufereignisse": {}}
+    assert bc.discard_summary([], offered=0) == {"nenner": 0, "verworfen": {}, "verworfen_gesamt": 0, "dubletten": {}, "laufereignisse": {}}
     assert bc.reason_label("overlap") == "Überdeckung (overlap)"
     assert bc.reason_label("too_short") == "zu kurz (too_short)"
     assert bc.reason_label("gate") == "Tor (gate)"
     assert bc.reason_label("duplicate_payoff") == "Dublette, gleicher Payoff (duplicate_payoff)"
     assert bc.reason_label("duplicate_payoff/same_span") == "Dublette, gleicher Payoff, gleiche Spanne (duplicate_payoff/same_span)"
+    assert bc.reason_label("chapter_overlap") == "Kapitelüberlappung (chapter_overlap)"
     assert bc.reason_label("ohne_grund/search") == "ohne Grundangabe, Stufe Suche (ohne_grund/search)"
     assert bc.reason_label("critic:distortion") == "Kritiker: distortion (critic:distortion)"
     assert bc.reason_label("neu") == "unbekannter Grund (neu)"
@@ -329,12 +333,15 @@ def test_rejection_rate_of_a_run_matches_report_discarded(version):
         llm = LLM(Tenant(id="t", tier="standard"), provider=providers_llm.HEURISTIC_PROVIDER, s=config.settings())
         report = story_engine.run(copy.deepcopy(source["words"]), dict(bc.DEFAULT_BRIEF), {}, None, llm, max_candidates=1)
     codes = Counter(bc.discard_code(d) for d in report.discarded)
-    duplicates = {c: n for c, n in codes.items() if c.split("/", 1)[0] in bc.DUPLICATE_REASONS}
+    legacy = {c: n for c, n in codes.items() if c.split("/", 1)[0] in bc.DUPLICATE_REASONS}
     events = {c: n for c, n in codes.items() if c in bc.RUN_EVENT_REASONS}
-    rejected = {c: n for c, n in codes.items() if c not in duplicates and c not in events}
-    denominator = report.proposals - sum(duplicates.values())
+    rejected = {c: n for c, n in codes.items() if c not in legacy and c not in events}
+    duplicates = Counter(legacy)
+    duplicates.update(report.search.get("duplicate_counts") or {})
+    assert sum((report.search.get("duplicate_counts") or {}).values()) == len(report.search.get("duplicates") or [])
+    denominator = sum(rejected.values()) + len(report.candidates)
     assert run["vorschlaege"] == report.proposals and run["nenner"] == denominator
-    assert run["dubletten"] == duplicates and run["laufereignisse"] == events
+    assert run["dubletten"] == dict(duplicates) and run["laufereignisse"] == events
     assert {r: v["anzahl"] for r, v in run["verworfen"].items()} == rejected
     assert run["verworfen_gesamt"] == sum(rejected.values())
     for reason, v in run["verworfen"].items():
@@ -421,7 +428,7 @@ def test_evaluation_of_a_filled_rating(tmp_path):
                                "too_long": {"anzahl": 1, "quote": 0.125}}  # fmt: skip
     assert v1["nenner"] == 8 and v2["nenner"] == 6 and v2["vorschlaege"] == 8
     assert v2["verwerfungsquote"] == 0.3333
-    assert v2["dubletten"] == {"duplicate_payoff/same_opening": 1, "duplicate_payoff/same_span": 1}
+    assert v2["dubletten"] == {"chapter_overlap": 1, "same_span": 1}
     assert v2["laufereignisse"] == {"budget_exhausted": 1}
     assert v1["ohne_vorschlag"] == ["quelle_leer"] and v2["ohne_kandidat"] == ["quelle_leer"]
     assert v1["bestehensquote"] == 0.5 and v2["bestehensquote"] == 1.0
@@ -441,8 +448,9 @@ def test_evaluation_of_a_filled_rating(tmp_path):
         "| ohne Grundangabe, Stufe Suche (ohne_grund/search) | 1 (12,5 %) | 0 |",
         "| Überdeckung (overlap) | 0 | 1 (16,7 %) |",
         "| gesamt | 3 von 8 (37,5 %) | 2 von 6 (33,3 %) |",
-        "Vorschläge vor dem Abzug der Dubletten: v1 8, v2 8.",
-        "| Dublette, gleicher Payoff, gleiche Spanne (duplicate_payoff/same_span) | 0 | 1 |",
+        "Zum Vergleich `DetectReport.proposals`: v1 8, v2 8.",
+        "| gleiche Spanne (same_span) | 0 | 1 |",
+        "| Kapitelüberlappung (chapter_overlap) | 0 | 1 |",
         "| gesamt | 0 | 2 |",
         "| Modellbudget erschöpft (budget_exhausted) | 0 | 1 |",
         "**Warnung: Die Verblindung ist gefährdet.**",
@@ -598,3 +606,12 @@ def test_clip_eval_summary_pause_share_and_median():
     assert summary["laenge_median_s"] == 25.0
     v1 = clip_eval.zusammenfassung([row(10.0), row(20.0), row(30.0)])
     assert "grenze_nur_aus_pause_anteil" not in v1 and v1["laenge_median_s"] == 20.0
+
+
+@pytest.mark.parametrize("name", ["fall_instruction_in_transcript", "fall_speaker_turn_attribution"])
+def test_kuerzung_passes_cases_with_local_seams(name):
+    """Die Kürzung erzeugt lokale Nähte; mit rubric.removed_spans im Harness zählen sie nicht als Naht mitten im Satz."""
+    variant = {v.name: v for v in bc.switch_variants()}["v2_kuerzung"]
+    run = bc.run_variant(variant, _sources((name,))[0], dict(bc.DEFAULT_BRIEF), providers_llm.HEURISTIC_PROVIDER, 5)
+    assert any(c["removed_spans"] for c in run["clip_candidates"] if c["decision"] == "accept"), "die Kürzung wirkt hier"
+    assert run["editorial_v1"] == {"bestanden": True, "gruende": []}

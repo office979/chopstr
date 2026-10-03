@@ -516,6 +516,16 @@ def test_run_case_14_instruction_is_flagged_not_followed(wired_v2, monkeypatch):
 def test_run_case_11_weak_material_offers_nothing(wired_v2, monkeypatch):
     report, offered = _run_case("weak_material", None, monkeypatch)
     assert offered == [] and report.candidates == []
+    # Ehrlich verworfen, mit Grund im Bericht (nicht nur eine leere Liste).
+    (entry,) = report.rejected_chapters
+    harness.assert_rejected(CASES["weak_material"], {"decision": "reject", "decision_reason": f"{entry['reason']}: {entry['detail']}"})
+    assert entry["reason"] == "no_viable_moment" and entry["chapter"] == 0
+    assert entry["detail"].startswith("nur Organisatorisches") and entry["end_s"] > entry["start_s"] == round(report_start(), 2)
+    assert entry in report.discarded and report.to_json()["rejected_chapters"] == [entry]
+
+
+def report_start() -> float:
+    return float(words_of("weak_material")[0]["start"])
 
 
 def test_run_case_12_near_duplicates_leave_one_survivor(wired_v2, monkeypatch):

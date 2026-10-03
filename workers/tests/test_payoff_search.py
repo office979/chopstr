@@ -441,11 +441,48 @@ def test_clip_worthy_fixtures_get_a_proposal_that_respects_the_case(cid, pol):
         assert p["first_sent"] <= p["opening_sent"] <= p["payoff_sent"] <= p["last_sent"]
 
 
-def test_silent_demonstration_has_no_text_payoff(pol):
-    """Bekannte Grenze: die Demonstration ohne Sprache hat keinen Textmarker, der Einstieg bleibt uneingelöst."""
+@pytest.mark.parametrize("source", ["words", "visual_events"])
+def test_silent_demonstration_has_its_payoff_after_the_silence(source, pol):
+    """Stilles Zeigen (Master-Prompt 6, 18, Testfall 7): Demonstrations-Einstieg, Stille ab trim.long_silence_s
+    (aus den Wortzeiten) oder sichtbares Ereignis, Payoff im ersten Satz danach. Genau ein Vorschlag, der die
+    Stille enthält und den Fall einhält; kein promise_unfulfilled."""
+    case, sents = case_sents("silent_demonstration")
+    kw = {"words": case["words"]} if source == "words" else {"heat": {"visual_events": case["visual_events"]}}
+    res = payoff_search.search_moments(sents, pol, **kw)
+    assert len(res["proposals"]) == 1
+    p = res["proposals"][0]
+    assert p["payoff_type"] == "demonstration" and p["hook_type"] == "demonstration" and p["payoff_sent"] == 3
+    assert not [r for r in res["rejected"] if r["reason"] == "promise_unfulfilled"]
+    a, b = sents[p["first_sent"]].word_range[0], sents[p["last_sent"]].word_range[1]
+    seg = harness.segment_from_word_range(case, a, b)
+    ((t0, t1),) = [
+        s["time_range"] for s in case["expected"]["protected_spans"] if s["type"] == "visual_demonstration"
+    ]
+    assert seg["source_in"] <= t0 and t1 <= seg["source_out"]
+    harness.assert_clip_respects_case(case, [seg])
+
+
+def test_silent_demonstration_without_timing_signal_stays_unfulfilled(pol):
+    """Ohne Wortzeiten und ohne visuelles Ereignis ist die Stille im Satz nicht sichtbar."""
     _case, sents = case_sents("silent_demonstration")
     res = payoff_search.search_moments(sents, pol)
     assert res["proposals"] == [] and {r["reason"] for r in res["rejected"]} == {"promise_unfulfilled"}
+
+
+def test_demonstration_without_a_following_sentence_ends_after_the_silence(pol):
+    rows = sents_of(
+        [
+            ("A", "Bei uns wird jede Verbindung von Hand geprüft und erst dann verleimt.", 6.0),
+            ("A", "Das dauert zwar länger, spart uns aber jede zweite Reklamation.", 6.0),
+            ("A", "Ich zeig Ihnen das am besten direkt am Werkstück.", 4.0),
+        ]
+    )
+    heat = {"visual_events": [{"start": 17.0, "end": 24.0}]}
+    res = payoff_search.search_moments(rows, pol, heat=heat)
+    p = next(p for p in res["proposals"] if p["payoff_type"] == "demonstration")
+    assert p["last_sent"] == 2 and p["end_s"] == 24.0 and p["duration_s"] == 24.0
+    fwd = payoff_search.forward_payoff(rows, 2, pol, heat=heat)
+    assert fwd["payoff_type"] == "demonstration" and fwd["payoff_sent"] == 2
 
 
 def test_alternative_openings_are_different_sentences(pol):

@@ -638,7 +638,7 @@ search:
     result_with_open_cause: ["trotzdem gestiegen", "stieg trotzdem", "trotzdem mehr", "obwohl wir weniger"]
     scene_with_stakes: ["damals", "zwei tage vor", "am letzten tag", "kurz vor dem", "mitten in der"]
     decision_rule: ["nur wenn", "nur, wenn", "nur dann", "wir nehmen nur", "der wichtigste rat", "mein rat ist"]
-    demonstration: ["hier siehst du", "hier sehen sie", "schau mal hier", "ich zeig dir", "ich zeige ihnen", "ich zeig ihnen"]
+    demonstration: ["hier siehst du", "hier sehen sie", "schau mal hier", "schau hier", "guck mal", "ich zeig", "ich zeige", "so sieht das aus"]
     self_correction: ["ich dachte lange", "ich dachte immer", "ich lag falsch", "ich habe mich geirrt", "ich hab mich geirrt"]
     recognizable_problem: ["kennst du das", "kennen sie das", "du bekommst ständig", "das problem ist", "fast niemand"]
     perspective_shift: ["das problem war nicht", "das problem ist nicht", "es geht nicht um", "der punkt ist nicht"]

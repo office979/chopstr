@@ -467,6 +467,30 @@ def _zielgruppe(m: _Merkmale, p: editorial.Policy, laenge_ok: bool) -> float:
     return _anteil(NEUTRAL + bonus)
 
 
+# Reaktion des Gegenübers, die eine Pointe anzeigt (kleingeschriebene Kerntokens, ganzer Satz höchstens
+# ``LAUGH_REACTION_MAX_WORDS`` Wörter).
+LAUGH_REACTIONS = frozenset({"haha", "hahaha", "hahahaha", "hehe", "hihi", "lacht", "lachen", "gelächter", "lol"})
+LAUGH_REACTION_MAX_WORDS = 3
+
+
+def _humor(sents: list[dict], p: editorial.Policy) -> str | None:
+    """Ab Fassung 2 (Abschnitt ``search``): Pointe im Clip? Pointe mit Setup aus ``payoff_search``
+    (``punchline``) oder eine Lachreaktion eines anderen Sprechers nach einem Satz. Dann ``is_humor`` und
+    damit ``risk_flags`` humor, also menschliche Prüfung (P27). Lachen aus der Heatmap sieht der Provider
+    nicht, er kennt nur den Prompt. Fassung 1: ``None`` (unverändert)."""
+    if editorial.search_settings(p) is None:
+        return None
+    from .pipeline import payoff_search
+
+    if any("punchline" in h["types"] for h in payoff_search.find_payoffs(_timed(sents), p)):
+        return "Pointe mit Setup (menschliche Humorprüfung)"
+    for prev, s in zip(sents, sents[1:]):
+        toks = [dach_nlp.core_token(x) for x in s["text"].split()]
+        if s["speaker"] != prev["speaker"] and 0 < len(toks) <= LAUGH_REACTION_MAX_WORDS and set(toks) & LAUGH_REACTIONS:
+            return "Lachreaktion des Gegenübers (menschliche Humorprüfung)"
+    return None
+
+
 def score_clip(user: str) -> dict:
     """Rubrik der Grundlage aus einfachen Textmerkmalen; Belege sind wörtliche Satzanfänge.
 
@@ -483,6 +507,7 @@ def score_clip(user: str) -> dict:
     if not sents:
         sents = [{"idx": 0, "speaker": "?", "text": user.strip() or "-"}]
     m = _merkmale(sents, p)
+    humor = _humor(sents, p)
     est_s = estimate_seconds(sents)
     laenge_ok = p.laenge_ok(est_s)
     abzug = p.laenge_abzug(est_s)
@@ -531,6 +556,8 @@ def score_clip(user: str) -> dict:
         parts.append("Kontrastmarker")
     if organisatorisch:
         parts.append("reines Organisationsgespräch")
+    if humor:
+        parts.append(humor)
     parts.append(f"geschätzt {round(est_s)} Sekunden" + ("" if laenge_ok else f", Längenabzug {abzug:.2f}"))
     return {
         "unresolved_references": unresolved,
@@ -557,7 +584,7 @@ def score_clip(user: str) -> dict:
         "punkte": punkte,
         "punkte_gesamt": p.punkte_gesamt,
         "policy_version": editorial.policy_version(p.version),
-        "is_humor": False,
+        "is_humor": humor is not None,
         "sensitive_topic": sensitive,
         "suggested_title_card": "",
         "why": "Heuristik ohne Sprachmodell: " + ", ".join(parts) + ".",

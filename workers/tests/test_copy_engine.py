@@ -498,3 +498,58 @@ def test_v2_heuristic_hooks_are_verbatim_excerpts(policy_v2):
     for v in res.variants:
         assert v["onscreen"] in flat and v["spoken"] in flat, v  # keine Rahmung, nur wörtliche Auszüge
     assert res.onscreen_hook in flat
+
+
+# -- Keine zurückgenommene Aussage und keine fremde Position als Hook (Abschlussverifikation AP6a) ----
+
+
+def _case_text(cid: str) -> str:
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent / "editorial_v1" / "cases" / f"{cid}.json"
+    return " ".join(w["text"] for w in json.loads(path.read_text(encoding="utf-8"))["words"])
+
+
+RETRACTED = "Werbung braucht man also eigentlich gar nicht."
+
+
+def test_v2_later_self_correction_is_never_the_text_hook(policy_v2):
+    clip = _case_text("later_self_correction")
+    assert RETRACTED in clip
+    text, kind = copy_engine.native_onscreen(clip)
+    assert text != RETRACTED and (text, kind) == ("", "none_retracted")
+    llm = FakeLLM(_variants(RETRACTED, "Werbung braucht man gar nicht", "b " * 12, "c " * 12, "d " * 12))
+    res = copy_engine.write_copy(llm, clip, copy_de.BrandProfile(), platforms=("linkedin",))
+    assert res.onscreen_hook not in (RETRACTED, "Werbung braucht man gar nicht")
+    assert any("später korrigierte" in c for c in res.variants[0]["claim_issues"])
+    assert any("später korrigierte" in c for c in res.variants[1]["claim_issues"])
+    assert res.pattern == "native" and res.onscreen_hook == ""
+    assert _selected(res)["features"]["onscreen_source"] == "none_retracted"
+
+
+def test_v2_sentence_without_later_correction_stays_selectable(policy_v2):
+    clip = "Wir haben den Laden umgebaut. Die Kunden zahlen jetzt schneller."
+    assert copy_engine.retracted_statements(clip) == {}
+    assert copy_engine.native_onscreen(clip) == ("Wir haben den Laden umgebaut.", "first_sentence")
+    # Ein Satz ohne Bezug zur Korrektur bleibt wählbar, der korrigierte nicht.
+    clip = "Werbung braucht man gar nicht. Wir verkaufen über Empfehlungen. Moment, das muss ich korrigieren. Werbung hilft doch."
+    assert copy_engine.native_onscreen(clip) == ("Wir verkaufen über Empfehlungen.", "other_sentence")
+
+
+def test_v2_correction_in_context_after_the_clip_counts():
+    clip = "Werbung braucht man gar nicht. Wir verkaufen über Empfehlungen und Messen in der ganzen Region."
+    assert copy_engine.native_onscreen(clip)[0] == "Werbung braucht man gar nicht."
+    after = "Moment, das muss ich korrigieren. Ohne Werbung wäre es nicht gegangen."
+    assert copy_engine.native_onscreen(clip, context_after=after) == ("", "none_retracted")
+
+
+def test_v2_reported_position_is_not_the_text_hook(policy_v2):
+    clip = _case_text("reported_position")
+    text, _kind = copy_engine.native_onscreen(clip)
+    assert "Kaltakquise ist tot" not in text
+    assert copy_engine.retraction_issue("Kaltakquise ist tot.", clip).startswith("Text-Hook gibt eine fremde Position wieder")
+    llm = FakeLLM(_variants("Kaltakquise ist tot.", "b " * 12, "c " * 12, "d " * 12, "e " * 12))
+    res = copy_engine.write_copy(llm, clip, copy_de.BrandProfile(), platforms=("linkedin",))
+    assert res.onscreen_hook != "Kaltakquise ist tot."
+    assert any("fremde Position" in c for c in res.variants[0]["claim_issues"])

@@ -29,7 +29,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .. import config, editorial, prompts, residency
-from . import copy_de, dach_nlp, fidelity
+from . import copy_de, dach_nlp, fidelity, story_graph
+from .segment import Sentence
 
 log = logging.getLogger("chopstr.copy")
 
@@ -483,23 +484,118 @@ def spoken_opening(clip_text: str, partial: bool = False) -> tuple[str, str]:
     return (part, "first_sentence_part") if part else (first, "first_sentence_long")
 
 
+# Eine Aussage, die der Clip (oder der Kontext danach) zurücknimmt oder relativiert, oder eine fremde Position,
+# wird nie zum Text-Hook (Master-Prompt 8 und 13, Fälle later_self_correction und reported_position).
+RETRACTION_WINDOW = 3  # so viele Folgesätze prüfen Korrektur- und Relativierungsmarker
+RETRACTION_PHRASES = ("das heißt aber nicht", "das heißt nicht", "das bedeutet nicht", "das stimmt so nicht")
+RETRACTION_STARTS = ("moment",)
+REPORTED_FRAMES = (
+    "viele sagen", "man sagt", "heißt es", "angeblich", "so nach dem motto", "hat immer gesagt", "hat gesagt",
+    "sagte immer", "meinte immer", "behauptet", "behaupten", "laut",
+)  # fmt: skip
+HOOK_OVERLAP_RETRACTED = 0.6  # Anteil der Inhaltswörter eines Hooks, die in einer zurückgenommenen Aussage stehen
+
+
+def _sentence_objects(texts: list[str]) -> list[Sentence]:
+    # Ohne Zeiten: der Abstand zählt in Sätzen, eine Sekunde je Satz liegt sicher im Story-Graph-Fenster.
+    return [Sentence(idx=i, text=t, start=float(i), end=float(i), speaker=None, word_range=(0, 0)) for i, t in enumerate(texts)]
+
+
+def _is_reported(texts: list[str], i: int) -> bool:
+    """Gibt der Satz eine fremde Position wieder (Zitatrahmen im Satz oder Doppelpunkt-Rahmen davor)?"""
+    low = texts[i].lower()
+    if fidelity.phrase_hits(REPORTED_FRAMES, low):
+        return True
+    toks = texts[i].split()
+    if any(t.endswith(":") and _core(t) in SAYING_VERBS for t in toks):
+        return True
+    prev = texts[i - 1] if i > 0 else ""
+    return prev.rstrip().endswith(":") and any(_core(t) in SAYING_VERBS for t in prev.split())
+
+
+def _is_retracted(texts: list[str], sents: list[Sentence], i: int) -> bool:
+    """Wird Satz ``i`` danach korrigiert oder relativiert? Story-Graph v2 (Korrektur- und Kontrastmarker mit
+    Bezug), ein Folgesatz, der mit einem Kontrastwort beginnt, oder „Moment“, „Das heißt aber nicht“ und
+    Korrekturmarker in den nächsten ``RETRACTION_WINDOW`` Sätzen mit Bezug auf den Satz. Ein Korrektursatz
+    selbst zählt auch als ausgeschlossen."""
+    if story_graph.find_later_qualifications(sents, i, i, rule="v2"):
+        return True
+    if i + 1 < len(texts) and fidelity.starts_with_contrast(texts[i + 1].lower(), "v2"):
+        return True
+    own = texts[i]
+    if _core(own.split()[0] if own.split() else "") in RETRACTION_STARTS or story_graph.find_marker(
+        own, story_graph.CORRECTION_MARKERS
+    ):
+        return True  # der Korrektursatz selbst („Moment, das muss ich korrigieren.“) ist kein Hook
+    for j in range(i + 1, min(len(texts), i + 1 + RETRACTION_WINDOW)):
+        later = texts[j]
+        first = _core(later.split()[0]) if later.split() else ""
+        marked = first in RETRACTION_STARTS or fidelity.phrase_hits(RETRACTION_PHRASES, later.lower())
+        marked = marked or bool(story_graph.find_marker(later, story_graph.CORRECTION_MARKERS))
+        if not marked:
+            continue
+        # Bezug wie im Story-Graph: der Markersatz und der Satz danach teilen Inhaltswörter mit dem Satz.
+        target = f"{later} {texts[j + 1]}" if j + 1 < len(texts) else later
+        if story_graph.lexical_overlap(own, target) >= story_graph.MIN_OVERLAP:
+            return True
+    return False
+
+
+def retracted_statements(clip_text: str, context_after: str = "") -> dict[int, str]:
+    """Sätze des Clips (Index in ``clip_sentences``), die nicht zum Hook taugen, mit Grund: ``retracted``
+    (später korrigiert oder relativiert, auch durch ``context_after``) oder ``reported`` (fremde Position)."""
+    clip = [" ".join(t) for t in clip_sentences(clip_text)]
+    texts = clip + [" ".join(t) for t in clip_sentences(context_after)]
+    sents = _sentence_objects(texts)
+    out: dict[int, str] = {}
+    for i in range(len(clip)):
+        if _is_reported(texts, i):
+            out[i] = "reported"
+        elif _is_retracted(texts, sents, i):
+            out[i] = "retracted"
+    return out
+
+
+def _content_tokens(text: str) -> set[str]:
+    return {c for c in (_core(t) for t in text.split()) if len(c) >= 3 and c not in ARTICLES | PREPOSITIONS | COPULA}
+
+
+def retraction_issue(hook: str, clip_text: str, context_after: str = "") -> str | None:
+    """Befund, wenn ein (generierter) Text-Hook im Wesentlichen eine zurückgenommene oder fremde Aussage des
+    Clips wiedergibt, sonst None."""
+    hook_tokens = _content_tokens(hook)
+    if not hook_tokens:
+        return None
+    clip = clip_sentences(clip_text)
+    for i, reason in retracted_statements(clip_text, context_after).items():
+        sent = " ".join(clip[i])
+        if len(hook_tokens & _content_tokens(sent)) / len(hook_tokens) >= HOOK_OVERLAP_RETRACTED:
+            what = "eine später korrigierte oder relativierte Aussage" if reason == "retracted" else "eine fremde Position"
+            return f"Text-Hook gibt {what} wieder ('{sent}')"
+    return None
+
+
 def native_onscreen(
-    clip_text: str, uncertain: list[str] | tuple[str, ...] = (), partial: bool = False
+    clip_text: str, uncertain: list[str] | tuple[str, ...] = (), partial: bool = False, context_after: str = ""
 ) -> tuple[str, str]:
     """Text-Hook des Rückfalls. Gibt (Text, Herkunft) zurück.
 
     Standard (``partial`` false): ein ganzer Originalsatz mit höchstens ``ONSCREEN_MAX_WORDS`` Wörtern, ohne
     unsichere Zahl, ohne Meta-Rede und ohne Claim-Befund; zuerst der erste Satz, sonst der nächste solche Satz
     ohne Rückbezug innerhalb der ersten vier Sätze. Herkunft ``first_sentence`` oder ``other_sentence``; mit
-    ``partial`` auch ``*_part``. Gibt es keinen, ist der Text leer (kein Overlay): ``none_meta`` (der erste
-    Satz ist Meta-Rede), ``none_uncertain`` (er nennt eine unsicher erkannte Zahl) oder ``none_too_long``."""
+    ``partial`` auch ``*_part``. Sätze, die der Clip oder ``context_after`` später korrigiert oder relativiert,
+    und Sätze mit fremder Position sind ausgeschlossen. Gibt es keinen, ist der Text leer (kein Overlay):
+    ``none_meta`` (der erste Satz ist Meta-Rede), ``none_retracted`` (ein kurzer Satz im Fenster wurde wegen
+    Korrektur oder fremder Position ausgeschlossen), ``none_uncertain`` (der erste Satz nennt eine unsicher erkannte Zahl)
+    oder ``none_too_long``."""
     sents = clip_sentences(clip_text)
+    excluded = retracted_statements(clip_text, context_after)
 
     def accept(text: str) -> bool:
         return not is_meta_speech(text) and not fidelity.hook_claim_check_v2(text, clip_text, uncertain)
 
     for idx, toks in enumerate(sents[:NATIVE_SENTENCE_WINDOW]):
-        if idx > 0 and _core(toks[0]) in ANAPHORIC_STARTS:
+        if (idx > 0 and _core(toks[0]) in ANAPHORIC_STARTS) or idx in excluded:
             continue
         text = sentence_hook(toks, ONSCREEN_MAX_WORDS, partial, accept)
         if text is not None:
@@ -508,6 +604,8 @@ def native_onscreen(
     first = " ".join(sents[0]) if sents else ""
     if first and is_meta_speech(first):
         return "", "none_meta"
+    if any(i < NATIVE_SENTENCE_WINDOW and len(sents[i]) <= ONSCREEN_MAX_WORDS for i in excluded):
+        return "", "none_retracted"  # ein kurzer Satz wäre wählbar gewesen, wird aber korrigiert oder ist fremd
     if first and fidelity.number_values([first]) & fidelity.number_values(uncertain):
         return "", "none_uncertain"
     return "", "none_too_long"
@@ -521,6 +619,7 @@ OPENING_NOTES = {
     "none_too_long": "kein Text: kein ganzer kurzer Originalsatz ohne Befund in den ersten vier Sätzen",
     "none_meta": "kein Text: der Einstieg spricht ein Modell an",
     "none_uncertain": "kein Text: der Einstieg nennt eine unsicher erkannte Zahl, kein anderer kurzer Satz passt",
+    "none_retracted": "kein Text: die kurzen Sätze werden später korrigiert oder geben eine fremde Position wieder",
 }
 
 
@@ -549,12 +648,16 @@ def select_variant_v2(variants: list[HookVariant]) -> HookVariant | None:
 
 
 def native_variant(
-    clip_text: str, brand: copy_de.BrandProfile, uncertain: list[str] | tuple[str, ...] = (), partial: bool = False
+    clip_text: str,
+    brand: copy_de.BrandProfile,
+    uncertain: list[str] | tuple[str, ...] = (),
+    partial: bool = False,
+    context_after: str = "",
 ) -> tuple[HookVariant, str]:
     """Rückfall ohne gültige Variante (Muster ``native``): Text-Hook nach ``native_onscreen``, gesprochen der
     wörtliche Einstieg. Gibt (Variante, Herkunft des Text-Hooks); ein leerer Text-Hook heißt kein Overlay."""
     spoken, _ = spoken_opening(clip_text, partial)
-    raw, kind = native_onscreen(clip_text, uncertain, partial)
+    raw, kind = native_onscreen(clip_text, uncertain, partial, context_after)
     onscreen, notes = copy_de.lint(raw, brand) if raw else ("", [])
     if kind != "first_sentence":
         notes.append(f"On-Screen-Hook: {OPENING_NOTES[kind]}")
@@ -698,12 +801,14 @@ def write_copy(
     s: config.Settings | None = None,
     pattern_order: list[str] | None = None,
     words: list[dict] | None = None,
+    context_after: str = "",
 ) -> CopyResult:
     """Komplette Copy für einen Clip: Varianten, Auswahl, Post-Captions je Plattform, Linter, optional LanguageTool.
 
     ``pattern_order`` (aus ``learning.thompson_order``) sortiert die Varianten vor der Auswahl; die
     Entscheidungen landen in ``CopyResult.decisions`` für das Decision Log. ``words`` sind die Wörter des
-    Clips mit ``prob``; unter Fassung 2 dürfen unsicher erkannte Zahlen nicht in den Hook."""
+    Clips mit ``prob``; unter Fassung 2 dürfen unsicher erkannte Zahlen nicht in den Hook. ``context_after``
+    ist Transkripttext nach dem Clip: korrigiert er eine Aussage des Clips, wird sie nicht zum Hook."""
     s = s or config.settings()
     variants, hooks_version = generate_variants(llm, clip_text, brand)
     variants = order_variants(variants, pattern_order)
@@ -711,7 +816,9 @@ def write_copy(
     uncertain: list[str] | None = None
     if native:
         uncertain = fidelity.uncertain_number_tokens(words or [])
-        chosen, spoken_hook, extra_notes, extra_claims, extra = _select_v2(variants, clip_text, brand, uncertain)
+        chosen, spoken_hook, extra_notes, extra_claims, extra = _select_v2(
+            variants, clip_text, brand, uncertain, context_after
+        )
         rule = RULE_V2
     else:
         chosen = select_variant(variants)
@@ -758,11 +865,16 @@ def write_copy(
 
 
 def _select_v2(
-    variants: list[HookVariant], clip_text: str, brand: copy_de.BrandProfile, uncertain: list[str]
+    variants: list[HookVariant],
+    clip_text: str,
+    brand: copy_de.BrandProfile,
+    uncertain: list[str],
+    context_after: str = "",
 ) -> tuple[HookVariant, str, list[str], list[str], dict[str, Any]]:
     """Auswahl unter Fassung 2 mit ``hook.native_spoken``.
 
-    1. Je Variante zählt nur der Text-Hook: Claim-Check v2 (mit unsicheren Zahlen), Lint und Wortlimit.
+    1. Je Variante zählt nur der Text-Hook: Claim-Check v2 (mit unsicheren Zahlen), Lint, Wortlimit und ob er
+       eine später korrigierte Aussage oder eine fremde Position wiedergibt (``retraction_issue``).
        Befunde zum gesprochenen Text stehen als ``Gesprochen (Hinweis): …`` in ``lint_notes``.
     2. Gewählt wird die erste gültige Variante in der Thompson-Reihenfolge (``select_variant_v2``), sonst der
        wörtliche Rückfall ``native_variant`` (ganzer Originalsatz oder kein Overlay; Teilsätze nur mit
@@ -776,6 +888,9 @@ def _select_v2(
         _, notes_s = copy_de.lint(v.spoken, brand)
         spoken_claims = fidelity.hook_claim_check_v2(v.spoken, clip_text, uncertain)
         v.claim_issues = fidelity.hook_claim_check_v2(v.onscreen, clip_text, uncertain)
+        retraction = retraction_issue(v.onscreen, clip_text, context_after)
+        if retraction:
+            v.claim_issues.append(retraction)
         v.lint_notes = [
             *notes_o,
             *limit_notes("", v.onscreen),
@@ -788,9 +903,13 @@ def _select_v2(
     fallback = chosen is None
     onscreen_source = "variant"
     if chosen is None:
-        chosen, onscreen_source = native_variant(clip_text, brand, uncertain, partial)
+        chosen, onscreen_source = native_variant(clip_text, brand, uncertain, partial, context_after)
     spoken, kind = spoken_opening(clip_text, partial)
     notes = [f"Gesprochener Hook: {OPENING_NOTES[kind]}"] if kind != "first_sentence" else []
+    if retracted_statements(clip_text, context_after).get(0):
+        notes.append(
+            "Gesprochener Hook: der Einstieg wird später korrigiert oder gibt eine fremde Position wieder, bitte prüfen"
+        )
     if is_meta_speech(spoken):
         notes.append("Gesprochener Hook: der Einstieg enthält Meta-Rede an ein Modell, sie wird nicht befolgt, bitte prüfen")
     claims = []
@@ -838,6 +957,8 @@ __all__ = [
     "allow_partial_opening",
     "is_meta_speech",
     "native_onscreen",
+    "retracted_statements",
+    "retraction_issue",
     "native_hooks_enabled",
     "native_variant",
     "order_variants",

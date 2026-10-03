@@ -165,6 +165,63 @@ class Policy:
     def hart_max_s(self) -> float:
         return float(self.roh["laenge"]["hart_max_s"])
 
+    # -- Ausbeute (nur Fassung 2; ohne den Abschnitt gilt das Verhalten vor AP9) ----------------
+    #
+    # WICHTIG: Die Rueckfallwerte bilden exakt die frueheren Festwerte ab (PROPOSE_MAX_MOMENTS = 3,
+    # MAX_PER_CHAPTER = 4, Anker nur an Markern). Fassung 1 bleibt dadurch byte-gleich zum Golden
+    # Snapshot in tests/snapshots/detect_v1.json. Neue Logik gehoert hinter einen Schalter in
+    # Fassung 2 - siehe den Kopf von tests/test_policy_snapshot_v1.py.
+    @property
+    def hat_ausbeute(self) -> bool:
+        return bool(self._ausbeute)
+
+    @property
+    def _ausbeute(self) -> dict:
+        return self.roh.get("ausbeute") or {}
+
+    @property
+    def kandidaten_je_minute(self) -> float:
+        return float(self._ausbeute.get("kandidaten_je_minute", 0.0))
+
+    @property
+    def min_je_kapitel(self) -> int:
+        return int(self._ausbeute.get("min_je_kapitel", 3))
+
+    @property
+    def max_je_kapitel(self) -> int:
+        return int(self._ausbeute.get("max_je_kapitel", 12))
+
+    @property
+    def vorschlag_ueberschuss(self) -> float:
+        return float(self._ausbeute.get("vorschlag_ueberschuss", 1.0))
+
+    @property
+    def anker_ohne_marker(self) -> bool:
+        """Ohne den Abschnitt aus: unter Fassung 1 setzt die Heuristik Anker nur an Markern."""
+        return bool(self._ausbeute.get("anker_ohne_marker", False))
+
+    def kandidaten_fuer(self, sekunden: float) -> int:
+        """Wie viele Kandidaten diese Spanne am Ende ANBIETEN soll.
+
+        Ohne ``ausbeute``-Abschnitt der fruehere Festwert 3 (PROPOSE_MAX_MOMENTS)."""
+        if not self.hat_ausbeute:
+            return 3
+        roh = (max(0.0, sekunden) / 60.0) * self.kandidaten_je_minute
+        return max(self.min_je_kapitel, min(self.max_je_kapitel, round(roh)))
+
+    def vorschlaege_fuer(self, sekunden: float) -> int:
+        """Wie viele VORSCHLAEGE diese Spanne erzeugen soll.
+
+        Mehr als ``kandidaten_fuer``, weil Tore, Laengenfenster und Ueberlappungsregel danach
+        aussieben. Ohne ``ausbeute``-Abschnitt der fruehere Festwert 3 (PROPOSE_MAX_MOMENTS) - so
+        viele lieferte die Heuristik unter Fassung 1. Die Engine deckelt zusaetzlich mit
+        MAX_PER_CHAPTER."""
+        if not self.hat_ausbeute:
+            return 3
+        ziel = (max(0.0, sekunden) / 60.0) * self.kandidaten_je_minute * self.vorschlag_ueberschuss
+        obergrenze = round(self.max_je_kapitel * self.vorschlag_ueberschuss)
+        return max(self.min_je_kapitel, min(obergrenze, round(ziel)))
+
     @property
     def kontext_zugabe_s(self) -> float:
         """Wie viele Sekunden ein Clip ueber die harte Grenze wachsen darf, um sein Ende zu heilen.

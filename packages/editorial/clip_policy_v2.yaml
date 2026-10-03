@@ -677,6 +677,40 @@ gates:
 # ------------------------------------------------------------------------------------------------
 # Ausgabeumfang (neu in Fassung 2, AP9)
 # ------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
+# Ausbeute: wie viele Kandidaten ein Video hergeben soll (nur Fassung 2)
+# ------------------------------------------------------------------------------------------------
+# [E] Gemessen am 27.09.2026 an einer echten Quelle (9,0 min, 1712 Woerter, 81 Saetze): im harten
+#     Laengenfenster 532 moegliche Satzspannen, Vorschlaege der Engine 6, angeboten 3.
+#
+# Ursache war nicht eine Entscheidung, sondern drei Begrenzer, die zusammenwirkten:
+#   1. Die Heuristik setzte Anker nur, wo ein Marker griff, und brach beim ersten Satz ohne Marker
+#      ab. Marker greifen laut Messung weiter unten auf 2,4 bis 6,2 Prozent der Saetze.
+#   2. PROPOSE_MAX_MOMENTS = 3 je Kapitel, unabhaengig von dessen Laenge.
+#   3. MAX_PER_CHAPTER = 4 schnitt in der Engine nochmals ab.
+#
+# Punkt 1 widersprach `bewertung.modus: sortieren`: ein Moment, der nie vorgeschlagen wird, ist
+# unterdrueckt, nicht niedrig bewertet.
+#
+# GRUNDHALTUNG: Ueber den Wert eines Clips entscheidet der Mensch am Werkzeug. Die Maschine
+# verwirft nur, was nachweislich kaputt ist (die Tore). Alles andere wird angeboten und sortiert.
+#
+# ABGRENZUNG zu `output.max_candidates` weiter unten: Das ist die Produktregel, wie viele Clips am
+# Ende in der Liste stehen (10). Dieser Abschnitt regelt, wie viele ueberhaupt erst VORGESCHLAGEN
+# werden. Ohne ihn kommen dort nie zehn an.
+#
+# Fehlt dieser Abschnitt (Fassung 1), gelten die alten Festwerte. Fassung 1 bleibt damit
+# byte-gleich zum Golden Snapshot.
+ausbeute:
+  kandidaten_je_minute: 1.5
+  min_je_kapitel: 3
+  max_je_kapitel: 12
+  # Zwischen Vorschlag und Angebot sieben Tore, Laengenfenster und Ueberlappung aus. An der
+  # Messquelle kamen von 11 Vorschlaegen 6 durch, also 55 Prozent.
+  vorschlag_ueberschuss: 2.0
+  # Saetze ohne Marker duerfen Anker sein. Der Marker bleibt ein Vorteil, kein Eintrittsbillett.
+  anker_ohne_marker: true
+
 # max_candidates: höchstens so viele Kandidaten je Quelle bietet story_engine.select_best an (vorher 20 fest im
 # Code). Keine feste Clipanzahl pro Stunde, Verwerfen bleibt zulässig (Master-Prompt Abschnitt 7).
 # redundancy_jaccard: ab diesem Anteil gemeinsamer Inhaltswörter (Lemma-Jaccard aus story_graph._lemmas) gilt

@@ -33,7 +33,12 @@ from .pipeline.story_graph import CONTRAST_MARKERS
 
 MODEL_ID = "heuristic-v1"
 WORDS_PER_SECOND = 2.5  # ruhiges Sprechtempo Deutsch, etwa 150 Wörter pro Minute
-PROPOSE_MAX_MOMENTS = 3
+# Notbremse gegen Endlosschleifen, keine redaktionelle Zahl. Wie viele Vorschlaege ein Kapitel
+# wirklich hergibt, steht in der Grundlage (`ausbeute`), siehe Policy.kandidaten_fuer().
+PROPOSE_MAX_MOMENTS_HART = 40
+# Mindestabstand zweier Anker in Saetzen. Klein genug fuer versetzte Zuschnitte desselben
+# Moments, gross genug, dass nicht jeder Satz einen eigenen Vorschlag erzeugt.
+ANKER_MINDESTABSTAND_SAETZE = 2
 EVIDENCE_WORDS = 8
 HOOK_MAX_WORDS = 15  # „stoppt in drei Sekunden“ heisst in Textmerkmalen: kurzer erster Satz
 NEUTRAL = 0.5  # Mittelwert für das, was die Heuristik ehrlicherweise nicht misst
@@ -142,7 +147,13 @@ def _anchor_score(sent: dict, p: editorial.Policy | None = None) -> float:
     """Wie sehr taugt dieser Satz als Anker? Eigene Marker plus die Moment-Typen der Grundlage."""
     p = p or policy()
     low = sent["text"].lower()
-    score = 0.0
+    # Grundwert: Jeder Satz taugt grundsaetzlich als Anker, Marker heben ihn nur hervor.
+    # Vorher stand hier 0.0, und propose_moments brach beim ersten Anker ohne Marker ab. Da die
+    # Marker nur auf 2,4 bis 6,2 Prozent der Saetze greifen (Messung in der Grundlage), entstanden
+    # pro Kapitel ein bis zwei Vorschlaege, unabhaengig von seiner Laenge. Das widersprach
+    # `bewertung.modus: sortieren`: ein Moment, der nie vorgeschlagen wird, ist unterdrueckt.
+    # Ueber den Wert entscheidet der Mensch, nicht diese Funktion.
+    score = 0.1 if p.anker_ohne_marker else 0.0
     score += 2.0 * min(len(_markers_in(low)), 2)
     if _NUMBER.search(sent["text"]):
         score += 1.0
@@ -193,24 +204,39 @@ def propose_moments(user: str) -> dict:
     p = policy()
     ziel, von, bis, minimum = p.ziel_s, p.gut_von_s, p.gut_bis_s, p.hart_min_s
     anchors = sorted(((_anchor_score(s, p), i) for i, s in enumerate(sents)), key=lambda x: (-x[0], x[1]))
+    # Wie viele Vorschlaege dieses Kapitel hergeben soll, richtet sich nach seiner Laenge
+    # (`ausbeute.kandidaten_je_minute`), nicht nach einer festen Zahl. Ein Kapitel von vier
+    # Minuten hat mehr zu bieten als eines von einer Minute.
+    # Fassung 2 (`ausbeute`) richtet die Zahl nach der Laenge des Kapitels und erlaubt versetzte
+    # Zuschnitte. Fassung 1 bleibt unveraendert - der Golden Snapshot haengt daran.
+    weit = p.hat_ausbeute
+    obergrenze = min(p.vorschlaege_fuer(estimate_seconds(sents)), PROPOSE_MAX_MOMENTS_HART)
     chosen: list[tuple[int, int]] = []
     moments = []
     for score, i in anchors:
-        if score <= 0 or len(moments) >= PROPOSE_MAX_MOMENTS:
+        if score <= 0 or len(moments) >= obergrenze:
             break
-        if any(a <= i <= b for a, b in chosen):
+        # Fassung 1: jeder bereits gewaehlte Bereich ist komplett gesperrt, und ein Vorschlag
+        # waechst nicht in einen fremden hinein. Mit `ausbeute` (Fassung 2) gilt stattdessen nur
+        # ein Mindestabstand zwischen den Ankern: versetzte Zuschnitte desselben Bereichs werden
+        # moeglich, und `select_best` sortiert zu Aehnliches spaeter wieder aus. Die Wahl zwischen
+        # zwei Zuschnitten gehoert dem Menschen, nicht dieser Schleife.
+        if weit:
+            if any(abs(i - a) < ANKER_MINDESTABSTAND_SAETZE for a, _b in chosen):
+                continue
+        elif any(a <= i <= b for a, b in chosen):
             continue
         a, b = i, i
         while estimate_seconds(sents[a : b + 1]) < ziel and b + 1 < len(sents):
             if estimate_seconds(sents[a : b + 2]) > bis:
                 break
-            if any(x <= b + 1 <= y for x, y in chosen):
+            if not weit and any(x <= b + 1 <= y for x, y in chosen):
                 break
             b += 1
         while estimate_seconds(sents[a : b + 1]) < von and a > 0:
             if estimate_seconds(sents[a - 1 : b + 1]) > bis:
                 break
-            if any(x <= a - 1 <= y for x, y in chosen):
+            if not weit and any(x <= a - 1 <= y for x, y in chosen):
                 break
             a -= 1
         if estimate_seconds(sents[a : b + 1]) < minimum:

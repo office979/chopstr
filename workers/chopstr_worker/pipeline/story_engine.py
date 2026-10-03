@@ -53,7 +53,11 @@ MAX_LEN_S = 90.0
 # ENDE; was am Anfang fehlt, holt die Verlaengerung nach hinten nicht zurueck.
 ENDE_TORE = ("fidelity", "sentence_boundaries", "no_open_loop")
 MAX_CANDIDATES = 20
+# Ruecklauf, falls die Grundlage keinen `ausbeute`-Abschnitt hat. Wie viele Vorschlaege ein
+# Kapitel wirklich liefern darf, steht dort (Policy.vorschlaege_fuer); MAX_PER_CHAPTER_HART ist
+# nur die Notbremse gegen Ausreisser.
 MAX_PER_CHAPTER = 4
+MAX_PER_CHAPTER_HART = 40
 MAX_REPAIR_ROUNDS = 2
 CHAPTER_SECONDS = 240.0
 # Ab wann zwei Spannen als derselbe Clip gelten, gemessen am KUERZEREN der beiden.
@@ -374,6 +378,24 @@ def policy_total(
 
 
 # -- Kapitel und Seeds ---------------------------------------------------------------------------
+
+
+def _vorschlaege_fuer(chapter: list[Sentence]) -> int:
+    """Wie viele Vorschlaege dieses Kapitel liefern darf, nach seiner Laenge.
+
+    Vorher schnitt MAX_PER_CHAPTER jedes Kapitel auf vier ab, unabhaengig davon, ob es eine oder
+    fuenf Minuten lang war - und unabhaengig davon, wie viele die Stufe davor geliefert hatte.
+    Gemessen am 27.09.2026 an einer echten Quelle (9 min): 532 moegliche Satzspannen, 6 Vorschlaege,
+    3 angebotene Clips. Die Zahl steht jetzt in der Grundlage (`ausbeute`), siehe
+    Policy.vorschlaege_fuer(); hier bleibt nur die Notbremse."""
+    if not chapter:
+        return MAX_PER_CHAPTER
+    pol = editorial.load()
+    # Fassung 1 (ohne `ausbeute`): unveraendert MAX_PER_CHAPTER, damit der Golden Snapshot haelt.
+    if not getattr(pol, "hat_ausbeute", False):
+        return MAX_PER_CHAPTER
+    sekunden = float(chapter[-1].end) - float(chapter[0].start)
+    return max(1, min(pol.vorschlaege_fuer(sekunden), MAX_PER_CHAPTER_HART))
 
 
 def chapter_order(chapters: list[list[Sentence]], seeds: list[float]) -> list[tuple[int, list[Sentence], bool]]:
@@ -1813,7 +1835,7 @@ def run(
             if not moments:
                 no_viable_moment(report, chapter_no, chapter)
         else:
-            moments = story_score.propose(chapter, brief, llm)[:MAX_PER_CHAPTER]
+            moments = story_score.propose(chapter, brief, llm)[: _vorschlaege_fuer(chapter)]
             report.proposals += len(moments)
         for m in moments:
             first, last = int(m["first_sent"]), int(m["last_sent"])
@@ -2141,7 +2163,9 @@ def _propose_v2(
     model: list[dict] = []
     if not heuristic:
         try:
-            model = story_score.propose(chapter, brief, llm, overview=overview, seeds=seeds, policy=pol)[:MAX_PER_CHAPTER]
+            model = story_score.propose(chapter, brief, llm, overview=overview, seeds=seeds, policy=pol)[
+                : _vorschlaege_fuer(chapter)
+            ]
         except LLMBudgetExceeded:
             report.discarded.append({"reason": "llm_budget", "stage": "propose", **span})
     found = payoff_search.search_moments(chapter, pol, heat_payload, gate_fn=gate_fn, words=words)

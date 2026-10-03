@@ -58,7 +58,10 @@ def test_propose_is_deterministic_and_schema_conform(no_network):
     m1 = story_score.propose(sents, BRIEF, llm, policy=pol)
     m2 = story_score.propose(sents, BRIEF, llm, policy=pol)
     assert m1 == m2
-    assert 1 <= len(m1) <= 3
+    # Wie viele Vorschlaege ein Kapitel liefert, steht in der Grundlage (`ausbeute`) und richtet
+    # sich nach seiner Laenge. Unter Fassung 1 bleiben es die frueheren hoechstens drei.
+    _soll = editorial.load().vorschlaege_fuer(sents[-1].end - sents[0].start)
+    assert 1 <= len(m1) <= _soll
     valid = {s.idx for s in sents}
     spans = []
     for m in m1:
@@ -71,7 +74,11 @@ def test_propose_is_deterministic_and_schema_conform(no_network):
         spans.append((m["first_sent"], m["last_sent"]))
     for a, b in spans:
         for c, d in spans:
-            assert (a, b) == (c, d) or b < c or d < a  # keine Überlappung
+            # Ueberlappende Zuschnitte sind ausdruecklich erlaubt: derselbe Moment darf in zwei
+            # Varianten angeboten werden, der Clipper waehlt. Was gelten muss, ist der
+            # Mindestabstand der Anker - sonst entstuende fuer jeden Satz ein eigener Vorschlag.
+            # Zu Aehnliches sortiert `select_best` spaeter ueber `ausbeute.ueberlappung_max` aus.
+            assert abs(a - c) >= heuristic_llm.ANKER_MINDESTABSTAND_SAETZE or (a, b) == (c, d)
 
 
 def test_score_fields_ranges_and_grounded_evidence(no_network):

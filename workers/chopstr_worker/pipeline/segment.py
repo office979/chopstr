@@ -47,11 +47,12 @@ class Candidate:
         return self.end - self.start
 
 
-def sentences_from_words(words: list[dict], min_pause_s: float = MIN_PAUSE_AS_BOUNDARY) -> list[Sentence]:
+def sentences_from_words(words: list[dict], min_pause_s: float = MIN_PAUSE_AS_BOUNDARY, rule: str = "v1") -> list[Sentence]:
+    """Sätze nach der Satzende-Regel ``rule`` (``v1`` wie vor AP2, ``v2`` siehe ``dach_nlp.sentence_end_kind``)."""
     sents: list[Sentence] = []
     buf_start = 0
     for i in range(len(words)):
-        if dach_nlp.is_sentence_end(words, i, min_pause_s):
+        if dach_nlp.is_sentence_end(words, i, min_pause_s, rule=rule):
             chunk = words[buf_start : i + 1]
             sents.append(
                 Sentence(
@@ -64,6 +65,40 @@ def sentences_from_words(words: list[dict], min_pause_s: float = MIN_PAUSE_AS_BO
                 )
             )
             buf_start = i + 1
+    return sents
+
+
+def has_sentence_idx(words: list[dict]) -> bool:
+    """Tragen alle Wörter eine ``sentence_idx`` (geschrieben von ``dach_nlp.annotate``)?"""
+    return bool(words) and all(isinstance(w.get("sentence_idx"), int) and not isinstance(w.get("sentence_idx"), bool) for w in words)
+
+
+def sentences_from_annotated(words: list[dict]) -> list[Sentence]:
+    """Sätze aus der vorhandenen ``sentence_idx`` (Spiegel von ``sentencesFromWords`` im Web).
+
+    Aufeinanderfolgende Wörter mit gleicher ``sentence_idx`` bilden einen Satz; ``idx`` zählt fortlaufend
+    ab 0, wie bei ``sentences_from_words``. Damit zerlegen Worker und Web ein bestehendes Transkript
+    gleich, egal nach welcher Regel es annotiert wurde. Ohne ``sentence_idx`` an jedem Wort: leere Liste,
+    der Aufrufer fällt auf ``sentences_from_words`` zurück."""
+    if not has_sentence_idx(words):
+        return []
+    sents: list[Sentence] = []
+    buf_start = 0
+    for i in range(len(words)):
+        if i + 1 < len(words) and words[i + 1]["sentence_idx"] == words[i]["sentence_idx"]:
+            continue
+        chunk = words[buf_start : i + 1]
+        sents.append(
+            Sentence(
+                idx=len(sents),
+                text=" ".join(str(x["text"]) for x in chunk),
+                start=float(chunk[0]["start"]),
+                end=float(chunk[-1]["end"]),
+                speaker=chunk[0].get("speaker"),
+                word_range=(buf_start, i),
+            )
+        )
+        buf_start = i + 1
     return sents
 
 
@@ -112,4 +147,14 @@ def numbered(sents: list[Sentence]) -> str:
     return "\n".join(f"[{s.idx}] ({s.speaker or '?'}) {s.text}" for s in sents)
 
 
-__all__ = ["MIN_PAUSE_AS_BOUNDARY", "Candidate", "Sentence", "candidate_windows", "chapterize", "numbered", "sentences_from_words"]
+__all__ = [
+    "MIN_PAUSE_AS_BOUNDARY",
+    "Candidate",
+    "Sentence",
+    "candidate_windows",
+    "chapterize",
+    "has_sentence_idx",
+    "numbered",
+    "sentences_from_annotated",
+    "sentences_from_words",
+]

@@ -1,0 +1,347 @@
+{
+  "version": "claim_check_v1",
+  "description": "Gemeinsame Fälle für fidelity.hook_claim_check_v2 (pytest) und hookClaimCheckV2 in apps/web/lib/copy/claims.ts (vitest). expected_issues ist die exakte Ausgabe; beide Seiten müssen sie wörtlich liefern.",
+  "cases": [
+    {
+      "id": "zahl_ohne_tausender",
+      "note": "40 Euro gegen 400.000 Euro ist ein Befund",
+      "hook": "40 Euro gespart",
+      "clip_text": "Wir haben 400.000 Euro gespart.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Zahl '40' (Euro) steht so nicht im Clip"
+      ]
+    },
+    {
+      "id": "zahl_in_jahreszahl",
+      "note": "4 Tipps gegen 2024 ist ein Befund",
+      "hook": "4 Tipps für den Einkauf",
+      "clip_text": "Das war 2024 im Einkauf.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Zahl '4' (Tipps) steht so nicht im Clip"
+      ]
+    },
+    {
+      "id": "prozent_zeichen_gegen_wort",
+      "note": "40 % ist durch 40 Prozent gedeckt",
+      "hook": "40 % Marge verloren",
+      "clip_text": "Wir haben 40 Prozent Marge verloren.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "prozent_wort_gegen_zeichen",
+      "note": "40 Prozent ist durch 40 % gedeckt",
+      "hook": "40 Prozent weniger",
+      "clip_text": "Die Kosten sanken um 40 % im Jahr.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "tausenderpunkt_gegen_leerzeichen",
+      "note": "40.000 Euro ist durch 40 000 Euro gedeckt",
+      "hook": "40.000 Euro gespart",
+      "clip_text": "Wir haben 40 000 Euro gespart.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "tausend_als_wort",
+      "note": "40 Tausend Euro ist 40.000 Euro",
+      "hook": "40 Tausend Euro gespart",
+      "clip_text": "Wir haben 40.000 Euro gespart.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "dezimalkomma",
+      "note": "2,5 Mio. Euro gegen 2,5 Millionen Euro gedeckt",
+      "hook": "2,5 Mio. Euro Umsatz",
+      "clip_text": "Der Umsatz lag bei 2,5 Millionen Euro.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "dezimalkomma_anderer_wert",
+      "note": "3,5 Prozent gegen 35 Prozent ist ein Befund",
+      "hook": "3,5 Prozent Zinsen",
+      "clip_text": "Wir zahlen 35 Prozent Zinsen.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Zahl '3,5' (Prozent) steht so nicht im Clip"
+      ]
+    },
+    {
+      "id": "euro_zeichen_vorne",
+      "note": "€ 500 ist durch 500 Euro gedeckt",
+      "hook": "Nur € 500 im Monat",
+      "clip_text": "Das kostet uns 500 Euro.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "zahlwort_im_clip",
+      "note": "4 Lieferanten ist durch vier Lieferanten gedeckt",
+      "hook": "Von 12 auf 4 Lieferanten",
+      "clip_text": "Die Zahl der Lieferanten sank von zwölf auf vier.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "zahlwort_falsches_nomen",
+      "note": "4 Wochen ist durch vier ohne Wochen nicht gedeckt",
+      "hook": "In 4 Wochen umgebaut",
+      "clip_text": "Wir haben von zwölf auf vier reduziert.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Zahl '4' (Wochen) steht so nicht im Clip"
+      ]
+    },
+    {
+      "id": "zahlwort_im_hook",
+      "note": "Drei Fehler gegen 3 Fehler gedeckt",
+      "hook": "Drei Fehler beim Einkauf",
+      "clip_text": "Es gab 3 Fehler beim Einkauf.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "zahl_ohne_einheit_im_hook",
+      "note": "Eine Zahl ohne Einheit ist durch denselben Wert gedeckt",
+      "hook": "Seit 2024 weniger Lieferanten",
+      "clip_text": "Wer hat bei euch den Einkauf neu aufgestellt? Das war Frau Meier, das schreibt man mit a i. Sie hat die Zahl der Lieferanten von zwölf auf vier reduziert. Bei uns hat das im ersten Jahr rund 40.000 Euro gespart. Das war 2024, also bevor die Preise nochmal angezogen haben. Für einen Betrieb mit vierzig Leuten ist das viel Geld.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "unsichere_zahl",
+      "note": "Unsicher erkannte Zahl darf nicht in den Hook",
+      "hook": "Rund 40.000 Euro gespart",
+      "clip_text": "Wer hat bei euch den Einkauf neu aufgestellt? Das war Frau Meier, das schreibt man mit a i. Sie hat die Zahl der Lieferanten von zwölf auf vier reduziert. Bei uns hat das im ersten Jahr rund 40.000 Euro gespart. Das war 2024, also bevor die Preise nochmal angezogen haben. Für einen Betrieb mit vierzig Leuten ist das viel Geld.",
+      "uncertain_tokens": [
+        "40.000"
+      ],
+      "expected_issues": [
+        "Zahl '40.000' ist im Clip unsicher erkannt und darf nicht in den Hook (am Audio prüfen)"
+      ]
+    },
+    {
+      "id": "unsichere_zahl_andere_schreibweise",
+      "note": "Unsicher erkannte Zahl auch in anderer Schreibweise",
+      "hook": "40 000 Euro gespart",
+      "clip_text": "Wer hat bei euch den Einkauf neu aufgestellt? Das war Frau Meier, das schreibt man mit a i. Sie hat die Zahl der Lieferanten von zwölf auf vier reduziert. Bei uns hat das im ersten Jahr rund 40.000 Euro gespart. Das war 2024, also bevor die Preise nochmal angezogen haben. Für einen Betrieb mit vierzig Leuten ist das viel Geld.",
+      "uncertain_tokens": [
+        "40.000"
+      ],
+      "expected_issues": [
+        "Zahl '40 000' ist im Clip unsicher erkannt und darf nicht in den Hook (am Audio prüfen)"
+      ]
+    },
+    {
+      "id": "fixture_40_euro",
+      "note": "Fall misrecognized_number_or_name, must_flag",
+      "hook": "Bei uns 40 Euro gespart",
+      "clip_text": "Wer hat bei euch den Einkauf neu aufgestellt? Das war Frau Meier, das schreibt man mit a i. Sie hat die Zahl der Lieferanten von zwölf auf vier reduziert. Bei uns hat das im ersten Jahr rund 40.000 Euro gespart. Das war 2024, also bevor die Preise nochmal angezogen haben. Für einen Betrieb mit vierzig Leuten ist das viel Geld.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Zahl '40' (Euro) steht so nicht im Clip"
+      ]
+    },
+    {
+      "id": "fixture_4_wochen",
+      "note": "Fall misrecognized_number_or_name, must_flag",
+      "hook": "In 4 Wochen den Einkauf umgebaut",
+      "clip_text": "Wer hat bei euch den Einkauf neu aufgestellt? Das war Frau Meier, das schreibt man mit a i. Sie hat die Zahl der Lieferanten von zwölf auf vier reduziert. Bei uns hat das im ersten Jahr rund 40.000 Euro gespart. Das war 2024, also bevor die Preise nochmal angezogen haben. Für einen Betrieb mit vierzig Leuten ist das viel Geld.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Zahl '4' (Wochen) steht so nicht im Clip"
+      ]
+    },
+    {
+      "id": "fixture_2024",
+      "note": "Fall misrecognized_number_or_name, must_pass",
+      "hook": "Seit 2024 weniger Lieferanten",
+      "clip_text": "Wer hat bei euch den Einkauf neu aufgestellt? Das war Frau Meier, das schreibt man mit a i. Sie hat die Zahl der Lieferanten von zwölf auf vier reduziert. Bei uns hat das im ersten Jahr rund 40.000 Euro gespart. Das war 2024, also bevor die Preise nochmal angezogen haben. Für einen Betrieb mit vierzig Leuten ist das viel Geld.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "geltungsbereich_jedes_unternehmen",
+      "note": "Verallgemeinerer gegen Einschränker ist ein Befund",
+      "hook": "Jedes Unternehmen spart so",
+      "clip_text": "Bei einem Kunden hat das viel gespart.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Geltungsbereich: 'jedes unternehmen' im Hook, der Clip schränkt ein ('bei einem kunden')"
+      ]
+    },
+    {
+      "id": "geltungsbereich_alle_damals",
+      "note": "alle gegen damals ist ein Befund",
+      "hook": "Alle sparen damit",
+      "clip_text": "Damals haben wir damit gespart.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Geltungsbereich: 'alle' im Hook, der Clip schränkt ein ('damals')"
+      ]
+    },
+    {
+      "id": "geltungsbereich_ohne_einschraenker",
+      "note": "Verallgemeinerer ohne Einschränker im Clip ist kein Geltungsbefund",
+      "hook": "Alle sparen damit",
+      "clip_text": "Alle unsere Kunden sparen damit.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "zuspitzung_wortgrenze",
+      "note": "Zuspitzung an Wortgrenzen: „nimmermehr“ deckt „immer“ nicht",
+      "hook": "Immer der beste Weg",
+      "clip_text": "Das ist der beste Weg, nimmermehr anders.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Zuspitzung 'immer' nicht durch Clip gedeckt"
+      ]
+    },
+    {
+      "id": "sauber",
+      "note": "Hook ohne Zahl und Zuspitzung",
+      "hook": "Der Grund war ein falsches Preismodell",
+      "clip_text": "Der Grund war ein falsches Preismodell.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "nomen_anderes_nomen",
+      "note": "40 Kunden ist durch 40 Mitarbeiter und viele Kunden nicht gedeckt",
+      "hook": "40 Kunden",
+      "clip_text": "40 Mitarbeiter und viele Kunden",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Zahl '40' (Kunden) steht so nicht im Clip"
+      ]
+    },
+    {
+      "id": "nomen_gleicher_stamm",
+      "note": "40 Kunden ist durch 40 Kundinnen gedeckt",
+      "hook": "40 Kunden gewonnen",
+      "clip_text": "Wir haben 40 Kundinnen gewonnen.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "nomen_zahl_ohne_einheit",
+      "note": "40 Kunden ist durch 40 neue Kunden gedeckt",
+      "hook": "40 Kunden gewonnen",
+      "clip_text": "Wir haben 40 neue Kunden gewonnen.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "geltungsbereich_hook_schraenkt_ein",
+      "note": "Kein Befund, wenn der Hook selbst einschränkt",
+      "hook": "Bei uns sparen alle",
+      "clip_text": "Bei uns spart man.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "geltungsbereich_clip_sagt_es_selbst",
+      "note": "Kein Befund, wenn der Clip den Verallgemeinerer ohne Einschränker sagt",
+      "hook": "Immer sparen",
+      "clip_text": "Immer sparen wir. Bei uns sowieso.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "geltungsbereich_ohne_doppelbefund",
+      "note": "immer nur als Geltungsbereich, nicht zusätzlich als Zuspitzung",
+      "hook": "Das klappt immer",
+      "clip_text": "Bei uns hat das geklappt.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Geltungsbereich: 'immer' im Hook, der Clip schränkt ein ('bei uns')"
+      ]
+    },
+    {
+      "id": "zahlwort_ueber_zwanzig",
+      "note": "vierzigtausend Euro deckt 40.000 Euro",
+      "hook": "40.000 Euro gespart",
+      "clip_text": "Wir haben vierzigtausend Euro gespart.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "zahlwort_zusammengesetzt",
+      "note": "einundzwanzig Kunden deckt 21 Kunden",
+      "hook": "21 Kunden",
+      "clip_text": "Wir haben einundzwanzig Kunden.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "zahlwort_nicht_erkannt",
+      "note": "Ein unlesbares Zahlwort im Hook ist ein Befund",
+      "hook": "Zehntausende Kunden",
+      "clip_text": "Wir haben viele Kunden.",
+      "uncertain_tokens": [],
+      "expected_issues": [
+        "Zahlwort 'Zehntausende' nicht erkannt, am Clip prüfen"
+      ]
+    },
+    {
+      "id": "einzig_ist_kein_zahlwort",
+      "note": "einzig ist kein Zahlwort",
+      "hook": "Das einzige Problem",
+      "clip_text": "Das einzige Problem war der Preis.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "acht_als_verb",
+      "note": "acht ohne Nomen ist keine Zahl",
+      "hook": "Gib acht beim Preis",
+      "clip_text": "Beim Preis muss man aufpassen.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "uhrzeit",
+      "note": "9:30 Uhr ist durch 9.30 Uhr gedeckt",
+      "hook": "Start 9:30 Uhr",
+      "clip_text": "Wir starten um 9.30 Uhr.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "geschuetztes_leerzeichen",
+      "note": "Geschütztes Leerzeichen als Tausendertrenner",
+      "hook": "40 000 Euro",
+      "clip_text": "Wir haben 40.000 Euro gespart.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    },
+    {
+      "id": "unsichere_zahl_im_kontext",
+      "note": "Unsichere Zahl als Wortfolge gelesen: 40 Tausend Euro ist 40.000",
+      "hook": "40.000 Euro gespart",
+      "clip_text": "Rund 40 Tausend Euro gespart.",
+      "uncertain_tokens": [
+        "40 Tausend Euro",
+        "40"
+      ],
+      "expected_issues": [
+        "Zahl '40.000' ist im Clip unsicher erkannt und darf nicht in den Hook (am Audio prüfen)"
+      ]
+    },
+    {
+      "id": "eine_million",
+      "note": "eine Million Euro ist 1.000.000 Euro",
+      "hook": "1.000.000 Euro Umsatz",
+      "clip_text": "Wir hatten eine Million Euro Umsatz.",
+      "uncertain_tokens": [],
+      "expected_issues": []
+    }
+  ]
+}

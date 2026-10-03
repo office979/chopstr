@@ -587,7 +587,44 @@ def _fit(prefix: str, sentence: str, limit: int, suffix: str = "") -> str:
 
 
 def write_hooks(user: str) -> dict:
-    """Fünf Hook-Varianten aus Satzanfängen, erster Zahl und Kontrastmarker des Clips. Keine neuen Zahlen."""
+    """Fünf Hook-Varianten aus Satzanfängen, erster Zahl und Kontrastmarker des Clips. Keine neuen Zahlen.
+
+    Mit ``hooks_v2`` (Clip zwischen Begrenzern, Fassung 2, AP6a): keine eigenen Rahmungen, jede Variante ist
+    ein wörtlicher Auszug aus dem Clip (ganzer Satz oder bis zu einer gültigen Phrasengrenze, siehe
+    ``copy_engine.verbatim_excerpt``), möglichst je Muster ein anderer Satz. Mit ``hooks_v1`` wie bisher."""
+    open_at, close_at = user.find("<clip>"), user.rfind("</clip>")
+    if open_at >= 0 and close_at > open_at:
+        from .pipeline import copy_engine
+
+        clip_v2 = user[open_at + len("<clip>") : close_at]
+        sents = [" ".join(t) for t in copy_engine.clip_sentences(clip_v2) if not copy_engine.is_meta_speech(" ".join(t))]
+        excerpts = {}
+        for x in sents or [clip_v2.strip() or "-"]:
+            toks = x.split()
+            onscreen = copy_engine.verbatim_excerpt(toks, ONSCREEN_MAX_WORDS)
+            if onscreen is not None:
+                excerpts[x] = (copy_engine.verbatim_excerpt(toks, SPOKEN_MAX_WORDS) or x, onscreen)
+        if not excerpts:
+            first = sents[0] if sents else clip_v2.strip() or "-"
+            excerpts[first] = (first, first)
+        order = list(excerpts)
+        fits = {
+            "identity_call": lambda x: re.search(r"\b(du|dich|dir|dein\w*|euch|euer|eure\w*|ihr|Ihnen)\b", x, re.IGNORECASE),
+            "contrarian": lambda x: CONTRAST_WORDS.search(x.lower()),
+            "open_loop": lambda x: x.endswith("?"),
+            "results_first": lambda x: _NUMBER.search(x),
+            "mistake_warning": lambda x: re.search(r"\b(fehler\w*|falsch\w*|verloren|problem\w*|teuer\w*)\b", x.lower()),
+        }
+        used: set[int] = set()
+        native = []
+        for pattern in HOOK_PATTERNS:
+            idx = next((i for i, x in enumerate(order) if i not in used and fits[pattern](x)), None)
+            if idx is None:
+                idx = next((i for i in range(len(order)) if i not in used), 0)
+            used.add(idx)
+            spoken, onscreen = excerpts[order[idx]]
+            native.append({"pattern": pattern, "spoken": spoken, "onscreen": onscreen})
+        return {"variants": native}
     clip = clip_text_of(user)
     address = address_of(user)
     sents = sentences_of(clip) or [clip or "-"]

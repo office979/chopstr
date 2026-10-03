@@ -39,3 +39,36 @@ def test_candidate_windows_and_chapters():
     assert sum(len(c) for c in chapters) == 20
     assert len(chapters) > 1
     assert segment.numbered(sents[:2]) == "[0] (S0) Satz 0.\n[1] (S0) Satz 1."
+
+
+# -- AP2: Sätze aus der vorhandenen sentence_idx ------------------------------------------------
+
+
+def test_sentences_from_annotated_mirror_the_annotation():
+    from chopstr_worker.pipeline import dach_nlp
+
+    words = _words(["Das", "ist", "so.", "Wir", "machen", "weiter.", "Fertig?"])
+    dach_nlp.annotate(words, rule="v2")
+    sents = segment.sentences_from_annotated(words)
+    assert [s.text for s in sents] == ["Das ist so.", "Wir machen weiter.", "Fertig?"]
+    assert [s.word_range for s in sents] == [(0, 2), (3, 5), (6, 6)]
+    assert [s.idx for s in sents] == [0, 1, 2]
+    assert sents[1].start == words[3]["start"] and sents[1].end == words[5]["end"]
+
+
+def test_sentences_from_annotated_keeps_an_existing_v1_annotation():
+    """Eine bestehende Transkriptversion behält ihre Sätze, auch wenn die Regel sich ändert."""
+    from chopstr_worker.pipeline import dach_nlp
+
+    words = _words(["Das", "ist", "so.", "Wir", "machen", "weiter."])
+    dach_nlp.annotate(words)  # v1: „so." ist eine Abkürzung
+    assert [s.text for s in segment.sentences_from_annotated(words)] == ["Das ist so. Wir machen weiter."]
+    assert [s.text for s in segment.sentences_from_words(words, rule="v2")] == ["Das ist so.", "Wir machen weiter."]
+
+
+def test_sentences_from_annotated_without_index_returns_nothing():
+    words = _words(["Das", "ist", "gut."])
+    assert segment.sentences_from_annotated(words) == []
+    words[1]["sentence_idx"] = 0
+    assert segment.sentences_from_annotated(words) == []
+    assert segment.sentences_from_annotated([]) == []

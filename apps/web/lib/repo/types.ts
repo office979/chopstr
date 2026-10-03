@@ -385,7 +385,8 @@ export interface CandidateCount {
 export type ClipStatus = "draft" | "approved" | "rendering" | "rendered" | "exported" | "failed" | "deleted";
 export type ClipReview = "offen" | "bereit" | "verworfen";
 export type Aspect = "9:16" | "4:5" | "1:1" | "16:9";
-export type HookPattern = "identity_call" | "contrarian" | "open_loop" | "results_first" | "mistake_warning";
+/* "native": wörtlicher Auszug aus dem Clip, Rückfall der Auswahl v2 im Worker (AP6a); nie zur Auswahl angeboten. */
+export type HookPattern = "identity_call" | "contrarian" | "open_loop" | "results_first" | "mistake_warning" | "native";
 export type ReframeStrategy = "talking_head" | "two_speakers" | "neutral";
 export type RenderStage = "copy" | "reframe" | "captions" | "encode" | "provenance";
 
@@ -697,6 +698,8 @@ export interface Repo extends AuthRepo, WorkspaceAdminRepo, BlockBRepo {
   listCandidates(sourceId: string): Promise<Candidate[]>;
   getCandidate(id: string): Promise<Candidate | null>;
   setCandidateVerdict(id: string, verdict: "accepted" | "rejected", reason?: string): Promise<Candidate | null>;
+  /* Wie setCandidateVerdict, aber nur, solange noch kein Urteil vorliegt (human_verdict is null); sonst null */
+  setCandidateVerdictIfOpen(id: string, verdict: "accepted" | "rejected", reason?: string): Promise<Candidate | null>;
   /* Neue Zeile version + 1 mit neu berechneten Grenzen und Gates; alte Zeile bekommt human_verdict = 'edited' */
   reviseCandidate(id: string, input: ReviseCandidateInput): Promise<Candidate | null>;
   countCandidates(sourceId: string): Promise<CandidateCount>;

@@ -522,9 +522,11 @@ def _clip_text(cid: str) -> str:
     return text_of(w, 0, len(w) - 1)
 
 
-@pytest.mark.parametrize("hook", _hook_rows("must_flag", defect=7))
+# Behoben mit AP6a in ``hook_claim_check_v2`` (Zahlen als Wert und Einheit); ``hook_claim_check`` bleibt
+# für Fassung 1 unverändert und vergleicht weiter per Teilstring.
+@pytest.mark.parametrize("hook", _hook_rows("must_flag"))
 def test_hook_claim_check_flags_numbers_not_in_the_clip(hook):
-    issues = fidelity.hook_claim_check(hook["hook"], _clip_text("misrecognized_number_or_name"))
+    issues = fidelity.hook_claim_check_v2(hook["hook"], _clip_text("misrecognized_number_or_name"))
     for num in hook["unsupported_numbers"]:
         assert any(f"'{num}'" in x for x in issues), f"„{num}“ nicht beanstandet: {issues}"
 
@@ -532,6 +534,45 @@ def test_hook_claim_check_flags_numbers_not_in_the_clip(hook):
 @pytest.mark.parametrize("hook", _hook_rows("must_pass"))
 def test_hook_claim_check_accepts_numbers_that_are_in_the_clip(hook):
     assert fidelity.hook_claim_check(hook["hook"], _clip_text("misrecognized_number_or_name")) == []
+    assert fidelity.hook_claim_check_v2(hook["hook"], _clip_text("misrecognized_number_or_name")) == []
+
+
+def test_hook_does_not_use_the_uncertain_number(monkeypatch):
+    """Fall misrecognized_number_or_name: „40.000“ hat niedrige Erkennungssicherheit und darf in keinem Hook
+    stehen, auch nicht im Rückfall; ein Hook mit dieser Zahl wird verworfen (Fassung 2, AP6a)."""
+    from chopstr_worker.pipeline import copy_de, copy_engine
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    editorial.clear_cache()
+    c = CASES["misrecognized_number_or_name"]
+    words = [{**w, "prob": w["asr_confidence"]} for w in words_of("misrecognized_number_or_name")]
+    clip = _clip_text("misrecognized_number_or_name")
+    assert fidelity.uncertain_number_tokens(words) == ["40.000 Euro gespart.", "40.000"]
+
+    class FakeLLM:
+        def model(self):
+            return "fake"
+
+        def structured(self, system, user, schema, tool_name, prompt_version, job_type="llm_score"):
+            if tool_name == "write_post_caption":
+                return {"text": "Rund 40.000 Euro gespart.", "cta": "Wie macht ihr das?"}
+            hooks = ["Rund 40.000 Euro gespart", "40.000 Euro im ersten Jahr", "Bei uns 40 Euro gespart",
+                     "In 4 Wochen den Einkauf umgebaut", "Jedes Unternehmen spart so"]  # fmt: skip
+            return {"variants": [{"pattern": p, "spoken": h, "onscreen": h} for p, h in zip(copy_engine.HOOK_PATTERNS, hooks)]}
+
+    try:
+        res = copy_engine.write_copy(FakeLLM(), clip, copy_de.BrandProfile(), platforms=("linkedin",), words=words)
+    finally:
+        editorial.clear_cache()
+    assert all(v["claim_issues"] for v in res.variants), res.variants
+    assert res.pattern == "native" and res.onscreen_hook in clip
+    assert "40.000" not in res.onscreen_hook and "40 000" not in res.onscreen_hook
+    assert res.spoken_hook == "Wer hat bei euch den Einkauf neu aufgestellt?"
+    # Post-Captions schreibt das Modell frei; die unsichere Zahl darin wird gemeldet, nicht still gelassen.
+    unsicher = "Zahl '40.000' ist im Clip unsicher erkannt und darf nicht in den Hook (am Audio prüfen)"
+    assert f"linkedin: {unsicher}" in res.claim_issues
+    expected = {u["text"] for u in c["expected"]["uncertain_words"]}
+    assert "40.000" in expected
 
 
 # -- Auswahl (Nr. 4) -------------------------------------------------------------------------------

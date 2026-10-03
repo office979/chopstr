@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from chopstr_worker import db
+from chopstr_worker import db, editorial
 from chopstr_worker.pipeline import dach_nlp
 
 # Wörter, die auf etwas vorher Gesagtes verweisen. Beginnt ein Clip damit, fehlt dem Zuschauer der
@@ -195,8 +195,18 @@ def starts_with_backref(words: list[dict], i_start: int, i_ende: int) -> bool | 
     return doc[0].tag_ in BACKREF_POS_TAGS
 
 
-def check_boundaries(cand: dict, words: list[dict]) -> dict[str, Any]:
-    """Grenzqualität eines Vorschlags. Alle Werte sind für sich verständlich, ohne Referenzstellen."""
+def active_sentence_rule() -> str:
+    """Satzende-Regel der aktiven Richtlinie, dieselbe wie im Lauf (``editorial.sentence_rule``)."""
+    return editorial.sentence_rule(editorial.load())
+
+
+def check_boundaries(cand: dict, words: list[dict], rule: str | None = None) -> dict[str, Any]:
+    """Grenzqualität eines Vorschlags. Alle Werte sind für sich verständlich, ohne Referenzstellen.
+
+    ``rule`` ist die Satzende-Regel (``v1`` oder ``v2``, ohne Angabe die der aktiven Richtlinie), also
+    dieselbe Entscheidung wie Zerlegung und Satzgrenzen-Tor. Unter ``v2`` steht zusätzlich
+    ``grenze_nur_aus_pause``: welche Grenze (Anfang, Ende) nur aus einer angenommenen Pause stammt."""
+    rule = rule or active_sentence_rule()
     i_start = word_index_at(words, cand["start_s"], "start")
     i_ende = word_index_at(words, cand["end_s"], "ende")
     laenge = round(cand["end_s"] - cand["start_s"], 2)
@@ -220,13 +230,20 @@ def check_boundaries(cand: dict, words: list[dict]) -> dict[str, Any]:
     # Ein kleingeschriebenes erstes Wort heisst, der Schnitt liegt mitten im Satz. Genau so fängt
     # eines der schlechten Beispiele an: „auf einen Ausschnitt von Friedrich Merz reagieren".
     # Ohne diese Unterscheidung meldet die Messung für jeden eigenständigen Clip „Satzanfang: ja".
+    nur_pause: list[str] = []
     if i_start > 0:
-        satzanfang = dach_nlp.is_sentence_end(words, i_start - 1)
+        art = dach_nlp.cut_boundary_kind(words, i_start - 1, rule)
+        satzanfang = art != "none"
+        if art == "pause_candidate":
+            nur_pause.append("Anfang")
     else:
         erstes_roh = str(words[0].get("text", "")).lstrip("\"'„»(-– ")
         satzanfang = bool(erstes_roh[:1].isupper())
     # Satzende: das letzte Wort des Clips beendet einen Satz.
-    satzende = dach_nlp.is_sentence_end(words, i_ende)
+    art = dach_nlp.cut_boundary_kind(words, i_ende, rule)
+    satzende = art != "none"
+    if art == "pause_candidate":
+        nur_pause.append("Ende")
 
     rueckverweis = starts_with_backref(words, i_start, i_ende)
 
@@ -236,7 +253,7 @@ def check_boundaries(cand: dict, words: list[dict]) -> dict[str, Any]:
     rand += list(range(max(i_ende - EDGE_WORDS + 1, i_start), i_ende + 1))
     verneinung_am_rand = any(first_token(words[i].get("text")) in dach_nlp.NEGATIONS for i in set(rand))
 
-    return {
+    out = {
         "laenge_s": laenge,
         "satzanfang": bool(satzanfang),
         "satzende": bool(satzende),
@@ -247,6 +264,9 @@ def check_boundaries(cand: dict, words: list[dict]) -> dict[str, Any]:
         "erstes_wort": words[i_start].get("text"),
         "letztes_wort": words[i_ende].get("text"),
     }
+    if rule != "v1":
+        out["grenze_nur_aus_pause"] = nur_pause
+    return out
 
 
 def sauber(b: dict[str, Any]) -> bool:

@@ -819,6 +819,21 @@ export const postgresRepo: Repo = {
     });
   },
 
+  async setCandidateVerdictIfOpen(id, verdict, reason) {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`
+        update candidates set
+          human_verdict = ${verdict},
+          verdict_reason = ${reason?.trim() || null},
+          verdict_by = ${session.userId},
+          verdict_at = now()
+        where id = ${id} and human_verdict is null
+        returning *`;
+      return rows.length ? toCandidate(rows[0] as Row) : null;
+    });
+  },
+
   async reviseCandidate(id, input) {
     const session = await currentSession();
     return withContext(session, async (tx) => {

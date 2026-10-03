@@ -4,9 +4,28 @@ import { MAX_CPS } from "@/lib/clips/presets";
 
 /* Caption-Karten für die stumme Vorschau und den Demo-Render: Spiegel von captions_de.build_cards
  * und wrap_lines (Umbruch an Satzzeichen, Konjunktionen, Pausen; eine Negation steht nie allein in
- * einer neuen Zeile). Zeiten liegen auf der Ausgabe-Timeline (Sekunde 0 = Clip-Start). */
+ * einer neuen Zeile). Zeiten liegen auf der Ausgabe-Timeline (Sekunde 0 = Clip-Start).
+ *
+ * AP10a, teilweise aus captions_de übernommen: Zahl plus Einheit („40 Prozent", „3,5 Mio. Euro",
+ * „14.30 Uhr") ist ein Token, steht in einer Zeile und wird nie auf zwei Karten verteilt; ein
+ * Bindestrichwort, das breiter als die Zeile ist, wird nur am vorhandenen Bindestrich getrennt.
+ * Nicht übernommen: Morphem- und Silbentrennung eines Segments, das allein zu breit ist, der
+ * Komma-Bruch P30 und die Ereigniszeiten (Brücke, Mindestdauer); die Vorschau gilt unabhängig von
+ * der Policy-Fassung. Gemeinsame Fälle stehen in packages/editorial/parity/caption_cards_v1.json. */
 
 const BREAK_WORDS = new Set(["und", "aber", "weil", "dass", "denn", "oder", "wenn", "sondern", "also", "obwohl", "damit"]);
+
+/* Gleiche Liste wie captions_de.UNIT_WORDS (klein geschrieben). */
+export const UNIT_WORDS: ReadonlySet<string> = new Set([
+  "%", "prozent", "prozentpunkte", "promille",
+  "€", "euro", "eur", "cent", "$", "dollar", "usd", "chf", "franken", "rappen", "£", "pfund",
+  "tsd.", "tausend", "mio.", "mio", "million", "millionen", "mrd.", "mrd", "milliarde", "milliarden",
+  "uhr", "sekunde", "sekunden", "minute", "minuten", "stunde", "stunden", "tag", "tage", "tagen",
+  "woche", "wochen", "monat", "monate", "monaten", "jahr", "jahre", "jahren",
+  "km", "m", "cm", "mm", "kg", "g", "kwh", "grad", "°c", "°", "km/h", "mal", "punkte",
+]);
+const NUMBER_RE = /^[+-]?\d+(?:[.,:]\d+)*$/; // 40, 3,5, 40.000, 14.30, 14:30
+const MAX_UNITS_PER_NUMBER = 2;
 
 export interface TimedWord {
   text: string;
@@ -47,14 +66,74 @@ export function wrapLines(tokens: string[], limit: number, maxLines = 2): string
   return out;
 }
 
-/* Gruppiert Wörter zu Karten: Bruch an Satzzeichen, Konjunktionen, Pausen ab 0,4 s und vor langen Komposita */
+function isUnit(text: string): boolean {
+  const key = text.toLowerCase().replace(/[,;:!?]+$/, "");
+  return UNIT_WORDS.has(key) || UNIT_WORDS.has(key.replace(/\.+$/, ""));
+}
+
+/* Zahl plus bis zu zwei Einheiten bildet ein Token (wie captions_de._tokens). Eine Einheit mit
+ * Satzzeichen, außer dem Punkt einer Abkürzung wie „Mio.", schließt das Token ab. Ist das Token
+ * breiter als limit, bleibt Zahl plus erste Einheit oder die Zahl allein. */
+export function unitTokens(words: TimedWord[], limit = Infinity): TimedWord[][] {
+  const out: TimedWord[][] = [];
+  let i = 0;
+  while (i < words.length) {
+    const tok = [words[i]];
+    if (NUMBER_RE.test(words[i].text)) {
+      while (tok.length <= MAX_UNITS_PER_NUMBER && i + tok.length < words.length) {
+        if (tok.length > 1 && !UNIT_WORDS.has(tok[tok.length - 1].text.toLowerCase())) break;
+        if (!isUnit(words[i + tok.length].text)) break;
+        tok.push(words[i + tok.length]);
+      }
+      while (tok.length > 1 && tok.map((w) => w.text).join(" ").length > limit) tok.pop();
+    }
+    out.push(tok);
+    i += tok.length;
+  }
+  return out;
+}
+
+/* Bindestrichwort, das breiter als die Zeile ist: nur am vorhandenen Bindestrich trennen (Netflix-Norm,
+ * wie captions_de._hyphenate_v2). Ein Segment, das allein zu breit ist, und Wörter ohne Bindestrich
+ * bleiben hier ganz; der Worker teilt sie weiter an Morphemgrenzen. */
+export function splitAtHyphens(word: string, limit: number): string[] {
+  if (word.length <= limit) return [word];
+  const segments: string[] = [];
+  let cur = "";
+  for (let i = 0; i < word.length; i += 1) {
+    const ch = word[i];
+    cur += ch;
+    if (ch === "-" && i > 0 && i < word.length - 1 && word[i + 1] !== "-" && cur.replace(/-/g, "")) {
+      segments.push(cur);
+      cur = "";
+    }
+  }
+  if (cur) segments.push(cur);
+  if (segments.length < 2) return [word];
+  const lines: string[] = [];
+  let line = "";
+  for (const seg of segments) {
+    if (line && line.length + seg.length > limit) {
+      lines.push(line);
+      line = seg;
+    } else {
+      line += seg;
+    }
+  }
+  lines.push(line);
+  return lines;
+}
+
+/* Gruppiert Wörter zu Karten: Bruch an Satzzeichen, Konjunktionen, Pausen ab 0,4 s und vor langen
+ * Komposita. Zahl plus Einheit ist ein Token und landet immer in derselben Karte. */
 export function groupCards(words: TimedWord[], limit: number, maxLines = 2): TimedWord[][] {
   const cap = limit * maxLines;
   const cards: TimedWord[][] = [];
   let cur: TimedWord[] = [];
   let curLen = 0;
-  words.forEach((w, i) => {
-    const t = w.text;
+  const tokens = unitTokens(words, limit);
+  tokens.forEach((tok, i) => {
+    const t = tok.map((w) => w.text).join(" ");
     const isLong = t.length > limit;
     if (isLong && cur.length && curLen > 8) {
       cards.push(cur);
@@ -67,10 +146,10 @@ export function groupCards(words: TimedWord[], limit: number, maxLines = 2): Tim
       cur = [];
       curLen = 0;
     }
-    cur.push(w);
+    cur.push(...tok);
     curLen += t.length + 1;
-    const nxt = words[i + 1];
-    if (isLong || /[.!?,]$/.test(t) || (nxt && nxt.start - w.end > 0.4)) {
+    const nxt = tokens[i + 1]?.[0];
+    if (isLong || /[.!?,]$/.test(t) || (nxt && nxt.start - tok[tok.length - 1].end > 0.4)) {
       cards.push(cur);
       cur = [];
       curLen = 0;
@@ -105,6 +184,17 @@ function keywordOf(words: TimedWord[]): string | undefined {
   return cleaned.reduce((a, b) => (b.length > a.length ? b : a));
 }
 
+/* Zeilen einer Karte: ein Token aus Zahl plus Einheit ist eine Umbrucheinheit (geschütztes
+ * Leerzeichen für wrapLines), damit „40 Prozent" nie über zwei Zeilen verteilt wird. */
+const TOKEN_JOINER = "\u00a0";
+
+function cardLines(card: TimedWord[], limit: number, maxLines: number): string[] {
+  const units = unitTokens(card, limit).flatMap((tok) =>
+    tok.length > 1 ? [tok.map((w) => w.text).join(TOKEN_JOINER)] : splitAtHyphens(tok[0].text, limit),
+  );
+  return wrapLines(units, limit, maxLines).map((line) => line.split(TOKEN_JOINER).join(" "));
+}
+
 export interface BuiltCaptions {
   cards: CaptionCard[];
   cps_warnings: string[];
@@ -124,7 +214,7 @@ export function buildCaptionCards(words: TimedWord[], limit: number, maxLines = 
     cards.push({
       start: g[0].start,
       end: g[g.length - 1].end,
-      lines: wrapLines(g.map((w) => w.text), limit, maxLines),
+      lines: cardLines(g, limit, maxLines),
       keyword: keywordOf(g),
     });
   }

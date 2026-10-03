@@ -12,7 +12,7 @@ def test_all_repo_prompts_load():
         "propose_moments": ("propose_moments", 1),
         "score_clip": ("score_clip", 2),
         "story_graph_confirm": ("confirm_qualification", 1),
-        "hooks": ("write_hooks", 1),
+        "hooks": ("write_hooks", 2),  # hooks_v2 (AP6a), gepinnt nur in Fassung 2
         "post_caption": ("write_post_caption", 1),
     }
     for name, (tool, version) in expected.items():
@@ -102,7 +102,7 @@ def test_new_prompt_file_does_not_switch_the_path(prompts_copy, monkeypatch, pol
     from chopstr_worker.pipeline import story_engine
 
     monkeypatch.setenv("CHOPSTR_POLICY_VERSION", policy_version)
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     before = story_engine.prompt_versions()
     v2 = (prompts_copy / "score_clip_v2.md").read_text(encoding="utf-8")
     (prompts_copy / "score_clip_v99.md").write_text(v2.replace("version: 2", "version: 99"), encoding="utf-8")
@@ -111,13 +111,13 @@ def test_new_prompt_file_does_not_switch_the_path(prompts_copy, monkeypatch, pol
     assert prompts.load("score_clip").version == 99  # ungepinnt nähme sie die neue Datei
     assert prompts.load_pinned("score_clip").version == 2
     assert story_engine.prompt_versions() == before == ["propose_moments_v1", "score_clip_v2", "story_graph_confirm_v1"]
-    editorial.load.cache_clear()
+    editorial.clear_cache()
 
 
 def test_load_without_version_warns(prompts_copy, caplog):
     with caplog.at_level("WARNING", logger="chopstr.prompts"):
         prompts.load("hooks")
-    assert any("ohne Version" in r.getMessage() and "hooks_v1.md" in r.getMessage() for r in caplog.records)
+    assert any("ohne Version" in r.getMessage() and "hooks_v2.md" in r.getMessage() for r in caplog.records)
 
 
 def test_load_pinned_follows_the_given_policy():

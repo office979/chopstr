@@ -8,8 +8,9 @@ laufen und schreibt ``candidates`` nach ``packages/schema/CANDIDATES.md``.
 
 Seit dem Wegfall des Auswahlschritts legt ``detect_candidates`` im selben Zug für **jeden** Kandidaten
 eine ``clips``-Zeile an (``auto_create_clips``) und setzt den Kandidaten auf ``human_verdict = 'accepted'``,
-außer er trägt einen Risikohinweis aus ``AUTO_ACCEPT_BLOCKING_FLAGS``: dann bleibt das Urteil leer und
-der Clip ein Entwurf ohne Render, bis ein Mensch ihn annimmt.
+außer ``auto_accept_blockers`` findet einen Blocker (harter Risikohinweis, freigaberelevante
+Behauptung im Text oder in der Titelkarte, oder ein Text, der sich nicht prüfen lässt): dann bleibt
+das Urteil leer und der Clip ein Entwurf ohne Render, bis ein Mensch ihn annimmt.
 Damit ist die Warteschlange des Renderers (``clips.status = 'draft'`` mit angenommenem Kandidaten)
 ohne menschliches Zutun gefüllt. Weil beide Wege — der lokale Worker und die Temporal-Activity —
 durch ``run_detect_candidates`` laufen, hängt die Clip-Erzeugung an genau einer Stelle.
@@ -25,11 +26,11 @@ from typing import Any
 from temporalio import activity
 
 from .. import costlog, db, decision_log, editorial, events, outbox, storage, usage
-from ..pipeline import copy_engine, signals, story_engine
+from ..pipeline import release_gate, signals, story_engine
 from ..providers_llm import LLM
 from ..residency import Tenant
 from . import common
-from .render import STEP_RENDER, ad_label_for, render_pack
+from .render import FALLBACK_CLIP_PLATFORM, STEP_RENDER, ad_label_for, default_clip_platform, render_pack
 from .transcribe import asr_key_for
 
 log = logging.getLogger("chopstr.activities.analyze")
@@ -43,12 +44,18 @@ SIGNALS_VERSION = "signals_v2"
 # -- Automatische Clips (ohne Auswahlschritt) ---------------------------------------------------
 # Gründerentscheidung: alle Kandidaten bekommen einen Clip, immer Hochformat, je Kandidat genau einer.
 AUTO_CLIP_ASPECT = "9:16"
-AUTO_CLIP_PLATFORM = "reels"  # Rückfall, wenn an der Quelle kein Markenprofil hängt
+# Rückfall, wenn weder das Markenprofil noch das Briefing eine Plattform nennt. Dieselbe Reihenfolge
+# (Markenprofil, Briefing, ``reels``) gilt in der Web-App (``apps/web/lib/clips/acceptance.ts``) und
+# im Render (``render.default_clip_platform``, dort steht der Wert).
+AUTO_CLIP_PLATFORM = FALLBACK_CLIP_PLATFORM
 AUTO_VERDICT_REASON = "automatisch angenommen (ohne Auswahlschritt)"
 # Produktregel Freigabepflicht (Master-Prompt Priorität 1 Originaltreue): Humor, sensible Themen und
 # Tatsachenbehauptungen nimmt nie die Automatik an. Der Clip-Entwurf entsteht trotzdem, das Urteil
 # bleibt leer, und ohne angenommenen Kandidaten rendert ihn kein Worker.
-AUTO_ACCEPT_BLOCKING_FLAGS = ("humor", "sensitive_topic", "claim")
+# Harte Blocker aus ``risk_flags``. ``claim`` steht nicht darin: das Flag aus ``story_graph.claims_in``
+# trifft fast jeden Kandidaten. Ob eine Behauptung die Freigabe aufhält, entscheidet
+# ``release_gate.release_relevant_claims`` am Text des Kandidaten (``docs/ENTSCHEIDUNGEN.md`` P27).
+AUTO_ACCEPT_HARD_FLAGS = ("humor", "sensitive_topic")
 AUTO_HOLD_REASON_PREFIX = "automatische Freigabe ausgesetzt: "
 # Rundung der Kandidatenfenster für den Dublettenschutz (Zehntelsekunden)
 _WINDOW_DIGITS = 1
@@ -63,11 +70,19 @@ SQL_CLIP_WINDOWS = (
 # Re-Run: die noch nicht gerenderten Automatik-Clips und ihre Kandidaten weichen dem neuen Ergebnis,
 # auch die zurückgehaltenen (Begründung beginnt mit ``AUTO_HOLD_REASON_PREFIX``); deren Kandidaten
 # haben kein Urteil und fallen danach mit allen anderen ohne Urteil weg.
+# Ein zurückgehaltener Entwurf, an dem ein Mensch schon gearbeitet hat (``review`` nicht mehr
+# ``offen``, nach dem Anlegen geändert, oder mit Einträgen in ``hook_versions``, ``caption_versions``
+# oder ``guest_approvals``), bleibt stehen und hält damit auch seinen Kandidaten.
 # Menschliche Urteile haben immer ein ``verdict_by`` und bleiben deshalb unberührt.
 SQL_DROP_AUTO_CLIPS = (
-    "delete from clips where status = 'draft' and candidate_id in "
-    "(select id from candidates where source_id = %s and verdict_by is null "
-    "and (verdict_reason = %s or verdict_reason like %s))"
+    "delete from clips where status = 'draft' and ("
+    "candidate_id in (select id from candidates where source_id = %s and verdict_by is null and verdict_reason = %s) "
+    "or (review = 'offen' and updated_at <= created_at "
+    "and not exists (select 1 from hook_versions h where h.clip_id = clips.id) "
+    "and not exists (select 1 from caption_versions v where v.clip_id = clips.id) "
+    "and not exists (select 1 from guest_approvals g where g.clip_id = clips.id) "
+    "and candidate_id in "
+    "(select id from candidates where source_id = %s and verdict_by is null and verdict_reason like %s)))"
 )
 SQL_DROP_AUTO_CANDIDATES = (
     "delete from candidates where source_id = %s and verdict_by is null and verdict_reason = %s "
@@ -168,9 +183,9 @@ def candidates_key_for(tv_id: str, tv_version: int, brief: dict, prompt_versions
 
     Gemeint ist die aktive Fassung (``CHOPSTR_POLICY_VERSION``), nicht die Standardfassung, und die
     ``prompt_versions`` sind die gepinnten (``story_engine.prompt_versions``): ein Wechsel auf v2
-    oder ein neuer Pin ergibt einen neuen Schluessel."""
+    oder ein neuer Pin ergibt einen neuen Schlüssel."""
     try:
-        policy = editorial.policy_version(editorial.load().version)
+        policy = editorial.policy_version()
     except Exception:  # ohne Richtlinie lieber weiterarbeiten als gar nicht
         policy = "unbekannt"
     params = {
@@ -201,8 +216,11 @@ def _drop_stale_auto_rows(ctx: common.Context, source_id: str) -> None:
     Kandidat den Lauf (``human_verdict`` ist gesetzt) und das neue Ergebnis käme obendrauf — doppelte
     Kandidaten und doppelte Clips. Entfernt werden deshalb die Automatik-Clips, die noch nicht gerendert
     sind (``draft``), und anschließend die Automatik-Kandidaten, an denen danach kein Clip mehr hängt.
-    Gerenderte Ergebnisse und alles mit menschlichem Urteil (``verdict_by`` gesetzt) bleiben stehen."""
-    ctx.conn.execute(SQL_DROP_AUTO_CLIPS, (source_id, AUTO_VERDICT_REASON, AUTO_HOLD_REASON_PREFIX + "%"))
+    Gerenderte Ergebnisse und alles mit menschlichem Urteil (``verdict_by`` gesetzt) bleiben stehen,
+    ebenso zurückgehaltene Entwürfe mit menschlicher Arbeit daran (siehe ``SQL_DROP_AUTO_CLIPS``)."""
+    ctx.conn.execute(
+        SQL_DROP_AUTO_CLIPS, (source_id, AUTO_VERDICT_REASON, source_id, AUTO_HOLD_REASON_PREFIX + "%")
+    )
     ctx.conn.execute(SQL_DROP_AUTO_CANDIDATES, (source_id, AUTO_VERDICT_REASON))
 
 
@@ -264,28 +282,39 @@ def _window(start: Any, end: Any) -> tuple[float, float]:
     return round(float(start or 0.0), _WINDOW_DIGITS), round(float(end or 0.0), _WINDOW_DIGITS)
 
 
-def clip_platform(ctx: common.Context, source_id: str) -> str:
-    """Standard-Plattform aus dem Markenprofil der Quelle; ohne Profil oder Wert ``reels``.
+def clip_platform(ctx: common.Context, source_id: str, brief: dict | None = None) -> str:
+    """Standard-Plattform der Quelle: Markenprofil, sonst die Plattform aus dem Briefing, sonst ``reels``.
 
-    Das Seitenverhältnis hängt bewusst nicht daran (immer ``9:16``), die Plattform steuert nur
-    Untertitel-Voreinstellung und Branding im Render."""
+    Dieselbe Reihenfolge nutzt die Web-App, wenn ein Mensch einen Kandidaten ohne Plattformwahl
+    annimmt (``defaultClipPlatform`` in ``apps/web/lib/clips/acceptance.ts``). Das Seitenverhältnis
+    hängt bewusst nicht daran (immer ``9:16``), die Plattform steuert nur Untertitel-Voreinstellung
+    und Branding im Render."""
+    value = ""
     try:
         row = db.fetch_one(ctx.conn, SQL_DEFAULT_PLATFORM, (source_id,))
+        value = str(row[0]).strip() if row and row[0] else ""
     except Exception as exc:  # Markenprofil ist Komfort, die Automatik darf daran nicht scheitern
         log.warning("default platform not readable source=%s error=%s", source_id, exc.__class__.__name__)
-        return AUTO_CLIP_PLATFORM
-    value = str(row[0]).strip() if row and row[0] else ""
-    if value not in copy_engine.PLATFORMS:
-        return AUTO_CLIP_PLATFORM
-    return value
+    return default_clip_platform(value, brief)
 
 
-def auto_accept_blockers(risk_flags: Any) -> list[str]:
-    """Die Risikohinweise, die eine automatische Annahme verbieten, in der Reihenfolge des Kandidaten."""
+def auto_accept_blockers(risk_flags: Any, text: str, title_card: str = "") -> list[str]:
+    """Was eine automatische Annahme verbietet: die harten Risikohinweise in der Reihenfolge des
+    Kandidaten, danach ``claim``, wenn Text oder Titelkarte eine freigaberelevante Behauptung
+    enthalten. Ist der Text leer, lässt sich das nicht prüfen; dann hält ``claim_unchecked`` den
+    Kandidaten sicher zurück.
+
+    Der ``claim``-Eintrag in ``risk_flags`` zählt hier nicht, nur ``release_gate``."""
     blockers: list[str] = []
     for flag in risk_flags or ():
-        if flag in AUTO_ACCEPT_BLOCKING_FLAGS and flag not in blockers:
+        if flag in AUTO_ACCEPT_HARD_FLAGS and flag not in blockers:
             blockers.append(flag)
+    if not text.strip():
+        blockers.append("claim_unchecked")
+        if release_gate.release_relevant_claims(title_card):
+            blockers.append("claim")
+    elif release_gate.release_relevant_claims(text) or release_gate.release_relevant_claims(title_card):
+        blockers.append("claim")
     return blockers
 
 
@@ -308,10 +337,10 @@ def auto_create_clips(
     zu dem an dieser Quelle schon ein Clip existiert, bekommt keinen zweiten (zweiter Lauf, gelöschte
     oder bereits gerenderte Clips).
 
-    Angenommen wird nur ein Kandidat ohne Hinweis aus ``AUTO_ACCEPT_BLOCKING_FLAGS``. Sonst bleibt
-    ``human_verdict`` leer und ``verdict_reason`` nennt die Hinweise; der Clip bleibt ``draft`` und
+    Angenommen wird nur ein Kandidat ohne Blocker aus ``auto_accept_blockers``. Sonst bleibt
+    ``human_verdict`` leer und ``verdict_reason`` nennt die Blocker; der Clip bleibt ``draft`` und
     wird erst nach menschlicher Annahme gerendert."""
-    platform = clip_platform(ctx, source_id)
+    platform = clip_platform(ctx, source_id, dict(src.get("brief") or {}))
     ad_label = ad_label_for(dict(src.get("brief") or {}), src.get("country") or "AT")
     taken = {_window(r[0], r[1]) for r in db.fetch_all(ctx.conn, SQL_CLIP_WINDOWS, (source_id,))}
     created: list[str] = []
@@ -341,7 +370,9 @@ def auto_create_clips(
             status="draft",
             created_by=None,
         )
-        blockers = auto_accept_blockers(row.get("risk_flags"))
+        blockers = auto_accept_blockers(
+            row.get("risk_flags"), str((row.get("rubric") or {}).get("text") or ""), title_card or ""
+        )
         if blockers:
             db.update(ctx.conn, "candidates", {"id": candidate_id}, verdict_reason=auto_hold_reason(blockers))
             held += 1
@@ -377,6 +408,10 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
         tv_id, tv_version, words = common.load_transcript(ctx, source_id)
         heat = _load_heat(ctx, src)
         brief = dict(src.get("brief") or {})
+        # Die Plattform, für die die Clips entstehen (Markenprofil, Briefing, reels). Die Story-Engine
+        # nennt sie in der Begründung; im Briefing steht sie deshalb im Cache-Schlüssel.
+        platform = clip_platform(ctx, source_id, brief)
+        brief["clip_platform"] = platform
         brand = {"country": src.get("country"), "address": src.get("address"), "learned_weights": src.get("learned_weights")}
         weights = story_engine.resolve_weights(brand["learned_weights"])
         tenant = Tenant(id=src["workspace_id"], tier=src["tier"], allow_us_subprocessors=bool(src.get("allow_us_subprocessors")))
@@ -410,8 +445,7 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
         # Kein Auswahlschritt mehr: die Clips entstehen hier, nicht erst nach einem Urteil in der Oberfläche.
         clips = auto_create_clips(ctx, source_id, src, ids, report.candidates)
         decisions = decision_log.record_detect_report(
-            ctx.conn, src["workspace_id"], source_id, src.get("brand_profile_id"), report, ids,
-            str(brief.get("platform") or "linkedin"),
+            ctx.conn, src["workspace_id"], source_id, src.get("brand_profile_id"), report, ids, platform,
         )  # fmt: skip
         outbox.candidates_ready(ctx.conn, src["workspace_id"], source_id, len(report.candidates), report.gate_passed)
         events.set_source_status(ctx.conn, source_id, "ready", None)
@@ -478,7 +512,7 @@ def notify(source_id: str, event: str) -> None:
 
 
 __all__ = [
-    "AUTO_ACCEPT_BLOCKING_FLAGS",
+    "AUTO_ACCEPT_HARD_FLAGS",
     "AUTO_CLIP_ASPECT",
     "AUTO_CLIP_PLATFORM",
     "AUTO_HOLD_REASON_PREFIX",

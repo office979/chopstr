@@ -28,4 +28,5 @@ Regeln:
 | `score_clip_v2.md` | Stufe 3, gepinnt in Fassung 1 und 2: Rubrik aus der redaktionellen Grundlage (7 Kriterien, 0 bis 2) | `score_clip` |
 | `story_graph_confirm_v1.md` | Stufe 4: relativiert ein späterer Satz den Clip? | `confirm_qualification` |
 | `hooks_v1.md` | Copy: 5 Hook-Varianten nach Muster | `write_hooks` |
+| `hooks_v2.md` | Copy, gepinnt in Fassung 2 (AP6a): Varianten aus verschiedenen Originalstellen, Frage nur als Variante, Clip in Begrenzern als Daten | `write_hooks` |
 | `post_caption_v1.md` | Copy: Post-Text pro Plattform | `write_post_caption` |

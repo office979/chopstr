@@ -44,7 +44,14 @@ export function buildRevision(
 
   const start = range[0].start;
   const end = range[range.length - 1].end;
-  const gates = boundariesChanged ? recomputeGates(prev.gates, range[range.length - 1].text) : prev.gates;
+  const gates = boundariesChanged
+    ? recomputeGates(prev.gates, range[range.length - 1].text, {
+        before: sentences.find((s) => s.idx === first_sent - 1),
+        first: range[0],
+        last: range[range.length - 1],
+        after: sentences.find((s) => s.idx === last_sent + 1),
+      })
+    : prev.gates;
   const flags: StoryGraphFlag[] = prev.story_graph_flags
     .filter((f) => f.sentence_idx > last_sent)
     .map((f) => {

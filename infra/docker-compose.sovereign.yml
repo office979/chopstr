@@ -64,11 +64,14 @@ services:
       <<: *sovereign-env
       ASR_DEVICE: cpu
       # Pfade der gemeinsamen Dateien im Image (workers/Dockerfile kopiert sie nach /app/packages).
-      # Explizit gesetzt, damit ein spaeterer Umzug nicht still bricht; der Worker prueft sie beim Start.
+      # Explizit gesetzt, damit ein späterer Umzug nicht still bricht; der Worker prüft sie beim Start.
       PROMPTS_DIR: /app/packages/prompts
       EDITORIAL_DIR: /app/packages/editorial
       CHOPSTR_CAPTION_FONTS: /app/packages/design/caption_fonts.json
       CHOPSTR_AUSGABE_REGELN: /app/packages/schema/ausgabe_regeln_v1.json
+      # Fassung der redaktionellen Grundlage (Rollback-Schalter, docs/ENTSCHEIDUNGEN.md P33). Leer heißt
+      # Standard des Codes; editorial.active_version liest die Variable direkt, nicht über config.py.
+      CHOPSTR_POLICY_VERSION: ${CHOPSTR_POLICY_VERSION:-}
 
   # GPU-Worker: Transkription und Sprechererkennung (Queue gpu) auf dem Hetzner-GPU-Host.
   # Auf einem Host ohne GPU diesen Service weglassen: docker compose ... up -d --scale worker-gpu=0
@@ -89,11 +92,14 @@ services:
       ASR_DEVICE: cuda
       ASR_COMPUTE: int8_float16
       # Pfade der gemeinsamen Dateien im Image (workers/Dockerfile kopiert sie nach /app/packages).
-      # Explizit gesetzt, damit ein spaeterer Umzug nicht still bricht; der Worker prueft sie beim Start.
+      # Explizit gesetzt, damit ein späterer Umzug nicht still bricht; der Worker prüft sie beim Start.
       PROMPTS_DIR: /app/packages/prompts
       EDITORIAL_DIR: /app/packages/editorial
       CHOPSTR_CAPTION_FONTS: /app/packages/design/caption_fonts.json
       CHOPSTR_AUSGABE_REGELN: /app/packages/schema/ausgabe_regeln_v1.json
+      # Fassung der redaktionellen Grundlage (Rollback-Schalter, docs/ENTSCHEIDUNGEN.md P33). Leer heißt
+      # Standard des Codes; editorial.active_version liest die Variable direkt, nicht über config.py.
+      CHOPSTR_POLICY_VERSION: ${CHOPSTR_POLICY_VERSION:-}
     volumes:
       - ../workers/models:/app/workers/models
       - hf-cache:/home/worker/.cache

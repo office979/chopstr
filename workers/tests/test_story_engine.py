@@ -488,3 +488,222 @@ def test_beide_grenzen_der_zugabe_gelten():
         end=sents[10].end + pol.kontext_zugabe_s + 5.0, speaker=sents[11].speaker, word_range=sents[11].word_range,
     )  # fmt: skip
     assert story_engine.kontext_verlaengern(w, [*sents[:11], weit, *sents[12:]], 8, 10, {}) == (10, None)
+
+
+# -- AP2 und AP3 unter Fassung 2 ---------------------------------------------------------------------
+from chopstr_worker.pipeline import dach_nlp  # noqa: E402
+
+
+@pytest.fixture
+def policy_v2(monkeypatch):
+    """Fassung 2 mit implementation.sentence_rule; spaCy fest aus, damit der Rückfall geprüft wird."""
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    editorial.clear_cache()
+    monkeypatch.setattr(dach_nlp, "nlp", lambda: None)
+    yield editorial.load()
+    editorial.clear_cache()
+
+
+PRONOUN_SCRIPT = [
+    ("SPEAKER_00", "Unsere neue Lagerleiterin kam direkt aus der Gastronomie.", 5.0),
+    ("SPEAKER_00", "Sie hat jede Schicht selbst mitgemacht, auch die Nachtschichten.", 6.0),
+    ("SPEAKER_00", "Nach dem Sommer war klar, dass das die beste Entscheidung war.", 6.0),
+    ("SPEAKER_00", "Seitdem stellen wir stärker nach Haltung ein als nach Lebenslauf.", 6.0),
+]
+
+
+def test_policy_v2_switches_on_the_sentence_rule(policy_v2):
+    assert editorial.sentence_rule(policy_v2) == "v2"
+    assert editorial.context_front(policy_v2) == (2, 7.0)
+    assert editorial.never_end_on_qualification(policy_v2) is True
+    assert editorial.sentence_rule(editorial.load(1)) == "v1"
+    assert editorial.context_front(editorial.load(1)) is None
+
+
+def test_heal_start_heals_a_pronoun_start(policy_v2):
+    w = make_words(PRONOUN_SCRIPT)
+    sents = segment.sentences_from_words(w, rule="v2")
+    assert story_engine.start_defects(w, sents, 1, policy_v2) == ["Pronomen ohne Bezug am Anfang („Sie“)"]
+    first, note = story_engine.heal_start(w, sents, 1, 3, {}, policy_v2)
+    assert first == 0
+    assert note["geheilt"] is True and note["saetze"] == 1 and note["sekunden"] <= 7.0
+
+
+def test_heal_start_gives_up_beyond_the_limits(policy_v2):
+    lang = [("SPEAKER_00", PRONOUN_SCRIPT[0][1], 9.0), *PRONOUN_SCRIPT[1:]]
+    w = make_words(lang)
+    sents = segment.sentences_from_words(w, rule="v2")
+    first, note = story_engine.heal_start(w, sents, 1, 3, {}, policy_v2)
+    assert first == 1
+    assert note == {"geheilt": False, "maengel": ["Pronomen ohne Bezug am Anfang („Sie“)"]}
+
+
+def test_heal_start_does_nothing_under_v1():
+    w = make_words(PRONOUN_SCRIPT)
+    sents = segment.sentences_from_words(w)
+    assert story_engine.heal_start(w, sents, 1, 3, {}, editorial.load(1)) == (1, None)
+
+
+def test_heal_start_heals_a_start_mid_sentence(policy_v2):
+    """Anfang mitten im Satz: der Satz davor endet ohne Satzzeichen und ohne Grenze."""
+    w = make_words(PRONOUN_SCRIPT)
+    sents = segment.sentences_from_words(w, rule="v2")
+    # Künstliche Zerlegung: Satz 2 beginnt erst bei „dass“, mitten im Satz.
+    a, b = sents[2].word_range
+    cut = next(i for i in range(a, b + 1) if w[i]["text"] == "dass")
+    teil1 = segment.Sentence(idx=2, text=" ".join(x["text"] for x in w[a:cut]), start=w[a]["start"], end=w[cut - 1]["end"], speaker="SPEAKER_00", word_range=(a, cut - 1))
+    teil2 = segment.Sentence(idx=3, text=" ".join(x["text"] for x in w[cut : b + 1]), start=w[cut]["start"], end=w[b]["end"], speaker="SPEAKER_00", word_range=(cut, b))
+    kuenstlich = [*sents[:2], teil1, teil2, segment.Sentence(**{**sents[3].__dict__, "idx": 4})]
+    maengel = story_engine.start_defects(w, kuenstlich, 3, policy_v2)
+    assert maengel and maengel[0].startswith("Anfang mitten im Satz")
+    first, note = story_engine.heal_start(w, kuenstlich, 3, 4, {}, policy_v2)
+    assert first == 2 and note["geheilt"] is True
+
+
+def test_evaluate_span_rescores_exactly_once_after_healing(brain, llm, policy_v2):
+    w = make_words(PRONOUN_SCRIPT)
+    sents = segment.sentences_from_words(w, rule="v2")
+    brain.rubrics[(1, 3)] = {"hook": 3}
+    out = story_engine.evaluate_span(w, sents, {"first_sent": 1, "last_sent": 3, "why": "x"}, BRIEF, llm, DEFAULT_WEIGHTS)
+    assert isinstance(out, story_engine.CandidateResult)
+    scores = [c for c in brain.calls if c[0] == "score_clip"]
+    assert len(scores) == 2, "einmal bewerten, nach der Heilung genau einmal neu"
+    assert out.first_sent == 0
+    assert out.rubric["start_heal"]["geheilt"] is True
+    pre = out.rubric["pre_heal_scores"]
+    assert (pre["first_sent"], pre["last_sent"]) == (1, 3)
+    assert pre["scores"]["hook"] == 3
+    assert out.rubric["scores"]["hook"]["value"] == DEFAULT_SCORES["hook"], "die Rubrik ist die der geheilten Spanne"
+    assert out.rubric["sentence_rule"] == "v2"
+
+
+def test_evaluate_span_without_healing_scores_once(brain, llm, policy_v2):
+    w = make_words(PRONOUN_SCRIPT)
+    sents = segment.sentences_from_words(w, rule="v2")
+    out = story_engine.evaluate_span(w, sents, {"first_sent": 0, "last_sent": 3}, BRIEF, llm, DEFAULT_WEIGHTS)
+    assert isinstance(out, story_engine.CandidateResult)
+    assert len([c for c in brain.calls if c[0] == "score_clip"]) == 1
+    assert out.rubric["start_heal"] is None and out.rubric["pre_heal_scores"] is None
+
+
+def test_evaluate_span_discards_an_unhealable_start(brain, llm, policy_v2):
+    lang = [("SPEAKER_00", PRONOUN_SCRIPT[0][1], 9.0), *PRONOUN_SCRIPT[1:]]
+    w = make_words(lang)
+    sents = segment.sentences_from_words(w, rule="v2")
+    out = story_engine.evaluate_span(w, sents, {"first_sent": 1, "last_sent": 3}, BRIEF, llm, DEFAULT_WEIGHTS)
+    assert out["reason"] == "start_not_healed"
+    assert "Pronomen ohne Bezug" in out["detail"]
+
+
+QUALIFICATION_SCRIPT = [
+    ("SPEAKER_00", "Wir haben die Vier-Tage-Woche im ganzen Betrieb eingeführt.", 9.0),
+    ("SPEAKER_00", "Im ersten Quartal hat das richtig gut funktioniert, aber", 5.0),
+    ("SPEAKER_00", "Wobei das in der Werkstatt nicht ging.", 3.0),
+    ("SPEAKER_00", "Im Büro machen wir weiter.", 2.0),
+]
+
+
+def test_end_healing_never_stops_on_the_qualification(policy_v2):
+    """Befund 6: die Heilung endete auf dem „Wobei“-Satz. Jetzt geht sie einen Satz weiter."""
+    w = make_words(QUALIFICATION_SCRIPT)
+    sents = segment.sentences_from_words(w, rule="v2")
+    neu, zugabe = story_engine.kontext_verlaengern(w, sents, 0, 1, {})
+    assert neu == 3
+    assert zugabe["saetze"] == 2 and "no_open_loop" in zugabe["behoben"]
+
+
+def test_end_healing_on_the_qualification_is_kept_under_v1():
+    w = make_words(QUALIFICATION_SCRIPT)
+    sents = segment.sentences_from_words(w)
+    neu, _zugabe = story_engine.kontext_verlaengern(w, sents, 0, 1, {})
+    assert neu == 2, "Fassung 1 bleibt wie sie war"
+
+
+def test_end_healing_discards_when_only_the_qualification_heals(policy_v2):
+    """DEMO_SCRIPT 8 bis 10 endet auf „aber“; geheilt wäre es nur auf „Allerdings hatten wir Glück.“"""
+    w = demo_words()
+    sents = segment.sentences_from_words(w, rule="v2")
+    neu, note = story_engine.kontext_verlaengern(w, sents, 8, 10, {})
+    assert neu == 10
+    assert note["verworfen"] == "ends_on_qualification"
+    assert note["saetze"] == [11]
+
+
+def test_evaluate_span_reports_ends_on_qualification(brain, llm, policy_v2):
+    w = demo_words()
+    sents = segment.sentences_from_words(w, rule="v2")
+    out = story_engine.evaluate_span(w, sents, {"first_sent": 7, "last_sent": 10}, BRIEF, llm, DEFAULT_WEIGHTS)
+    assert out["reason"] == "ends_on_qualification"
+    assert "Allerdings" in out["detail"]
+
+
+def test_sentence_gate_v2_reports_pause_only_boundary(policy_v2):
+    w = make_words([("SPEAKER_00", "Wir haben das gemacht", 2.0), ("SPEAKER_00", "Heute läuft es gut.", 2.0)])
+    sents = segment.sentences_from_words(w, rule="v2")
+    assert len(sents) == 2
+    g = story_engine._satzgrenzen_gate(w, sents, 0, 0)
+    assert g["passed"] is True and "Grenze nur aus Pause (Ende)" in g["detail"]
+    g = story_engine._satzgrenzen_gate(w, sents, 1, 1)
+    assert g["passed"] is True and "Grenze nur aus Pause (Anfang)" in g["detail"]
+
+
+def test_sentence_gate_v2_rejects_a_cut_inside_a_pause_bracket(policy_v2):
+    w = make_words([("SPEAKER_00", "Wir haben dann stattdessen", 2.0), ("SPEAKER_00", "Newsletter gemacht.", 1.5)])
+    one = segment.Sentence(idx=0, text="Wir haben dann stattdessen", start=w[0]["start"], end=w[3]["end"], speaker="SPEAKER_00", word_range=(0, 3))
+    g = story_engine._satzgrenzen_gate(w, [one], 0, 0)
+    assert g["passed"] is False and "endet mitten im Satz auf „stattdessen“" in g["detail"]
+
+
+def test_verb_bracket_gate_fires_without_spacy_and_says_so(policy_v2):
+    w = make_words([("SPEAKER_00", "Das war klar.", 1.5), ("SPEAKER_00", "Wir haben das letzte Jahr nicht gemacht.", 3.0)])
+    jahr = next(i for i, x in enumerate(w) if x["text"] == "Jahr")
+    span = segment.Sentence(idx=0, text="", start=w[0]["start"], end=w[jahr]["end"], speaker="SPEAKER_00", word_range=(0, jahr))
+    g = story_engine._verb_bracket_gate(w, [span], 0, 0)
+    assert g["passed"] is False
+    assert g["available"] is True and g["method"] == "heuristic"
+    assert "Ende" in g["detail"] and "Heuristik, spaCy-Modell fehlt" in g["detail"]
+    sents = segment.sentences_from_words(w, rule="v2")
+    ok = story_engine._verb_bracket_gate(w, sents, 0, len(sents) - 1)
+    assert ok["passed"] is True and "Heuristik, spaCy-Modell fehlt" in ok["detail"]
+
+
+def test_verb_bracket_gate_checks_the_start_across_the_boundary(policy_v2):
+    w = make_words([("SPEAKER_00", "Wir haben das letzte Jahr", 2.0), ("SPEAKER_00", "nicht gemacht.", 1.0)])
+    start = next(i for i, x in enumerate(w) if x["text"] == "nicht")
+    span = segment.Sentence(idx=0, text="", start=w[start]["start"], end=w[-1]["end"], speaker="SPEAKER_00", word_range=(start, len(w) - 1))
+    g = story_engine._verb_bracket_gate(w, [span], 0, 0)
+    assert g["passed"] is False and "Anfang" in g["detail"]
+
+
+def test_verb_bracket_gate_with_fallback_off_is_visible(policy_v2, monkeypatch):
+    raw = dict(policy_v2.roh)
+    raw["verb_bracket"] = {**raw["verb_bracket"], "fallback": "off"}
+    monkeypatch.setattr(editorial, "load", lambda version=None: editorial.Policy(version=2, stand="", roh=raw))
+    w = make_words([("SPEAKER_00", "Wir haben das gemacht.", 2.0)])
+    g = story_engine._verb_bracket_gate(w, segment.sentences_from_words(w), 0, 0)
+    assert g["passed"] is True and g["available"] is False and g["method"] == "off"
+    assert "nicht verfügbar" in g["detail"]
+
+
+def test_run_reports_nlp_status_only_under_v2(brain, llm, policy_v2, monkeypatch):
+    w = demo_words()
+    brain.moments = lambda sents: [{"first_sent": sents[0]["idx"], "last_sent": sents[3]["idx"], "structure": "hook_build_payoff", "why": "x"}]
+    report = story_engine.run(w, BRIEF, {}, None, llm)
+    assert report.nlp_status == "heuristic"
+    assert report.to_json()["nlp_status"] == "heuristic"
+    assert story_engine.DetectReport.from_json(report.to_json()).nlp_status == "heuristic"
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "1")
+    editorial.clear_cache()
+    report = story_engine.run(demo_words(), BRIEF, {}, None, llm)
+    assert report.nlp_status == "" and "nlp_status" not in report.to_json()
+
+
+def test_run_uses_the_sentence_idx_of_the_transcript_under_v2(brain, llm, policy_v2):
+    """Eine bestehende Transkriptversion behält ihre Sätze (Plan AP2: die Regel wirkt ab der nächsten)."""
+    w = demo_words()
+    for x in w:
+        x["sentence_idx"] = 0  # ein einziger Satz
+    seen = []
+    brain.moments = lambda sents: seen.append(len(sents)) or []
+    story_engine.run(w, BRIEF, {}, None, llm)
+    assert seen == [1]

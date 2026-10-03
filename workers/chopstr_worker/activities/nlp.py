@@ -17,7 +17,7 @@ import time
 
 from temporalio import activity
 
-from .. import costlog, db, events
+from .. import costlog, db, editorial, events
 from ..pipeline import dach_nlp
 from ..pipeline import transcribe as asr
 from . import common
@@ -59,7 +59,11 @@ def run(ctx: common.Context, source_id: str, asr_key: str | None = None, diar_ke
         dialect = dach_nlp.detect_dialect(words)
         asr_variant = str(asr_doc.get("variant") or src.get("asr_variant") or "de")
         ch = dialect["variant"] == "de-CH" or asr_variant == "de-CH"
-        dach_nlp.annotate(words, protected_terms=src.get("protected_terms") or [], dialect="de-CH" if ch else None)
+        # Satzende-Regel aus der aktiven Richtlinie (AP2): v1 wie bisher, v2 nur mit implementation.sentence_rule.
+        sentence_rule = editorial.sentence_rule(editorial.load())
+        dach_nlp.annotate(
+            words, protected_terms=src.get("protected_terms") or [], dialect="de-CH" if ch else None, rule=sentence_rule
+        )
         common.heartbeat("annotated")
 
         stats = asr.confidence_stats(words)
@@ -68,6 +72,7 @@ def run(ctx: common.Context, source_id: str, asr_key: str | None = None, diar_ke
         stats["negations"] = sum(1 for w in words if w.get("negation"))
         stats["beta"] = bool(asr_doc.get("beta"))
         stats["verb_bracket_available"] = dach_nlp.verb_bracket_available
+        stats["sentence_rule"] = sentence_rule
         stats["dialect"] = {"variant": dialect["variant"], "confidence": dialect["confidence"], "markers": dialect["markers"]}
         stats["text_norm_count"] = sum(1 for w in words if w.get("text_norm"))
         stats["diarization"] = "skipped" if diar_doc.get("skipped") else "done"

@@ -63,6 +63,14 @@ V2_SWITCHES = (
     "cut.padding",
     "captions.word_bridge",
 )
+# Schalter, deren Code gebaut ist und den Schalter liest. Jedes Arbeitspaket trägt seinen Schalter
+# ein, sobald der Code ihn liest; nur diese stehen in v2 auf true, alle anderen auf false.
+V2_IMPLEMENTED_SWITCHES = frozenset({"captions.word_bridge", "hook.native_spoken", "sentence_rule"})
+# Regelabschnitte, die es nur in v2 gibt. rule_paths und die Herkunftsprüfung laufen zusätzlich über
+# sie, wenn der Abschnitt in den Daten steht; v1 hat sie nicht und bleibt unberührt.
+V2_RULE_SECTIONS = ("captions", "hook", "segmentation", "verb_bracket")
+# Prompt-Pins, die v2 gegenüber V1_PROMPT_PINS ändert (Prompt-Name zu Version).
+V2_PIN_CHANGES: dict[str, int] = {"hooks": 2}
 # F Forschungsbefund, H Übertragungshypothese, R Produktregel, G gelernte Entscheidung
 # (docs/RESEARCH-CLIPPING-KERN.md, Statusschreibweise).
 ORIGIN_VALUES = ("F", "H", "R", "G")
@@ -294,6 +302,25 @@ class Policy:
     def ausschluss(self) -> dict[str, Any]:
         return dict(self.roh["ausschluss"])
 
+    # -- Hook (AP6a, nur ab Fassung 2) ---------------------------------------------------------
+    @property
+    def hook(self) -> dict[str, Any]:
+        """Abschnitt ``hook`` (native_spoken, hyperbole, question_as_variant); Fassung 1 hat ihn nicht."""
+        return dict(self.roh.get("hook") or {})
+
+    @property
+    def hyperbole(self) -> tuple[str, ...]:
+        """Leere Intensivierungen, die der Linter meldet (``hook.hyperbole``), kleingeschrieben."""
+        return tuple(str(x).lower() for x in self.hook.get("hyperbole") or ())
+
+    @property
+    def hook_native_spoken(self) -> bool:
+        """Gesprochener Hook als Originalstelle und Auswahl v2: Regel ``hook.native_spoken`` und Schalter
+        ``implementation.hook.native_spoken`` müssen beide true sein; einer auf false ist der Rollback."""
+        if self.version < 2 or self.hook.get("native_spoken") is not True:
+            return False
+        return _switch_value(self.roh.get("implementation") or {}, "hook.native_spoken") is True
+
     # -- Prompt-Pins ---------------------------------------------------------------------------
     @property
     def prompt_pins(self) -> dict[str, int]:
@@ -373,6 +400,10 @@ def rule_paths(data: dict[str, Any]) -> list[str]:
 
     for section in RULE_SECTIONS:
         walk(data[section], section)
+    # Abschnitte, die nur v2 kennt, zählen mit, sobald sie in den Daten stehen.
+    for section in V2_RULE_SECTIONS:
+        if section in data:
+            walk(data[section], section)
     return paths
 
 
@@ -438,8 +469,9 @@ def load(version: int | None = None) -> Policy:
     return _load_version(active_version() if version is None else int(version))
 
 
-# Tests und Werkzeuge leeren den Zwischenspeicher über ``load.cache_clear()`` wie bisher.
-load.cache_clear = _load_version.cache_clear  # type: ignore[attr-defined]
+def clear_cache() -> None:
+    """Zwischenspeicher der geladenen Fassungen leeren, etwa nach einem Wechsel von ``CHOPSTR_POLICY_VERSION``."""
+    _load_version.cache_clear()
 
 
 def policy_version(version: int | None = None) -> str:
@@ -458,8 +490,109 @@ __all__ = [
     "Policy",
     "PolicyError",
     "active_version",
+    "clear_cache",
     "load",
     "policy_dir",
     "policy_version",
     "rule_paths",
 ]
+
+
+# -- AP10a: Untertitel-Ereignisse (Abschnitt ``captions``, nur Fassung 2) --------------------------
+CAPTION_SWITCH = "captions.word_bridge"
+
+
+def caption_settings(policy: Policy) -> dict[str, Any] | None:
+    """Einstellungen aus ``captions``, wenn Fassung 2 und ``implementation.captions.word_bridge`` an.
+
+    ``None`` heisst: Verhalten vor AP10a (Fassung 1 oder Schalter aus, das ist der Rollback). Fehlt
+    der Abschnitt bei eingeschaltetem Schalter oder ist ein Wert unbrauchbar, scheitert das laut:
+    stillschweigend auf alte Untertitel zu fallen, sähe aus wie ein gebautes Paket."""
+    if policy.version < 2:
+        return None
+    if _switch_value(policy.roh.get("implementation") or {}, CAPTION_SWITCH) is not True:
+        return None
+    raw = policy.roh.get("captions")
+    if not isinstance(raw, dict):
+        raise PolicyError(f"clip_policy_v{policy.version}: {CAPTION_SWITCH} ist an, der Abschnitt captions fehlt.")
+    try:
+        settings = {
+            "bridge_words": raw["bridge_words"],
+            "bridge_max_s": float(raw["bridge_max_s"]),
+            "min_event_s": float(raw["min_event_s"]),
+            "comma_break_only_on_overflow": raw["comma_break_only_on_overflow"],
+        }
+    except (KeyError, TypeError, ValueError):
+        raise PolicyError(
+            f"clip_policy_v{policy.version}: captions braucht bridge_words, bridge_max_s, min_event_s und "
+            "comma_break_only_on_overflow."
+        ) from None
+    if not all(isinstance(settings[k], bool) for k in ("bridge_words", "comma_break_only_on_overflow")):
+        raise PolicyError(f"clip_policy_v{policy.version}: captions.bridge_words und comma_break_only_on_overflow sind true oder false.")
+    if settings["bridge_max_s"] < 0 or settings["min_event_s"] < 0:
+        raise PolicyError(f"clip_policy_v{policy.version}: captions.bridge_max_s und min_event_s dürfen nicht negativ sein.")
+    return settings
+
+
+__all__ += ["CAPTION_SWITCH", "V2_IMPLEMENTED_SWITCHES", "V2_PIN_CHANGES", "V2_RULE_SECTIONS", "caption_settings"]
+
+
+# -- AP2 und AP3: Satzende-Regel, Anfang heilen, Ende vor der Abschwächung, Verbklammer ------------
+SENTENCE_RULE_SWITCH = "sentence_rule"
+
+
+def _sentence_rule_on(policy: Policy) -> bool:
+    return policy.version >= 2 and _switch_value(policy.roh.get("implementation") or {}, SENTENCE_RULE_SWITCH) is True
+
+
+def sentence_rule(policy: Policy) -> str:
+    """Satzende-Regel ``v1`` oder ``v2`` (``dach_nlp.sentence_end_kind``).
+
+    ``v1`` in Fassung 1 und bei ausgeschaltetem ``implementation.sentence_rule`` (Rollback). Mit Schalter
+    gilt ``segmentation.sentence_rule``; fehlt der Wert oder ist er unbekannt, scheitert das laut."""
+    if not _sentence_rule_on(policy):
+        return "v1"
+    raw = policy.roh.get("segmentation")
+    rule = raw.get("sentence_rule") if isinstance(raw, dict) else None
+    if rule not in ("v1", "v2"):
+        raise PolicyError(f"clip_policy_v{policy.version}: segmentation.sentence_rule muss v1 oder v2 sein, nicht {rule!r}.")
+    return str(rule)
+
+
+def context_front(policy: Policy) -> tuple[int, float] | None:
+    """Grenzen für das Heilen des Anfangs (Sätze, Sekunden) oder ``None`` ohne AP2 (Rollback)."""
+    if not _sentence_rule_on(policy):
+        return None
+    laenge = policy.roh["laenge"]
+    try:
+        return int(laenge["context_front_sentences"]), float(laenge["context_front_s"])
+    except (KeyError, TypeError, ValueError):
+        raise PolicyError(
+            f"clip_policy_v{policy.version}: {SENTENCE_RULE_SWITCH} ist an, laenge.context_front_sentences "
+            "oder laenge.context_front_s fehlt."
+        ) from None
+
+
+def never_end_on_qualification(policy: Policy) -> bool:
+    """Darf die Heilung des Endes auf einem Abschwächungssatz enden? ``True`` heißt nein (nur mit AP2)."""
+    return _sentence_rule_on(policy) and policy.ausstieg.get("never_end_on_qualification") is True
+
+
+def verb_bracket_settings(policy: Policy) -> dict[str, Any] | None:
+    """Einstellungen der Verbklammer-Prüfung über die Schnittgrenze (AP3) oder ``None`` für das Tor vor AP3.
+
+    ``None`` in Fassung 1 und in Fassungen ohne Abschnitt ``verb_bracket``. Sonst ``{active, fallback,
+    lists}``; ``active`` ist ``ausstieg.verbklammer_nicht_trennen``."""
+    if policy.version < 2 or "verb_bracket" not in policy.roh:
+        return None
+    raw = policy.roh["verb_bracket"]
+    fallback = raw.get("fallback") if isinstance(raw, dict) else None
+    if fallback not in ("heuristic", "off"):
+        raise PolicyError(f"clip_policy_v{policy.version}: verb_bracket.fallback muss heuristic oder off sein, nicht {fallback!r}.")
+    lists = {key: tuple(str(x) for x in (raw.get(key) or ())) for key in ("particles", "subordinators", "auxiliaries")}
+    if not all(lists.values()):
+        raise PolicyError(f"clip_policy_v{policy.version}: verb_bracket braucht particles, subordinators und auxiliaries.")
+    return {"active": policy.ausstieg.get("verbklammer_nicht_trennen") is not False, "fallback": fallback, "lists": lists}
+
+
+__all__ += ["SENTENCE_RULE_SWITCH", "context_front", "never_end_on_qualification", "sentence_rule", "verb_bracket_settings"]

@@ -31,7 +31,7 @@ REFERENZ_MEDIAN_S = 41.0  # Median der 105 guten Beispielclips
 
 @pytest.fixture
 def policy():
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     return editorial.load()
 
 
@@ -87,12 +87,12 @@ def test_die_laenge_kommt_aus_der_grundlage_und_nicht_aus_dem_code(policy, tmp_p
         """),
         encoding="utf-8",
     )
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path))
     try:
         assert heuristic_llm.score_clip(zehn_sekunden)["laenge_ok"] is True
     finally:
-        editorial.load.cache_clear()
+        editorial.clear_cache()
 
 
 def _kriterien_yaml() -> str:

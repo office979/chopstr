@@ -90,6 +90,13 @@ laenge:
   kontext_zugabe_s: 7
   kontext_zugabe_saetze: 2
 
+  # ANFANG HEILEN (AP2, neu in Fassung 2). Spiegel der Kontextzugabe am Ende: ein Clip, der mitten im
+  # Satz, mit einem Pronomen ohne Bezug oder in einer offenen Verbklammer beginnt, darf um höchstens
+  # so viele Sätze und Sekunden nach vorn wachsen, bis der Mangel weg ist. Beide Grenzen gelten.
+  # Gelesen nur mit implementation.sentence_rule (story_engine.heal_start).
+  context_front_sentences: 2
+  context_front_s: 7
+
 # ------------------------------------------------------------------------------------------------
 # Rubrik
 # ------------------------------------------------------------------------------------------------
@@ -300,6 +307,10 @@ ausstieg:
     - "allerdings"
     - "aber natürlich"
     - "um fair zu sein"
+  # AP2, neu in Fassung 2: die Heilung des Endes endet nie auf einem Satz, der mit einem dieser
+  # Marker beginnt; sie sucht einen Satz weiter (innerhalb der Zugabe), sonst wird der Clip mit dem
+  # Grund ends_on_qualification verworfen. Gelesen nur mit implementation.sentence_rule.
+  never_end_on_qualification: true
 
 # ------------------------------------------------------------------------------------------------
 # Zusammenhang
@@ -371,6 +382,87 @@ ausschluss:
   insiderwitz_ohne_kontext: true
 
 # ------------------------------------------------------------------------------------------------
+# Untertitel-Ereignisse (neu in Fassung 2, AP10a)
+# ------------------------------------------------------------------------------------------------
+# Neue Untertitelzeiten sind eine Folge des Schnitts, keine Gestaltungsänderung: Farben, Schrift,
+# Größe, Position, Wörter je Karte, Animation und Highlight-Stil bleiben gleich. Gelesen wird der
+# Abschnitt nur, wenn implementation.captions.word_bridge an ist; dieser Schalter ist der Rollback
+# für alle Regeln hier (chopstr_worker/pipeline/captions_de.py). Mit dem Schalter gilt außerdem:
+# Zahl plus Einheit ist ein Token, Bindestrichwörter werden nur am vorhandenen Bindestrich getrennt,
+# Komposita bevorzugt an Morphemgrenzen (Netflix-Norm, RK 5).
+captions:
+  # Ein Wort-Ereignis endet erst beim Start des nächsten Wortes, innerhalb einer Karte und von Karte
+  # zu Karte; die Caption verschwindet in kurzen Sprechpausen nicht mehr (RK 2 Befund 9, Flackern).
+  bridge_words: true
+  # Größte Lücke in Sekunden, die überbrückt wird; bei längerer Lücke endet das Ereignis am Wortende.
+  bridge_max_s: 0.4
+  # Mindeststandzeit in Sekunden je Karte mit mehreren Wörtern; nie in die nächste Karte hinein.
+  min_event_s: 0.8
+  # Bruch nach einem Komma nur, wenn die Karte sonst die Zeilenbreite der Karte überschreitet (P30).
+  comma_break_only_on_overflow: true
+
+# ------------------------------------------------------------------------------------------------
+# Hook (neu in Fassung 2, AP6a)
+# ------------------------------------------------------------------------------------------------
+# Der Text-Hook darf verdichten, aber nicht mehr behaupten als der Clip trägt (Master-Prompt 8).
+# Gelesen von copy_engine.write_copy (Auswahl v2), copy_de.lint (Hyperbel) und hooks_v2 (Prompt).
+# Wirksam nur zusammen mit implementation.hook.native_spoken; steht eins auf false, gilt die Auswahl
+# wie in Fassung 1. Rollback: Schalter und Pin hooks gemeinsam zurücksetzen (native_spoken false,
+# prompts.hooks 1), sonst geht hooks_v2 mit der Auswahl aus Fassung 1 zusammen.
+hook:
+  # Gesprochener Hook ist der wörtliche Einstieg des Clips (erster Satz, bei mehr als zwölf Wörtern
+  # ein wörtlicher Teil an einer Phrasengrenze), nie generierter Text.
+  native_spoken: true
+  # Leere Intensivierung ersetzt keine Substanz. Der Linter meldet sie, die Auswahl v2 verwirft eine
+  # Variante damit. Kleingeschrieben, Teilstring im kleingeschriebenen Hook.
+  hyperbole:
+    - "das verändert alles"
+    - "niemand spricht darüber"
+    - "niemand redet darüber"
+    - "das ist das geheimnis"
+    - "du glaubst nicht"
+  # Aussage als Standard, Frage höchstens als eine Variante unter mehreren (zu testen).
+  # prompt_only: wirkt nur über den Text von hooks_v2, kein Code liest diesen Wert.
+  question_as_variant: true
+
+# ------------------------------------------------------------------------------------------------
+# Satzzerlegung (neu in Fassung 2, AP2)
+# ------------------------------------------------------------------------------------------------
+# Eine Satzende-Funktion für Zerlegung, Satzgrenzen-Tor und Messung (dach_nlp.sentence_end_kind).
+# v2: Satzzeichen zuerst, Sprecherwechsel ist Grenze, eine Pause ab 0,7 s nur Grenzkandidat
+# (angenommen mit großgeschriebenem Folgewort und ohne offene Klammer); Abkürzungsliste ohne „so",
+# „i", „mag", „max", „art", „min". v1 ist das Verhalten vor AP2. Wirksam nur mit
+# implementation.sentence_rule; eine bestehende Transkriptversion behält ihre sentence_idx.
+segmentation:
+  sentence_rule: v2
+
+# ------------------------------------------------------------------------------------------------
+# Verbklammer (neu in Fassung 2, AP3)
+# ------------------------------------------------------------------------------------------------
+# Geprüft wird der Schnitt zwischen Vorsatz und Folgesatz (Anfang und Ende des Clips), nicht ein Satz
+# für sich. Mit spaCy über das Modell, ohne spaCy über eine Heuristik aus drei Signalen
+# (dach_nlp.bracket_heuristic). fallback: heuristic oder off; off heißt ohne spaCy nicht prüfen und
+# das sichtbar melden. Gelesen wird der Abschnitt nur, wenn ausstieg.verbklammer_nicht_trennen gilt.
+verb_bracket:
+  fallback: heuristic
+  # Verbpartikeln trennbarer Verben („Wir fangen morgen | an.").
+  particles: [an, auf, aus, ein, mit, zu, ab, vor, nach, zurück, weg, her, hin, los, fest, vorbei, weiter]
+  # Nebensatzkonnektoren, nach denen das finite Verb am Ende steht.
+  subordinators: [dass, weil, wenn, ob, obwohl, damit, nachdem, bevor, als, während, falls, sofern, sodass]
+  # Finite Formen von haben, sein, werden, können, müssen, wollen, sollen, dürfen, mögen.
+  auxiliaries: [
+    hab, habe, hast, hat, haben, habt, hatte, hattest, hatten, hattet, hätte, hättest, hätten, hättet,
+    bin, bist, ist, sind, seid, war, warst, waren, wart, wäre, wärst, wären, wärt,
+    werde, wirst, wird, werden, werdet, wurde, wurdest, wurden, wurdet, würde, würdest, würden, würdet,
+    kann, kannst, können, könnt, konnte, konntest, konnten, konntet, könnte, könntest, könnten, könntet,
+    muss, musst, müssen, müsst, musste, musstest, mussten, musstet, müsste, müsstest, müssten, müsstet,
+    will, willst, wollen, wollt, wollte, wolltest, wollten, wolltet,
+    soll, sollst, sollen, sollt, sollte, solltest, sollten, solltet,
+    darf, darfst, dürfen, dürft, durfte, durftest, durften, durftet, dürfte, dürftest, dürften, dürftet,
+    mag, magst, mögen, mögt, mochte, mochtest, mochten, mochtet, möchte, möchtest, möchten, möchtet,
+  ]
+
+# ------------------------------------------------------------------------------------------------
 # Prompt-Pins (neu in Fassung 2)
 # ------------------------------------------------------------------------------------------------
 # Welche Datei packages/prompts/<name>_v<N>.md gilt. Eine neue Prompt-Version wird erst wirksam, wenn
@@ -381,7 +473,7 @@ prompts:
   propose_moments: 1
   score_clip: 2
   story_graph_confirm: 1
-  hooks: 1
+  hooks: 2                    # AP6a: hooks_v2 (verschiedene Originalstellen, Frage als Variante, Clip als Daten)
   post_caption: 1
 
 # ------------------------------------------------------------------------------------------------
@@ -392,19 +484,19 @@ prompts:
 # Die Schalter sind Rollback-Mechanik, keine redaktionellen Regeln; die Regeln, die sie freischalten,
 # kommen mit ihrem Paket und tragen dann eine Herkunft in origins.
 implementation:
-  sentence_rule: false        # AP2: eine Satzende-Funktion, Anfang heilen
+  sentence_rule: true         # AP2: eine Satzende-Funktion, Anfang heilen (gebaut, liest segmentation)
   gates:
     discard_hard: false       # AP4: harte Gates vor dem Ranking verwerfen statt sortieren
   search:
     payoff_first: false       # AP5: Suche vom Payoff rückwärts zum Einstieg
   hook:
-    native_spoken: false      # AP6: gesprochener Einstieg als Originalstelle
+    native_spoken: true       # AP6a: gesprochener Einstieg als Originalstelle, Auswahl v2 (gebaut)
   trim:
     enabled: false            # AP7: Remove- und Keep-Logik mit Mehrsegment-Komposition
   cut:
     padding: false            # AP10b: Vor- und Nachlauf an Wortgrenzen
   captions:
-    word_bridge: false        # AP10a: Wort-Events bis zum nächsten Wort
+    word_bridge: true         # AP10a: Wort-Events bis zum nächsten Wort (gebaut, liest Abschnitt captions)
 
 # ------------------------------------------------------------------------------------------------
 # Herkunft je Regel (neu in Fassung 2)
@@ -422,8 +514,8 @@ origins:
   laenge.hart_max_s: {origin: H, source: "RK 2 Befund 4 (Längengrenzen 18 bis 70 s aus der Policy, ohne Messung); RK 9 Punkt 5"}
   laenge.kontext_zugabe_s: {origin: H, source: "RK 2 Befund 1 (kaputtes Ende um höchstens zwei Sätze oder 7 s geheilt); Abwägung an einer Quelle, nicht gemessen"}
   laenge.kontext_zugabe_saetze: {origin: H, source: "RK 2 Befund 1 (kaputtes Ende um höchstens zwei Sätze oder 7 s geheilt); Abwägung an einer Quelle, nicht gemessen"}
-  rubrik.skala_max: {origin: H, source: "RK 7, Gegenposition 1: Rubrik und Gewichte sind Eigenkonstruktion aus dem Projektwissen (Masterclass 10.2), nicht gemessen"}
-  rubrik.kriterien.standalone: {origin: R, source: "RK 8 Prio 3 (Eigenständigkeit als Gate), Master-Prompt Priorität 2; das Gewicht 0,20 ist H (RK 7, Gegenposition 1)"}
+  rubrik.skala_max: {origin: H, source: "Masterclass Modul 10.2 (sieben Kriterien zu je 0 bis 2 Punkten), nicht gemessen; Master-Prompt Abschnitt 19 verlangt Anker 0 bis 4, die Abweichung ist offen"}
+  rubrik.kriterien.standalone: {origin: R, source: "RK 8 Prio 3 (Eigenständigkeit als Gate), Master-Prompt Priorität 2", weight_origin: H, weight_source: "Gewicht 0,20 aus Masterclass Modul 10.2, nicht gemessen; RK 7 Gegenposition 1: die Literatur stützt keine Gewichte"}
   rubrik.kriterien.hook: {origin: H, source: "RK 3, Zeilen „Textbasierter Hook-Score als Prognose“ (F negativ) und „Frage-Hook“ (umstritten); Drei-Sekunden-Satz aus Masterclass Modul 3, nicht gemessen"}
   rubrik.kriterien.offene_frage: {origin: H, source: "RK 3, Zeilen „Informationslücke, umgekehrt U-förmig“ (F, Headlines) und „Ovsiankina“ (F mittel), Übertrag auf Clips H; Zeile „Zeigarnik“ widerlegt, als Begründung gestrichen"}
   rubrik.kriterien.spezifitaet: {origin: H, source: "RK 3, Zeile „Zahlenpräzision“ (F aus Verhandlungen, bei Fachpublikum nur mit Herleitung)"}
@@ -468,3 +560,18 @@ origins:
   ausschluss.organisations_marker: {origin: H, source: "Wortliste ohne Messung; RK 2 Befund 13 (nur die Heuristik liest sie)"}
   ausschluss.begruessung_und_abschied: {origin: H, source: "Masterclass 10.4, nicht gemessen; RK 2 Befund 13 (von keinem Code gelesen)"}
   ausschluss.insiderwitz_ohne_kontext: {origin: R, source: "Master-Prompt Priorität 2 eigenständige Verständlichkeit; RK 8 Prio 3; RK 2 Befund 13 (von keinem Code gelesen)"}
+  captions.bridge_words: {origin: R, source: "RK 2 Befund 9 (ein ASS-Event je Wort ohne Überbrückung der Lücken); RK 8 Prio 12 (Wort-Events bis zum nächsten Wort verlängern); Master-Prompt 2 (neue Untertitelzeiten als Folge des Schnitts)"}
+  captions.bridge_max_s: {origin: H, source: "Startwert aus dem Entscheidungsregister (offene Fragen, Startwerte); RK 2 Befund 9; nicht gemessen"}
+  captions.min_event_s: {origin: H, source: "Startwert aus dem Entscheidungsregister, nur für Karten mit mehreren Wörtern; RK 5 Netflix German Timed Text Style Guide als Orientierung; RK 2 Befund 9 (keine Mindestanzeigedauer)"}
+  captions.comma_break_only_on_overflow: {origin: R, source: "Entscheidung P30 (Komma-Bruch nur bei Überlauf); RK 2 Befund 9 (Bruch nach jedem Komma); RK 5 Netflix German Timed Text Style Guide (zusammenhängende grammatische Einheit je Zeile)"}
+  hook.native_spoken: {origin: R, source: "Master-Prompt Abschnitt 8 (gesprochener Hook muss im Original vorhanden sein); RK 2 Befund 7 (spoken_hook wird nie verwendet); RK 7, Zeile „Clickbait“ (Sinntreue)"}
+  hook.hyperbole: {origin: R, source: "RK 7, Tabelle Zeile „Niemand redet darüber“ (Anti-Hyperbel, leere Intensivierung ersetzt keine Substanz); Masterfile 3.3; Master-Prompt Abschnitt 9"}
+  hook.question_as_variant: {origin: H, source: "RK 3, Zeile „Frage-Hook“ (umstritten: Fang und Wheeler 2026, 22.743 A/B-Tests, Fragen senken Engagement); RK 7, Zeile „Frage-Hooks“ (Aussage als Standard, Frage als Variante)"}
+  laenge.context_front_sentences: {origin: H, source: "Startwert aus dem Entscheidungsregister (offene Fragen, Startwerte: 2 Sätze wie die Heilung des Endes); RK 2 Befund 1 (kaputter Anfang wird verworfen statt nach vorn geheilt); RK 8 Prio 1; nicht gemessen"}
+  laenge.context_front_s: {origin: H, source: "Startwert aus dem Entscheidungsregister (offene Fragen, Startwerte: 7 s wie die Heilung des Endes); RK 2 Befund 1; RK 8 Prio 1; nicht gemessen"}
+  ausstieg.never_end_on_qualification: {origin: R, source: "RK 2 Befund 6 (Heilung des Endes schließt den Abschwächungssatz ein und endet darauf, im Widerspruch zu ausstieg.vor_der_abschwaechung); RK 8 Prio 1"}
+  segmentation.sentence_rule: {origin: R, source: "RK 8 Prio 1 (eine Satzende-Funktion, Pause nur Grenzkandidat mit großgeschriebenem Folgewort und ohne offenes finites Verb, Abkürzungsliste bereinigen); RK 2 Befund 1"}
+  verb_bracket.fallback: {origin: R, source: "RK 8 Prio 2 (fehlendes Modell laut melden statt still bestehen, deterministischer Rückfall ohne spaCy); RK 2 Befund 2; Entscheidungsregister (spaCy-Modell ins Image, Rückfall heuristisch und laut)"}
+  verb_bracket.particles: {origin: H, source: "Wortliste ohne Messung; RK 5 (Satzklammer im Deutschen für Clip-Schnitte unerforscht); RK 8 Prio 2"}
+  verb_bracket.subordinators: {origin: H, source: "Wortliste ohne Messung; RK 5 (Satzklammer im Deutschen für Clip-Schnitte unerforscht); RK 8 Prio 2"}
+  verb_bracket.auxiliaries: {origin: H, source: "Wortliste der finiten Formen ohne Messung; RK 5 (Satzklammer im Deutschen für Clip-Schnitte unerforscht); RK 8 Prio 2"}

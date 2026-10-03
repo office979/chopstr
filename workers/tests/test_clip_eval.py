@@ -208,3 +208,47 @@ def test_es_am_anfang_ist_kein_rueckverweis():
     assert clip_eval.check_boundaries({"start_s": words[0]["start"], "end_s": words[-1]["end"]}, words)[
         "beginnt_mit_rueckverweis"
     ] is False
+
+
+# -- AP2: dieselbe Satzende-Entscheidung wie Zerlegung und Tor ------------------------------------
+
+
+def _clip(woerter: list[dict], a: int, b: int) -> dict:
+    return {"start_s": woerter[a]["start"], "end_s": woerter[b]["end"]}
+
+
+def test_check_boundaries_v1_has_no_new_key():
+    woerter = satz(["Das", "ist", "gut."]) + satz(["Wir", "machen", "weiter."], ab=1.2)
+    b = clip_eval.check_boundaries(_clip(woerter, 3, 5), woerter, rule="v1")
+    assert "grenze_nur_aus_pause" not in b
+    assert b["satzanfang"] is True and b["satzende"] is True
+
+
+def test_check_boundaries_v2_decides_like_the_gate(monkeypatch):
+    """Pause vor kleingeschriebenem Wort: unter v1 eine Grenze, unter v2 nicht; Tor und Messung gleich."""
+    from chopstr_worker import editorial
+    from chopstr_worker.pipeline import segment, story_engine
+
+    woerter = satz(["Das", "bringt", "bei", "uns"]) + satz(["nicht", "viel."], ab=2.5)
+    clip = _clip(woerter, 0, 3)
+    assert clip_eval.check_boundaries(clip, woerter, rule="v1")["satzende"] is True
+    v2 = clip_eval.check_boundaries(clip, woerter, rule="v2")
+    assert v2["satzende"] is False and v2["grenze_nur_aus_pause"] == []
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    editorial.clear_cache()
+    try:
+        assert clip_eval.active_sentence_rule() == "v2"
+        span = [segment.Sentence(idx=0, text="", start=0.0, end=woerter[3]["end"], speaker="SPEAKER_00", word_range=(0, 3))]
+        assert story_engine._satzgrenzen_gate(woerter, span, 0, 0)["passed"] is v2["satzende"]
+        assert clip_eval.check_boundaries(clip, woerter) == v2
+    finally:
+        editorial.clear_cache()
+
+
+def test_check_boundaries_v2_reports_pause_only_boundaries():
+    woerter = satz(["Wir", "haben", "das", "gemacht"]) + satz(["Heute", "läuft", "es", "gut."], ab=2.6)
+    b = clip_eval.check_boundaries(_clip(woerter, 0, 3), woerter, rule="v2")
+    assert b["satzende"] is True and b["grenze_nur_aus_pause"] == ["Ende"]
+    b = clip_eval.check_boundaries(_clip(woerter, 4, 7), woerter, rule="v2")
+    assert b["satzanfang"] is True and b["grenze_nur_aus_pause"] == ["Anfang"]

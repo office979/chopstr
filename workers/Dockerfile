@@ -11,7 +11,7 @@ RUN apt-get update \
 WORKDIR /app
 
 # Gemeinsame Dateien aus dem Monorepo: Prompts, redaktionelle Grundlage, Schriftenliste, Ausgaberegeln.
-# Die Pfade setzt docker-compose zusaetzlich explizit (PROMPTS_DIR, EDITORIAL_DIR, CHOPSTR_CAPTION_FONTS,
+# Die Pfade setzt docker-compose zusätzlich explizit (PROMPTS_DIR, EDITORIAL_DIR, CHOPSTR_CAPTION_FONTS,
 # CHOPSTR_AUSGABE_REGELN); fehlt eine Datei, bricht der Worker beim Start ab (worker.check_assets).
 COPY packages/prompts /app/packages/prompts
 COPY packages/editorial /app/packages/editorial

@@ -22,6 +22,9 @@ from . import captions_de, reframe
 CONTRACT = "render_plan_v1"
 RENDER_VERSION = "render_v1"
 CAPTIONS_VERSION = "captions_v1"
+# Untertitel nach AP10a (Policy v2, implementation.captions.word_bridge). Steht nur bei aktiven Regeln
+# im Plan: Umschalten und Rollback ändern den Hash und rendern neu; unter v1 bleibt der Hash gleich.
+CAPTIONS_VERSION_V2 = "captions_v2"
 OUTPUT_SIZES: dict[str, tuple[int, int]] = {"9:16": (1080, 1920), "4:5": (1080, 1350), "1:1": (1080, 1080), "16:9": (1920, 1080)}
 PLATFORM_ASPECT = {"tiktok": "9:16", "reels": "9:16", "shorts": "9:16", "linkedin": "4:5"}
 TITLE_CARD_S = 2.5
@@ -252,10 +255,18 @@ def build_plan(
             "hook_version": sources.get("hook_version"),
             "candidate_id": sources.get("candidate_id"),
         },
-        "versions": dict(VERSIONS),
+        "versions": plan_versions(),
     }
     json.dumps(plan)  # muss serialisierbar sein, sonst hier scheitern statt beim DB-Schreiben
     return plan
+
+
+def plan_versions() -> dict[str, str]:
+    """Modulversionen für den Plan; ``captions_de`` wird ``captions_v2``, wenn die AP10a-Regeln gelten."""
+    versions = dict(VERSIONS)
+    if captions_de.caption_rules().enabled:
+        versions["captions_de"] = CAPTIONS_VERSION_V2
+    return versions
 
 
 def plan_hash(plan: dict, hook_version: int | None, transcript_version: int | None) -> str:
@@ -267,6 +278,7 @@ def plan_hash(plan: dict, hook_version: int | None, transcript_version: int | No
 __all__ = [
     "AUDIO_PRESETS",
     "CAPTIONS_VERSION",
+    "CAPTIONS_VERSION_V2",
     "CONTRACT",
     "DEFAULT_FPS",
     "HOOK_OVERLAY_DEFAULT",
@@ -288,4 +300,5 @@ __all__ = [
     "output_size",
     "plan_duration",
     "plan_hash",
+    "plan_versions",
 ]

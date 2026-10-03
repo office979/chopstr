@@ -111,12 +111,12 @@ def test_active_policy_version_is_part_of_the_cache_key(fake_db, fake_context, s
     from chopstr_worker import editorial
 
     monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "1")
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     analyze.run_detect_candidates(fake_context, source)
     key_v1 = fake_db.events_for("detect_candidates")[-1]["payload"]["key"]
 
     monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     analyze.run_detect_candidates(fake_context, source)
     fin = fake_db.events_for("detect_candidates")[-1]["payload"]
     assert fin["key"] != key_v1 and fin["cached"] is False
@@ -125,11 +125,11 @@ def test_active_policy_version_is_part_of_the_cache_key(fake_db, fake_context, s
     assert {c["rubric"]["policy_version"] for c in fake_db.candidates} == {"clip_policy_v2"}
 
     monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "1")
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     analyze.run_detect_candidates(fake_context, source)
     fin = fake_db.events_for("detect_candidates")[-1]["payload"]
     assert fin["key"] == key_v1 and fin["cached"] is True
-    editorial.load.cache_clear()
+    editorial.clear_cache()
 
 
 def test_runs_without_heatmap(fake_db, fake_context, monkeypatch):
@@ -174,8 +174,17 @@ def test_missing_transcript_fails_clearly(fake_db, fake_context, monkeypatch):
 # -- Automatische Clips (kein Auswahlschritt mehr) ---------------------------------------------
 
 
-def _result(start: float, end: float, *, gate_passed: bool, risk_flags: list[str]) -> story_engine.CandidateResult:
-    """Ein Kandidat mit frei wählbaren Hinweisen, ohne die Story-Engine laufen zu lassen."""
+# Freigaberelevante Behauptung (Zahl mit Währung) und ein Text, der nur das alte, breite Flag auslöst.
+CLAIM_TEXT = "[0] (SPEAKER_00) Bei uns hat das im ersten Jahr rund 40.000 Euro gespart."
+HARMLESS_TEXT = "[0] (SPEAKER_00) Allerdings hat das gedauert, weil jeder erst lernen musste."
+NEUTRAL_TEXT = "[0] (SPEAKER_00) Dann haben wir das Lager neu sortiert."
+
+
+def _result(
+    start: float, end: float, *, gate_passed: bool, risk_flags: list[str], text: str = NEUTRAL_TEXT,
+    title_card: str = " Drei Fehler ",
+) -> story_engine.CandidateResult:
+    """Ein Kandidat mit frei wählbaren Hinweisen und Text, ohne die Story-Engine laufen zu lassen."""
     return story_engine.CandidateResult(
         segments=[{"start": start, "end": end, "role": "body"}],
         start_s=start,
@@ -183,7 +192,7 @@ def _result(start: float, end: float, *, gate_passed: bool, risk_flags: list[str
         first_sent=0,
         last_sent=1,
         structure="how_to_list",
-        rubric={"contract": "candidates_v1", "suggested_title_card": " Drei Fehler ", "scores": {}, "speakers": []},
+        rubric={"contract": "candidates_v1", "suggested_title_card": title_card, "scores": {}, "speakers": [], "text": text},
         gates={"standalone": {"passed": gate_passed}, "fidelity": {"passed": True}},
         story_graph_flags=[],
         risk_flags=risk_flags,
@@ -226,7 +235,9 @@ def test_clip_per_candidate_is_created_in_portrait(fake_db, fake_context, brande
         assert clip["delete_after"] is None  # setzt der Trigger aus Migration 0006
         cand = next(c for c in fake_db.candidates if c["id"] == clip["candidate_id"])
         assert clip["composition"] == cand["segments"]
-        blockers = analyze.auto_accept_blockers(cand["risk_flags"])
+        blockers = analyze.auto_accept_blockers(
+            cand["risk_flags"], cand["rubric"].get("text") or "", cand["rubric"].get("suggested_title_card") or ""
+        )
         if blockers:  # AP0a: Behauptung, Humor oder sensibles Thema wartet auf einen Menschen
             assert cand["human_verdict"] is None
             assert cand["verdict_reason"] == analyze.auto_hold_reason(blockers)
@@ -295,13 +306,27 @@ def test_candidate_with_hints_gets_a_clip_too(fake_db, fake_context, branded_sou
     assert any(c["candidate_id"] == objected_row["id"] for c in fake_db.clips.values())
 
 
-@pytest.mark.parametrize("flags", [["humor"], ["sensitive_topic"], ["claim"], ["heuristic_only", "claim", "sensitive_topic"]])
-def test_flagged_candidate_gets_draft_clip_but_no_verdict(fake_db, fake_context, branded_source, monkeypatch, flags):
-    """AP0a: Humor, sensible Themen und Behauptungen nimmt nie die Automatik an. Der Entwurf entsteht,
-    das Urteil bleibt leer, die Begründung nennt die Hinweise, und der lokale Worker rendert ihn nicht."""
+@pytest.mark.parametrize(
+    ("flags", "text", "blockers"),
+    [
+        (["humor"], HARMLESS_TEXT, ["humor"]),
+        (["sensitive_topic"], NEUTRAL_TEXT, ["sensitive_topic"]),
+        ([], "", ["claim_unchecked"]),  # leerer Text lässt sich nicht prüfen
+        (["humor"], "  ", ["humor", "claim_unchecked"]),
+        (["claim"], CLAIM_TEXT, ["claim"]),
+        ([], CLAIM_TEXT, ["claim"]),  # die Prüfung hängt am Text, nicht am Flag
+        (["heuristic_only", "claim", "sensitive_topic"], CLAIM_TEXT, ["sensitive_topic", "claim"]),
+    ],
+)
+def test_flagged_candidate_gets_draft_clip_but_no_verdict(
+    fake_db, fake_context, branded_source, monkeypatch, flags, text, blockers
+):
+    """AP0a: Humor, sensible Themen und freigaberelevante Behauptungen nimmt nie die Automatik an. Der
+    Entwurf entsteht, das Urteil bleibt leer, die Begründung nennt die Blocker, und der lokale Worker
+    rendert ihn nicht."""
     from chopstr_worker import local_worker
 
-    flagged = _result(1.0, 20.0, gate_passed=True, risk_flags=flags)
+    flagged = _result(1.0, 20.0, gate_passed=True, risk_flags=flags, text=text)
     clean = _result(30.0, 55.0, gate_passed=True, risk_flags=["heuristic_only"])
     _fixed_report(monkeypatch, [flagged, clean])
 
@@ -309,7 +334,6 @@ def test_flagged_candidate_gets_draft_clip_but_no_verdict(fake_db, fake_context,
     assert len(ids) == 2 and len(fake_db.clips) == 2
     flagged_row = next(c for c in fake_db.candidates if c["start_s"] == 1.0)
     clean_row = next(c for c in fake_db.candidates if c["start_s"] == 30.0)
-    blockers = [f for f in flags if f in analyze.AUTO_ACCEPT_BLOCKING_FLAGS]
 
     assert flagged_row["human_verdict"] is None and flagged_row["verdict_by"] is None
     assert flagged_row["verdict_at"] is None
@@ -325,15 +349,41 @@ def test_flagged_candidate_gets_draft_clip_but_no_verdict(fake_db, fake_context,
     assert {str(r[1]) for r in rows} == {clean_row["id"]}
 
 
+def test_claim_flag_alone_does_not_hold_back_the_candidate(fake_db, fake_context, branded_source, monkeypatch):
+    """H2: Das breite Flag ``claim`` aus ``story_graph.claims_in`` (hier wegen „Allerdings“, „weil“ und
+    „jeder“) hält die automatische Annahme nicht auf, solange der Text nichts Freigaberelevantes sagt."""
+    _fixed_report(monkeypatch, [_result(1.0, 20.0, gate_passed=True, risk_flags=["claim", "heuristic_only"], text=HARMLESS_TEXT)])
+
+    analyze.run_detect_candidates(fake_context, branded_source)
+    (row,) = fake_db.candidates
+    assert row["risk_flags"] == ["claim", "heuristic_only"]  # risk_flags bleiben, wie sie sind
+    assert row["human_verdict"] == "accepted" and row["verdict_reason"] == analyze.AUTO_VERDICT_REASON
+
+
 def test_auto_accept_blocking_flags_are_the_product_rule():
-    assert analyze.AUTO_ACCEPT_BLOCKING_FLAGS == ("humor", "sensitive_topic", "claim")
-    assert analyze.auto_accept_blockers(["claim", "heuristic_only", "humor", "claim"]) == ["claim", "humor"]
-    assert analyze.auto_accept_blockers(None) == []
+    assert not hasattr(analyze, "AUTO_ACCEPT_BLOCKING_FLAGS")
+    assert analyze.AUTO_ACCEPT_HARD_FLAGS == ("humor", "sensitive_topic")
+    assert analyze.auto_accept_blockers(["claim", "heuristic_only", "humor", "humor"], NEUTRAL_TEXT) == ["humor"]
+    assert analyze.auto_accept_blockers(["sensitive_topic", "humor"], CLAIM_TEXT) == ["sensitive_topic", "humor", "claim"]
+    assert analyze.auto_accept_blockers(["claim"], HARMLESS_TEXT) == []
+    assert analyze.auto_accept_blockers(None, "") == ["claim_unchecked"]
+
+
+def test_title_card_with_a_claim_holds_back_the_candidate(fake_db, fake_context, branded_source, monkeypatch):
+    """H2c: Die Titelkarte geht mit dem Clip hinaus; eine Behauptung dort hält die Freigabe auf wie im Text."""
+    assert analyze.auto_accept_blockers([], NEUTRAL_TEXT, "40 Prozent mehr Umsatz") == ["claim"]
+    assert analyze.auto_accept_blockers([], "", "40 Prozent mehr Umsatz") == ["claim_unchecked", "claim"]
+    _fixed_report(monkeypatch, [_result(1.0, 20.0, gate_passed=True, risk_flags=[], title_card="Doppelt so viele Kunden")])
+
+    analyze.run_detect_candidates(fake_context, branded_source)
+    (row,) = fake_db.candidates
+    assert row["human_verdict"] is None
+    assert row["verdict_reason"] == analyze.auto_hold_reason(["claim"])
 
 
 def test_rerun_drops_held_draft_clips_without_orphans(fake_db, fake_context, branded_source, monkeypatch):
     """Zurückgehaltene Entwürfe weichen beim erneuten Lauf wie die angenommenen; kein Clip bleibt ohne Kandidat."""
-    flagged = _result(1.0, 20.0, gate_passed=True, risk_flags=["claim"])
+    flagged = _result(1.0, 20.0, gate_passed=True, risk_flags=["claim"], text=CLAIM_TEXT)
     clean = _result(30.0, 55.0, gate_passed=True, risk_flags=[])
     _fixed_report(monkeypatch, [flagged, clean])
 
@@ -344,10 +394,109 @@ def test_rerun_drops_held_draft_clips_without_orphans(fake_db, fake_context, bra
     assert all(c["candidate_id"] in cand_ids for c in fake_db.clips.values())
 
 
+def _held_and_clean_run(fake_db, fake_context, source_id, monkeypatch) -> tuple[dict, dict]:
+    """Erster Lauf mit einem zurückgehaltenen und einem angenommenen Kandidaten; liefert Kandidat und Clip
+    des zurückgehaltenen."""
+    flagged = _result(1.0, 20.0, gate_passed=True, risk_flags=["claim"], text=CLAIM_TEXT)
+    clean = _result(30.0, 55.0, gate_passed=True, risk_flags=[])
+    _fixed_report(monkeypatch, [flagged, clean])
+    analyze.run_detect_candidates(fake_context, source_id)
+    held = next(c for c in fake_db.candidates if c["start_s"] == 1.0)
+    assert held["human_verdict"] is None and held["verdict_reason"].startswith(analyze.AUTO_HOLD_REASON_PREFIX)
+    clip = next(c for c in fake_db.clips.values() if c["candidate_id"] == held["id"])
+    return held, clip
+
+
+def _assert_survived(fake_db, held: dict, clip: dict) -> None:
+    assert any(c["id"] == held["id"] for c in fake_db.candidates)
+    assert clip["id"] in fake_db.clips
+    # kein zweiter Kandidat und kein zweiter Clip für dasselbe Fenster
+    assert sum(1 for c in fake_db.candidates if c["start_s"] == 1.0) == 1
+    assert sum(1 for c in fake_db.clips.values() if _cand_window(fake_db, c["id"]) == (1.0, 20.0)) == 1
+    cand_ids = {c["id"] for c in fake_db.candidates}
+    assert all(c["candidate_id"] in cand_ids for c in fake_db.clips.values())
+
+
+@pytest.mark.parametrize("work", ["review", "edited", "hook", "captions", "guest"])
+def test_rerun_keeps_held_draft_with_human_work(fake_db, fake_context, branded_source, monkeypatch, work):
+    """M4: Ein zurückgehaltener Entwurf, an dem ein Mensch gearbeitet hat (Prüfstand gesetzt, nach dem
+    Anlegen geändert, eigene Hook- oder Untertitelfassung, Gastfreigabe angefragt), bleibt beim Neulauf
+    stehen, und mit ihm sein Kandidat."""
+    held, clip = _held_and_clean_run(fake_db, fake_context, branded_source, monkeypatch)
+    if work == "review":
+        clip["review"] = "bereit"
+    elif work == "edited":
+        clip["updated_at"] = clip["created_at"] + 1
+    elif work == "hook":
+        fake_db.add_hook_version(clip["id"], spoken_hook="Eigener Einstieg")
+    elif work == "captions":
+        fake_db.caption_versions.append({"id": "cv-1", "clip_id": clip["id"], "version": 1})
+    else:
+        fake_db.guest_approvals.append({"id": "ga-1", "clip_id": clip["id"], "decision": None})
+
+    analyze.run_detect_candidates(fake_context, branded_source)
+    _assert_survived(fake_db, held, clip)
+    assert fake_db.clips[clip["id"]]["status"] == "draft"
+    assert len(fake_db.clips) == 2
+
+
+def test_rerun_drops_untouched_held_draft(fake_db, fake_context, branded_source, monkeypatch):
+    held, clip = _held_and_clean_run(fake_db, fake_context, branded_source, monkeypatch)
+    analyze.run_detect_candidates(fake_context, branded_source)
+    assert clip["id"] not in fake_db.clips
+    assert not any(c["id"] == held["id"] for c in fake_db.candidates)
+    assert len(fake_db.clips) == 2  # neu angelegt, nicht verdoppelt
+
+
+@pytest.mark.parametrize("status", ["rendered", "failed", "rendering"])
+def test_held_candidate_whose_clip_is_no_longer_draft_survives_rerun(
+    fake_db, fake_context, branded_source, monkeypatch, status
+):
+    """L11: Steht der Clip eines zurückgehaltenen Kandidaten nicht mehr auf ``draft``, überleben Clip
+    und Kandidat den Neulauf."""
+    held, clip = _held_and_clean_run(fake_db, fake_context, branded_source, monkeypatch)
+    clip["status"] = status
+
+    analyze.run_detect_candidates(fake_context, branded_source)
+    _assert_survived(fake_db, held, clip)
+    assert fake_db.clips[clip["id"]]["status"] == status
+
+
+def test_human_accepted_formerly_held_candidate_survives_rerun(fake_db, fake_context, branded_source, monkeypatch):
+    """L11: Hat ein Mensch den zurückgehaltenen Kandidaten angenommen (Web: Verdict-Route oder Klick auf
+    „Video clippen“), trägt er ``verdict_by`` und bleibt beim Neulauf mit seinem Entwurf stehen."""
+    held, clip = _held_and_clean_run(fake_db, fake_context, branded_source, monkeypatch)
+    held.update(
+        human_verdict="accepted",
+        verdict_by="user-1",
+        verdict_reason=f"angenommen beim Clippen, vorher {held['verdict_reason']}",
+    )
+
+    analyze.run_detect_candidates(fake_context, branded_source)
+    _assert_survived(fake_db, held, clip)
+    row = next(c for c in fake_db.candidates if c["id"] == held["id"])
+    assert row["human_verdict"] == "accepted" and row["verdict_by"] == "user-1"
+
+
+def test_held_clip_enters_the_render_queue_after_human_acceptance(fake_db, fake_context, branded_source, monkeypatch):
+    """H1: Der Klick auf „Video clippen“ setzt in der Web-App das Urteil auf accepted (mit ``verdict_by``)
+    und den Clip auf ``draft``; danach findet der lokale Worker ihn über ``SQL_PENDING_CLIPS``."""
+    from chopstr_worker import local_worker
+
+    held, clip = _held_and_clean_run(fake_db, fake_context, branded_source, monkeypatch)
+    pending = {str(r[0]) for r in fake_db.execute(local_worker.SQL_PENDING_CLIPS, (10,)).fetchall()}
+    assert clip["id"] not in pending
+
+    held.update(human_verdict="accepted", verdict_by="user-1", verdict_reason="angenommen beim Clippen")
+    pending = {str(r[0]) for r in fake_db.execute(local_worker.SQL_PENDING_CLIPS, (10,)).fetchall()}
+    assert clip["id"] in pending
+
+
 def test_platform_falls_back_to_reels_without_brand_profile(fake_db, fake_context, monkeypatch):
     _use_provider(monkeypatch, fake_context, "local-heuristic")
     wid = fake_db.add_workspace()
-    sid = fake_db.add_source(wid, "uploads/in.mp4", brief=BRIEF, status="analyzing")  # kein brand_profile_id
+    brief = {k: v for k, v in BRIEF.items() if k != "platform"}
+    sid = fake_db.add_source(wid, "uploads/in.mp4", brief=brief, status="analyzing")  # kein brand_profile_id
     fake_db.add_transcript_version(sid, demo_words())
 
     ids = analyze.run_detect_candidates(fake_context, sid)
@@ -357,8 +506,32 @@ def test_platform_falls_back_to_reels_without_brand_profile(fake_db, fake_contex
         assert clip["aspect"] == "9:16"
 
 
-def test_platform_falls_back_to_reels_when_profile_has_no_default(fake_db, fake_context, source):
-    """Markenprofil ohne ``default_platform`` (Fake-Profil der Fixture) landet ebenfalls bei ``reels``."""
+def test_platform_comes_from_the_brief_without_brand_default(fake_db, fake_context, monkeypatch):
+    """M3: Reihenfolge wie in der Web-App (Markenprofil, Briefing, ``reels``); das Format bleibt 9:16."""
+    _use_provider(monkeypatch, fake_context, "local-heuristic")
+    wid = fake_db.add_workspace()
+    sid = fake_db.add_source(wid, "uploads/in.mp4", brief=BRIEF, status="analyzing")  # Briefing: linkedin
+    fake_db.add_transcript_version(sid, demo_words())
+
+    analyze.run_detect_candidates(fake_context, sid)
+    assert {(c["platform"], c["destination"], c["aspect"]) for c in fake_db.clips.values()} == {
+        ("linkedin", "linkedin", "9:16")
+    }
+
+
+def test_brand_default_platform_wins_over_the_brief(fake_db, fake_context, branded_source):
+    analyze.run_detect_candidates(fake_context, branded_source)  # Marke: tiktok, Briefing: linkedin
+    assert {c["platform"] for c in fake_db.clips.values()} == {"tiktok"}
+
+
+def test_platform_falls_back_to_brief_when_profile_has_no_default(fake_db, fake_context, source):
+    """Markenprofil ohne ``default_platform`` (Fake-Profil der Fixture): es gilt das Briefing (linkedin)."""
+    analyze.run_detect_candidates(fake_context, source)
+    assert {c["platform"] for c in fake_db.clips.values()} == {"linkedin"}
+
+
+def test_platform_falls_back_to_reels_when_neither_profile_nor_brief_name_one(fake_db, fake_context, source):
+    fake_db.sources[source]["brief"] = {k: v for k, v in BRIEF.items() if k != "platform"}
     analyze.run_detect_candidates(fake_context, source)
     assert {c["platform"] for c in fake_db.clips.values()} == {"reels"}
 
@@ -379,7 +552,7 @@ def test_local_worker_picks_up_the_auto_clips(fake_db, fake_context, branded_sou
     _fixed_report(monkeypatch, [
         _result(1.0, 20.0, gate_passed=True, risk_flags=["heuristic_only"]),
         _result(30.0, 55.0, gate_passed=True, risk_flags=[]),
-        _result(60.0, 80.0, gate_passed=True, risk_flags=["claim", "heuristic_only"]),
+        _result(60.0, 80.0, gate_passed=True, risk_flags=["claim", "heuristic_only"], text=CLAIM_TEXT),
     ])  # fmt: skip
     ids = analyze.run_detect_candidates(fake_context, branded_source)
     assert len(ids) == len(fake_db.clips) == 3

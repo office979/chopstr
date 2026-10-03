@@ -649,6 +649,18 @@ export const demoRepo: Repo = {
     return { ...c };
   },
 
+  async setCandidateVerdictIfOpen(id, verdict, reason) {
+    const c = state().candidates.find((x) => x.id === id);
+    if (!c || c.human_verdict != null) return null;
+    const { userId: actorId } = await currentSession();
+    if (c.human_verdict != null) return null; /* zwischen Lesen und Schreiben vergeben */
+    c.human_verdict = verdict;
+    c.verdict_reason = reason?.trim() || null;
+    c.verdict_by = actorId;
+    c.verdict_at = nowIso();
+    return { ...c };
+  },
+
   async reviseCandidate(id, input) {
     const s = state();
     const prev = s.candidates.find((x) => x.id === id);

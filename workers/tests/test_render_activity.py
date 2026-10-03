@@ -221,3 +221,57 @@ def test_destination_with_clip_id_renders_exactly_that_clip(fake_db, fake_contex
     assert act_render.parse_destination("tiktok:abc") == ("tiktok", "abc")
     with pytest.raises(LookupError):
         act_render.run_render_pack(fake_context, project["cid"], "linkedin:" + clip_b)  # falsche Plattform für diesen Clip
+
+
+def _spy_write_copy(monkeypatch) -> list[dict]:
+    calls: list[dict] = []
+    original = act_render.copy_engine.write_copy
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(act_render.copy_engine, "write_copy", spy)
+    return calls
+
+
+@requires_ffmpeg
+def test_render_passes_thompson_order_and_words_under_policy_v2(fake_db, fake_context, project, monkeypatch):
+    """AP6a: Fassung 2 übergibt die Thompson-Reihenfolge aus hook_pattern_stats und die Wörter mit prob."""
+    from chopstr_worker import editorial
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    editorial.clear_cache()
+    pid = fake_db.sources[project["sid"]]["brand_profile_id"]
+    fake_db.hook_pattern_stats[(pid, "open_loop")] = {
+        "brand_profile_id": pid, "pattern": "open_loop", "shown": 10, "chosen": 9, "reward_sum": 0.0, "reward_n": 0,
+    }  # fmt: skip
+    order = ["open_loop", "results_first", "contrarian", "identity_call", "mistake_warning"]
+    seen_stats: list[list[dict]] = []
+
+    def fixed_order(stats, seed=None):
+        seen_stats.append(stats)
+        return list(order)
+
+    monkeypatch.setattr(act_render.learning, "thompson_order", fixed_order)
+    calls = _spy_write_copy(monkeypatch)
+    try:
+        clip_id = act_render.run_render_pack(fake_context, project["cid"], "tiktok")
+    finally:
+        editorial.clear_cache()
+    assert len(calls) == 1 and calls[0]["pattern_order"] == order
+    assert seen_stats and seen_stats[0][0]["pattern"] == "open_loop" and seen_stats[0][0]["chosen"] == 9
+    assert calls[0]["words"] and all("prob" in w for w in calls[0]["words"])
+    hook = next(h for h in fake_db.hook_versions if h["clip_id"] == clip_id)
+    assert hook["prompt_version"] == "hooks_v2"
+    assert hook["spoken_hook"] == SCRIPT[0][1]  # wörtlicher Einstieg des Clips
+    assert [v["pattern"] for v in hook["variants"]] == order
+    assert fake_db.clips[clip_id]["render_plan"]["hook_overlay"]["text"] == hook["onscreen_hook"]
+
+
+@requires_ffmpeg
+def test_render_under_policy_v1_passes_no_order_and_no_words(fake_db, fake_context, project, monkeypatch):
+    monkeypatch.delenv("CHOPSTR_POLICY_VERSION", raising=False)
+    calls = _spy_write_copy(monkeypatch)
+    act_render.run_render_pack(fake_context, project["cid"], "tiktok")
+    assert calls == [{"pattern_order": None, "words": None}]

@@ -17,9 +17,9 @@ BRIEF = {"audience": "Gründer", "wanted": "Zahlen", "exclude": "Werbung", "plat
 def active_policy(request, monkeypatch):
     """AP0b: Der Heuristik-Provider läuft unter beiden Fassungen der Grundlage gleich."""
     monkeypatch.setenv("CHOPSTR_POLICY_VERSION", str(request.param))
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     yield request.param
-    editorial.load.cache_clear()
+    editorial.clear_cache()
 
 
 @pytest.fixture
@@ -131,3 +131,24 @@ def test_unknown_tool_raises_and_parse_ignores_noise():
     parsed = heuristic_llm.parse_numbered("Zielgruppe: x\n[3] (SPEAKER_01) Hallo Welt.\nkein Satz\n[4] (?) Noch einer?")
     assert parsed == [{"idx": 3, "speaker": "SPEAKER_01", "text": "Hallo Welt."}, {"idx": 4, "speaker": "?", "text": "Noch einer?"}]
     assert heuristic_llm.propose_moments("nur Text ohne Sätze") == {"moments": []}
+
+
+def test_write_hooks_v2_has_no_invented_framings():
+    """AP6a: Mit hooks_v2 (Clip in Begrenzern) nur wörtliche Auszüge aus dem Clip, keine eigene Rahmung wie
+    „Das Gegenteil stimmt:“; mit hooks_v1 bleibt die Rahmung (Fassung 1 unverändert)."""
+    from chopstr_worker import prompts
+
+    clip = (
+        "Wir haben 40 Prozent Marge verloren. Aber das gilt nicht für jede Firma. "
+        "Was würdest du heute anders machen? Der Fehler war ein falsches Preismodell."
+    )
+    user = prompts.load("hooks", 2).render(address="DU", country="AT", platform="tiktok", protected_terms=[], clip_text=clip)
+    out = heuristic_llm.write_hooks(user)["variants"]
+    assert [v["pattern"] for v in out] == list(heuristic_llm.HOOK_PATTERNS)
+    for v in out:
+        for key, limit in (("spoken", heuristic_llm.SPOKEN_MAX_WORDS), ("onscreen", heuristic_llm.ONSCREEN_MAX_WORDS)):
+            assert v[key] in clip and len(v[key].split()) <= limit, v
+            assert not v[key].startswith(("Das Gegenteil", "Du kennst", "Was dahinter", "Dieser Fehler", "Das Ergebnis"))
+    assert len({v["onscreen"] for v in out}) == 4  # je Muster ein anderer Satz, solange der Clip Sätze hat
+    old = heuristic_llm.write_hooks(prompts.load("hooks", 1).render(address="DU", country="AT", platform="tiktok", protected_terms=[], clip_text=clip))
+    assert old["variants"][1]["spoken"].startswith("Das Gegenteil stimmt:")

@@ -32,7 +32,7 @@ from typing import Any
 
 from temporalio import activity
 
-from .. import costlog, db, decision_log, events, ingest, usage
+from .. import costlog, db, decision_log, events, ingest, learning, usage
 from ..pipeline import (
     ausgabe_pruefung,
     captions_de,
@@ -119,7 +119,7 @@ def _load_candidate(ctx: common.Context, candidate_id: str) -> dict[str, Any]:
     }
 
 
-def _load_brand_extra(ctx: common.Context, source_id: str) -> dict[str, Any]:
+def _load_brand_extra(ctx: common.Context, source_id: str, brief: dict | None = None) -> dict[str, Any]:
     row = db.fetch_one(ctx.conn, SQL_BRAND_EXTRA, (source_id,))
     keys = [
         "gender_mode", "banned_phrases", "tone_adjectives", "default_platform", "caption_preset", "caption_style",
@@ -133,7 +133,7 @@ def _load_brand_extra(ctx: common.Context, source_id: str) -> dict[str, Any]:
     out["gender_mode"] = out.get("gender_mode") or "neutral"
     out["banned_phrases"] = list(out.get("banned_phrases") or [])
     out["tone_adjectives"] = list(out.get("tone_adjectives") or [])
-    out["default_platform"] = out.get("default_platform") or "linkedin"
+    out["default_platform"] = default_clip_platform(out.get("default_platform"), brief)
     # Kein Ersatzwert: NULL heißt „keine ausdrückliche Wahl“ und muss so bei caption_preset_for
     # ankommen, sonst gewinnt der ruhige LinkedIn-Stil wieder im Hochformat (Migration 0007).
     out["caption_preset"] = out.get("caption_preset") or None
@@ -210,6 +210,20 @@ def brand_assets_for(ctx: common.Context, ci: dict[str, Any]) -> dict[str, Any]:
                     log.warning("brand logo download failed asset=%s error=%s", asset["id"], exc.__class__.__name__)
                     out["notes"].append("Logo-Asset konnte nicht geladen werden, kein Wasserzeichen")
     return out
+
+
+# Letzter Rückfall der Plattform, wenn weder Markenprofil noch Briefing eine nennen. Dieselbe Reihenfolge
+# gilt in ``analyze.clip_platform`` und in der Web-App (``apps/web/lib/clips/acceptance.ts``).
+FALLBACK_CLIP_PLATFORM = "reels"
+
+
+def default_clip_platform(brand_default: Any, brief: dict | None) -> str:
+    """Standard-Plattform: Markenprofil, sonst Briefing, sonst ``FALLBACK_CLIP_PLATFORM``."""
+    for value in (brand_default, (brief or {}).get("platform")):
+        candidate = str(value or "").strip()
+        if candidate in PLATFORMS:
+            return candidate
+    return FALLBACK_CLIP_PLATFORM
 
 
 def ad_label_for(brief: dict, country: str) -> str | None:
@@ -575,7 +589,7 @@ def run_render_pack(ctx: common.Context, candidate_id: str, destination: str) ->
     cand = _load_candidate(ctx, candidate_id)
     source_id = cand["source_id"]
     src = db.load_source(ctx.conn, source_id)
-    extra = _load_brand_extra(ctx, source_id)
+    extra = _load_brand_extra(ctx, source_id, dict(src.get("brief") or {}))
     clip = _find_or_create_clip(ctx, cand, src, destination, clip_id_hint)
     clip_id = clip["id"]
     db.update(ctx.conn, "clips", {"id": clip_id}, status="rendering", destination=destination, render_error=None)
@@ -626,7 +640,19 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
                 "(BEDROCK_MODEL_ID, MISTRAL_MODEL oder SELFHOST_LLM_MODEL setzen, für Entwicklung LLM_PROVIDER=local-heuristic)"
             )
         llm_provider = llm.provider
-        copy = copy_engine.write_copy(llm, text, brand, PLATFORMS, s)
+        # Fassung 2 (AP6a): Thompson-Reihenfolge der Hook-Muster je Markenprofil und Wörter mit ``prob`` für den
+        # Claim-Check; unter Fassung 1 ohne beides, Auswahl wie bisher.
+        native_hooks = copy_engine.native_hooks_enabled()
+        pattern_order = None
+        if native_hooks and src.get("brand_profile_id"):
+            try:
+                pattern_order = learning.thompson_order(learning.load_hook_stats(conn, str(src["brand_profile_id"])))
+            except Exception as exc:  # Lernstatistik darf den Render nie stoppen
+                log.warning("hook stats unavailable clip=%s error=%s: %s", clip_id, exc.__class__.__name__, str(exc)[:200])
+        copy = copy_engine.write_copy(
+            llm, text, brand, PLATFORMS, s,
+            pattern_order=pattern_order, words=clip_words(words, segments) if native_hooks else None,
+        )  # fmt: skip
         hook = _write_hook_version(ctx, clip_id, copy)
         try:
             decision_log.record_copy_result(

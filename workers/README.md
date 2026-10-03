@@ -649,7 +649,7 @@ Offene Punkte Phase 4 (Worker):
 - Schwere Imports (faster_whisper, pyannote, torch, spacy, cv2, boto3) nur innerhalb von Funktionen.
 - Keine Telemetrie mit Transkriptinhalten; Logs enthalten IDs, Dauern, Zähler.
 - Code-Bezeichner Englisch, Docstrings und Event-Meldungen Deutsch, keine Gedankenstriche in Nutzertexten.
-- Prompts nur über `prompts.load()`; jede Änderung ist eine neue Datei mit erhöhter Version.
+- Prompts nur über `prompts.load_pinned()`; jede Änderung ist eine neue Datei mit erhöhter Version, wirksam erst, wenn eine Policy sie pinnt.
 
 ## Phase 5c: Folien-Crop, Schweizerdeutsch-Beta, Sovereign
 

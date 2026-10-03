@@ -16,7 +16,7 @@ from chopstr_worker import editorial
 
 @pytest.fixture
 def policy():
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     return editorial.load()
 
 
@@ -43,11 +43,11 @@ def test_jedes_kriterium_nennt_seine_herkunft(policy):
 
 
 def test_fehlende_datei_scheitert_laut(tmp_path, monkeypatch):
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path))
     with pytest.raises(editorial.PolicyError, match="nicht gefunden"):
         editorial.load()
-    editorial.load.cache_clear()
+    editorial.clear_cache()
 
 
 def test_falsche_gewichtssumme_scheitert_laut(tmp_path, monkeypatch):
@@ -72,11 +72,11 @@ def test_falsche_gewichtssumme_scheitert_laut(tmp_path, monkeypatch):
         """),
         encoding="utf-8",
     )
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path))
     with pytest.raises(editorial.PolicyError, match="0.70 statt 1,00"):
         editorial.load()
-    editorial.load.cache_clear()
+    editorial.clear_cache()
 
 
 def test_verdrehte_laengengrenzen_scheitern_laut(tmp_path, monkeypatch):
@@ -99,18 +99,18 @@ def test_verdrehte_laengengrenzen_scheitern_laut(tmp_path, monkeypatch):
         """),
         encoding="utf-8",
     )
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path))
     with pytest.raises(editorial.PolicyError, match="aufsteigender Reihenfolge"):
         editorial.load()
-    editorial.load.cache_clear()
+    editorial.clear_cache()
 
 
 # -- Startprüfung des Workers (AP0a) -------------------------------------------------------------
 def test_startup_check_passes_with_repo_files():
     from chopstr_worker import worker
 
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     worker.check_assets()
 
 
@@ -118,16 +118,33 @@ def test_startup_check_aborts_clearly_when_editorial_dir_is_empty(tmp_path, monk
     """Im Image ohne Policy soll der Worker gar nicht erst starten, statt in der Kandidatensuche zu scheitern."""
     from chopstr_worker import worker
 
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path / "gibt_es_nicht"))
     with pytest.raises(SystemExit) as excinfo:
         worker.check_assets()
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     message = str(excinfo.value)
     assert message.startswith("Der Worker startet nicht, weil gemeinsame Dateien fehlen")
     assert "Redaktionelle Grundlage (EDITORIAL_DIR)" in message
     assert "nicht gefunden" in message and str(tmp_path / "gibt_es_nicht") in message
     assert "Schriftenliste" not in message and "Ausgaberegeln" not in message
+    assert "Gepinnte Prompts" not in message  # derselbe Fehler nicht ein zweites Mal
+    assert message.count("nicht gefunden") == 1
+
+
+def test_startup_check_names_invalid_policy_version_under_its_variable(monkeypatch):
+    """Ein Tippfehler im Rollback-Schalter erscheint einmal und unter ``CHOPSTR_POLICY_VERSION``."""
+    from chopstr_worker import worker
+
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "zwei")
+    editorial.clear_cache()
+    with pytest.raises(SystemExit) as excinfo:
+        worker.check_assets()
+    editorial.clear_cache()
+    message = str(excinfo.value)
+    assert "Fassung der redaktionellen Grundlage (CHOPSTR_POLICY_VERSION): CHOPSTR_POLICY_VERSION='zwei'" in message
+    assert "EDITORIAL_DIR" not in message and "PROMPTS_DIR" not in message
+    assert message.count("keine Fassungsnummer") == 1
 
 
 def test_startup_check_names_missing_fonts_and_output_rules(tmp_path, monkeypatch):
@@ -138,12 +155,58 @@ def test_startup_check_names_missing_fonts_and_output_rules(tmp_path, monkeypatc
     monkeypatch.setattr(ausgabe_pruefung, "_zwischenspeicher", None)
     monkeypatch.setenv("CHOPSTR_CAPTION_FONTS", str(tmp_path / "caption_fonts.json"))
     monkeypatch.setenv("CHOPSTR_AUSGABE_REGELN", str(tmp_path / "ausgabe_regeln_v1.json"))
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     with pytest.raises(SystemExit) as excinfo:
         worker.check_assets()
     message = str(excinfo.value)
     assert "Schriftenliste (CHOPSTR_CAPTION_FONTS)" in message
     assert "Ausgaberegeln (CHOPSTR_AUSGABE_REGELN)" in message
+    assert "Redaktionelle Grundlage" not in message
+
+
+def test_startup_check_rejects_existing_but_invalid_fonts_and_output_rules(tmp_path, monkeypatch):
+    """L2: Die Dateien existieren und sind gültiges JSON, aber die Pflichtschlüssel fehlen oder sind leer."""
+    from chopstr_worker import worker
+    from chopstr_worker.pipeline import ausgabe_pruefung, captions_de
+
+    fonts = tmp_path / "caption_fonts.json"
+    fonts.write_text('{"version": "x", "schriften": []}', encoding="utf-8")
+    rules = tmp_path / "ausgabe_regeln_v1.json"
+    rules.write_text('{"version": "ausgabe_regeln_v1", "technische_pruefungen": {}}', encoding="utf-8")
+    monkeypatch.setattr(captions_de, "_fonts_zwischenspeicher", None)
+    monkeypatch.setattr(ausgabe_pruefung, "_zwischenspeicher", None)
+    monkeypatch.setenv("CHOPSTR_CAPTION_FONTS", str(fonts))
+    monkeypatch.setenv("CHOPSTR_AUSGABE_REGELN", str(rules))
+    editorial.clear_cache()
+    with pytest.raises(SystemExit) as excinfo:
+        worker.check_assets()
+    message = str(excinfo.value)
+    assert "Schriftenliste (CHOPSTR_CAPTION_FONTS): Pflichtschlüssel schriften ist keine nicht leere Liste" in message
+    assert "Ausgaberegeln (CHOPSTR_AUSGABE_REGELN): Pflichtschlüssel technische_pruefungen.pruefungen fehlt" in message
+    assert "Redaktionelle Grundlage" not in message and "Gepinnte Prompts" not in message
+
+
+def test_startup_check_loads_every_pinned_prompt(tmp_path, monkeypatch):
+    """L1: Fehlt eine gepinnte Prompt-Datei, startet der Worker nicht, statt mitten im Lauf zu scheitern."""
+    import shutil
+
+    from chopstr_worker import prompts, worker
+
+    real = prompts.prompts_dir()
+    for path in real.glob("*.md"):
+        if path.name != "score_clip_v2.md":
+            shutil.copy(path, tmp_path / path.name)
+    monkeypatch.setenv("PROMPTS_DIR", str(tmp_path))
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "1")
+    prompts.clear_cache()
+    editorial.clear_cache()
+    try:
+        with pytest.raises(SystemExit) as excinfo:
+            worker.check_assets()
+    finally:
+        prompts.clear_cache()
+    message = str(excinfo.value)
+    assert "Gepinnte Prompts (PROMPTS_DIR)" in message and "score_clip_v2.md" in message
     assert "Redaktionelle Grundlage" not in message
 
 
@@ -409,11 +472,11 @@ def _write_v2(tmp_path, monkeypatch, data):
 
     (tmp_path / "clip_policy_v2.yaml").write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
     monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path))
-    editorial.load.cache_clear()
+    editorial.clear_cache()
 
 
 def test_v1_and_v2_load():
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     assert editorial.load(1).version == 1
     assert editorial.load(2).version == 2
     assert editorial.policy_version(2) == "clip_policy_v2"
@@ -421,7 +484,7 @@ def test_v1_and_v2_load():
 
 def test_active_version_comes_from_environment(monkeypatch):
     monkeypatch.delenv("CHOPSTR_POLICY_VERSION", raising=False)
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     assert editorial.active_version() == 1
     assert editorial.load().version == 1 and editorial.policy_version() == "clip_policy_v1"
     monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
@@ -429,7 +492,7 @@ def test_active_version_comes_from_environment(monkeypatch):
     assert editorial.load().version == 2 and editorial.policy_version() == "clip_policy_v2"
     monkeypatch.setenv("CHOPSTR_POLICY_VERSION", " 1 ")
     assert editorial.load().version == 1
-    editorial.load.cache_clear()
+    editorial.clear_cache()
 
 
 def test_typo_in_rollback_switch_fails_loudly(monkeypatch):
@@ -440,10 +503,10 @@ def test_typo_in_rollback_switch_fails_loudly(monkeypatch):
 
 def test_unknown_version_fails_loudly(monkeypatch):
     monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "9")
-    editorial.load.cache_clear()
+    editorial.clear_cache()
     with pytest.raises(editorial.PolicyError, match="nicht gefunden"):
         editorial.load()
-    editorial.load.cache_clear()
+    editorial.clear_cache()
 
 
 def test_v1_pins_are_the_versions_loaded_before_ap0b():
@@ -454,25 +517,39 @@ def test_v1_pins_are_the_versions_loaded_before_ap0b():
     assert editorial.load(1).prompt_pins == editorial.V1_PROMPT_PINS
 
 
-def test_v2_pins_match_v1_and_all_switches_are_false(v2_raw):
-    assert editorial.load(2).prompt_pins == editorial.V1_PROMPT_PINS
+def test_v2_pins_match_v1_and_switches_match_implementation(v2_raw):
+    """Pins wie v1 plus die Änderungen in V2_PIN_CHANGES; ein Schalter steht genau dann auf true,
+    wenn sein Code gebaut ist und ihn liest (V2_IMPLEMENTED_SWITCHES)."""
+    assert editorial.load(2).prompt_pins == {**editorial.V1_PROMPT_PINS, **editorial.V2_PIN_CHANGES}
+    assert editorial.V2_IMPLEMENTED_SWITCHES.issubset(editorial.V2_SWITCHES)
     for path in editorial.V2_SWITCHES:
         value = v2_raw["implementation"]
         for part in path.split("."):
             value = value[part]
-        assert value is False, path
+        assert value is (path in editorial.V2_IMPLEMENTED_SWITCHES), path
 
 
 def test_v2_rules_are_a_copy_of_v1(v2_raw):
-    """Gleiche Regeln und gleicher Prompt-Text; anders sind nur Kopf, neue Abschnitte und die Begründung
-    bei offene_frage, die nicht mehr auf den widerlegten Zeigarnik-Effekt verweist."""
+    """Jede v1-Regel steht unverändert in v2 und der Prompt-Text ist gleich; v2 darf Abschnitte und
+    Schlüssel ergänzen (Arbeitspakete). Anders sind nur Kopf, neue Abschnitte, neue Schlüssel und die
+    Begründung bei offene_frage, die nicht mehr auf den widerlegten Zeigarnik-Effekt verweist."""
     import yaml
 
     v1_raw = yaml.safe_load((editorial.policy_dir() / "clip_policy_v1.yaml").read_text(encoding="utf-8"))
+
+    def v1_rules_kept(old, new, path):
+        if isinstance(old, dict):
+            assert isinstance(new, dict), path
+            for key, value in old.items():
+                assert key in new, f"{path}.{key}"
+                v1_rules_kept(value, new[key], f"{path}.{key}")
+        else:
+            assert new == old, path
+
     for section in editorial.RULE_SECTIONS:
         if section == "rubrik":
             continue
-        assert v2_raw[section] == v1_raw[section], section
+        v1_rules_kept(v1_raw[section], v2_raw[section], section)
     assert v2_raw["rubrik"]["skala_max"] == v1_raw["rubrik"]["skala_max"]
     for old, new in zip(v1_raw["rubrik"]["kriterien"], v2_raw["rubrik"]["kriterien"], strict=True):
         assert {k: v for k, v in old.items() if k != "herkunft"} == {k: v for k, v in new.items() if k != "herkunft"}
@@ -508,7 +585,7 @@ def test_v2_without_required_section_fails_loudly(tmp_path, monkeypatch, v2_raw,
     _write_v2(tmp_path, monkeypatch, v2_raw)
     with pytest.raises(editorial.PolicyError, match=f"Pflichtabschnitte fehlen: {section}"):
         editorial.load(2)
-    editorial.load.cache_clear()
+    editorial.clear_cache()
 
 
 def test_v2_rule_without_origin_fails_loudly(tmp_path, monkeypatch, v2_raw):
@@ -516,7 +593,7 @@ def test_v2_rule_without_origin_fails_loudly(tmp_path, monkeypatch, v2_raw):
     _write_v2(tmp_path, monkeypatch, v2_raw)
     with pytest.raises(editorial.PolicyError, match="Regeln ohne Herkunft in origins: laenge.ziel_s"):
         editorial.load(2)
-    editorial.load.cache_clear()
+    editorial.clear_cache()
 
 
 def test_v2_orphaned_origin_and_bad_status_fail_loudly(tmp_path, monkeypatch, v2_raw):
@@ -529,7 +606,7 @@ def test_v2_orphaned_origin_and_bad_status_fail_loudly(tmp_path, monkeypatch, v2
     _write_v2(tmp_path, monkeypatch, v2_raw)
     with pytest.raises(editorial.PolicyError, match="muss F, H, R oder G sein"):
         editorial.load(2)
-    editorial.load.cache_clear()
+    editorial.clear_cache()
 
 
 def test_v2_without_pin_or_switch_fails_loudly(tmp_path, monkeypatch, v2_raw):
@@ -542,7 +619,7 @@ def test_v2_without_pin_or_switch_fails_loudly(tmp_path, monkeypatch, v2_raw):
     _write_v2(tmp_path, monkeypatch, v2_raw)
     with pytest.raises(editorial.PolicyError, match="implementation ohne Schalter: cut.padding"):
         editorial.load(2)
-    editorial.load.cache_clear()
+    editorial.clear_cache()
 
 
 def test_file_name_and_version_must_match(tmp_path, monkeypatch, v2_raw):
@@ -550,4 +627,22 @@ def test_file_name_and_version_must_match(tmp_path, monkeypatch, v2_raw):
     _write_v2(tmp_path, monkeypatch, v2_raw)
     with pytest.raises(editorial.PolicyError, match="nennt version 3, erwartet 2"):
         editorial.load(2)
-    editorial.load.cache_clear()
+    editorial.clear_cache()
+
+
+def test_v2_origins_name_matching_sources_for_scale_and_standalone():
+    """L9: Die Skala stammt aus der Masterclass (H) und weicht von den Ankern 0 bis 4 aus Master-Prompt
+    Abschnitt 19 ab; Gegenposition 1 (Hook-Gleichung) ist dafür keine Quelle. Bei standalone sind Regel
+    (R) und Gewicht (H) getrennt ausgewiesen."""
+    origins = editorial.load(2).roh["origins"]
+    scale = origins["rubrik.skala_max"]
+    assert scale["origin"] == "H"
+    assert "Masterclass Modul 10.2" in scale["source"] and "Master-Prompt Abschnitt 19" in scale["source"]
+    assert "Gegenposition 1" not in scale["source"]
+    standalone = origins["rubrik.kriterien.standalone"]
+    assert standalone["origin"] == "R" and standalone["weight_origin"] == "H"
+    assert "0,20" in standalone["weight_source"] and "Gewicht" not in standalone["source"]
+    for path, entry in origins.items():
+        if "weight_origin" in entry:
+            assert entry["weight_origin"] in editorial.ORIGIN_VALUES, path
+            assert str(entry.get("weight_source") or "").strip(), path

@@ -86,3 +86,17 @@ def test_path_variables_are_the_ones_the_code_reads():
     }
     for var, path in sources.items():
         assert f'"{var}"' in path.read_text(encoding="utf-8"), f"{path.name} liest {var} nicht"
+
+
+def test_policy_version_is_documented_without_overriding_the_default():
+    """L6: ``CHOPSTR_POLICY_VERSION`` steht in Compose, ``.env.example`` und ``local_env.sh``, setzt aber
+    nirgends einen eigenen Standard; ohne Wert gilt ``editorial.POLICY_VERSION``."""
+    for name, service in _services():
+        assert service["environment"].get("CHOPSTR_POLICY_VERSION") == "${CHOPSTR_POLICY_VERSION:-}", name
+    env_example = (REPO / ".env.example").read_text(encoding="utf-8").splitlines()
+    assert "CHOPSTR_POLICY_VERSION=" in env_example
+    local_env = (REPO / "workers" / "scripts" / "local_env.sh").read_text(encoding="utf-8")
+    assert "CHOPSTR_POLICY_VERSION" in local_env
+    assert not any(
+        line.strip().startswith("export CHOPSTR_POLICY_VERSION") for line in local_env.splitlines()
+    ), "local_env.sh darf den Standard nicht überschreiben"

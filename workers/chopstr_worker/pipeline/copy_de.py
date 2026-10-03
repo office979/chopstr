@@ -11,7 +11,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .. import prompts
+from .. import editorial, prompts
+from . import fidelity
 
 AI_FLOSKELN = [
     "essenziell", "nahtlos", "maßgeschneidert", "vielfältig", "ganzheitlich", "im digitalen zeitalter",
@@ -64,9 +65,48 @@ class BrandProfile:
     platform: str = "linkedin"  # "tiktok" | "reels" | "shorts" | "linkedin"
 
 
-def lint(text: str, p: BrandProfile) -> tuple[str, list[str]]:
-    """Gibt (korrigierter_text, hinweise) zurück. Korrigiert nur Eindeutiges, der Rest sind Hinweise."""
+# Hinweise, die eine Hook-Variante in der Auswahl v2 disqualifizieren (copy_engine.select_variant_v2). Die
+# übrigen sind korrigiert (Em-Dash, ß) oder nur Prüfhinweise (Durchkopplung, mögliche Sie-Form, Muster).
+VIOLATION_PREFIXES = (
+    "Floskel:", "Abgenutzter Hook:", "Hyperbel:", "Du-Form in Sie-Profil", "Genderzeichen",
+    "Mehrere Gedankenstriche",
+)  # fmt: skip
+
+
+def lint_violations(notes: list[str]) -> list[str]:
+    """Die Hinweise aus ``lint``, die ein Verstoß sind und keine bloße Prüfbitte."""
+    return [n for n in notes if n.startswith(VIOLATION_PREFIXES)]
+
+
+def prompt_clip_text(clip_text: str, prompt_version: int) -> str:
+    """Clip-Text für den Hook-Prompt. Ab ``hooks_v2`` steht er zwischen ``<clip>``-Begrenzern; spitze
+    Klammern im Transkript werden maskiert, damit kein Text den Begrenzer schließen kann."""
+    if prompt_version < 2:
+        return clip_text
+    return clip_text.replace("<", "‹").replace(">", "›")
+
+
+def lint(
+    text: str,
+    p: BrandProfile,
+    hyperbole: tuple[str, ...] | list[str] | None = None,
+    word_bounds: bool | None = None,
+) -> tuple[str, list[str]]:
+    """Gibt (korrigierter_text, hinweise) zurück. Korrigiert nur Eindeutiges, der Rest sind Hinweise.
+
+    ``hyperbole``: leere Intensivierungen; ohne Angabe ``hook.hyperbole`` der aktiven Grundlage (Fassung 1
+    hat keine, dort bleibt der Linter wie bisher). ``word_bounds``: Floskeln, abgenutzte Hooks und
+    Hyperbeln nur an Wortgrenzen („spannend“ trifft nicht „Hochspannend“); ohne Angabe an, wenn die aktive
+    Grundlage ``hook.native_spoken`` hat (Fassung 2), in Fassung 1 Teilstring wie bisher."""
     notes, out = [], text
+    policy = editorial.load() if hyperbole is None or word_bounds is None else None
+    if hyperbole is None:
+        hyperbole = policy.hyperbole if policy else ()
+    if word_bounds is None:
+        word_bounds = bool(policy and policy.hook_native_spoken)
+
+    def found(phrase: str, low_text: str) -> bool:
+        return bool(fidelity.phrase_hits([phrase], low_text)) if word_bounds else phrase in low_text
 
     if "—" in out:
         out = out.replace(" — ", ", ").replace("—", ", ")
@@ -76,11 +116,15 @@ def lint(text: str, p: BrandProfile) -> tuple[str, list[str]]:
 
     low = out.lower()
     for f in AI_FLOSKELN + [b.lower() for b in p.banned_phrases]:
-        if f and f in low:
+        if f and found(f, low):
             notes.append(f"Floskel: '{f}'")
     for h in WORN_HOOKS:
-        if h in low:
+        if found(h, low):
             notes.append(f"Abgenutzter Hook: '{h}'")
+    for h in hyperbole:
+        h = str(h).lower()
+        if h and found(h, low) and h not in WORN_HOOKS:
+            notes.append(f"Hyperbel: '{h}' ersetzt keine Substanz")
     if re.search(r"\bnicht\b[^.]{0,40}, sondern\b", low):
         notes.append("Muster 'nicht A, sondern B': sparsam einsetzen")
 
@@ -118,7 +162,7 @@ def build_hook_prompt(clip_text: str, p: BrandProfile) -> tuple[str, prompts.Pro
             country=p.country,
             platform=p.platform,
             protected_terms=p.protected_terms,
-            clip_text=clip_text,
+            clip_text=prompt_clip_text(clip_text, pr.version),
         ),
         pr,
     )
@@ -155,4 +199,7 @@ def ad_disclosure(p: BrandProfile, is_paid_partnership: bool, brand_mentioned: b
     return None
 
 
-__all__ = ["AD_LABELS", "AI_FLOSKELN", "HOOK_SCHEMA", "WORN_HOOKS", "BrandProfile", "ad_disclosure", "build_hook_prompt", "generate_hooks", "lint"]
+__all__ = [
+    "AD_LABELS", "AI_FLOSKELN", "HOOK_SCHEMA", "VIOLATION_PREFIXES", "WORN_HOOKS", "BrandProfile", "ad_disclosure",
+    "build_hook_prompt", "generate_hooks", "lint", "lint_violations", "prompt_clip_text",
+]  # fmt: skip

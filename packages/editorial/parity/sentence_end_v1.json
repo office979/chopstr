@@ -1,0 +1,4444 @@
+{
+ "version": 1,
+ "description": "Gemeinsame Falldatei für die Satzende-Entscheidung (dach_nlp.sentence_end_kind und apps/web/lib/transcript/sentences.ts sentenceEndKind). Je Wort die erwartete Art des Satzendes unter Regel v1 und v2, dazu cut_v2 für Schnitte (dach_nlp.cut_boundary_kind, cutBoundaryKind). Gelesen von workers/tests/test_sentence_end_parity.py und apps/web/tests/satzende.test.ts.",
+ "min_pause_s": 0.7,
+ "kinds": [
+  "punct",
+  "speaker_change",
+  "pause_candidate",
+  "end_of_text",
+  "none"
+ ],
+ "cases": [
+  {
+   "id": "abbreviation_so",
+   "note": "„so.“ beendet unter v2 einen Satz, unter v1 nicht",
+   "words": [
+    {
+     "text": "Das",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ist",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "so.",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Deshalb",
+     "start": 0.96,
+     "end": 1.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "machen",
+     "start": 1.28,
+     "end": 1.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "wir",
+     "start": 1.6,
+     "end": 1.9,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "das.",
+     "start": 1.92,
+     "end": 2.22,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "abbreviation_i",
+   "note": "„i.“ als Buchstabe am Satzende",
+   "words": [
+    {
+     "text": "Das",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "schreibt",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "man",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "mit",
+     "start": 0.96,
+     "end": 1.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "a",
+     "start": 1.28,
+     "end": 1.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "i.",
+     "start": 1.6,
+     "end": 1.9,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Sie",
+     "start": 1.92,
+     "end": 2.22,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "hat",
+     "start": 2.24,
+     "end": 2.54,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "reduziert.",
+     "start": 2.56,
+     "end": 2.86,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "abbreviation_max_mag_art_min",
+   "note": "„max.“, „mag.“, „art.“, „min.“ sind unter v2 keine Abkürzungen",
+   "words": [
+    {
+     "text": "Das",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ist",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "das",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Max.",
+     "start": 0.96,
+     "end": 1.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Ich",
+     "start": 1.28,
+     "end": 1.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "mag.",
+     "start": 1.6,
+     "end": 1.9,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Das",
+     "start": 1.92,
+     "end": 2.22,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ist",
+     "start": 2.24,
+     "end": 2.54,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Art.",
+     "start": 2.56,
+     "end": 2.86,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Eine",
+     "start": 2.88,
+     "end": 3.18,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Min.",
+     "start": 3.2,
+     "end": 3.5,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Gut.",
+     "start": 3.52,
+     "end": 3.82,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "punct",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "punct",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "abbreviation_zb_kept",
+   "note": "„z. B.“ bleibt Abkürzung",
+   "words": [
+    {
+     "text": "Wir",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "haben",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "z.",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "B.",
+     "start": 0.96,
+     "end": 1.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "die",
+     "start": 1.28,
+     "end": 1.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Vertretung",
+     "start": 1.6,
+     "end": 1.9,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "geregelt.",
+     "start": 1.92,
+     "end": 2.22,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "ordinal_and_decimal",
+   "note": "Ordinal- und Dezimalzahl über die Wortgrenze",
+   "words": [
+    {
+     "text": "Am",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "3.",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Oktober",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "waren",
+     "start": 0.96,
+     "end": 1.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "es",
+     "start": 1.28,
+     "end": 1.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "2.",
+     "start": 1.6,
+     "end": 1.9,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "4",
+     "start": 1.92,
+     "end": 2.22,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Prozent",
+     "start": 2.24,
+     "end": 2.54,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "mehr.",
+     "start": 2.56,
+     "end": 2.86,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "pause_lowercase_next",
+   "note": "Pause vor kleingeschriebenem Folgewort ist keine Grenze",
+   "words": [
+    {
+     "text": "Das",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "bringt",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "bei",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "uns",
+     "start": 0.96,
+     "end": 1.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "nicht",
+     "start": 2.18,
+     "end": 2.48,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "viel.",
+     "start": 2.5,
+     "end": 2.8,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "pause_open_auxiliary",
+   "note": "Pause mit offenem Hilfsverb und Partizip danach",
+   "words": [
+    {
+     "text": "Wir",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "haben",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "dann",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "stattdessen",
+     "start": 0.96,
+     "end": 1.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Newsletter",
+     "start": 2.18,
+     "end": 2.48,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gemacht",
+     "start": 2.5,
+     "end": 2.8,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "und",
+     "start": 2.82,
+     "end": 3.12,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Zeit",
+     "start": 3.14,
+     "end": 3.44,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gespart.",
+     "start": 3.46,
+     "end": 3.76,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "pause_closed_sentence",
+   "note": "Pause nach geschlossenem Satz und großgeschriebenem Folgewort ist Grenze",
+   "words": [
+    {
+     "text": "Wir",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "haben",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "das",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gemacht",
+     "start": 0.96,
+     "end": 1.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Heute",
+     "start": 2.28,
+     "end": 2.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "läuft",
+     "start": 2.6,
+     "end": 2.9,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "es",
+     "start": 2.92,
+     "end": 3.22,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gut.",
+     "start": 3.24,
+     "end": 3.54,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "pause_after_article",
+   "note": "Pause nach unbestimmtem Artikel ist keine Grenze",
+   "words": [
+    {
+     "text": "Wir",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "arbeiten",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "mit",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "einem",
+     "start": 0.96,
+     "end": 1.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Kunden",
+     "start": 2.48,
+     "end": 2.78,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "zusammen.",
+     "start": 2.8,
+     "end": 3.1,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "pause_after_preposition",
+   "note": "Pause nach Präposition ist keine Grenze",
+   "words": [
+    {
+     "text": "Das",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gilt",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "für",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Kunden",
+     "start": 1.96,
+     "end": 2.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "in",
+     "start": 2.28,
+     "end": 2.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Wien.",
+     "start": 2.6,
+     "end": 2.9,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "pause_open_subordinate",
+   "note": "Pause in einem Nebensatz ohne Verb am Ende",
+   "words": [
+    {
+     "text": "Ich",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "glaube",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "dass",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "wir",
+     "start": 0.96,
+     "end": 1.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "das",
+     "start": 1.28,
+     "end": 1.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Projekt",
+     "start": 2.6,
+     "end": 2.9,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "schaffen.",
+     "start": 2.92,
+     "end": 3.22,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "pause_broken_off_aber",
+   "note": "Abgebrochener Satz auf „aber“ vor großgeschriebenem Neuanfang bleibt Grenze (DEMO_SCRIPT Satz 11)",
+   "words": [
+    {
+     "text": "Wir",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "haben",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "zu",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "lange",
+     "start": 0.96,
+     "end": 1.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gewartet,",
+     "start": 1.28,
+     "end": 1.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "aber",
+     "start": 1.6,
+     "end": 1.9,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Allerdings",
+     "start": 2.92,
+     "end": 3.22,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "hatten",
+     "start": 3.24,
+     "end": 3.54,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "wir",
+     "start": 3.56,
+     "end": 3.86,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Glück.",
+     "start": 3.88,
+     "end": 4.18,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "ellipsis_without_pause",
+   "note": "Auslassungspunkte sind unter v2 kein Satzzeichen",
+   "words": [
+    {
+     "text": "Und",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "dann…",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "kam",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "der",
+     "start": 0.96,
+     "end": 1.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "zweite",
+     "start": 1.28,
+     "end": 1.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Fehler.",
+     "start": 1.6,
+     "end": 1.9,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "ellipsis_with_pause",
+   "note": "Auslassungspunkte mit Pause und großgeschriebenem Folgewort",
+   "words": [
+    {
+     "text": "Und",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "dann...",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Wir",
+     "start": 1.64,
+     "end": 1.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "haben",
+     "start": 1.96,
+     "end": 2.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "es",
+     "start": 2.28,
+     "end": 2.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gelassen.",
+     "start": 2.6,
+     "end": 2.9,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "speaker_change_mid_clause",
+   "note": "Sprecherwechsel ist unter beiden Regeln eine Grenze",
+   "words": [
+    {
+     "text": "Ich",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "bin",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "da",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ganz",
+     "start": 0.96,
+     "end": 1.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ehrlich,",
+     "start": 1.28,
+     "end": 1.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Okay.",
+     "start": 1.6,
+     "end": 1.9,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "ich",
+     "start": 1.92,
+     "end": 2.22,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "hänge",
+     "start": 2.24,
+     "end": 2.54,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "an",
+     "start": 2.56,
+     "end": 2.86,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "den",
+     "start": 2.88,
+     "end": 3.18,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Leuten.",
+     "start": 3.2,
+     "end": 3.5,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "speaker_change",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "speaker_change",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "comma_before_pause",
+   "note": "Komma vor der Pause: der Teilsatz geht weiter, auch vor großgeschriebenem Wort",
+   "words": [
+    {
+     "text": "Und",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "jetzt",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "passen",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Sie",
+     "start": 0.96,
+     "end": 1.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "auf,",
+     "start": 1.28,
+     "end": 1.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "äh,",
+     "start": 1.6,
+     "end": 1.9,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "So.",
+     "start": 3.92,
+     "end": 4.22,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Das",
+     "start": 4.24,
+     "end": 4.54,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "hält.",
+     "start": 4.56,
+     "end": 4.86,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "separable_particle_pause",
+   "note": "Pause vor der Verbpartikel",
+   "words": [
+    {
+     "text": "Wir",
+     "start": 0.0,
+     "end": 0.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "fangen",
+     "start": 0.32,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "morgen",
+     "start": 0.64,
+     "end": 0.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "an.",
+     "start": 1.86,
+     "end": 2.16,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Dann",
+     "start": 2.18,
+     "end": 2.48,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "sehen",
+     "start": 2.5,
+     "end": 2.8,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "wir",
+     "start": 2.82,
+     "end": 3.12,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "weiter.",
+     "start": 3.14,
+     "end": 3.44,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "pause_candidate",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "editorial_v1_negation_sentence_end",
+   "note": "Wortliste aus workers/tests/editorial_v1/cases/negation_sentence_end.json",
+   "words": [
+    {
+     "text": "Viele",
+     "start": 0.4,
+     "end": 0.68,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "Händler",
+     "start": 0.73,
+     "end": 1.07,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "machen",
+     "start": 1.12,
+     "end": 1.44,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "zum",
+     "start": 1.49,
+     "end": 1.7,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "Jahresende",
+     "start": 1.75,
+     "end": 2.19,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "große",
+     "start": 2.24,
+     "end": 2.52,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "Rabattaktionen.",
+     "start": 2.57,
+     "end": 3.14,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "Lohnt",
+     "start": 3.46,
+     "end": 3.74,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "sich",
+     "start": 3.79,
+     "end": 4.04,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "das",
+     "start": 4.09,
+     "end": 4.3,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "für",
+     "start": 4.35,
+     "end": 4.57,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "euch?",
+     "start": 4.62,
+     "end": 4.87,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "Ehrlich",
+     "start": 5.27,
+     "end": 5.61,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gesagt,",
+     "start": 5.66,
+     "end": 5.97,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Rabatte",
+     "start": 6.11,
+     "end": 6.46,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "zum",
+     "start": 6.51,
+     "end": 6.72,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Jahresende,",
+     "start": 6.77,
+     "end": 7.21,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "das",
+     "start": 7.35,
+     "end": 7.57,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "bringt",
+     "start": 7.62,
+     "end": 7.93,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "bei",
+     "start": 7.98,
+     "end": 8.2,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "uns",
+     "start": 8.25,
+     "end": 8.46,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "nicht",
+     "start": 9.36,
+     "end": 9.64,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "viel.",
+     "start": 9.69,
+     "end": 9.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Wir",
+     "start": 10.26,
+     "end": 10.48,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "haben",
+     "start": 10.53,
+     "end": 10.81,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "das",
+     "start": 10.86,
+     "end": 11.07,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "zwei",
+     "start": 11.12,
+     "end": 11.37,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Jahre",
+     "start": 11.42,
+     "end": 11.7,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "lang",
+     "start": 11.75,
+     "end": 12.0,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gemacht.",
+     "start": 12.05,
+     "end": 12.39,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Am",
+     "start": 12.71,
+     "end": 12.9,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Ende",
+     "start": 12.95,
+     "end": 13.2,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "hatten",
+     "start": 13.25,
+     "end": 13.56,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "wir",
+     "start": 13.61,
+     "end": 13.82,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "mehr",
+     "start": 13.87,
+     "end": 14.12,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Retouren",
+     "start": 14.17,
+     "end": 14.55,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "und",
+     "start": 14.6,
+     "end": 14.81,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "kaum",
+     "start": 14.86,
+     "end": 15.11,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "neue",
+     "start": 15.16,
+     "end": 15.41,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Stammkunden.",
+     "start": 15.46,
+     "end": 15.93,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Das",
+     "start": 16.25,
+     "end": 16.47,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ist",
+     "start": 16.52,
+     "end": 16.73,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "so.",
+     "start": 16.78,
+     "end": 16.97,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Deshalb",
+     "start": 17.32,
+     "end": 17.66,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "geben",
+     "start": 17.71,
+     "end": 17.99,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "wir",
+     "start": 18.04,
+     "end": 18.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "seit",
+     "start": 18.31,
+     "end": 18.56,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "letztem",
+     "start": 18.61,
+     "end": 18.95,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Herbst",
+     "start": 19.0,
+     "end": 19.31,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "keine",
+     "start": 19.36,
+     "end": 19.64,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Rabatte",
+     "start": 19.69,
+     "end": 20.04,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "mehr,",
+     "start": 20.09,
+     "end": 20.33,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "sondern",
+     "start": 20.47,
+     "end": 20.82,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "verlängern",
+     "start": 20.87,
+     "end": 21.31,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "die",
+     "start": 21.36,
+     "end": 21.57,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Garantie",
+     "start": 21.62,
+     "end": 22.0,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "auf",
+     "start": 22.05,
+     "end": 22.27,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "drei",
+     "start": 22.32,
+     "end": 22.56,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Jahre.",
+     "start": 22.61,
+     "end": 22.89,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Das",
+     "start": 23.21,
+     "end": 23.43,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "kommt",
+     "start": 23.48,
+     "end": 23.76,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "bei",
+     "start": 23.81,
+     "end": 24.03,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "unseren",
+     "start": 24.08,
+     "end": 24.42,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Kunden",
+     "start": 24.47,
+     "end": 24.78,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "deutlich",
+     "start": 24.83,
+     "end": 25.21,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "besser",
+     "start": 25.26,
+     "end": 25.57,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "an.",
+     "start": 25.62,
+     "end": 25.8,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "editorial_v1_later_self_correction",
+   "note": "Wortliste aus workers/tests/editorial_v1/cases/later_self_correction.json",
+   "words": [
+    {
+     "text": "Wir",
+     "start": 0.4,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "haben",
+     "start": 0.67,
+     "end": 0.95,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "im",
+     "start": 1.0,
+     "end": 1.18,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Frühjahr",
+     "start": 1.23,
+     "end": 1.61,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "komplett",
+     "start": 1.66,
+     "end": 2.03,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "auf",
+     "start": 2.08,
+     "end": 2.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "bezahlte",
+     "start": 2.35,
+     "end": 2.72,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Werbung",
+     "start": 2.77,
+     "end": 3.12,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "verzichtet,",
+     "start": 3.17,
+     "end": 3.61,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "und",
+     "start": 3.75,
+     "end": 3.96,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "der",
+     "start": 4.01,
+     "end": 4.23,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Umsatz",
+     "start": 4.28,
+     "end": 4.59,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ist",
+     "start": 4.64,
+     "end": 4.86,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "trotzdem",
+     "start": 4.91,
+     "end": 5.28,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gestiegen.",
+     "start": 5.33,
+     "end": 5.74,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Werbung",
+     "start": 6.06,
+     "end": 6.41,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "braucht",
+     "start": 6.46,
+     "end": 6.8,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "man",
+     "start": 6.85,
+     "end": 7.07,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "also",
+     "start": 7.12,
+     "end": 7.36,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "eigentlich",
+     "start": 7.41,
+     "end": 7.85,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gar",
+     "start": 7.9,
+     "end": 8.12,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "nicht.",
+     "start": 8.17,
+     "end": 8.45,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Wir",
+     "start": 8.77,
+     "end": 8.99,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "haben",
+     "start": 9.04,
+     "end": 9.32,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "dann",
+     "start": 9.37,
+     "end": 9.61,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "stattdessen",
+     "start": 9.66,
+     "end": 10.14,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Newsletter",
+     "start": 11.04,
+     "end": 11.48,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gemacht",
+     "start": 11.53,
+     "end": 11.87,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "und",
+     "start": 11.92,
+     "end": 12.14,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "mehr",
+     "start": 12.19,
+     "end": 12.43,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Zeit",
+     "start": 12.48,
+     "end": 12.73,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "in",
+     "start": 12.78,
+     "end": 12.97,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "den",
+     "start": 13.02,
+     "end": 13.23,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Kundenservice",
+     "start": 13.28,
+     "end": 13.82,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gesteckt.",
+     "start": 13.87,
+     "end": 14.24,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Moment,",
+     "start": 14.56,
+     "end": 14.88,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "das",
+     "start": 15.02,
+     "end": 15.23,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "muss",
+     "start": 15.28,
+     "end": 15.53,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ich",
+     "start": 15.58,
+     "end": 15.8,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "korrigieren.",
+     "start": 15.85,
+     "end": 16.32,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Das",
+     "start": 16.64,
+     "end": 16.85,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "heißt",
+     "start": 16.9,
+     "end": 17.18,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "aber",
+     "start": 17.23,
+     "end": 17.48,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "nicht,",
+     "start": 17.53,
+     "end": 17.81,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "dass",
+     "start": 17.95,
+     "end": 18.2,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Werbung",
+     "start": 18.25,
+     "end": 18.59,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "überflüssig",
+     "start": 18.64,
+     "end": 19.12,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ist.",
+     "start": 19.17,
+     "end": 19.38,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Im",
+     "start": 19.7,
+     "end": 19.89,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Frühjahr",
+     "start": 19.94,
+     "end": 20.31,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "hatten",
+     "start": 20.36,
+     "end": 20.67,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "wir",
+     "start": 20.72,
+     "end": 20.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "noch",
+     "start": 20.99,
+     "end": 21.24,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "die",
+     "start": 21.29,
+     "end": 21.5,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Aufträge",
+     "start": 21.55,
+     "end": 21.93,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "von",
+     "start": 21.98,
+     "end": 22.2,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "der",
+     "start": 22.25,
+     "end": 22.46,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Messe",
+     "start": 22.51,
+     "end": 22.79,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "im",
+     "start": 22.84,
+     "end": 23.03,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Winter,",
+     "start": 23.08,
+     "end": 23.39,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "die",
+     "start": 23.53,
+     "end": 23.74,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "haben",
+     "start": 23.79,
+     "end": 24.07,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "den",
+     "start": 24.12,
+     "end": 24.34,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Umsatz",
+     "start": 24.39,
+     "end": 24.7,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "getragen.",
+     "start": 24.75,
+     "end": 25.13,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Ohne",
+     "start": 25.45,
+     "end": 25.7,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "diese",
+     "start": 25.75,
+     "end": 26.03,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Aufträge",
+     "start": 26.08,
+     "end": 26.45,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "wäre",
+     "start": 26.5,
+     "end": 26.75,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "der",
+     "start": 26.8,
+     "end": 27.02,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Umsatz",
+     "start": 27.07,
+     "end": 27.38,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "bei",
+     "start": 27.43,
+     "end": 27.64,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "uns",
+     "start": 27.69,
+     "end": 27.91,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "deutlich",
+     "start": 27.96,
+     "end": 28.34,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "eingebrochen.",
+     "start": 28.39,
+     "end": 28.89,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "editorial_v1_emotional_pause",
+   "note": "Wortliste aus workers/tests/editorial_v1/cases/emotional_pause.json",
+   "words": [
+    {
+     "text": "Das",
+     "start": 0.4,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Schwierigste",
+     "start": 0.67,
+     "end": 1.17,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "war",
+     "start": 1.22,
+     "end": 1.44,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "der",
+     "start": 1.49,
+     "end": 1.7,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Tag,",
+     "start": 1.75,
+     "end": 1.97,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "an",
+     "start": 2.11,
+     "end": 2.29,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "dem",
+     "start": 2.34,
+     "end": 2.56,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ich",
+     "start": 2.61,
+     "end": 2.82,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "den",
+     "start": 2.87,
+     "end": 3.09,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Betrieb",
+     "start": 3.14,
+     "end": 3.48,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "von",
+     "start": 3.53,
+     "end": 3.75,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "meinem",
+     "start": 3.8,
+     "end": 4.11,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Vater",
+     "start": 4.16,
+     "end": 4.44,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "übernommen",
+     "start": 4.49,
+     "end": 4.93,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "habe.",
+     "start": 4.98,
+     "end": 5.23,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Er",
+     "start": 5.55,
+     "end": 5.73,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "hat",
+     "start": 5.78,
+     "end": 6.0,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "mir",
+     "start": 6.05,
+     "end": 6.27,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "den",
+     "start": 6.32,
+     "end": 6.53,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Schlüssel",
+     "start": 6.58,
+     "end": 6.99,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gegeben",
+     "start": 7.04,
+     "end": 7.38,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "und",
+     "start": 7.43,
+     "end": 7.65,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gesagt,",
+     "start": 7.7,
+     "end": 8.01,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "pass",
+     "start": 8.15,
+     "end": 8.4,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gut",
+     "start": 8.45,
+     "end": 8.67,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "drauf",
+     "start": 8.72,
+     "end": 9.0,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "auf.",
+     "start": 9.05,
+     "end": 9.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Und",
+     "start": 9.58,
+     "end": 9.8,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "dann",
+     "start": 9.85,
+     "end": 10.1,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "hat",
+     "start": 12.5,
+     "end": 12.71,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "er",
+     "start": 12.76,
+     "end": 12.95,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "sich",
+     "start": 13.0,
+     "end": 13.24,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "umgedreht",
+     "start": 13.29,
+     "end": 13.7,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "und",
+     "start": 13.75,
+     "end": 13.97,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ist",
+     "start": 14.02,
+     "end": 14.23,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gegangen.",
+     "start": 14.28,
+     "end": 14.66,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Ich",
+     "start": 14.98,
+     "end": 15.2,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "hab",
+     "start": 15.25,
+     "end": 15.46,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "danach",
+     "start": 15.51,
+     "end": 15.82,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "im",
+     "start": 15.87,
+     "end": 16.06,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "leeren",
+     "start": 16.11,
+     "end": 16.42,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Büro",
+     "start": 16.47,
+     "end": 16.72,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gestanden",
+     "start": 16.77,
+     "end": 17.18,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "und,",
+     "start": 17.23,
+     "end": 17.44,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ja,",
+     "start": 17.58,
+     "end": 17.77,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ich",
+     "start": 19.37,
+     "end": 19.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "hab",
+     "start": 19.63,
+     "end": 19.85,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "geweint.",
+     "start": 19.9,
+     "end": 20.24,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Heute",
+     "start": 20.56,
+     "end": 20.84,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "weiß",
+     "start": 20.89,
+     "end": 21.14,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ich,",
+     "start": 21.19,
+     "end": 21.41,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "dass",
+     "start": 21.55,
+     "end": 21.79,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "das",
+     "start": 21.84,
+     "end": 22.06,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "der",
+     "start": 22.11,
+     "end": 22.33,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Moment",
+     "start": 22.38,
+     "end": 22.69,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "war,",
+     "start": 22.74,
+     "end": 22.95,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "in",
+     "start": 23.09,
+     "end": 23.28,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "dem",
+     "start": 23.33,
+     "end": 23.54,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "es",
+     "start": 23.59,
+     "end": 23.78,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "wirklich",
+     "start": 23.83,
+     "end": 24.2,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "meine",
+     "start": 24.25,
+     "end": 24.53,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Firma",
+     "start": 24.58,
+     "end": 24.86,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "wurde.",
+     "start": 24.91,
+     "end": 25.19,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "editorial_v1_silent_demonstration",
+   "note": "Wortliste aus workers/tests/editorial_v1/cases/silent_demonstration.json",
+   "words": [
+    {
+     "text": "Ich",
+     "start": 0.4,
+     "end": 0.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "zeig",
+     "start": 0.67,
+     "end": 0.91,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Ihnen",
+     "start": 0.96,
+     "end": 1.24,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "das",
+     "start": 1.29,
+     "end": 1.51,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "am",
+     "start": 1.56,
+     "end": 1.74,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "besten",
+     "start": 1.79,
+     "end": 2.11,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "direkt",
+     "start": 2.16,
+     "end": 2.47,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "am",
+     "start": 2.52,
+     "end": 2.7,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Werkstück.",
+     "start": 2.75,
+     "end": 3.16,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Hier",
+     "start": 3.48,
+     "end": 3.73,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "sehen",
+     "start": 3.78,
+     "end": 4.06,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Sie",
+     "start": 4.11,
+     "end": 4.32,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "die",
+     "start": 4.37,
+     "end": 4.59,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "alte",
+     "start": 4.64,
+     "end": 4.89,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Verbindung,",
+     "start": 4.94,
+     "end": 5.38,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "die",
+     "start": 5.52,
+     "end": 5.73,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ist",
+     "start": 5.78,
+     "end": 6.0,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "nur",
+     "start": 6.05,
+     "end": 6.27,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "geleimt",
+     "start": 6.32,
+     "end": 6.66,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "und",
+     "start": 6.71,
+     "end": 6.93,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "nach",
+     "start": 6.98,
+     "end": 7.22,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ein",
+     "start": 7.27,
+     "end": 7.49,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "paar",
+     "start": 7.54,
+     "end": 7.79,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Jahren",
+     "start": 7.84,
+     "end": 8.15,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "wackelt",
+     "start": 8.2,
+     "end": 8.54,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "sie.",
+     "start": 8.59,
+     "end": 8.81,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Und",
+     "start": 9.13,
+     "end": 9.35,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "jetzt",
+     "start": 9.4,
+     "end": 9.68,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "passen",
+     "start": 9.73,
+     "end": 10.04,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Sie",
+     "start": 10.09,
+     "end": 10.3,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "auf,",
+     "start": 10.35,
+     "end": 10.57,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "äh,",
+     "start": 10.71,
+     "end": 10.89,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "So.",
+     "start": 17.39,
+     "end": 17.58,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Das",
+     "start": 17.9,
+     "end": 18.11,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "hält",
+     "start": 18.16,
+     "end": 18.41,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "jetzt",
+     "start": 18.46,
+     "end": 18.74,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ohne",
+     "start": 18.79,
+     "end": 19.04,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "einen",
+     "start": 19.09,
+     "end": 19.37,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Tropfen",
+     "start": 19.42,
+     "end": 19.76,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Leim.",
+     "start": 19.81,
+     "end": 20.06,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Das",
+     "start": 20.38,
+     "end": 20.6,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ist",
+     "start": 20.65,
+     "end": 20.86,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "der",
+     "start": 20.91,
+     "end": 21.13,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ganze",
+     "start": 21.18,
+     "end": 21.46,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Trick,",
+     "start": 21.51,
+     "end": 21.79,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "und",
+     "start": 21.93,
+     "end": 22.15,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "den",
+     "start": 22.2,
+     "end": 22.41,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "zeigen",
+     "start": 22.46,
+     "end": 22.77,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "wir",
+     "start": 22.82,
+     "end": 23.04,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "bei",
+     "start": 23.09,
+     "end": 23.31,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "uns",
+     "start": 23.36,
+     "end": 23.57,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "jedem",
+     "start": 23.62,
+     "end": 23.9,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Lehrling",
+     "start": 23.95,
+     "end": 24.33,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "in",
+     "start": 24.38,
+     "end": 24.56,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "der",
+     "start": 24.61,
+     "end": 24.83,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ersten",
+     "start": 24.88,
+     "end": 25.19,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Woche.",
+     "start": 25.24,
+     "end": 25.52,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "pause_candidate",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  },
+  {
+   "id": "editorial_v1_misrecognized_number_or_name",
+   "note": "Wortliste aus workers/tests/editorial_v1/cases/misrecognized_number_or_name.json",
+   "words": [
+    {
+     "text": "Wer",
+     "start": 0.4,
+     "end": 0.62,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "hat",
+     "start": 0.67,
+     "end": 0.88,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "bei",
+     "start": 0.93,
+     "end": 1.15,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "euch",
+     "start": 1.2,
+     "end": 1.45,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "den",
+     "start": 1.5,
+     "end": 1.71,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "Einkauf",
+     "start": 1.76,
+     "end": 2.11,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "neu",
+     "start": 2.16,
+     "end": 2.37,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "aufgestellt?",
+     "start": 2.42,
+     "end": 2.89,
+     "speaker": "SPEAKER_01"
+    },
+    {
+     "text": "Das",
+     "start": 3.29,
+     "end": 3.51,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "war",
+     "start": 3.56,
+     "end": 3.78,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Frau",
+     "start": 3.83,
+     "end": 4.07,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Meier,",
+     "start": 4.12,
+     "end": 4.4,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "das",
+     "start": 4.54,
+     "end": 4.76,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "schreibt",
+     "start": 4.81,
+     "end": 5.19,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "man",
+     "start": 5.24,
+     "end": 5.45,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "mit",
+     "start": 5.5,
+     "end": 5.72,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "a",
+     "start": 5.77,
+     "end": 5.92,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "i.",
+     "start": 5.97,
+     "end": 6.12,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Sie",
+     "start": 6.44,
+     "end": 6.66,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "hat",
+     "start": 6.71,
+     "end": 6.92,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "die",
+     "start": 6.97,
+     "end": 7.19,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Zahl",
+     "start": 7.24,
+     "end": 7.49,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "der",
+     "start": 7.54,
+     "end": 7.75,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Lieferanten",
+     "start": 7.8,
+     "end": 8.28,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "von",
+     "start": 8.33,
+     "end": 8.54,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "zwölf",
+     "start": 8.59,
+     "end": 8.87,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "auf",
+     "start": 8.92,
+     "end": 9.14,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "vier",
+     "start": 9.19,
+     "end": 9.44,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "reduziert.",
+     "start": 9.49,
+     "end": 9.89,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Bei",
+     "start": 10.21,
+     "end": 10.43,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "uns",
+     "start": 10.48,
+     "end": 10.7,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "hat",
+     "start": 10.75,
+     "end": 10.96,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "das",
+     "start": 11.01,
+     "end": 11.23,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "im",
+     "start": 11.28,
+     "end": 11.46,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ersten",
+     "start": 11.51,
+     "end": 11.82,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Jahr",
+     "start": 11.87,
+     "end": 12.12,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "rund",
+     "start": 12.17,
+     "end": 12.42,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "40.000",
+     "start": 12.47,
+     "end": 12.75,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Euro",
+     "start": 12.8,
+     "end": 13.05,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "gespart.",
+     "start": 13.1,
+     "end": 13.44,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Das",
+     "start": 13.76,
+     "end": 13.98,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "war",
+     "start": 14.03,
+     "end": 14.24,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "2024,",
+     "start": 14.29,
+     "end": 14.54,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "also",
+     "start": 14.68,
+     "end": 14.93,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "bevor",
+     "start": 14.98,
+     "end": 15.26,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "die",
+     "start": 15.31,
+     "end": 15.53,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Preise",
+     "start": 15.58,
+     "end": 15.89,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "nochmal",
+     "start": 15.94,
+     "end": 16.28,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "angezogen",
+     "start": 16.33,
+     "end": 16.74,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "haben.",
+     "start": 16.79,
+     "end": 17.07,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Für",
+     "start": 17.39,
+     "end": 17.61,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "einen",
+     "start": 17.66,
+     "end": 17.94,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Betrieb",
+     "start": 17.99,
+     "end": 18.33,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "mit",
+     "start": 18.38,
+     "end": 18.6,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "vierzig",
+     "start": 18.65,
+     "end": 18.99,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Leuten",
+     "start": 19.04,
+     "end": 19.35,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "ist",
+     "start": 19.4,
+     "end": 19.62,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "das",
+     "start": 19.67,
+     "end": 19.88,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "viel",
+     "start": 19.93,
+     "end": 20.18,
+     "speaker": "SPEAKER_00"
+    },
+    {
+     "text": "Geld.",
+     "start": 20.23,
+     "end": 20.48,
+     "speaker": "SPEAKER_00"
+    }
+   ],
+   "expected": {
+    "v1": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ],
+    "cut_v2": [
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "punct",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "none",
+     "end_of_text"
+    ]
+   }
+  }
+ ]
+}

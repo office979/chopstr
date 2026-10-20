@@ -1,0 +1,207 @@
+{
+  "version": 1,
+  "hinweis": "Teil je vollständiger Quelle. Entwicklung: Fehlersuche und jede Änderung. Kalibrierung: Gewichte und Schwellen einstellen. Abschluss: unangetastet bis zur Abnahme, Regeln und Schwellen werden vorher festgeschrieben. Ausschnitte derselben Aufnahme (Feld aufnahme) liegen im selben Teil.",
+  "abschluss_hinweis": "Abschluss ist leer: es gibt noch kein echtes Langvideo von PLACEMedia mit Rechteklärung. Das vorhandene Material ist synthetisch, aus Fixtures oder kurz und taugt nur zur Entwicklung. Abschlussquellen werden eingetragen, bevor jemand sie ansieht, und erst mit --abschluss-bestaetigt ausgewertet.",
+  "quellen": [
+    {
+      "id": "demo_script",
+      "dateiname": null,
+      "aufnahme": "demo_script",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 85.98,
+      "herkunft": "tests/transcript_fixtures.py (DEMO_SCRIPT), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "fall_conditional_recommendation",
+      "dateiname": null,
+      "aufnahme": "fall_conditional_recommendation",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 23.95,
+      "herkunft": "tests/editorial_v1 Fall conditional_recommendation (Sprache de), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "fall_emotional_pause",
+      "dateiname": null,
+      "aufnahme": "fall_emotional_pause",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 24.79,
+      "herkunft": "tests/editorial_v1 Fall emotional_pause (Sprache de), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "fall_imprecise_timestamps",
+      "dateiname": null,
+      "aufnahme": "fall_imprecise_timestamps",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 18.75,
+      "herkunft": "tests/editorial_v1 Fall imprecise_timestamps (Sprache de), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "fall_instruction_in_transcript",
+      "dateiname": null,
+      "aufnahme": "fall_instruction_in_transcript",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 25.85,
+      "herkunft": "tests/editorial_v1 Fall instruction_in_transcript (Sprache de), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "fall_later_self_correction",
+      "dateiname": null,
+      "aufnahme": "fall_later_self_correction",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 28.49,
+      "herkunft": "tests/editorial_v1 Fall later_self_correction (Sprache de), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "fall_misrecognized_number_or_name",
+      "dateiname": null,
+      "aufnahme": "fall_misrecognized_number_or_name",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 20.08,
+      "herkunft": "tests/editorial_v1 Fall misrecognized_number_or_name (Sprache de), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "fall_near_duplicate_candidates",
+      "dateiname": null,
+      "aufnahme": "fall_near_duplicate_candidates",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 26.74,
+      "herkunft": "tests/editorial_v1 Fall near_duplicate_candidates (Sprache de), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "fall_negation_sentence_end",
+      "dateiname": null,
+      "aufnahme": "fall_negation_sentence_end",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 25.4,
+      "herkunft": "tests/editorial_v1 Fall negation_sentence_end (Sprache de), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "fall_punchline_setup",
+      "dateiname": null,
+      "aufnahme": "fall_punchline_setup",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 27.51,
+      "herkunft": "tests/editorial_v1 Fall punchline_setup (Sprache de), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "fall_reported_position",
+      "dateiname": null,
+      "aufnahme": "fall_reported_position",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 20.41,
+      "herkunft": "tests/editorial_v1 Fall reported_position (Sprache de), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "fall_silent_demonstration",
+      "dateiname": null,
+      "aufnahme": "fall_silent_demonstration",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 25.12,
+      "herkunft": "tests/editorial_v1 Fall silent_demonstration (Sprache de), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "fall_speaker_turn_attribution",
+      "dateiname": null,
+      "aufnahme": "fall_speaker_turn_attribution",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 20.39,
+      "herkunft": "tests/editorial_v1 Fall speaker_turn_attribution (Sprache de), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "fall_unresolved_pronoun",
+      "dateiname": null,
+      "aufnahme": "fall_unresolved_pronoun",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 29.06,
+      "herkunft": "tests/editorial_v1 Fall unresolved_pronoun (Sprache de), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "fall_weak_material",
+      "dateiname": null,
+      "aufnahme": "fall_weak_material",
+      "teil": "entwicklung",
+      "format": "fixture",
+      "sprachvariante": "DE",
+      "dauer_s": 26.66,
+      "herkunft": "tests/editorial_v1 Fall weak_material (Sprache de), nur Wortliste, kein Audio"
+    },
+    {
+      "id": "quelle_16982bb5-f2e4-4d89-81ed-1ca44fd391d7",
+      "dateiname": null,
+      "aufnahme": "quelle_16982bb5-f2e4-4d89-81ed-1ca44fd391d7",
+      "teil": "entwicklung",
+      "format": "monolog",
+      "sprachvariante": "DE",
+      "dauer_s": 22.26,
+      "herkunft": "lokale Datenbank, Quelle 16982bb5-f2e4-4d89-81ed-1ca44fd391d7 (Testvideo: Preise im Handwerk); Dauer aus der Wortliste (erstes bis letztes Wort), nicht aus sources.duration_s; Format und Sprachvariante nach dem Transkript eingeordnet, nicht redaktionell bestätigt"
+    },
+    {
+      "id": "quelle_c958814e-6c21-41ee-bcc5-ea2c5cf3795b",
+      "dateiname": null,
+      "aufnahme": "quelle_c958814e-6c21-41ee-bcc5-ea2c5cf3795b",
+      "teil": "entwicklung",
+      "format": "monolog",
+      "sprachvariante": "DE",
+      "dauer_s": 44.06,
+      "herkunft": "lokale Datenbank, Quelle c958814e-6c21-41ee-bcc5-ea2c5cf3795b (AD 3); Dauer aus der Wortliste (erstes bis letztes Wort), nicht aus sources.duration_s; Format und Sprachvariante nach dem Transkript eingeordnet, nicht redaktionell bestätigt"
+    },
+    {
+      "id": "a_interview_handwerk",
+      "dateiname": "a_interview_handwerk.mp4",
+      "aufnahme": "a_interview_handwerk",
+      "teil": "entwicklung",
+      "format": "interview",
+      "sprachvariante": "DE",
+      "dauer_s": 297.883,
+      "herkunft": "eval/runs/testmaterial/a_interview_handwerk (synthetisch: macOS say und ffmpeg, fiktives Skript, nicht versioniert)"
+    },
+    {
+      "id": "b_monolog_gruenderin",
+      "dateiname": "b_monolog_gruenderin.mp4",
+      "aufnahme": "b_monolog_gruenderin",
+      "teil": "entwicklung",
+      "format": "monolog",
+      "sprachvariante": "DE",
+      "dauer_s": 242.557,
+      "herkunft": "eval/runs/testmaterial/b_monolog_gruenderin (synthetisch: macOS say und ffmpeg, fiktives Skript, nicht versioniert)"
+    },
+    {
+      "id": "c_debatte_viertagewoche",
+      "dateiname": "c_debatte_viertagewoche.mp4",
+      "aufnahme": "c_debatte_viertagewoche",
+      "teil": "entwicklung",
+      "format": "debatte",
+      "sprachvariante": "DE",
+      "dauer_s": 242.77,
+      "herkunft": "eval/runs/testmaterial/c_debatte_viertagewoche (synthetisch: macOS say und ffmpeg, fiktives Skript, nicht versioniert)"
+    }
+  ]
+}

@@ -153,6 +153,9 @@ class ReframeResult:
     slide_region: SlideRegion | None = None  # erkannte Folie (auch wenn nicht genutzt)
     pip: dict | None = None  # Sprecherfläche in der Ausgabe {x, y, w, h}, nur bei slide_pip
     override: str | None = None  # clips.reframe_override, falls gesetzt
+    # Lane P4 (cut.split_screen): Bindung Sprecher zu Gesicht je Einstellung, nur wenn die Regel gilt und
+    # gemessen wurde; None hält den Plan byte-gleich.
+    speaker_face_binding: list[dict] | None = None
 
     def plan_block(self) -> dict:
         """Block ``reframe`` des Render-Plans. ``slide_region`` und ``pip`` nur bei ``slide_pip``."""
@@ -168,6 +171,8 @@ class ReframeResult:
             block["pip"] = {k: int(self.pip[k]) for k in ("x", "y", "w", "h")}
         if self.override:
             block["override"] = self.override
+        if self.speaker_face_binding is not None:
+            block["speaker_face_binding"] = self.speaker_face_binding
         return block
 
     def shots_json(self) -> list[dict]:
@@ -762,6 +767,9 @@ def verfolgen(
     src_w: int,
     folgen: bool = True,
     zeitmarken: list[dict] | None = None,
+    words: list[dict] | None = None,
+    split_rules: tracking.SplitScreenRules | None = None,
+    bindungen: list[dict] | None = None,
 ) -> tuple[list[list[tracking.Ziel]], list[tuple[float, float]], int, int]:
     """Das Video abtasten und daraus ableiten, wer wann im Ausschnitt steht.
 
@@ -771,7 +779,11 @@ def verfolgen(
 
     Zurück kommen die Ziele je Segment, die Sitzpositionen der längsten Einstellung (das ist die
     Bildaufteilung, die den Clip prägt, und was die Oberfläche anzeigt), die Zahl der Einstellungen
-    und die höchste Personenzahl, die in einer davon gleichzeitig zu sehen war."""
+    und die höchste Personenzahl, die in einer davon gleichzeitig zu sehen war.
+
+    Lane P4: mit ``split_rules`` und ``words`` wird je Einstellung die Bindung Sprecher zu Gesicht gemessen
+    (``tracking.speaker_face_binding``, angehängt an ``bindungen``) und bei überlappender Rede nur mit
+    gesicherter Bindung geteilt (``tracking.split_bei_overlap``). Zeitmarken von Hand gehen danach vor."""
     ziele_je_segment: list[list[tracking.Ziel]] = []
     laengste: tuple[float, list[tuple[float, float]]] | None = None
     einstellungen = 0
@@ -786,6 +798,17 @@ def verfolgen(
             if p and (laengste is None or e.dauer_s > laengste[0]):
                 laengste = (e.dauer_s, p)
         ziel_liste = tracking.ziele(einst, float(src_w), folgen=folgen)
+        if split_rules is not None and words:
+            ueberlappt = tracking.overlap_spans(words)
+            geteilt: list[tracking.Ziel] = []
+            for e in einst:
+                b = tracking.speaker_face_binding(e, tracking.positionen(e), words)
+                if bindungen is not None:
+                    bindungen.append({"start_s": round(e.start_s, 3), "end_s": round(e.ende_s, 3), "binding": b})
+                teil = [z for z in ziel_liste if e.start_s - 1e-6 <= z.start_s < e.ende_s + 1e-6]
+                geteilt.extend(tracking.split_bei_overlap(teil, ueberlappt, b, split_rules))
+            ziel_liste = geteilt + [z for z in ziel_liste if not any(e.start_s - 1e-6 <= z.start_s < e.ende_s + 1e-6 for e in einst)]
+            ziel_liste.sort(key=lambda z: z.start_s)
         if zeitmarken:
             ziel_liste = tracking.zeitmarken_anwenden(ziel_liste, zeitmarken, float(src_w))
         ziele_je_segment.append(ziel_liste)
@@ -809,13 +832,16 @@ def plan_reframe(
     out_size: tuple[int, int] | None = None,
     reframe_override: str | None = None,
     zeitmarken: list[dict] | None = None,
+    split_rules: tracking.SplitScreenRules | None = None,
 ) -> ReframeResult:
     """Kompletter Reframe-Plan: Detektor (wenn vorhanden), Positionen, Folie, Strategie, Shots.
 
     Ohne Detektor oder ohne Gesichter: ``neutral`` mit ``detector = "none"`` und einem Hinweis in ``notes``.
     ``src_w``/``src_h`` können übergeben werden (aus ``sources``), sonst wird die Datei per ffprobe gelesen.
     ``reframe_override`` (``clips.reframe_override``) erzwingt eine Strategie; ``slide_pip`` ohne erkannte
-    Folie legt das ganze Quellbild oben ab. Jede Abweichung zwischen Erkennung und Nutzung steht in ``notes``."""
+    Folie legt das ganze Quellbild oben ab. Jede Abweichung zwischen Erkennung und Nutzung steht in ``notes``.
+    ``split_rules`` (Lane P4, ``tracking.split_screen_rules``): Split-Screen bei Überlappung nur mit gesicherter
+    Bindung Sprecher zu Gesicht; ohne Regel oder ohne Detektor bleibt alles wie bisher."""
     if reframe_override is not None and reframe_override not in STRATEGIES:
         raise ValueError(f"Unbekannte Reframe-Strategie {reframe_override!r} (erlaubt: {', '.join(STRATEGIES)})")
     if src_w is None or src_h is None:
@@ -839,14 +865,16 @@ def plan_reframe(
     face_y: list[float] = []
     ziele_je_segment: list[list[tracking.Ziel]] | None = None
     max_personen = 0
+    bindungen: list[dict] | None = [] if split_rules is not None else None
     available, reason = detector_available()
     if available and video_path:
         try:
             # Bei Override talking_head soll der Ausschnitt innerhalb einer Einstellung stehen
             # bleiben; Kameraschnitte werden trotzdem beachtet.
             ziele_je_segment, centers, einstellungen, max_personen = verfolgen(
-                video_path, segments, src_w, folgen=(reframe_override != "talking_head"), zeitmarken=zeitmarken
-            )
+                video_path, segments, src_w, folgen=(reframe_override != "talking_head"), zeitmarken=zeitmarken,
+                words=words, split_rules=split_rules, bindungen=bindungen,
+            )  # fmt: skip
             detector = "yunet"
             positions = [c[0] for c in centers]
             face_y = [c[1] for c in centers]
@@ -868,8 +896,16 @@ def plan_reframe(
         except Exception as exc:  # Detektor darf den Render nie stoppen
             notes.append(f"Gesichtsdetektion fehlgeschlagen ({exc.__class__.__name__}), Reframe läuft neutral")
             detector, positions, face_y, ziele_je_segment = "none", [], [], None
+            bindungen = [] if split_rules is not None else None
     else:
         notes.append(reason or "Kein Detektor, Reframe läuft neutral")
+    if split_rules is not None and tracking.overlap_spans(words):
+        geteilt = sum(1 for zl in ziele_je_segment or [] for z in zl if z.grund == "overlap_gebunden")
+        notes.append(
+            f"{geteilt} Stellen mit überlappender Rede geteilt, Zuordnung Sprecher zu Gesicht gesichert"
+            if geteilt
+            else "Überlappende Rede ohne gesicherte Zuordnung Sprecher zu Gesicht, Ansicht bleibt konservativ"
+        )
 
     slide: SlideRegion | None = None
     if video_path:
@@ -944,6 +980,7 @@ def plan_reframe(
         slide_region=slide,
         pip=pip,
         override=reframe_override,
+        speaker_face_binding=bindungen,
     )
 
 

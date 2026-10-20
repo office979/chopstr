@@ -135,10 +135,10 @@ def test_bracket_open_at_cut_at_the_edges_and_with_fallback_off():
 def test_bracket_open_at_cut_uses_spacy_ranges_when_a_model_is_loaded(monkeypatch):
     w = words("Wir haben das letzte Jahr nicht gemacht.")
     monkeypatch.setattr(dach_nlp, "nlp", lambda: object())
-    monkeypatch.setattr(dach_nlp, "forbidden_cut_ranges", lambda text, wt: [(wt[1]["end"], wt[6]["start"])])
+    monkeypatch.setattr(dach_nlp, "forbidden_cut_ranges", lambda text, wt, rule="v1": [(wt[1]["end"], wt[6]["start"])])
     r = dach_nlp.bracket_open_at_cut(w, 5)
     assert r["open"] is True and r["available"] == "spacy"
-    monkeypatch.setattr(dach_nlp, "forbidden_cut_ranges", lambda text, wt: [])
+    monkeypatch.setattr(dach_nlp, "forbidden_cut_ranges", lambda text, wt, rule="v1": [])
     assert dach_nlp.bracket_open_at_cut(w, 5) == {"open": False, "signal": None, "detail": "keine offene Klammer", "available": "spacy"}
 
 

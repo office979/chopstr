@@ -91,6 +91,9 @@ class Settings:
     diarizer_model: str = ""
     gladia_api_key: str = ""
     gladia_base_url: str = ""
+    # Lane P1 (Phase 1): Routing nach erkannter Sprache und Mehrspur-Sprecherzuordnung, Standard aus.
+    asr_auto_route: bool = False
+    speakers_multitrack: bool = False
 
     languagetool_url: str = ""
     egress_allowlist: list[str] = field(default_factory=list)
@@ -169,6 +172,8 @@ def load_settings() -> Settings:
         diarizer_model=_env("DIARIZER_MODEL"),
         gladia_api_key=_env("GLADIA_API_KEY"),
         gladia_base_url=_env("GLADIA_BASE_URL"),
+        asr_auto_route=_env_bool("ASR_AUTO_ROUTE", False),
+        speakers_multitrack=_env_bool("SPEAKERS_MULTITRACK", False),
         languagetool_url=_env("LANGUAGETOOL_URL"),
         egress_allowlist=_env_list("EGRESS_ALLOWLIST"),
         work_dir=_env("WORKER_WORK_DIR"),

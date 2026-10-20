@@ -140,3 +140,21 @@ Die ASR-Sicherheit kommt aus `prob` (Transkript); fehlt `prob` oder ist es null,
 
 `candidates.policy_version` bleibt im `rubric`-JSON (`rubric.policy_version`); es gibt keine Migration.
 Rollback: unter Fassung 1 schreibt der Adapter nichts in die Rubrik und keinen Bericht (Plan AP8).
+
+## Kontexttreue und Ergebnisklassen (Lane P3)
+
+Der ClipCandidate bleibt im Vertrag `clip_candidate_v1` unverändert (Schema mit `additionalProperties: false`).
+`from_report` ruft vor dem Bau jedes ClipCandidate `release_gate.annotate_review` auf. Dieser Aufruf schreibt
+additiv in `candidates.rubric`, nicht in den ClipCandidate:
+
+- `review_state`: Ergebnisklasse `passed`, `uncertain` oder `blocked` mit Gründen. Jeder Grund trägt Herkunft
+  `rule`, `model` oder `confirmed` und eine Quellstelle.
+- `repair`: bisherige Reparatur, im Schlüssel `review_state.repair`.
+- `context_hits`: Claim-Index.
+- `counter_reader`: Gegenleser.
+- `repair_applied` und `title_card_attempt`: Titelkarte.
+
+Den Vertrag dieser Felder beschreibt `packages/schema/CANDIDATES.md`, Abschnitt „Kontexttreue und
+Ergebnisklassen“. `decision` und `decision_reason` des ClipCandidate ändern sich dadurch nicht. Ein vom
+Kritiker verworfener Kandidat ist `reject` und trägt in der Rubrik `review_state.state = "blocked"`. Ein
+Gegenleser-Befund, der verwirft, erscheint als `critic:counter_reader_<dimension>`.

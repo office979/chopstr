@@ -1,0 +1,16 @@
+{
+  "hinweis": "Fiktiver Ausschnitt eines DetectReport mit funnel (Lane P2); nur die Felder, die eval_harness liest.",
+  "funnel": {
+    "pool": [
+      {"start_s": 119.5, "end_s": 163.0}, {"start_s": 841.0, "end_s": 890.0},
+      {"start_s": 1501.0, "end_s": 1540.0}, {"start_s": 2600.0, "end_s": 2640.0}
+    ],
+    "after_gates": [
+      {"start_s": 119.5, "end_s": 163.0}, {"start_s": 1501.0, "end_s": 1540.0}, {"start_s": 2600.0, "end_s": 2640.0}
+    ],
+    "offered": [
+      {"start_s": 1501.0, "end_s": 1540.0, "rank": 1}, {"start_s": 2600.0, "end_s": 2640.0, "rank": 2}
+    ]
+  },
+  "candidates": []
+}

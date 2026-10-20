@@ -699,7 +699,9 @@ export interface Repo extends AuthRepo, WorkspaceAdminRepo, BlockBRepo {
   /* Kandidaten: nur aktuelle Versionen (ohne human_verdict = 'edited'), Pflichtkriterien erfüllt zuerst, dann total absteigend */
   listCandidates(sourceId: string): Promise<Candidate[]>;
   getCandidate(id: string): Promise<Candidate | null>;
-  setCandidateVerdict(id: string, verdict: "accepted" | "rejected", reason?: string): Promise<Candidate | null>;
+  /* null setzt das Urteil zurück auf offen, mit Grund: so speichert die Verdict-Route ein Flag an
+   * die Redaktion (lib/candidates/review.ts, EDITORIAL_FLAG_PREFIX). */
+  setCandidateVerdict(id: string, verdict: "accepted" | "rejected" | null, reason?: string): Promise<Candidate | null>;
   /* Wie setCandidateVerdict, aber nur, solange noch kein Urteil vorliegt (human_verdict is null); sonst null */
   setCandidateVerdictIfOpen(id: string, verdict: "accepted" | "rejected", reason?: string): Promise<Candidate | null>;
   /* Neue Zeile version + 1 mit neu berechneten Grenzen und Gates; alte Zeile bekommt human_verdict = 'edited' */

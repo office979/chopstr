@@ -16,6 +16,11 @@ kommen ``timeline`` (je Segment ``source_in``, ``source_out``, ``output_in``, ``
 ``boundary_confidence``, ``low_confidence``) und ``timebase`` (Sekunden auf der Audioebene, keine
 Frame-Rasterung, Kennzeichen für variable Bildrate, ungeprüft) hinzu, ``versions.render`` ist
 ``render_v2``. Ohne Schalter bleibt der Plan byte-gleich.
+
+Lane P4 (Fassung 2, je ein Schalter, ohne Schalter byte-gleich): prosodische Kanten (``cut.prosody``) tragen je
+Segment ``edges`` in ``timeline``; ``hook_audio`` prüft den Einstieg gegen den Ton (``cut.hook_audio``);
+``captions.reading_speed`` steht im Caption-Block, wenn das Lesetempo gilt; ``rubric.repair`` mit
+``kind = "title_card"`` (Lane P3) setzt den Text der vorhandenen Titelkarte, Stil und Dauer bleiben.
 """
 
 from __future__ import annotations
@@ -81,6 +86,7 @@ def caption_block(
     min_top: int | None = None,
     text_field: str | None = None,
     bereits_skaliert: bool = False,
+    reading_speed: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Block ``captions``: Basis-Preset (Name oder Objekt für 1080x1920) auf die Ausgabegröße skaliert,
     Safe Zone als Randabstände. Ein bereits skaliertes Preset hier nicht übergeben (doppelte Skalierung).
@@ -118,6 +124,8 @@ def caption_block(
     }
     if text_field and text_field != "text":
         block["text_field"] = captions_de.check_text_field(text_field)
+    if reading_speed is not None:
+        block["reading_speed"] = {"profile": str(reading_speed["profile"]), "chars_per_s": float(reading_speed["chars_per_s"])}
     return block
 
 
@@ -189,24 +197,69 @@ def normalize_segments(segments: list[dict]) -> list[dict]:
     return out
 
 
-def cut_segments(segments: list[dict], words: list[dict] | None, policy: editorial.Policy | None = None) -> list[dict]:
-    """Die Segmente, wie der Render sie schneidet: unter Fassung 2 mit ``cut.padding`` an Wortgrenzen gepaddet
-    (dieselbe Rechnung wie in ``build_plan``), sonst ``normalize_segments`` unverändert. Für Reframe und
-    Captions, die vor dem Plan gebraucht werden."""
-    segs = normalize_segments(segments)
+def _padded(
+    segments: list[dict],
+    words: list[dict] | None,
+    policy: editorial.Policy | None,
+    audio: transitions.Audio | None = None,
+    protected: list[tuple[float, float]] | None = None,
+) -> list[dict] | None:
+    """Gepaddete Segmente (``cut.padding``), mit ``cut.prosody`` auf dem Pegelminimum; ``None`` ohne ``cut.padding``."""
     rules = transitions.cut_rules(policy)
-    if rules is None or not words:
+    if rules is None:
+        return None
+    padded = transitions.pad_segments(normalize_segments(segments), words or [], rules)
+    prosody = transitions.prosody_rules(policy)
+    if prosody is not None and words:
+        padded = transitions.prosody_edges(padded, words, audio, prosody, protected)
+    return padded
+
+
+def cut_segments(
+    segments: list[dict],
+    words: list[dict] | None,
+    policy: editorial.Policy | None = None,
+    audio: transitions.Audio | None = None,
+    protected: list[tuple[float, float]] | None = None,
+) -> list[dict]:
+    """Die Segmente, wie der Render sie schneidet: unter Fassung 2 mit ``cut.padding`` an Wortgrenzen gepaddet
+    (dieselbe Rechnung wie in ``build_plan``, mit ``cut.prosody`` auf dem Pegelminimum von ``audio``), sonst
+    ``normalize_segments`` unverändert. Für Reframe und Captions, die vor dem Plan gebraucht werden."""
+    segs = normalize_segments(segments)
+    if not words:
         return segs
-    return [{k: s[k] for k in ("start", "end", "role")} for s in transitions.pad_segments(segs, words, rules)]
+    padded = _padded(segs, words, policy, audio, protected)
+    if padded is None:
+        return segs
+    return [{k: s[k] for k in ("start", "end", "role")} for s in padded]
 
 
 def timeline_block(padded: list[dict]) -> list[dict]:
-    """Herkunft und Ziel je Segment (``compose.output_timeline``) mit der Sicherheit der Kanten."""
+    """Herkunft und Ziel je Segment (``compose.output_timeline``) mit der Sicherheit der Kanten; mit
+    ``cut.prosody`` zusätzlich ``edges`` (``{"in": edge, "out": edge}``, Vertrag in ``transitions``)."""
     comp = compose.Composition.from_json([{k: s[k] for k in ("start", "end", "role")} for s in padded])
     return [
-        {**entry, "boundary_confidence": s["boundary_confidence"], "low_confidence": bool(s["low_confidence"])}
+        {
+            **entry, "boundary_confidence": s["boundary_confidence"], "low_confidence": bool(s["low_confidence"]),
+            **({"edges": s["edges"]} if "edges" in s else {}),
+        }
         for entry, s in zip(compose.output_timeline(comp), padded)
-    ]
+    ]  # fmt: skip
+
+
+REPAIR_TITLE_KIND = "title_card"
+
+
+def repair_title(repair: dict[str, Any] | None, policy: editorial.Policy | None = None) -> dict[str, Any] | None:
+    """``rubric.repair_applied`` (Lane P3; oder ``rubric.repair``, wenn es selbst die Karte ist) als Titelkarte: ``{"text", "source_span"}`` nur unter Fassung 2, nur mit
+    ``kind = "title_card"`` und nicht leerem Text; sonst ``None``. Stil und Dauer der Titelkarte bleiben."""
+    if not isinstance(repair, dict) or repair.get("kind") != REPAIR_TITLE_KIND:
+        return None
+    text = str(repair.get("text") or "").strip()
+    if not text or (policy if policy is not None else editorial.load()).version < 2:
+        return None
+    span = repair.get("source_span")
+    return {"text": text, "source_span": span if isinstance(span, (list, dict)) else None}
 
 
 def timebase_block(src_vfr: bool | None) -> dict[str, Any]:
@@ -245,6 +298,11 @@ def build_plan(
     policy: editorial.Policy | None = None,
     words: list[dict] | None = None,
     src_vfr: bool | None = None,
+    audio: transitions.Audio | None = None,
+    protected: list[tuple[float, float]] | None = None,
+    hook_info: dict[str, Any] | None = None,
+    repair: dict[str, Any] | None = None,
+    caption_reading_speed: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Baut den Plan. ``caption_preset`` ist das Basis-Preset (Name oder 1080x1920-Objekt), die Skalierung passiert hier.
     ``sources`` erwartet ``storage_key``, ``transcript_version``, ``hook_version``, ``candidate_id``.
@@ -259,7 +317,11 @@ def build_plan(
     false). Überschreibt die Komposition einen ausdrücklich übergebenen anderen Wert, steht das als
     ``filler_cuts_note`` im Plan.
     ``words`` (Transkript in Quellzeit) und ``src_vfr`` (probe) wirken nur unter Fassung 2 mit
-    ``cut.padding`` (AP10b): Segmente gepaddet, dazu ``timeline``, ``timebase`` und ``render_v2``."""
+    ``cut.padding`` (AP10b): Segmente gepaddet, dazu ``timeline``, ``timebase`` und ``render_v2``.
+    Lane P4: ``audio`` (16-kHz-Audio der Quelle) und ``protected`` (Zeitbereiche) für ``cut.prosody``;
+    ``hook_info`` aus ``transitions.shift_preamble`` für den Befund ``hook_audio`` (``cut.hook_audio``);
+    ``repair`` ist ``rubric.repair`` (Titelkarte als Reparatur); ``caption_reading_speed`` aus
+    ``captions_de.reading_speed``."""
     note = None
     if composition is not None and (policy if policy is not None else editorial.load()).version >= 2:
         from_comp = int(composition.get("local_cuts") or 0) > 0
@@ -269,8 +331,7 @@ def build_plan(
                 f"{'true' if from_comp else 'false'} gesetzt (local_cuts {int(composition.get('local_cuts') or 0)})"
             )
         filler_cuts = from_comp
-    cut = transitions.cut_rules(policy)
-    padded = transitions.pad_segments(normalize_segments(segments), words or [], cut) if cut is not None else None
+    padded = _padded(segments, words, policy, audio, protected)
     aspect = aspect or aspect_for_platform(platform)
     out_w, out_h = output_size(aspect)
     fps = float(src_fps) if src_fps else DEFAULT_FPS
@@ -300,7 +361,8 @@ def build_plan(
         # gebaute Video noch, was eingestellt ist" sie sieht - und damit die Tonkette sie findet.
         "musik": dict(musik) if musik else None,
         "captions": caption_block(
-            caption_preset, out_w, out_h, caption_cards, caption_font, caption_top, caption_text_field, caption_preset_skaliert
+            caption_preset, out_w, out_h, caption_cards, caption_font, caption_top, caption_text_field, caption_preset_skaliert,
+            caption_reading_speed,
         ),
         "title_card": {"text": title, "seconds": TITLE_CARD_S} if title else None,
         "hook_overlay": {"text": hook, "seconds": HOOK_OVERLAY_S} if hook and hook_overlay_enabled(platform, hook_overlay) else None,
@@ -317,9 +379,15 @@ def build_plan(
     }
     if note:
         plan["filler_cuts_note"] = note
+    fix = repair_title(repair, policy)
+    if fix is not None:
+        plan["title_card"] = {"text": fix["text"], "seconds": TITLE_CARD_S, "source": "repair", "source_span": fix["source_span"]}
     if padded is not None:
         plan["timeline"] = timeline_block(padded)
         plan["timebase"] = timebase_block(src_vfr)
+        hook_rules = transitions.hook_audio_rules(policy)
+        if hook_rules is not None and words:
+            plan["hook_audio"] = transitions.hook_audio_report(plan["timeline"], words, audio, hook_rules, dict(hook_info or {}))
     json.dumps(plan)  # muss serialisierbar sein, sonst hier scheitern statt beim DB-Schreiben
     return plan
 
@@ -369,6 +437,7 @@ __all__ = [
     "plan_duration",
     "plan_hash",
     "plan_versions",
+    "repair_title",
     "timebase_block",
     "timeline_block",
 ]

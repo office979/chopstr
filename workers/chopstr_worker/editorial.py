@@ -1215,3 +1215,63 @@ IMPLEMENTED_KEYS.update({
     "search.payoff_markers.resolution": _E + "search_settings",
     "search.cta_markers": _E + "search_settings",
 })  # fmt: skip
+
+
+# Lane P2 (Launch Phase 2, Momentfindung): Kapitel an Themenwechseln, Text-Heatmap v2, Paarvergleich (Hypothese).
+# Schalter und Regelabschnitte nur additiv; die Leser stehen in story_engine und signals, die Regeln bleiben false.
+V2_SWITCHES = (*V2_SWITCHES, "chapters.topic_shift", "heat.text_v2", "ranking.pairwise")
+V2_IMPLEMENTED_SWITCHES = V2_IMPLEMENTED_SWITCHES | {"chapters.topic_shift", "heat.text_v2", "ranking.pairwise"}
+V2_RULE_SECTIONS = (*V2_RULE_SECTIONS, "chapters", "heat", "ranking")
+V2_PIN_CHANGES.update({"compare_clips": 1})
+IMPLEMENTED_KEYS.update({
+    **{f"chapters.topic_shift.{k}": _SE + "topic_shift_settings"
+       for k in ("enabled", "min_s", "max_s", "window_s", "min_boundary_score", "speaker_weight")},
+    **{f"heat.{k}": "chopstr_worker.pipeline.signals:text_heat_settings" for k in ("text_v2", "text_weight", "units")},
+    **{f"heat.markers.{k}": "chopstr_worker.pipeline.signals:text_heat_settings"
+       for k in ("surprise", "expectation_negation", "stakes_money", "stakes_time", "stakes_loss", "stakes_risk", "reaction", "quote")},
+    "ranking.pairwise.enabled": _SE + "pairwise_settings",
+    "ranking.pairwise.top_n": _SE + "pairwise_settings",
+})  # fmt: skip
+
+
+# Lane P1 (Launch Phase 1, Transkript und Sprecher): Regelabschnitte asr und speakers, keine Schalter in
+# implementation (die Wirkung hängt an ASR_AUTO_ROUTE und SPEAKERS_MULTITRACK); Leser in pipeline/transcribe.
+V2_RULE_SECTIONS = (*V2_RULE_SECTIONS, "asr", "speakers")
+IMPLEMENTED_KEYS.update({
+    **{f"asr.{k}": "chopstr_worker.pipeline.transcribe:asr_settings"
+       for k in ("routing.enabled", "routing.min_confidence", "hotwords.max_terms", "hotwords.decode", "ch_route.beta")},
+    **{f"speakers.{k}": "chopstr_worker.pipeline.transcribe:speaker_settings"
+       for k in ("overlap.min_ratio_for_flag", "multitrack.energy_window_s", "multitrack.overlap_db", "multitrack.silence_dbfs")},
+})  # fmt: skip
+
+
+# Lane P4 (Launch Phase 4: Schnitt, Hook-Ton, Untertitel, Render, Export): Schalter, Regelabschnitt export und
+# Register der Schlüssel. Die Leser stehen in den Pipeline-Modulen der Lane; die Regeln cut.prosody.enabled,
+# cut.hook_audio.enabled, cut.split_screen.enabled und export.strict bleiben false.
+_P4_SWITCHES = ("cut.prosody", "cut.hook_audio", "cut.split_screen", "captions.reading_speed", "captions.address_check", "export.strict")
+V2_SWITCHES = (*V2_SWITCHES, *_P4_SWITCHES)
+V2_IMPLEMENTED_SWITCHES = V2_IMPLEMENTED_SWITCHES | set(_P4_SWITCHES)
+V2_RULE_SECTIONS = (*V2_RULE_SECTIONS, "export")
+IMPLEMENTED_KEYS.update({
+    **{f"cut.prosody.{k}": "chopstr_worker.pipeline.transitions:prosody_rules" for k in ("enabled", "search_window_s")},
+    **{f"cut.hook_audio.{k}": "chopstr_worker.pipeline.transitions:hook_audio_rules" for k in ("enabled", "max_lead_s", "hook_window_s")},
+    **{f"cut.split_screen.{k}": "chopstr_worker.pipeline.tracking:split_screen_rules" for k in ("enabled", "min_binding_confidence")},
+    **{f"captions.reading_speed.chars_per_s.{k}": "chopstr_worker.pipeline.captions_de:reading_speed" for k in ("standard", "langsam")},
+    **{f"export.{k}": "chopstr_worker.pipeline.ausgabe_pruefung:export_rules" for k in ("strict", "duration_tolerance_s")},
+})  # fmt: skip
+
+
+# Lane P3 (Launch Phase 3, Kontexttreue und Ergebnisklassen): Schalter, Regelabschnitte context und review,
+# Prompt-Pin des Gegenlesers und Register der Schlüssel. Die Leser stehen in den Pipeline-Modulen der Lane; die
+# Regel context.claim_index.enabled und context.counter_reader.model bleiben false.
+_P3_SWITCHES = ("context.claim_index", "context.counter_reader", "context.title_card", "review.review_state")
+V2_SWITCHES = (*V2_SWITCHES, *_P3_SWITCHES)
+V2_IMPLEMENTED_SWITCHES = V2_IMPLEMENTED_SWITCHES | set(_P3_SWITCHES)
+V2_RULE_SECTIONS = (*V2_RULE_SECTIONS, "context", "review")
+V2_PIN_CHANGES.update({"counter_reader": 1})
+IMPLEMENTED_KEYS.update({
+    **{f"context.claim_index.{k}": "chopstr_worker.pipeline.story_graph:claim_index_settings" for k in ("enabled", "max_hits", "min_overlap")},
+    **{f"context.counter_reader.{k}": "chopstr_worker.pipeline.fidelity:counter_reader_settings" for k in ("enabled", "model")},
+    **{f"context.title_card.{k}": "chopstr_worker.pipeline.fidelity:title_card_settings" for k in ("enabled", "max_words")},
+    "review.review_state": "chopstr_worker.pipeline.release_gate:review_settings",
+})  # fmt: skip

@@ -32,12 +32,22 @@ export interface Warning {
   label: string;
 }
 
-const RISK_LABELS: Record<RiskFlag, string> = {
+/* Der ausführliche Satz je Risikohinweis, als Erklärung neben dem Wort. */
+export const RISK_LABELS: Record<RiskFlag, string> = {
   humor: "Ist Witz, bitte selbst prüfen",
   sensitive_topic: "Heikles Thema",
   claim: "Enthält eine Behauptung. Stimmt sie?",
   ad: "Muss als Werbung gekennzeichnet werden",
   heuristic_only: "Ohne KI gefunden",
+};
+
+/* Der Risikohinweis als ein Wort, für die Kandidatenliste (lib/candidates/review.ts). */
+export const RISK_WORDS: Record<RiskFlag, string> = {
+  humor: "Humor",
+  sensitive_topic: "Heikles Thema",
+  claim: "Behauptung",
+  ad: "Werbung",
+  heuristic_only: "Ohne Sprachmodell",
 };
 
 export function formatSeconds(s: number): string {
@@ -59,17 +69,6 @@ export function warningsOf(c: Pick<Candidate, "risk_flags" | "story_graph_flags"
   return out;
 }
 
-export function formatTotal(total: number | null): string {
-  if (total == null) return "offen";
-  return total.toLocaleString("de-AT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-}
-
-/* Bewertung als Wort statt Zahl (docs/BEDIENKONZEPT.md, Abschnitt 5.5).
- * Die Zahl bleibt über formatTotal in „Details für Profis“ erreichbar. */
-export function qualityWord(total: number | null): string {
-  if (total == null) return "Noch nicht bewertet";
-  if (total >= 8) return "Sehr stark";
-  if (total >= 6) return "Stark";
-  if (total >= 4) return "Geht so";
-  return "Eher schwach";
-}
+/* Hier standen formatTotal und qualityWord: ohne Aufrufer und mit einer Skala bis 10, die `total`
+ * nie hatte. Die eine Qualitätszahl rechnet jetzt lib/candidates/review.ts (qualityScore) auf der
+ * Skala der Richtlinie (docs/decisions/052-eine-qualitaetszahl.md). */

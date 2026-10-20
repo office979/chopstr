@@ -47,6 +47,12 @@ class CaptionRules:
     bridge_max_s: float = 0.0
     min_event_s: float = 0.0
     comma_break_only_on_overflow: bool = False
+    # Lane P4 (``implementation.captions.reading_speed``, nur mit AP10a): eine Karte mit mehreren Wörtern steht
+    # mindestens so lange, wie ihr Text bei diesem Lesetempo braucht (Zeichen je Sekunde), nie in die nächste
+    # Karte hinein. 0 heisst: keine Einschränkung (Rollback, Fassung 1).
+    reading_cps: float = 0.0
+    # Ende des Clips auf der Ausgabe-Timeline; keine Karte steht darüber hinaus. None: keine Grenze (wie bisher).
+    clip_end_s: float | None = None
 
 
 LEGACY_RULES = CaptionRules()
@@ -889,14 +895,15 @@ def _card_lines_v2(
     return lines
 
 
-def _min_card_end(card: list[dict], end: float, next_card: float | None, rules: CaptionRules) -> float:
+def _min_card_end(card: list[dict], end: float, next_card: float | None, rules: CaptionRules, text_field: str = "text") -> float:
     """Ende einer Karte nach AP10a, nie über den Beginn der nächsten Karte und nie kürzer als das
     gesprochene Ende.
 
     Überbrückung zwischen Karten: ist die Lücke bis zur nächsten Karte höchstens ``bridge_max_s``,
     steht die Karte bis zu deren Start (jede Caption bis zur nächsten sichtbar, deckt die Presets mit
     einem Wort je Karte ab). Danach Mindestdauer ``min_event_s`` ab Kartenbeginn, nur für Karten mit
-    mehreren Wörtern."""
+    mehreren Wörtern. Lane P4: zusätzlich das Lesetempo ``reading_cps`` (Zeichen der Karte durch Zeichen je
+    Sekunde ab Kartenbeginn) und die Grenze ``clip_end_s``; beide nur, wenn gesetzt."""
     if not rules.enabled:
         return end
     if next_card is not None and next_card > float(card[-1]["start"]):
@@ -904,12 +911,20 @@ def _min_card_end(card: list[dict], end: float, next_card: float | None, rules: 
             end = next_card  # ASR-Zeiten überlappen: nie in die nächste Karte hinein
         elif rules.bridge_words and next_card - end <= rules.bridge_max_s + BRIDGE_EPS:
             end = next_card
-    if len(card) < 2 or rules.min_event_s <= 0:
-        return end
+    if len(card) < 2 or (rules.min_event_s <= 0 and rules.reading_cps <= 0):
+        return _clip_end_cap(end, rules)
     target = float(card[0]["start"]) + rules.min_event_s
+    if rules.reading_cps > 0:
+        target = max(target, float(card[0]["start"]) + _kartenlaenge(card, text_field, False) / rules.reading_cps)
     if next_card is not None:
         target = min(target, next_card)
-    return max(end, target)
+    return _clip_end_cap(max(end, target), rules)
+
+
+def _clip_end_cap(end: float, rules: CaptionRules) -> float:
+    if rules.clip_end_s is None:
+        return end
+    return min(end, max(float(rules.clip_end_s), 0.0))
 
 
 def _next_start(cards: list[list[dict]], i: int) -> float | None:
@@ -960,7 +975,7 @@ def to_ass(
         next_card = float(cards[ci + 1][0]["start"]) if ci + 1 < len(cards) else None
         if not p.highlight_words:
             s, e = float(card[0]["start"]), float(card[-1]["end"])
-            e = _min_card_end(card, e, next_card, rules)
+            e = _min_card_end(card, e, next_card, rules, text_field)
             text = NEWLINE.join(" ".join(_ass_escape(piece) for _, piece in ln) for ln in lines)
             events.append(f"Dialogue: 0,{_fmt_t(s - clip_start)},{_fmt_t(e - clip_start)},Cap,{text}")
             continue
@@ -971,7 +986,7 @@ def to_ass(
                 if s < nxt and nxt - e <= rules.bridge_max_s + BRIDGE_EPS:
                     e = nxt
             if j == len(card) - 1:
-                e = _min_card_end(card, e, next_card, rules)
+                e = _min_card_end(card, e, next_card, rules, text_field)
             s, e = s - clip_start, e - clip_start
             rendered = []
             for ln in lines:
@@ -1020,14 +1035,18 @@ def beiblatt_karten(
 
 
 def to_srt(
-    words: list[dict], clip_start: float = 0.0, preset: str | CaptionPreset | int | None = None, text_field: str = "text"
+    words: list[dict],
+    clip_start: float = 0.0,
+    preset: str | CaptionPreset | int | None = None,
+    text_field: str = "text",
+    rules: CaptionRules | None = None,
 ) -> str:
     text_field = check_text_field(text_field)
-    rules = caption_rules()
+    rules = _rules(rules)
     karten, breite = beiblatt_karten(words, preset, text_field, rules)
     out = []
     for i, card in enumerate(karten, start=1):
-        e = _min_card_end(card, float(card[-1]["end"]), _next_start(karten, i - 1), rules)
+        e = _min_card_end(card, float(card[-1]["end"]), _next_start(karten, i - 1), rules, text_field)
         s, e = float(card[0]["start"]) - clip_start, e - clip_start
         text = "\n".join(wrap_lines([word_text(w, text_field) for w in card], breite))
         out.append(f"{i}\n{_srt_t(s)} --> {_srt_t(e)}\n{text}\n")
@@ -1047,15 +1066,19 @@ def _vtt_t(t: float) -> str:
 
 
 def to_vtt(
-    words: list[dict], clip_start: float = 0.0, preset: str | CaptionPreset | int | None = None, text_field: str = "text"
+    words: list[dict],
+    clip_start: float = 0.0,
+    preset: str | CaptionPreset | int | None = None,
+    text_field: str = "text",
+    rules: CaptionRules | None = None,
 ) -> str:
     """WebVTT mit denselben Karten wie ``to_srt`` (Punkt statt Komma in den Zeiten, Kopfzeile WEBVTT)."""
     text_field = check_text_field(text_field)
-    rules = caption_rules()
+    rules = _rules(rules)
     karten, breite = beiblatt_karten(words, preset, text_field, rules)
     out = ["WEBVTT", ""]
     for i, card in enumerate(karten, start=1):
-        e = _min_card_end(card, float(card[-1]["end"]), _next_start(karten, i - 1), rules)
+        e = _min_card_end(card, float(card[-1]["end"]), _next_start(karten, i - 1), rules, text_field)
         s, e = float(card[0]["start"]) - clip_start, e - clip_start
         text = "\n".join(wrap_lines([word_text(w, text_field) for w in card], breite))
         out.append(f"{i}\n{_vtt_t(s)} --> {_vtt_t(e)}\n{text}\n")
@@ -1063,18 +1086,22 @@ def to_vtt(
 
 
 def cards_for(
-    words: list[dict], preset: str | CaptionPreset = "tiktok_bold", clip_start: float = 0.0, text_field: str = "text"
+    words: list[dict],
+    preset: str | CaptionPreset = "tiktok_bold",
+    clip_start: float = 0.0,
+    text_field: str = "text",
+    rules: CaptionRules | None = None,
 ) -> list[dict]:
     """Karten als JSON für ``caption_versions.cards``: ``{start, end, lines}`` auf der Ausgabe-Timeline."""
     text_field = check_text_field(text_field)
     p = preset if isinstance(preset, CaptionPreset) else preset_for(preset)
     out = []
-    rules = caption_rules()
+    rules = _rules(rules)
     cards = build_cards(words, p.max_chars, p.max_lines, text_field, p.words_per_card, p.all_caps, rules)
     for ci, card in enumerate(cards):
         lines = [" ".join(piece for _, piece in ln) for ln in card_lines(card, p, text_field, rules)]
         # Mit AP10a dasselbe Kartenende wie im eingebrannten Video (Brücke, Mindestdauer).
-        end = _min_card_end(card, float(card[-1]["end"]), _next_start(cards, ci), rules)
+        end = _min_card_end(card, float(card[-1]["end"]), _next_start(cards, ci), rules, text_field)
         out.append(
             {
                 "start": round(float(card[0]["start"]) - clip_start, 3),
@@ -1085,7 +1112,163 @@ def cards_for(
     return out
 
 
+# -- Lane P4: Lesetempo nach Zielgruppe, Du/Sie-Hinweis, Stichprobe der Umbrüche ---------------------
+READING_SPEED_SWITCH = "captions.reading_speed"
+ADDRESS_CHECK_SWITCH = "captions.address_check"
+READING_PROFILES = ("standard", "langsam")
+DEFAULT_READING_PROFILE = "standard"
+
+
+def _p4_switch(policy: editorial.Policy, path: str) -> bool:
+    value = policy.roh.get("implementation") or {}
+    for part in path.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return False
+        value = value[part]
+    return value is True
+
+
+def reading_speed(policy: editorial.Policy | None = None, profile: str | None = None) -> dict | None:
+    """Lesetempo ``captions.reading_speed.chars_per_s`` je Profil (``standard`` 15, ``langsam`` 12 Zeichen je
+    Sekunde) als ``{"profile", "chars_per_s"}``; ``None`` in Fassung 1, ohne den Schalter
+    ``implementation.captions.reading_speed`` oder ohne AP10a (``captions.word_bridge``).
+
+    ``profile`` kommt aus dem Untertitelstil (Feld ``reading_speed`` in ``caption_style`` des Markenprofils
+    oder des Clips); aus ``brief.audience`` ist es nicht ableitbar. Fehlt das Feld oder ist der Wert
+    unbekannt, gilt ``standard``."""
+    pol = policy if policy is not None else editorial.load()
+    if pol.version < 2 or not _p4_switch(pol, READING_SPEED_SWITCH) or editorial.caption_settings(pol) is None:
+        return None
+    raw = ((pol.roh.get("captions") or {}).get("reading_speed") or {}).get("chars_per_s")
+    if not isinstance(raw, dict) or any(k not in raw for k in READING_PROFILES):
+        raise editorial.PolicyError(f"clip_policy_v{pol.version}: captions.reading_speed.chars_per_s braucht standard und langsam.")
+    name = profile if profile in READING_PROFILES else DEFAULT_READING_PROFILE
+    try:
+        cps = float(raw[name])
+    except (TypeError, ValueError):
+        raise editorial.PolicyError(f"clip_policy_v{pol.version}: captions.reading_speed.chars_per_s.{name} ist keine Zahl.") from None
+    if cps <= 0:
+        raise editorial.PolicyError(f"clip_policy_v{pol.version}: captions.reading_speed.chars_per_s.{name} muss größer als 0 sein.")
+    return {"profile": name, "chars_per_s": cps}
+
+
+def address_check_enabled(policy: editorial.Policy | None = None) -> bool:
+    """Du/Sie-Hinweis in den Prüfbefunden: Fassung 2 mit ``implementation.captions.address_check``."""
+    pol = policy if policy is not None else editorial.load()
+    return pol.version >= 2 and _p4_switch(pol, ADDRESS_CHECK_SWITCH)
+
+
+# Anrede (Regel 9, Du/Sie konsistent). Kleingeschriebenes „ihr" ist mehrdeutig (Plural, Possessiv) und zählt nicht.
+DU_FORMS = frozenset({
+    "du", "dich", "dir", "dein", "deine", "deinen", "deinem", "deiner", "deines",
+    "euch", "euer", "eure", "euren", "eurem", "eurer", "eures",
+})  # fmt: skip
+SIE_FORMS = frozenset({"Sie", "Ihnen", "Ihr", "Ihre", "Ihren", "Ihrem", "Ihrer", "Ihres"})
+_EDGE_PUNCT = ".,!?;:\"'»«“”„‘’()[]"
+
+
+def anrede_pruefen(words: list[dict], text_field: str = "text") -> dict:
+    """Du- und Sie-Formen im Untertiteltext zählen. Großgeschriebene Sie-Formen am Satzanfang zählen nicht
+    (dort ist „Sie" auch die dritte Person), ``Ihnen`` zählt immer. Der Text wird nicht geändert:
+    Untertitel geben wieder, was gesagt wurde. Rückgabe ``{"du", "sie", "gemischt", "beispiele"}``."""
+    du: list[str] = []
+    sie: list[str] = []
+    prev = ""
+    for w in sichtbare_woerter(words, text_field):
+        raw = word_text(w, text_field)
+        token = raw.strip(_EDGE_PUNCT)
+        satzanfang = not prev or prev.rstrip("\"'»«“”„‘’)]").endswith((".", "!", "?", ":"))
+        if token.lower() in DU_FORMS:
+            du.append(token)
+        elif token in SIE_FORMS and (token == "Ihnen" or not satzanfang):
+            sie.append(token)
+        prev = raw
+    return {"du": len(du), "sie": len(sie), "gemischt": bool(du and sie), "beispiele": sorted({*du[:3], *sie[:3]})}
+
+
+def _satzende(token: str) -> bool:
+    """Endet ein Zeilenstück einen Satz? Abkürzungen (``dach_nlp.ABBREVIATIONS_V2``) und Zahlen nicht."""
+    from .dach_nlp import ABBREVIATIONS_V2
+
+    t = token.rstrip("\"'»«“”‘’)]")
+    if t.endswith(("!", "?")):
+        return True
+    if not t.endswith("."):
+        return False
+    core = t[:-1].lower()
+    return core not in ABBREVIATIONS_V2 and not NUMBER_RE.match(core)
+
+
+def _break_issues(left: tuple[dict, str], right: tuple[dict, str], left_line: list[str], right_line: list[str], text_field: str) -> list[str]:
+    issues: list[str] = []
+    (lw, lpiece), (rw, _rpiece) = left, right
+    # Ein Umbruch am vorhandenen Bindestrich lässt das Stück davor unverändert im Wort stehen („Know-how-"
+    # in „Know-how-Transfer"); eine Silbentrennung hängt einen Strich an, den es im Wort nicht gibt.
+    if lw is rw and not (lpiece.endswith("-") and lpiece.lower() in word_text(lw, text_field).lower()):
+        issues.append("kompositum")
+    if lw is not rw and NUMBER_RE.match(word_text(lw, text_field)) and _is_unit(word_text(rw, text_field)):
+        issues.append("zahl_einheit")
+    satz_mitte = any(_satzende(t) for t in left_line[:-1])
+    negation_allein = len(right_line) == 1 and _is_negation(right_line[0])
+    if satz_mitte or negation_allein:
+        issues.append("satz")
+    return issues
+
+
+def sample_breaks(
+    words: list[dict],
+    n: int = 200,
+    seed: int = 0,
+    preset: str | CaptionPreset = "linkedin_static",
+    text_field: str = "text",
+    rules: CaptionRules | None = None,
+) -> dict:
+    """Stichprobe von ``n`` Umbrüchen (Zeilen- und Kartenwechsel) für Gate 4, deterministisch über ``seed``.
+
+    Geprüft wird je Umbruch: ``kompositum`` (Umbruch in einem Wort, ausser am vorhandenen Bindestrich eines
+    Bindestrichworts; Regel 9 kennt keine Ausnahme für Morphemgrenzen), ``zahl_einheit`` (Zahl am Zeilen-
+    oder Kartenende, Einheit danach) und ``satz`` (Satzende mitten in der Zeile vor dem Umbruch oder eine
+    Negation allein in der Zeile danach). Mehrere Transkripte werden vorher aneinandergehängt.
+    Rückgabe: ``{"n", "total", "violations": {kompositum, zahl_einheit, satz}, "breaks": [...]}``."""
+    import random
+
+    p = preset if isinstance(preset, CaptionPreset) else preset_for(preset)
+    rules = _rules(rules)
+    cards = build_cards(words, p.max_chars, p.max_lines, text_field, p.words_per_card, p.all_caps, rules)
+    lines_per_card = [card_lines(card, p, text_field, rules) for card in cards]
+    seq: list[tuple[int, int, tuple[dict, str]]] = []  # (Karte, Zeile, (Wort, Stück))
+    for ci, lines in enumerate(lines_per_card):
+        for li, ln in enumerate(lines):
+            seq.extend((ci, li, pair) for pair in ln)
+    line_text: dict[tuple[int, int], list[str]] = {}
+    for ci, li, (_w, piece) in seq:
+        line_text.setdefault((ci, li), []).append(piece)
+    found: list[dict] = []
+    for k in range(1, len(seq)):
+        (c0, l0, left), (c1, l1, right) = seq[k - 1], seq[k]
+        if (c0, l0) == (c1, l1):
+            continue
+        issues = _break_issues(left, right, line_text[(c0, l0)], line_text[(c1, l1)], text_field)
+        found.append({
+            "kind": "karte" if c0 != c1 else "zeile", "left": " ".join(line_text[(c0, l0)]),
+            "right": " ".join(line_text[(c1, l1)]), "issues": issues,
+        })  # fmt: skip
+    picked = sorted(random.Random(seed).sample(range(len(found)), min(n, len(found)))) if found else []
+    sample = [found[i] for i in picked]
+    counts = {key: sum(1 for b in sample if key in b["issues"]) for key in ("kompositum", "zahl_einheit", "satz")}
+    return {"n": len(sample), "total": len(found), "violations": counts, "breaks": sample}
+
+
 __all__ = [
+    "ADDRESS_CHECK_SWITCH",
+    "DU_FORMS",
+    "READING_PROFILES",
+    "READING_SPEED_SWITCH",
+    "SIE_FORMS",
+    "address_check_enabled",
+    "anrede_pruefen",
+    "reading_speed",
+    "sample_breaks",
     "AVG_CHAR_EM",
     "BREAK_WORDS",
     "COMPOUND_MEMBERS",

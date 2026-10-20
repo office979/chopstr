@@ -1,0 +1,66 @@
+{
+ "baseline_v1": {
+  "341f9fc0-0df0-432c-8c68-859ef6ef6f51": {
+   "probe_and_extract": 10.7,
+   "transcribe_de": 115.6,
+   "diarize": 0.0,
+   "heatmap": 0.1,
+   "fuse_and_nlp": 0.0,
+   "detect_candidates": 0.1
+  },
+  "6ebff27a-a91b-4c43-9739-ec199e5f2e8f": {
+   "probe_and_extract": 8.9,
+   "transcribe_de": 73.9,
+   "diarize": 0.0,
+   "heatmap": 0.1,
+   "fuse_and_nlp": 0.0,
+   "detect_candidates": 0.0
+  },
+  "ed151550-c1c4-4623-b9fd-75b47e8b8b06": {
+   "probe_and_extract": 6.8,
+   "transcribe_de": 84.7,
+   "diarize": 0.0,
+   "heatmap": 0.1,
+   "fuse_and_nlp": 0.0,
+   "detect_candidates": 0.0
+  },
+  "render": {
+   "8b4a187b-780a-40b9-af56-40111c3191b2": 7.3
+  }
+ },
+ "v2": {
+  "341f9fc0-0df0-432c-8c68-859ef6ef6f51": {
+   "probe_and_extract": 0.1,
+   "transcribe_de": 95.9,
+   "diarize": 0.0,
+   "heatmap": 0.0,
+   "fuse_and_nlp": 0.0,
+   "detect_candidates": 0.7
+  },
+  "6ebff27a-a91b-4c43-9739-ec199e5f2e8f": {
+   "probe_and_extract": 0.1,
+   "transcribe_de": 76.9,
+   "diarize": 0.0,
+   "heatmap": 0.0,
+   "fuse_and_nlp": 0.0,
+   "detect_candidates": 0.6
+  },
+  "ed151550-c1c4-4623-b9fd-75b47e8b8b06": {
+   "probe_and_extract": 0.0,
+   "transcribe_de": 62.9,
+   "diarize": 0.0,
+   "heatmap": 0.0,
+   "fuse_and_nlp": 0.0,
+   "detect_candidates": 0.5
+  },
+  "render": {
+   "06a7cf65-018c-43a2-9b07-fa08b0194aee": 13.8
+  }
+ },
+ "material_s": 783.2,
+ "hardware": "Apple Silicon Mac, CPU, int8, local-heuristic, keine Diarisierung",
+ "baseline_v1_total_s": 301.0,
+ "baseline_v1_min_per_source_hour": 23.1,
+ "v2_total_s": 237.7,
+ "v2_min_per_source_hour": 18.2
+}

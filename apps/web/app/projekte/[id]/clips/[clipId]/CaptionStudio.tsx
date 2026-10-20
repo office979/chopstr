@@ -311,7 +311,7 @@ export function CaptionStudio({
     <GlassCard padding="md" selected={!gespeichert}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-lg font-semibold">Untertitel</h2>
-        {/* Der Unterschied zur Zeitleiste muss dastehen: dort gilt etwas ab einer Stelle, hier
+        {/* Der Unterschied zum Bildausschnitt muss dastehen: dort gilt etwas ab einer Stelle, hier
           * fuer den ganzen Clip. Ohne diesen Satz sieht beides gleich aus. */}
         <p className="text-sm text-text-2">Für den ganzen Clip</p>
       </div>
@@ -844,8 +844,8 @@ function Befunde({
           }
           satz={
             t.ueberGrenze
-              ? `Im Schnitt ${Math.round(t.mittel)} Zeichen je Sekunde, mitlesen lassen sich etwa ${MAX_CPS}. Das hängt am Sprechtempo und nicht am Aussehen: keine Einstellung hier ändert es. Wer will, kann die Stelle im Text straffen oder in der Timeline herausnehmen.`
-              : "Beim Mitlesen ohne Ton könnte es hier eng werden. Straffen im Text oder Herausnehmen in der Timeline hilft."
+              ? `Im Schnitt ${Math.round(t.mittel)} Zeichen je Sekunde, mitlesen lassen sich etwa ${MAX_CPS}. Das hängt am Sprechtempo und nicht am Aussehen: keine Einstellung hier ändert es. Wer will, kann die Stelle im Text straffen.`
+              : "Beim Mitlesen ohne Ton könnte es hier eng werden. Straffen im Text hilft."
           }
           liste={schnell}
           onSeek={onSeek}

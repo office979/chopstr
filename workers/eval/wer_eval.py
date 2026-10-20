@@ -47,8 +47,9 @@ class Alignment:
         return self.sub + self.dele + self.ins
 
     @property
-    def wer(self) -> float:
-        return self.errors / self.n_ref if self.n_ref else (0.0 if not self.ins else 1.0)
+    def wer(self) -> float | None:
+        """Ohne Referenzwörter ist die WER nicht definiert: ``None``, nie 0."""
+        return self.errors / self.n_ref if self.n_ref else None
 
 
 def align(ref: list[str], hyp: list[str]) -> Alignment:
@@ -86,15 +87,15 @@ def align(ref: list[str], hyp: list[str]) -> Alignment:
     return out
 
 
-def name_error_rate(al: Alignment, lexicon: set[str]) -> tuple[float, int, int]:
-    """(Rate, Fehler, Gesamt) über Referenz-Token, die im Lexikon stehen."""
+def name_error_rate(al: Alignment, lexicon: set[str]) -> tuple[float | None, int, int]:
+    """(Rate, Fehler, Gesamt) über Referenz-Token, die im Lexikon stehen; ohne solche Token ist die Rate ``None``."""
     total = errors = 0
     for op, r, _h in al.ops:
         if r is not None and r in lexicon:
             total += 1
             if op != "ok":
                 errors += 1
-    return (errors / total if total else 0.0), errors, total
+    return (errors / total if total else None), errors, total
 
 
 def load_reference(path: Path) -> dict:
@@ -130,12 +131,12 @@ def evaluate_pair(ref_text: str, hyp_text: str, dialect: str, names: list[str], 
     ner, n_err, n_tot = name_error_rate(al, lex)
     return {
         "dialect": dialect,
-        "wer": round(al.wer, 4),
+        "wer": None if al.wer is None else round(al.wer, 4),
         "sub": al.sub,
         "del": al.dele,
         "ins": al.ins,
         "n_ref": al.n_ref,
-        "name_error_rate": round(ner, 4),
+        "name_error_rate": None if ner is None else round(ner, 4),
         "name_errors": n_err,
         "name_total": n_tot,
     }
@@ -164,17 +165,33 @@ def run(gold_dir: str, hyp_dir: str, lexicon: list[str] | None = None, ch: bool 
         summary[d] = {
             "files": len(rows),
             "n_ref": n_ref,
-            "wer": round(errs / n_ref, 4) if n_ref else 0.0,
-            "name_error_rate": round(name_errs / n_names, 4) if n_names else 0.0,
+            "wer": round(errs / n_ref, 4) if n_ref else None,
+            "name_error_rate": round(name_errs / n_names, 4) if n_names else None,
             "name_total": n_names,
         }
-    return {"per_file": per_file, "summary": summary}
+    return {"per_file": per_file, "summary": summary, "metriken": metrics(summary)}
+
+
+def metrics(summary: dict) -> dict[str, dict]:
+    """WER je Dialekt im gemeinsamen Format für ``eval.baseline``; fehlende Dialekte sind nicht messbar."""
+    out = {}
+    for dialect in ("DE", "AT", "CH"):
+        s = summary.get(dialect)
+        wer = None if s is None else s["wer"]
+        cause = None if wer is not None else (f"keine Referenz im Dialekt {dialect}" if s is None else "Referenz ohne Wörter")
+        out[f"wer_{dialect.lower()}"] = {"wert": wer, "stichprobe": None if s is None else s["n_ref"], "ursache": cause}
+    return out
+
+
+def _pct(value: float | None) -> str:
+    return f"{'n. m.':>7}" if value is None else f"{value * 100:>6.1f}%"
 
 
 def format_table(summary: dict) -> str:
     lines = [f"{'Dialekt':8} {'Dateien':>7} {'Wörter':>8} {'WER':>7} {'Namen-FR':>9} {'Namen':>6}"]
     for d, s in summary.items():
-        lines.append(f"{d:8} {s['files']:>7} {s['n_ref']:>8} {s['wer'] * 100:>6.1f}% {s['name_error_rate'] * 100:>8.1f}% {s['name_total']:>6}")
+        lines.append(f"{d:8} {s['files']:>7} {s['n_ref']:>8} {_pct(s['wer'])} {_pct(s['name_error_rate']):>9} {s['name_total']:>6}")
+    lines.append("n. m. heißt nicht messbar (keine Referenzwörter oder keine Eigennamen), nicht null.")
     return "\n".join(lines)
 
 

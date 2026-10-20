@@ -18,10 +18,17 @@ Phase 5c: ``clips.reframe_override`` geht als ``reframe_override`` an ``plan_ref
 oder erzwungene Strategie; Abweichungen zwischen Erkennung und Nutzung stehen in ``notes``).
 ``brand_profiles.caption_style.caption_text_field`` (``text`` | ``text_norm``, Default ``text``) wählt die Wortform
 der Captions (Schweizerdeutsch-Beta, Entscheidung P2).
+
+Lane P4 (Fassung 2, je ein Schalter, Standard der Regeln aus, ohne sie wie bisher): prosodische Schnittkanten
+und Hook gegen den Ton lesen das 16-kHz-WAV der Quelle nur zur Analyse (``transitions.WavAudio``); gerendert
+wird immer aus dem Original (Regel 10). Lesetempo und Clipende begrenzen die Kartendauer
+(``captions_de.reading_speed``), der Du/Sie-Hinweis steht in ``export_checks``. Mit ``export.strict`` ist der
+Export das Abnahmeobjekt (Regel 16): ``rendered`` und ``file_key`` nur mit ``export_ok``.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import logging
@@ -45,7 +52,9 @@ from ..pipeline import (
     reframe,
     render,
     render_plan,
+    tracking,
     transitions,
+    trim_plan,
 )
 from ..pipeline import (
     effekte as effekte_mod,
@@ -635,7 +644,12 @@ def run_render_pack(ctx: common.Context, candidate_id: str, destination: str) ->
 
 
 def candidate_composition(
-    cand: dict, segments: list[dict], words: list[dict] | None = None, policy: editorial.Policy | None = None
+    cand: dict,
+    segments: list[dict],
+    words: list[dict] | None = None,
+    policy: editorial.Policy | None = None,
+    audio: transitions.Audio | None = None,
+    protected: list[tuple[float, float]] | None = None,
 ) -> dict | None:
     """Die Komposition aus der Kürzung des Kandidaten (AP7, ``rubric.composition``), solange der Clip genau
     die Segmente dieser Komposition schneidet (``rubric.composition.segments``). Verglichen wird gegen die
@@ -644,15 +658,16 @@ def candidate_composition(
     Zeilen) lässt sich das nicht prüfen, sie gilt dann ebenfalls nicht. ``render_plan.build_plan`` setzt
     ``filler_cuts`` nur mit ihr. Mit ``words`` (AP10b, cut.padding) werden beide Seiten über
     ``render_plan.cut_segments`` verglichen: nach dem Render stehen in ``clips.composition`` die gepaddeten
-    Segmente, die Komposition des Kandidaten ist ungepaddet; das Padding ist idempotent."""
+    Segmente, die Komposition des Kandidaten ist ungepaddet; das Padding ist idempotent. ``audio`` und
+    ``protected`` (Lane P4, ``cut.prosody``) gehen auf beiden Seiten gleich ein."""
     comp = (cand.get("rubric") or {}).get("composition")
     if not isinstance(comp, dict) or not isinstance(comp.get("segments"), list):
         return None
     try:
         if words is None:
             return comp if render_plan.normalize_segments(comp["segments"]) == segments else None
-        own = render_plan.cut_segments(comp["segments"], words, policy)
-        return comp if own == render_plan.cut_segments(segments, words, policy) else None
+        own = render_plan.cut_segments(comp["segments"], words, policy, audio, protected)
+        return comp if own == render_plan.cut_segments(segments, words, policy, audio, protected) else None
     except Exception:  # unlesbare Altzeile: ohne Komposition rendern
         return None
 
@@ -660,6 +675,68 @@ def candidate_composition(
 def clip_composition_from_timeline(plan: dict) -> list[dict]:
     """``clips.composition`` aus ``plan.timeline`` (AP10b): Quellsegmente mit Vor- und Nachlauf."""
     return [{"start": e["source_in"], "end": e["source_out"], "role": e["role"]} for e in plan["timeline"]]
+
+
+NOTE_AUDIO_UNREADABLE = "16-kHz-Audio nicht lesbar, Schnittkanten ohne Pegelminimum und Hook-Prüfung aus den Wortzeiten"
+SQL_EXPORT_CHECKS = "select export_checks from clips where id = %s"
+# Um die Clip-Grenzen herum wird so viel Transkript nach Schutzbereichen durchsucht (Sekunden).
+PROTECTED_CONTEXT_S = 10.0
+
+
+def _title_card_repair(rubric: dict) -> dict | None:
+    """Die Titelkarte als Reparatur aus ``rubric.repair_applied`` (Lane P3, nach bestandener
+    Wiederholungsprüfung); ``rubric.repair`` nur, wenn es selbst eine Titelkarte ist."""
+    for key in ("repair_applied", "repair"):
+        value = rubric.get(key)
+        if isinstance(value, dict) and value.get("kind") == render_plan.REPAIR_TITLE_KIND:
+            return value
+    return None
+
+
+def _load_analysis_audio(ctx: common.Context, src: dict) -> tuple[transitions.Audio | None, str | None]:
+    """Das 16-kHz-WAV der Quelle (Ingest) nur zur Analyse der Schnittkanten; nie für den Render (Regel 10)."""
+    try:
+        key = src.get("audio_key") or common.audio_key_for(src["storage_key"])
+        return transitions.WavAudio(common.ensure_local_audio(ctx, src["id"], key)), None
+    except Exception as exc:
+        log.warning("analysis audio unavailable source=%s error=%s", src.get("id"), exc.__class__.__name__)
+        return None, NOTE_AUDIO_UNREADABLE
+
+
+def protected_ranges(
+    words: list[dict], segments: list[dict], policy: editorial.Policy
+) -> tuple[list[tuple[float, float]], list[tuple[int, int]]]:
+    """Schutzbereiche (``trim_plan.protected_spans``) um den Clip herum: Zeitbereiche und Wortbereiche (Indizes
+    in ``words``). Ohne Abschnitt ``trim`` (Kürzung aus) leer: dann gibt es keine Schutzbereiche zu achten."""
+    if not words or not segments:
+        return [], []
+    lo = min(float(s["start"]) for s in segments) - PROTECTED_CONTEXT_S
+    hi = max(float(s["end"]) for s in segments) + PROTECTED_CONTEXT_S
+    ids = [i for i, w in enumerate(words) if float(w["end"]) >= lo and float(w["start"]) <= hi]
+    if not ids:
+        return [], []
+    sub = words[ids[0] : ids[-1] + 1]
+    try:
+        spans = trim_plan.protected_spans(sub, policy)
+    except editorial.PolicyError:
+        return [], []
+    word_ranges = [(ids[0] + int(p["word_range"][0]), ids[0] + int(p["word_range"][1])) for p in spans]
+    return [(float(words[a]["start"]), float(words[b]["end"])) for a, b in word_ranges], word_ranges
+
+
+def _export_ok_stored(ctx: common.Context, clip_id: str) -> bool:
+    """Hat der gespeicherte Export die Abnahme bestanden? Unlesbar heißt nein (dann wird neu gerendert)."""
+    try:
+        row = db.fetch_one(ctx.conn, SQL_EXPORT_CHECKS, (clip_id,))
+    except Exception as exc:
+        log.warning("export_checks not readable clip=%s error=%s", clip_id, exc.__class__.__name__)
+        return False
+    return ausgabe_pruefung.export_ok_aus(_json(row[0], None) if row else None)
+
+
+def _candidate_origin(cand: dict) -> float | None:
+    segs = [s for s in cand.get("segments") or [] if str(s.get("role") or "body") == "body"]
+    return min(float(s["start"]) for s in segs) if segs else cand.get("start_s")
 
 
 def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, extra: dict, clip: dict, destination: str, t0: float) -> None:
@@ -689,7 +766,17 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     # Untertitel auseinander. Copy und Sinntreue bleiben auf den Segmenten des Clips.
     policy = editorial.load()
     cut_on = transitions.cut_rules(policy) is not None
-    cut_segs = render_plan.cut_segments(segments, words, policy) if cut_on else segments
+    # Lane P4: Pegel der Quelle (16-kHz-WAV, nur Analyse) für Kanten und Hook, Schutzbereiche, Vorgeplänkel.
+    prosody_on = transitions.prosody_rules(policy) is not None
+    hook_rules = transitions.hook_audio_rules(policy)
+    audio, audio_note = _load_analysis_audio(ctx, src) if (prosody_on or hook_rules is not None) else (None, None)
+    protected, protected_words = protected_ranges(words, segments, policy) if (prosody_on or hook_rules is not None) else ([], [])
+    hook_info: dict[str, Any] | None = None
+    if hook_rules is not None:
+        segments, hook_info = transitions.shift_preamble(
+            segments, words, policy, origin_start=_candidate_origin(cand), protected_words=protected_words
+        )
+    cut_segs = render_plan.cut_segments(segments, words, policy, audio, protected or None) if cut_on else segments
     text = " ".join(str(w["text"]) for w in clip_words(words, segments))
     hook = _load_hook(ctx, clip_id)
     llm_usage: list[dict] = []
@@ -745,8 +832,10 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     rf = reframe.plan_reframe(
         str(local_src), cut_segs, words, clip.get("speaker_positions"), aspect,
         src_w=src_probe.width, src_h=src_probe.height, out_size=(out_w, out_h), reframe_override=override,
-        zeitmarken=zeitmarken,
+        zeitmarken=zeitmarken, split_rules=tracking.split_screen_rules(policy),
     )  # fmt: skip
+    if audio_note:
+        rf.notes.append(audio_note)
     if override_note:
         rf.notes.append(override_note)
     if marken_note:
@@ -769,7 +858,19 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         captions_de.scaled_preset(preset_name, out_w, out_h), style, out_h / captions_de.H
     )
     text_field = caption_text_field_for(style)
-    cards = captions_de.cards_for(out_words, preset, text_field=text_field)
+    # Lane P4: Lesetempo nach Profil (Feld ``reading_speed`` im Untertitelstil, sonst ``standard``) und, mit
+    # Lesetempo oder Abnahme, keine Karte über das Clipende hinaus. Ohne beides die Regeln der Policy.
+    reading = captions_de.reading_speed(policy, style.get("reading_speed"))
+    export_rules = ausgabe_pruefung.export_rules(policy)
+    clip_dauer = sum(float(seg["end"]) - float(seg["start"]) for seg in cut_segs)
+    cap_rules = None
+    if reading is not None or export_rules is not None:
+        cap_rules = dataclasses.replace(
+            captions_de.caption_rules(policy),
+            reading_cps=float(reading["chars_per_s"]) if reading else 0.0,
+            clip_end_s=round(clip_dauer, 3),
+        )
+    cards = captions_de.cards_for(out_words, preset, text_field=text_field, rules=cap_rules)
     cps = captions_de.cps_warnings(
         captions_de.build_cards(out_words, preset.max_chars, preset.max_lines, text_field, preset.words_per_card, preset.all_caps),
         text_field=text_field,
@@ -783,7 +884,6 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         rf.notes.append(schrift_note)
     # Effekte auf der Clip-Zeitachse. Beim ersten Clippen setzt die Automatik welche; danach gilt,
     # was am Clip steht - auch eine leere Liste, denn die heisst „ich will keine".
-    clip_dauer = sum(float(seg["end"]) - float(seg["start"]) for seg in cut_segs)
     effekte_liste, effekte_neu, effekte_note = _load_effekte(ctx, clip_id, out_words, clip_dauer)
     if effekte_note:
         rf.notes.append(effekte_note)
@@ -820,10 +920,17 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         zeitmarken=zeitmarken,
         effekte=effekte_liste,
         musik=musik_dict,
-        composition=candidate_composition(cand, segments, words if cut_on else None, policy),
+        composition=candidate_composition(cand, segments, words if cut_on else None, policy, audio, protected or None),
         policy=policy,
         words=words,
         src_vfr=src_probe.vfr,
+        audio=audio,
+        protected=protected or None,
+        hook_info=hook_info,
+        # Lane P3 schreibt die geprüfte Titelkarte nach rubric.repair_applied (rubric.repair ist unter
+        # Fassung 1 mit dem Heilungsprotokoll belegt); repair_title prüft kind == title_card.
+        repair=_title_card_repair(cand.get("rubric") or {}),
+        caption_reading_speed=reading,
     )
     if cut_on:
         # Übergangsbefunde (transition_*) zusätzlich zu den Sinntreue-Befunden; hoch nur bei Schnitt im Wort.
@@ -841,7 +948,12 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     keys["streifen"] = f"{RENDER_PREFIX}/{clip_id}/{h}.streifen.jpg"
     duration = render_plan.plan_duration(plan)
 
-    if clip.get("file_key") == keys["mp4"] and ctx.store.exists("derived", keys["mp4"]):
+    # Unter export.strict nur, wenn der gespeicherte Export die Abnahme bestanden hat; sonst wird neu
+    # gerendert und geprüft (ein nicht abgenommener Export wird nie durch eine Wiederholung ``rendered``).
+    reuse = clip.get("file_key") == keys["mp4"] and ctx.store.exists("derived", keys["mp4"])
+    if reuse and export_rules is not None:
+        reuse = _export_ok_stored(ctx, clip_id)
+    if reuse:
         db.update(conn, "clips", {"id": clip_id}, status="rendered", render_error=None, destination=destination)
         st.finish("Render bereits vorhanden, Schritt übersprungen", skipped=True, clip_id=clip_id, file_key=keys["mp4"], hash=h)
         return
@@ -852,7 +964,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     work = ctx.source_dir(source_id) / RENDER_PREFIX / clip_id
     work.mkdir(parents=True, exist_ok=True)
     paths = render.write_captions(
-        out_words, preset, (out_w, out_h), work, h, font_family=caption_font, text_field=text_field
+        out_words, preset, (out_w, out_h), work, h, font_family=caption_font, text_field=text_field, rules=cap_rules
     )
     mp4 = work / f"{h}.mp4"
     fonts_dir = brand_assets["fonts_dir"] or s.render_fonts_dir or None
@@ -917,6 +1029,16 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         untertitel_eingebrannt=result.captions_burned,
         schrift_ersetzt=schrift_note,
     )
+    if captions_de.address_check_enabled(policy):
+        befunde.append(ausgabe_pruefung.anrede_befund(captions_de.anrede_pruefen(out_words, text_field), src.get("address")))
+    if export_rules is not None:
+        befunde.extend(
+            ausgabe_pruefung.abnahme_pruefen(
+                plan=plan, dauer_s=probe.duration_s, srt_text=Path(paths["srt"]).read_text(encoding="utf-8"),
+                out_words=out_words, source_words=words, hat_ton=probe.has_audio, lufs=loud["integrated_lufs"],
+                schwarzbilder=schwarz, toleranz_s=export_rules["duration_tolerance_s"],
+            )
+        )  # fmt: skip
     checks = [f"{b.pruefung}: {b.text}" for b in befunde if b.ergebnis != "ok"]
     notes.extend(f"Pruefung {c}" for c in checks)
     technik = ausgabe_pruefung.schlimmstes(befunde)
@@ -942,12 +1064,21 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
     if streifen_meta is not None:
         ctx.store.put_file("derived", keys["streifen"], streifen, CONTENT_TYPES["jpg"])
     ctx.store.put_file("derived", keys["ass"], paths["ass"], CONTENT_TYPES["ass"])
+    export_summary: dict[str, Any] | None = None
+    if export_rules is not None:
+        # Regel 16: fertig erst, wenn die Exportdatei abrufbar ist und alle Prüfungen bestanden sind.
+        befunde.append(ausgabe_pruefung.abrufbar_befund(ctx.store.exists("derived", keys["mp4"])))
+        export_summary = ausgabe_pruefung.abnahme_zusammenfassung(befunde)
+        technik = ausgabe_pruefung.schlimmstes(befunde)
+        technik_fehler = ausgabe_pruefung.fehlertext(befunde)
+    released = export_summary is None or bool(export_summary["export_ok"])
 
     db.update(
         conn,
         "clips",
         {"id": clip_id},
-        file_key=keys["mp4"],
+        # Unter export.strict wird die Datei nur mit bestandener Abnahme freigegeben; sie bleibt im Speicher.
+        file_key=keys["mp4"] if released else None,
         srt_key=keys["srt"],
         vtt_key=keys["vtt"],
         poster_key=keys["jpg"],
@@ -982,7 +1113,7 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         status="failed" if technik == "fehler" else "rendered",
         rendered_at=datetime.now(UTC),
         render_error=technik_fehler,
-        export_checks=db.jsonb(ausgabe_pruefung.als_liste(befunde)),
+        export_checks=db.jsonb([*ausgabe_pruefung.als_liste(befunde), *([export_summary] if export_summary else [])]),
     )
     row = db.fetch_one(conn, SQL_CAPTION_MAX, (clip_id,))
     next_version = int(row[0] if row else 0) + 1
@@ -1046,6 +1177,8 @@ def _render(ctx: common.Context, st: events.StepContext, cand: dict, src: dict, 
         notes=notes,
         llm_provider=llm_provider,
         cached=False,
+        **({"export_ok": export_summary["export_ok"]} if export_summary else {}),
+        **({"hook_audio": plan["hook_audio"]} if "hook_audio" in plan else {}),
     )
 
 
@@ -1068,6 +1201,7 @@ __all__ = [
     "caption_text_field_for",
     "clip_words",
     "fidelity_warnings",
+    "protected_ranges",
     "render_pack",
     "run_render_pack",
 ]

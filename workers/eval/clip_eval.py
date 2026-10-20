@@ -349,6 +349,11 @@ def ja(wert: Any) -> str:
     return "ja" if wert else "nein"
 
 
+def prozent(wert: float | None, ursache: str) -> str:
+    """Anteil als Prozent; ein fehlender Wert ist nicht messbar, nie 0 %."""
+    return f"nicht messbar: {ursache}" if wert is None else f"{wert * 100:.1f} %"
+
+
 def tabelle(zeilen: list[dict]) -> str:
     kopf = f"{'#':>2}  {'von':>8}  {'bis':>8}  {'Länge':>6}  {'Bew':>4}  {'Satzanfang':>10}  {'Satzende':>8}  {'Rückverweis':>11}  {'Verneinung':>10}  Sauber"
     linien = [kopf, "-" * len(kopf)]
@@ -465,8 +470,8 @@ def main(argv: list[str] | None = None) -> None:
         t = ergebnis["treffer"]
         print()
         print(f"Treffer gegen {t['stellen_gesamt']} Referenzstellen:")
-        print(f"  gefunden        {t['gefunden']} von {t['stellen_gesamt']}  ({(t['trefferquote'] or 0) * 100:.1f} %)")
-        print(f"  Precision@{args.k}    {(t[f'precision_at_{args.k}'] or 0) * 100:.1f} %")
+        print(f"  gefunden        {t['gefunden']} von {t['stellen_gesamt']}  ({prozent(t['trefferquote'], 'keine Referenzstellen')})")
+        print(f"  Precision@{args.k}    {prozent(t[f'precision_at_{args.k}'], 'keine Vorschläge')}")
         if t["verpasst"]:
             print("  verpasst:")
             for v in t["verpasst"]:

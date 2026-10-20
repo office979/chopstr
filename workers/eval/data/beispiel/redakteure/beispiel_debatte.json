@@ -1,0 +1,15 @@
+{
+  "quelle": "beispiel_debatte",
+  "hinweis": "Fiktiv. Jede Person markiert unabhängig ihre Top-10 mit Rang 1 bis 10; weniger als zehn sind zulässig.",
+  "redakteure": [
+    {"person": "red_1", "top10": [
+      {"rang": 1, "start_s": 119.0, "end_s": 164.0},
+      {"rang": 2, "start_s": 1500.0, "end_s": 1541.0},
+      {"rang": 3, "start_s": 2210.0, "end_s": 2262.0}
+    ]},
+    {"person": "red_2", "top10": [
+      {"rang": 1, "start_s": 1499.0, "end_s": 1544.0},
+      {"rang": 2, "start_s": 840.0, "end_s": 890.0}
+    ]}
+  ]
+}

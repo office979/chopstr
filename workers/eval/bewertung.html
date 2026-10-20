@@ -221,6 +221,12 @@ textarea { width: 100%; min-height: 84px; border: 1px solid var(--line); border-
     </div>
     <div class="balken" aria-hidden="true"><i id="balken"></i></div>
 
+    <p class="klein" style="margin-top:10px">
+      <label for="in-rater">Bewerter-ID</label>
+      <input type="text" id="in-rater" autocomplete="off" placeholder="zum Beispiel Kürzel" style="margin-left:8px">
+      <span class="muted">Steht im exportierten Bogen unter rater; nötig, um Bögen mehrerer Personen zusammenzuführen.</span>
+    </p>
+
     <div id="hook-hinweis" class="meldung" hidden>Hooks am besten von anderen Personen bewerten als die Clips, damit der Hook die Clip-Bewertung nicht färbt.</div>
 
     <div class="chips" id="chips" role="group" aria-label="Paare"></div>
@@ -247,8 +253,18 @@ var DATEIEN = {
   sources: "quellen.json",
   rubric: "raster.json"
 };
-var PRAEFERENZEN = ["A", "B", "gleich"];
-var PRAEF_TEXT = { A: "Seite A besser", B: "Seite B besser", gleich: "gleich gut" };
+var PRAEFERENZEN = ["A", "B", "gleich", "beide_unbrauchbar"];
+var PRAEF_TEXT = { A: "Seite A besser", B: "Seite B besser", gleich: "gleich gut", beide_unbrauchbar: "beide unbrauchbar" };
+var UNBRAUCHBAR = "beide_unbrauchbar";
+var MANGEL = ["einstieg", "ende", "kontext", "ton", "untertitel", "inhalt", "keine"];
+var MANGEL_TEXT = { einstieg: "Einstieg", ende: "Ende", kontext: "Kontext", ton: "Ton", untertitel: "Untertitel", inhalt: "Inhalt", keine: "nichts" };
+
+function mangelAus(m) {
+  var out = { kategorie: null, text: "" };
+  if (m && MANGEL.indexOf(m.kategorie) >= 0) out.kategorie = m.kategorie;
+  if (m && typeof m.text === "string") out.text = m.text;
+  return out;
+}
 var SPEICHER = "chopstr-bewertung-v1";
 
 var docs = { sheet: null, hooks: null, sources: null, rubric: null };
@@ -386,6 +402,7 @@ function nachLaden(fehler) {
     meldung("warn", "bewertung.json und raster.json gehören zu verschiedenen Rasterfassungen.");
   }
   zustandAufbauen();
+  raterLaden();
   $("start").hidden = true;
   $("haupt").hidden = false;
   if (!verfuegbar(ui.tab)) ui.tab = verfuegbar("clips") ? "clips" : "hooks";
@@ -430,10 +447,19 @@ function ausDatei(kind, pair) {
   });
   if (PRAEFERENZEN.indexOf(b.praeferenz) >= 0) out.praeferenz = b.praeferenz;
   if (typeof b.notiz === "string") out.notiz = b.notiz;
+  out.mangel = mangelAus(b.mangel);
   return out;
 }
 
 function speicherKey(kind) { return SPEICHER + ":" + kind + ":" + sig[kind]; }
+
+function raterId() { return ($("in-rater").value || "").trim(); }
+
+function raterLaden() {
+  var gespeichert = speicherLesen(SPEICHER + ":rater");
+  var ausDatei = (docs.sheet && docs.sheet.rater) || (docs.hooks && docs.hooks.rater) || "";
+  $("in-rater").value = typeof gespeichert === "string" && gespeichert ? gespeichert : ausDatei;
+}
 
 function zustandAufbauen() {
   ["clips", "hooks"].forEach(function (kind) {
@@ -455,6 +481,7 @@ function normieren(kind, g) {
   });
   if (PRAEFERENZEN.indexOf(g.praeferenz) >= 0) out.praeferenz = g.praeferenz;
   if (typeof g.notiz === "string") out.notiz = g.notiz;
+  out.mangel = mangelAus(g.mangel);
   return out;
 }
 
@@ -472,6 +499,7 @@ function status(kind, pid) {
   var krit = Object.keys(kriterien(kind));
   var gesetzt = 0, gesamt = krit.length * 2;
   ["A", "B"].forEach(function (s) { krit.forEach(function (k) { if (w[s][k] != null) gesetzt++; }); });
+  if (w.praeferenz === UNBRAUCHBAR) return "fertig";  // ohne Kriterienwerte zulässig
   if (gesetzt === gesamt && w.praeferenz) return "fertig";
   if (gesetzt > 0 || w.praeferenz || w.notiz) return "teil";
   return "offen";
@@ -506,7 +534,7 @@ function tastenhilfe() {
   [
     [[kbd("0"), " bis ", kbd("4")], " Wert setzen"],
     [[kbd("↑"), kbd("↓"), kbd("←"), kbd("→")], " Kriterium und Seite"],
-    [[kbd("A"), " ", kbd("B"), " ", kbd("G")], " Präferenz"],
+    [[kbd("A"), " ", kbd("B"), " ", kbd("G"), " ", kbd("U")], " Präferenz (U: beide unbrauchbar)"],
     [[kbd("Entf")], " Wert löschen"],
     [[kbd("W"), " ", kbd("Z")], " weiter, zurück"]
   ].forEach(function (e) {
@@ -594,7 +622,8 @@ function clipKarte(name, side, cls) {
     ]),
     el("p", { class: "meta", text: "Dauer " + zahl(side.dauer_s) + " s, " + segs.length + (segs.length === 1 ? " Segment" : " Segmente") }),
     el("p", { class: "cliptext", text: side.text || "" }),
-    el("p", { class: "zeiten", text: zeiten ? "Zeiten in der Quelle: " + zeiten : "" })
+    el("p", { class: "zeiten", text: zeiten ? "Zeiten in der Quelle: " + zeiten : "" }),
+    side.video ? el("p", { class: "meta", text: "Video im Ordner des Laufs: " + side.video }) : null
   ]);
 }
 
@@ -734,6 +763,17 @@ function rasterAnsicht(host, kind, pid) {
     pr.appendChild(b);
   });
   abs.appendChild(pr);
+  abs.appendChild(el("h4", { text: "Was stimmt an dem anderen nicht?" }));
+  var w0 = werte[kind][pid];
+  var sel = el("select", { "aria-label": "Kategorie des Mangels" }, [el("option", { value: "", text: "keine Angabe" })].concat(
+    MANGEL.map(function (k) { return el("option", { value: k, text: MANGEL_TEXT[k] }); })));
+  sel.value = w0.mangel.kategorie || "";
+  sel.addEventListener("change", function () { werte[kind][pid].mangel.kategorie = sel.value || null; sichern(kind); });
+  var mt = el("input", { type: "text", "aria-label": "Mangel als Freitext", placeholder: "kurz: was stimmt am nicht gewählten Clip nicht", style: "margin-left:8px;min-width:50%" });
+  mt.value = w0.mangel.text;
+  mt.addEventListener("input", function () { werte[kind][pid].mangel.text = mt.value; sichern(kind); });
+  abs.appendChild(el("p", { class: "klein" }, [sel, mt]));
+  abs.appendChild(el("p", { class: "klein muted", text: "Bei A oder B gilt das für die nicht gewählte Seite, bei beide unbrauchbar für beide." }));
   abs.appendChild(el("h4", { text: "Anmerkung" }));
   var ta = el("textarea", { "aria-label": "Anmerkung zum Paar", placeholder: "Freitext, zum Beispiel was bei Seite A oder B aufgefallen ist" });
   ta.value = werte[kind][pid].notiz;
@@ -843,6 +883,8 @@ document.addEventListener("keydown", function (e) {
     setzePraeferenz("B");
   } else if (key === "g" || key === "G") {
     setzePraeferenz("gleich");
+  } else if (key === "u" || key === "U") {
+    setzePraeferenz(UNBRAUCHBAR);
   } else if (key === "w" || key === "W") {
     gehe(1);
   } else if (key === "z" || key === "Z") {
@@ -868,13 +910,14 @@ function baueExport(kind) {
       krit.forEach(function (k) { b[s][k] = w[s][k]; if (w[s][k] != null) hatWert = true; });
     });
     var praef = w.praeferenz;
-    if (praef && !hatWert) {
+    if (praef && praef !== UNBRAUCHBAR && !hatWert) {
       // --auswerten bricht bei einer Präferenz ohne Kriterienwerte ab
       praef = null;
       gekappt.push(p.paar_id);
     }
     b.praeferenz = praef;
     b.notiz = w.notiz || "";
+    b.mangel = { kategorie: (w.mangel && w.mangel.kategorie) || null, text: (w.mangel && w.mangel.text) || "" };
     p.bewertung = b;
     if (status(kind, p.paar_id) !== "fertig" || !praef) {
       p.offen = true;
@@ -884,6 +927,7 @@ function baueExport(kind) {
     }
   });
   if (offen.length) doc.offene_paare = offen; else delete doc.offene_paare;
+  doc.rater = raterId() || null;
   return { doc: doc, offen: offen, gekappt: gekappt };
 }
 
@@ -913,6 +957,9 @@ function exportieren() {
     if (t.ex.offen.length) zeilen.push((t.kind === "clips" ? "Clip-Bogen" : "Hook-Bogen") + ", offen oder unvollständig: " + t.ex.offen.join(", "));
     if (t.ex.gekappt.length) zeilen.push((t.kind === "clips" ? "Clip-Bogen" : "Hook-Bogen") + ", Präferenz ohne Kriterienwerte nicht exportiert (sonst bricht die Auswertung ab): " + t.ex.gekappt.join(", "));
   });
+  if (!raterId()) {
+    meldung("warn", "Ohne Bewerter-ID lässt sich dieser Bogen nicht mit den Bögen anderer Personen zusammenführen. Oben eintragen und erneut exportieren.");
+  }
   if (zeilen.length) {
     meldung("warn", "Der Export enthält unvollständige Paare. Sie sind in der Datei mit offen markiert und zählen in der Auswertung als offen. Der Export läuft trotzdem.", zeilen);
   }
@@ -999,6 +1046,7 @@ $("in-ordner").addEventListener("change", function (e) { dateienLesen(e.target.f
 $("tab-clips").addEventListener("click", function () { ui.tab = "clips"; ui.side = "A"; ui.ci = 0; zeigeTab(); });
 $("tab-hooks").addEventListener("click", function () { ui.tab = "hooks"; ui.side = "A"; ui.ci = 0; zeigeTab(); });
 $("btn-export").addEventListener("click", exportieren);
+$("in-rater").addEventListener("input", function () { speicherSchreiben(SPEICHER + ":rater", raterId()); });
 $("btn-verwerfen").addEventListener("click", verwerfen);
 
 dateiliste();

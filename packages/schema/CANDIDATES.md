@@ -151,6 +151,79 @@ mit Hinweis (kein Blocker, aber sichtbar). Fassung 2: `verb_bracket` prüft übe
 `confirmed` ist `true` nur nach LLM-Bestätigung (`story_graph_confirm_v1`); ohne Sprachmodell bleibt
 `confirmed = null` (Heuristik-Treffer, Mensch prüft). `repair` ist `"extend"` oder `"overlay"`.
 
+## Kontexttreue und Ergebnisklassen (Lane P3, nur Fassung 2)
+
+Additive Schlüssel in `rubric`, geschrieben von `release_gate.annotate_review` (aufgerufen in
+`clip_candidate.from_report` am Ende von `story_engine.run`) und vom Kritikerschritt (`critic.critique`). Unter
+Fassung 1 fehlen alle. Entscheidungen: `docs/decisions/030-claim-index.md`, `031-gegenleser-zweites-modell.md`,
+`032-ergebnisklassen.md`.
+
+### `rubric.review_state` (Regel 14, Schalter `implementation.review.review_state`, Regel `review.review_state`)
+
+```json
+{
+  "state": "uncertain",
+  "reasons": [
+    {"code": "gate:back_reference", "text": "Regelhinweis back_reference: „Das“ im ersten Satz verweist auf etwas vor dem Clip.",
+     "source_span": {"start_s": 812.4, "end_s": 812.6}, "origin": "rule"},
+    {"code": "critic:unclear_pronoun", "text": "Hinweis des Kritikers: Das Pronomen bleibt ohne Bezug.",
+     "source_span": {"start_s": 810.0, "end_s": 815.2}, "origin": "model"}
+  ],
+  "repair": {"attempted": true, "kind": "gate_heal", "result": "passed"}
+}
+```
+
+- `state`: `passed` (keine Gründe; heißt nur, dass diese Prüfungen nichts fanden, Regel 12), `uncertain` (Gründe
+  ohne Bestätigung: Gate- und Kritikerhinweise, Gegenleser, Claim-Index, Story-Graph, Flags `humor`,
+  `sensitive_topic`, `debate_contradiction`, freigaberelevante Behauptung `flag:claim`, Titelkarte), `blocked`
+  (mindestens ein bestätigter Fehler nach der Reparatur).
+- `reasons[].origin`: `rule` (regelbasierter Hinweis, auch jeder Befund der Heuristik), `model` (Bewertung eines
+  Sprachmodells ohne Bestätigung), `confirmed` (bestätigter Fehler: Kritiker bestätigt Schwere `fidelity`,
+  Gegenleser mit Modell bestätigt Schwere `high`, Gate verworfen unter Regel `gates.discard_hard`). Ein
+  `rule`-Grund allein ergibt nie `blocked`.
+- `reasons[].code`: `gate:<gate>`, `gate_flag:<gate>`, `gate_rejected:<gate>`, `tor:<tor>`, `critic:<art>`,
+  `critic_confirmed:<art>`, `counter_reader:<dimension>`, `counter_reader_model:<dimension>`,
+  `counter_reader_second:<dimension>`, `context:<klasse>`, `story_graph`, `story_graph_unconfirmed`,
+  `flag:<flag>`, `flag:claim`, `repair:title_card`. `text` ist ein deutscher Satz ohne Gedankenstriche.
+  `source_span` ist `{start_s, end_s}` in Quellsekunden oder `null`, wenn der Grund keine Stelle hat.
+- `repair`: was die Pipeline schon repariert hat, nur gelesen: `kind` `title_card`, `gate_heal`, `start_heal`,
+  `context_extension` oder `null`; `result` `passed`, `failed` oder `not_attempted`. Das Objekt ist immer da.
+- Automatische Annahme (`analyze.auto_accept_blockers`): nur `passed`. `uncertain` hält mit `review_uncertain`
+  zurück, `blocked` mit `review_blocked`; `verdict_reason` beginnt weiter mit „automatische Freigabe
+  ausgesetzt: “. Ein `blocked`-Kandidat wird nie automatisch angenommen; eine menschliche Annahme braucht eine
+  Begründung (Verdict-Route, Lane W). Heute stehen `blocked`-Kandidaten fast nur in `report.verworfen`, weil
+  Kritiker und Gate mit `discard_hard` bestätigte Fehler schon verwerfen.
+
+### `rubric.context_hits` (Claim-Index, Schalter `implementation.context.claim_index`, Regel `context.claim_index.enabled`, Standard aus)
+
+`{method: "lemma_jaccard", max_hits, min_overlap, index_size, hits: [...], flags: [...], note}`. Je Treffer
+`sentence_idx`, `clip_sentence_idx`, `speaker`, `clip_speaker`, `text`, `start_s`, `end_s`,
+`seconds_from_clip`, `kinds`, `jaccard`, `score`, `context_class` (`self_correction`, `addition`,
+`contradiction_by_other`, `unrelated`), `class_reason`, `marker`, `reaction` (`later_correction`, `review`,
+`hint`, `flag`, `none`) und bei `later_correction` `heal_to_sentence_idx` (Satz in Heilreichweite oder `null`).
+`flags` enthält je Widerspruch durch einen anderen Sprecher `{flag: "debate_contradiction", sentence_idx,
+speaker, source_span, quote}`; das Flag steht dann auch in `risk_flags`. `story_graph_flags[].context_class`
+nennt die Klasse eines Story-Graph-Treffers. `note`: ein nicht gefundener Bezug ist kein Beleg, dass keiner
+existiert.
+
+### `rubric.counter_reader` (Schalter `implementation.context.counter_reader`, Regel `context.counter_reader.enabled`)
+
+`{status: "checked", hook, hook_source, deterministic: {findings, hook_meaning, differs}, model, second,
+additional_findings, rejected_by_second_only, confirmed}`. `deterministic.findings` hat genau einen Befund je
+Dimension `attribution`, `negation`, `certainty`, `condition`, `number`, `time` mit `verdict` (`same`, `differs`),
+`source` (`context_before`, `context_after`, `hook` oder `null`), `clip_quote`, `source_quote`, `source_span`,
+`detail`. `model` und `second` nur mit Regel `context.counter_reader.model` und laufendem Kritiker
+(`{status, provider, prompt_version, findings, dropped, model_confirmed, confirmed}`; `status` auch `no_hook`,
+`heuristic`, `llm_budget`, `invalid_answer`, beim zweiten `not_a_second_model`).
+
+### `rubric.repair_applied` und `rubric.title_card_attempt` (Titelkarte, Schalter `implementation.context.title_card`, Regel `context.title_card.enabled`)
+
+`repair_applied = {kind: "title_card", text, source_span: {start_s, end_s}, sentence_idx, recheck}` steht nur,
+wenn eine Bedingung im Satz direkt vor dem Clip steht, die Heilung nach vorn ihn nicht in den Clip geholt hat,
+der Satz wörtlich in der Quelle steht, höchstens `context.title_card.max_words` Wörter hat und die erneute
+Prüfung (Gates und Gegenleser auf Clip plus Karte) ohne neuen Befund bleibt. `title_card_attempt` hält jeden
+Versuch mit `recheck` (auch gescheiterte). `rubric.repair` (Runden der Kontextreparatur) bleibt unverändert.
+
 ## Review-Aktionen der Web-App
 
 | Aktion | Wirkung |

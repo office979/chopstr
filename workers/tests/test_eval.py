@@ -11,7 +11,8 @@ def test_normalize_and_align():
     al = wer_eval.align(["a", "b", "c"], ["a", "x", "c", "d"])
     assert (al.sub, al.dele, al.ins) == (1, 0, 1)
     assert al.wer == 2 / 3
-    assert wer_eval.align([], []).wer == 0.0
+    # Ohne Referenzwörter ist die WER nicht definiert: None, nie 0 (Launch-Auftrag Abschnitt 1).
+    assert wer_eval.align([], []).wer is None
 
 
 def test_ch_normalization_equates_ss():
@@ -72,3 +73,23 @@ def test_export_predictions_from_engine_json(tmp_path):
     # und die Datei läuft direkt durch den Harness
     gold = {"dialect": "AT", "clips": [{"start": 12.0, "end": 41.0, "rating": 3}]}
     assert eval_harness.evaluate(gold, written, k=10)["recall"] == 1.0
+
+
+def test_wer_empty_reference_and_names_are_not_measurable(tmp_path):
+    r = wer_eval.evaluate_pair("", "irgendwas", "DE", [])
+    assert r["wer"] is None and r["name_error_rate"] is None and r["ins"] == 1
+    gold, hyp = tmp_path / "gold", tmp_path / "hyp"
+    gold.mkdir(), hyp.mkdir()
+    (gold / "leer_AT.txt").write_text("", encoding="utf-8")
+    (hyp / "leer_AT.txt").write_text("hallo", encoding="utf-8")
+    res = wer_eval.run(str(gold), str(hyp))
+    assert res["summary"]["AT"]["wer"] is None
+    assert res["metriken"]["wer_at"] == {"wert": None, "stichprobe": 0, "ursache": "Referenz ohne Wörter"}
+    assert res["metriken"]["wer_de"]["ursache"] == "keine Referenz im Dialekt DE"
+    assert "n. m." in wer_eval.format_table(res["summary"])
+
+
+def test_wer_metrics_for_baseline(tmp_path):
+    summary = {"DE": {"files": 1, "n_ref": 4, "wer": 0.25, "name_error_rate": None, "name_total": 0}}
+    m = wer_eval.metrics(summary)
+    assert m["wer_de"] == {"wert": 0.25, "stichprobe": 4, "ursache": None} and m["wer_ch"]["wert"] is None

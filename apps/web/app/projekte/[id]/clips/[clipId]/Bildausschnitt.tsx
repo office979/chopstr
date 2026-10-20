@@ -3,11 +3,11 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { cn } from "@/components/ui/cn";
 import type { RenderShot, Zeitmarke } from "@/lib/repo/types";
-import { timecode } from "./timeline/Lineal";
+import { timecode } from "@/lib/clips/timecode";
 
 interface Props {
-  /* Die Stelle, an der der Abspielkopf steht, in QUELLZEIT. Dieselbe Zeitrechnung wie in der
-   * Timeline und wie im Renderer: eine Marke zeigt auf eine Stelle im Video. */
+  /* Die Stelle, an der der Abspielkopf steht, in QUELLZEIT. Dieselbe Zeitrechnung wie im
+   * Renderer: eine Marke zeigt auf eine Stelle im Video. */
   zeit: number;
   shots: RenderShot[];
   zeitmarken: Zeitmarke[];
@@ -58,8 +58,8 @@ export function naeheName(zoom: number): string {
   return `${prozent} Prozent näher`;
 }
 
-/* Dieselbe Angabe kurz, für die Beschriftung eines Timeline-Abschnitts. Dort ist Platz für ein
- * paar Zeichen, nicht für einen Satz. */
+/* Dieselbe Angabe kurz, für eine Beschriftung mit Platz für ein paar Zeichen, nicht für einen
+ * Satz. */
 export function naeheKurz(zoom: number): string {
   const prozent = Math.round((zoom - 1) * 100);
   return prozent <= 0 ? "normal" : `${prozent} % näher`;
@@ -67,9 +67,10 @@ export function naeheKurz(zoom: number): string {
 
 /* Was an der Stelle des Abspielkopfs für den Bildausschnitt gilt, und was man daran ändert.
  *
- * Die Zeitspur steht in der Timeline unter der Seite. Hier stehen nur die Entscheidungen: wer im
- * Bild ist, wie nah, und ob beide zugleich. Eine Änderung schreibt eine Marke an der Stelle des
- * Abspielkopfs; in der Timeline ist sie danach als eigener Abschnitt zu sehen. */
+ * Hier stehen nur die Entscheidungen: wer im Bild ist, wie nah, und ob beide zugleich. Eine
+ * Änderung schreibt eine Marke an der Stelle des Abspielkopfs. Die Stelle wählt man unter der
+ * Vorschau oder mit einem Klick auf ein Wort im Reiter „Text“; eine Zeitleiste gibt es nicht mehr
+ * (docs/decisions/050-timeline-entfernen.md). */
 export function Bildausschnitt({ zeit, shots, zeitmarken, onMarke, onMarkeWeg, onVorschau, quelleBreite, canEdit }: Props) {
   const naeheId = useId();
   /* Der Regler, solange gezogen wird. Null heisst: es gilt, was gespeichert ist.
@@ -175,7 +176,7 @@ export function Bildausschnitt({ zeit, shots, zeitmarken, onMarke, onMarkeWeg, o
       <div className="flex flex-col gap-4 rounded-inner border border-line bg-black/20 p-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="text-sm font-medium text-text">Ab {timecode(zeit)} gilt</p>
-          <p className="text-sm text-text-3">Stelle in der Timeline wählen</p>
+          <p className="text-sm text-text-3">Stelle unter der Vorschau wählen</p>
         </div>
 
         {!canEdit && <p className="text-sm text-text-2">Du kannst hier nur ansehen.</p>}

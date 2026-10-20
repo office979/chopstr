@@ -1,0 +1,44 @@
+{
+  "quelle": "testmaterial: a_interview_handwerk, b_monolog_gruenderin, c_debatte_viertagewoche",
+  "hinweis": "Sprachsynthese (macOS say), kein echtes Material. Anker sind Satzgrenzen der Montage, keine manuell kontrollierten Audioanker.",
+  "metriken": {
+    "wer_de_synthetisch": {
+      "wert": 0.031026252983293555,
+      "stichprobe": 1676,
+      "ursache": null,
+      "hinweis": "Sprachsynthese (macOS say), kein echtes Material"
+    },
+    "versatz_anfang_median_synthetisch_ms": {
+      "wert": 356.5,
+      "stichprobe": 172,
+      "ursache": null,
+      "hinweis": "Median mit Vorzeichen -356.5 ms (negativ: Wortanfang im Transkript vor der Montagegrenze)"
+    },
+    "versatz_ende_median_synthetisch_ms": {
+      "wert": 112.0,
+      "stichprobe": 174,
+      "ursache": null,
+      "hinweis": "Median mit Vorzeichen -110.5 ms"
+    },
+    "sprecher_korrekt_overlap": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "Sprecher im Transkript stammen aus der Montage (synthetisch), keine echte Diarisierung; außerdem ohne Überlappung"
+    },
+    "sprecher_korrekt_gesamt": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "Sprecher im Transkript stammen aus der Montage (synthetisch), keine echte Diarisierung"
+    },
+    "cpwer": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "Sprecher im Transkript stammen aus der Montage (synthetisch), keine echte Diarisierung"
+    },
+    "der": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "Sprecher im Transkript stammen aus der Montage (synthetisch), keine echte Diarisierung"
+    }
+  }
+}

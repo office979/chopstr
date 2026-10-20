@@ -1,0 +1,453 @@
+{
+  "fassung": "baseline_v1",
+  "erstellt_am": "2026-10-20",
+  "provider": "keiner (keine Engine-Messung in der Baseline)",
+  "policy": "nicht zutreffend (Werte stammen nur aus ASR und Wortzeiten des Testmaterials)",
+  "hardware": "macOS, CPU; Transkripte des Testmaterials laut erwartungen.md mit cstr/whisper-large-v3-turbo-german-int8_float32 auf CPU erzeugt",
+  "hinweis": "Werte None heißen nicht messbar, die Ursache steht daneben. Toleranz ist die erlaubte absolute Verschlechterung in der Einheit der Metrik.",
+  "metriken": {
+    "abdeckung_pool": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.05,
+      "beschreibung": "Referenzmomente im Kandidatenpool (IoU >= 0,5)",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Quelle im Teil entwicklung mit DetectReport-Bericht in berichte",
+      "herkunft": "harness.json"
+    },
+    "abdeckung_nach_gates": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.05,
+      "beschreibung": "Referenzmomente nach den Gates",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Quelle im Teil entwicklung mit DetectReport-Bericht in berichte",
+      "herkunft": "harness.json"
+    },
+    "abdeckung_top_k": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.05,
+      "beschreibung": "Referenzmomente unter den angebotenen Kandidaten",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Quelle im Teil entwicklung mit DetectReport-Bericht in berichte",
+      "herkunft": "harness.json"
+    },
+    "recall_at_20": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.05,
+      "beschreibung": "Referenzmomente unter den ersten 20 angebotenen",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Quelle im Teil entwicklung mit DetectReport-Bericht in berichte",
+      "herkunft": "harness.json"
+    },
+    "precision_at_5": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.05,
+      "beschreibung": "Precision@5 gegen Redakteurs-Top-10, gemittelt",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Quelle im Teil entwicklung mit DetectReport-Bericht in berichte",
+      "herkunft": "harness.json"
+    },
+    "precision_at_10": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.05,
+      "beschreibung": "Precision@10 gegen Redakteurs-Top-10, gemittelt",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Quelle im Teil entwicklung mit DetectReport-Bericht in berichte",
+      "herkunft": "harness.json"
+    },
+    "grenzfehler_start_s": {
+      "einheit": "s",
+      "richtung": "niedriger",
+      "toleranz": 0.3,
+      "beschreibung": "mittlerer Startfehler getroffener Kandidaten",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Quelle im Teil entwicklung mit DetectReport-Bericht in berichte",
+      "herkunft": "harness.json"
+    },
+    "grenzfehler_ende_s": {
+      "einheit": "s",
+      "richtung": "niedriger",
+      "toleranz": 0.5,
+      "beschreibung": "mittlerer Endfehler getroffener Kandidaten",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Quelle im Teil entwicklung mit DetectReport-Bericht in berichte",
+      "herkunft": "harness.json"
+    },
+    "grenzfehler_gewichtet_s": {
+      "einheit": "s",
+      "richtung": "niedriger",
+      "toleranz": 0.3,
+      "beschreibung": "(2 x Start + Ende) / 3",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Quelle im Teil entwicklung mit DetectReport-Bericht in berichte",
+      "herkunft": "harness.json"
+    },
+    "neue_momente": {
+      "einheit": "Anzahl",
+      "richtung": "information",
+      "toleranz": null,
+      "beschreibung": "angeboten, in keiner Referenz; Prüfauftrag, kein Fehler",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Quelle im Teil entwicklung mit DetectReport-Bericht in berichte",
+      "herkunft": "harness.json"
+    },
+    "wer_de": {
+      "einheit": "Anteil",
+      "richtung": "niedriger",
+      "toleranz": 0.005,
+      "beschreibung": "WER Hochdeutsch gegen eigenes Referenzmaterial",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine manuelle Transkript-Referenz eigenen Materials (eval/data/transkript_referenz leer); synthetischer Wert unter wer_de_synthetisch",
+      "herkunft": "offen.json"
+    },
+    "wer_at": {
+      "einheit": "Anteil",
+      "richtung": "niedriger",
+      "toleranz": 0.01,
+      "beschreibung": "WER österreichisches Deutsch",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein österreichisches Referenzmaterial mit manuellem Transkript",
+      "herkunft": "offen.json"
+    },
+    "wer_ch": {
+      "einheit": "Anteil",
+      "richtung": "niedriger",
+      "toleranz": 0.02,
+      "beschreibung": "WER Schweizerdeutsch zu Hochdeutsch (Beta)",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein Schweizer Referenzmaterial mit manuellem Transkript",
+      "herkunft": "offen.json"
+    },
+    "wer_de_synthetisch": {
+      "einheit": "Anteil",
+      "richtung": "niedriger",
+      "toleranz": 0.005,
+      "beschreibung": "WER auf dem synthetischen Testmaterial (Sprachsynthese), nur Regressionssignal",
+      "wert": 0.031026252983293555,
+      "stichprobe": 1676,
+      "ursache": null,
+      "herkunft": "testmaterial.json",
+      "hinweis": "Sprachsynthese (macOS say), kein echtes Material"
+    },
+    "sprecher_korrekt_overlap": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.02,
+      "beschreibung": "Wörter in Überlappung mit korrektem Sprecher",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "Sprecher im Transkript stammen aus der Montage (synthetisch), keine echte Diarisierung; außerdem ohne Überlappung",
+      "herkunft": "testmaterial.json"
+    },
+    "sprecher_korrekt_gesamt": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.02,
+      "beschreibung": "alle Wörter mit korrektem Sprecher",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "Sprecher im Transkript stammen aus der Montage (synthetisch), keine echte Diarisierung",
+      "herkunft": "testmaterial.json"
+    },
+    "cpwer": {
+      "einheit": "Anteil",
+      "richtung": "niedriger",
+      "toleranz": 0.01,
+      "beschreibung": "concatenated minimum-permutation WER",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "Sprecher im Transkript stammen aus der Montage (synthetisch), keine echte Diarisierung",
+      "herkunft": "testmaterial.json"
+    },
+    "der": {
+      "einheit": "Anteil",
+      "richtung": "niedriger",
+      "toleranz": 0.01,
+      "beschreibung": "DER ohne Collar mit Überlappung",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "Sprecher im Transkript stammen aus der Montage (synthetisch), keine echte Diarisierung",
+      "herkunft": "testmaterial.json"
+    },
+    "versatz_anfang_median_ms": {
+      "einheit": "ms",
+      "richtung": "niedriger",
+      "toleranz": 10,
+      "beschreibung": "Wortanfang gegen Audioanker, Median",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine manuell kontrollierten Audioanker (eval/data/audioanker leer)",
+      "herkunft": "offen.json"
+    },
+    "versatz_anfang_p95_ms": {
+      "einheit": "ms",
+      "richtung": "niedriger",
+      "toleranz": 20,
+      "beschreibung": "Wortanfang gegen Audioanker, 95. Perzentil",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine manuell kontrollierten Audioanker (eval/data/audioanker leer)",
+      "herkunft": "offen.json"
+    },
+    "versatz_ende_median_ms": {
+      "einheit": "ms",
+      "richtung": "niedriger",
+      "toleranz": 10,
+      "beschreibung": "Wortende gegen Audioanker, Median",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine manuell kontrollierten Audioanker (eval/data/audioanker leer)",
+      "herkunft": "offen.json"
+    },
+    "versatz_ende_p95_ms": {
+      "einheit": "ms",
+      "richtung": "niedriger",
+      "toleranz": 20,
+      "beschreibung": "Wortende gegen Audioanker, 95. Perzentil",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine manuell kontrollierten Audioanker (eval/data/audioanker leer)",
+      "herkunft": "offen.json"
+    },
+    "alignment_fehlend_anteil": {
+      "einheit": "Anteil",
+      "richtung": "niedriger",
+      "toleranz": 0.01,
+      "beschreibung": "Anker ohne zugeordnetes Wort",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine manuell kontrollierten Audioanker (eval/data/audioanker leer)",
+      "herkunft": "offen.json"
+    },
+    "versatz_anfang_median_synthetisch_ms": {
+      "einheit": "ms",
+      "richtung": "niedriger",
+      "toleranz": 20,
+      "beschreibung": "Wortanfang gegen Satzgrenzen der Montage (Testmaterial), nur Regressionssignal",
+      "wert": 356.5,
+      "stichprobe": 172,
+      "ursache": null,
+      "herkunft": "testmaterial.json",
+      "hinweis": "Median mit Vorzeichen -356.5 ms (negativ: Wortanfang im Transkript vor der Montagegrenze)"
+    },
+    "versatz_ende_median_synthetisch_ms": {
+      "einheit": "ms",
+      "richtung": "niedriger",
+      "toleranz": 20,
+      "beschreibung": "Wortende gegen Satzgrenzen der Montage (Testmaterial), nur Regressionssignal",
+      "wert": 112.0,
+      "stichprobe": 174,
+      "ursache": null,
+      "herkunft": "testmaterial.json",
+      "hinweis": "Median mit Vorzeichen -110.5 ms"
+    },
+    "jaccard_top5_mittel": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.05,
+      "beschreibung": "Jaccard der Top-5 über frische Läufe, paarweise gemittelt",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine frischen Läufe (CHOPSTR_ANALYZE_NO_CACHE=1) mit gespeicherten DetectReports ausgewertet",
+      "herkunft": "offen.json"
+    },
+    "rang1_gleich_anteil": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.0,
+      "beschreibung": "Läufe mit gleichem Rang 1 wie der Bezugslauf",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine frischen Läufe (CHOPSTR_ANALYZE_NO_CACHE=1) mit gespeicherten DetectReports ausgewertet",
+      "herkunft": "offen.json"
+    },
+    "repro_bestanden_anteil": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.0,
+      "beschreibung": "Läufe mit Jaccard >= 0,8 und gleichem Rang 1",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine frischen Läufe (CHOPSTR_ANALYZE_NO_CACHE=1) mit gespeicherten DetectReports ausgewertet",
+      "herkunft": "offen.json"
+    },
+    "jaccard_top5_mittel_gespeichert": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.0,
+      "beschreibung": "gespeicherte Wiederholung, muss 1 sein",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Cache-Wiederholungen ausgewertet",
+      "herkunft": "offen.json"
+    },
+    "rang1_gleich_anteil_gespeichert": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.0,
+      "beschreibung": "gespeicherte Wiederholung, Rang 1",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Cache-Wiederholungen ausgewertet",
+      "herkunft": "offen.json"
+    },
+    "repro_bestanden_anteil_gespeichert": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.0,
+      "beschreibung": "gespeicherte Wiederholung identisch",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Cache-Wiederholungen ausgewertet",
+      "herkunft": "offen.json"
+    },
+    "eur_je_quellstunde": {
+      "einheit": "EUR",
+      "richtung": "niedriger",
+      "toleranz": 0.1,
+      "beschreibung": "geschätzte Kosten je Quellstunde",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein job_costs-Export ausgewertet; die Datenbank des laufenden Baseline-Laufs wurde nicht benutzt",
+      "herkunft": "offen.json"
+    },
+    "rechenzeit_s_je_quellstunde": {
+      "einheit": "s",
+      "richtung": "niedriger",
+      "toleranz": 60,
+      "beschreibung": "CPU plus GPU Sekunden je Quellstunde",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein job_costs-Export ausgewertet; die Datenbank des laufenden Baseline-Laufs wurde nicht benutzt",
+      "herkunft": "offen.json"
+    },
+    "wartezeit_s_je_quellstunde": {
+      "einheit": "s",
+      "richtung": "niedriger",
+      "toleranz": 60,
+      "beschreibung": "Wanduhr Upload bis Kandidatenliste je Quellstunde",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Wanduhr-Messung Upload bis Kandidatenliste erfasst",
+      "herkunft": "offen.json"
+    },
+    "sinnfehler_obere_grenze": {
+      "einheit": "Anteil",
+      "richtung": "niedriger",
+      "toleranz": 0.0,
+      "beschreibung": "obere 95-%-Grenze kritischer Sinnfehler (Clopper-Pearson)",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein ausgefüllter Sinnfehler-Bogen (braucht Prüfung gegen Vollkontext durch Menschen)",
+      "herkunft": "offen.json"
+    },
+    "sinnfehler_beobachtet": {
+      "einheit": "Anteil",
+      "richtung": "niedriger",
+      "toleranz": 0.0,
+      "beschreibung": "beobachteter Anteil Clips mit bestätigtem kritischem Sinnfehler",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein ausgefüllter Sinnfehler-Bogen (braucht Prüfung gegen Vollkontext durch Menschen)",
+      "herkunft": "offen.json"
+    },
+    "schnitt_natuerlich_anteil": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.02,
+      "beschreibung": "Schnittpunkt-Urteile natürlich",
+      "wert": null,
+      "stichprobe": 0,
+      "ursache": "keine Schnittpunkt-Urteile",
+      "herkunft": "harness.json"
+    },
+    "clips_unbrauchbar_anteil": {
+      "einheit": "Anteil",
+      "richtung": "niedriger",
+      "toleranz": 0.02,
+      "beschreibung": "Clips mit abgehacktem Schnitt oder Urteil unbrauchbar",
+      "wert": null,
+      "stichprobe": 0,
+      "ursache": "keine Clips mit Schnitt- oder Clip-Urteil",
+      "herkunft": "harness.json"
+    },
+    "angeboten_je_quellstunde": {
+      "einheit": "je Quellstunde",
+      "richtung": "information",
+      "toleranz": null,
+      "beschreibung": "angebotene Kandidaten je Quellstunde (report.yield)",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine DetectReports mit yield ausgewertet; Lane P2 liefert das Feld, ein Bericht aus dem Baseline-Lauf liegt Lane E nicht vor",
+      "herkunft": "offen.json"
+    },
+    "verwendbare_je_quellstunde": {
+      "einheit": "je Quellstunde",
+      "richtung": "hoeher",
+      "toleranz": 0.5,
+      "beschreibung": "angebotene mit review_state passed je Quellstunde",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine DetectReports mit yield ausgewertet; Lane P2 liefert das Feld, ein Bericht aus dem Baseline-Lauf liegt Lane E nicht vor",
+      "herkunft": "offen.json"
+    },
+    "verschiedene_je_quellstunde": {
+      "einheit": "je Quellstunde",
+      "richtung": "hoeher",
+      "toleranz": 0.5,
+      "beschreibung": "untereinander verschiedene angebotene je Quellstunde (report.yield.distinct)",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine DetectReports mit yield ausgewertet; Lane P2 liefert das Feld, ein Bericht aus dem Baseline-Lauf liegt Lane E nicht vor",
+      "herkunft": "offen.json"
+    },
+    "verwerfungsquote_gesamt": {
+      "einheit": "Anteil",
+      "richtung": "information",
+      "toleranz": null,
+      "beschreibung": "verworfene Vorschläge im Pool (funnel_counts, sonst discarded)",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine DetectReports mit funnel_counts oder discarded ausgewertet",
+      "herkunft": "offen.json"
+    },
+    "blind_gewinnrate": {
+      "einheit": "Anteil",
+      "richtung": "hoeher",
+      "toleranz": 0.05,
+      "beschreibung": "chopstr gewinnt unter den entschiedenen Urteilen",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein Wettbewerbsvergleich: keine Wettbewerbs-Clips mit geklärten Rechten, keine Bewerter",
+      "herkunft": "offen.json"
+    },
+    "beide_unbrauchbar_anteil": {
+      "einheit": "Anteil",
+      "richtung": "niedriger",
+      "toleranz": 0.05,
+      "beschreibung": "Urteile beide unbrauchbar",
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein Wettbewerbsvergleich: keine Wettbewerbs-Clips mit geklärten Rechten, keine Bewerter",
+      "herkunft": "offen.json"
+    }
+  }
+}

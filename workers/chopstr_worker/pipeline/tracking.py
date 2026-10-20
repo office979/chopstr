@@ -601,7 +601,150 @@ def zeitmarken_anwenden(ziele_liste: list[Ziel], marken: list[dict], quelle_brei
     return zerlegt
 
 
+# -- Lane P4: Sprecher zu Gesicht und Split-Screen bei Überlappung -----------------------------------
+# Eine Sprecher-ID aus der Diarisierung ist keine Zuordnung zu einem Gesicht (Master-Prompt Regel 16). Die
+# Bindung entsteht aus Abtastpunkten, an denen genau ein Sprecher allein spricht: wessen Mund sich dort
+# bewegt (``sprecher_position`` je Abtastpunkt), ist er. Nur mit gesicherter Bindung beider Sprecher wird
+# bei überlappender Rede automatisch geteilt; sonst bleibt die Ansicht wie bisher (konservativ).
+SPLIT_SCREEN_SWITCH = "cut.split_screen"
+# Ab so vielen Stimmen ist eine Bindung voll belastbar; darunter sinkt die Sicherheit anteilig (origin H).
+BINDUNG_MIN_STIMMEN = 5
+# Überlappende Wörter mit höchstens dieser Lücke gehören zu einer Stelle.
+OVERLAP_LUECKE_S = 0.3
+
+
+@dataclass(frozen=True)
+class SplitScreenRules:
+    min_binding_confidence: float
+
+
+def split_screen_rules(policy=None) -> SplitScreenRules | None:
+    """Regeln ``cut.split_screen.enabled`` und ``cut.split_screen.min_binding_confidence`` der Fassung 2 mit dem
+    Schalter ``implementation.cut.split_screen``; ``None`` heißt: nie automatisch teilen (Fassung 1, Schalter
+    oder Regel aus, Rollback)."""
+    from .. import editorial
+
+    pol = policy if policy is not None else editorial.load()
+    impl = (pol.roh.get("implementation") or {}).get("cut") or {}
+    if pol.version < 2 or impl.get("split_screen") is not True:
+        return None
+    raw = (pol.roh.get("cut") or {}).get("split_screen")
+    label = f"clip_policy_v{pol.version}: cut.split_screen"
+    if not isinstance(raw, dict) or not isinstance(raw.get("enabled"), bool):
+        raise editorial.PolicyError(f"{label}.enabled ist true oder false.")
+    if not raw["enabled"]:
+        return None
+    try:
+        conf = float(raw["min_binding_confidence"])
+    except (KeyError, TypeError, ValueError):
+        raise editorial.PolicyError(f"{label}.min_binding_confidence fehlt oder ist keine Zahl.") from None
+    if not 0.0 < conf <= 1.0:
+        raise editorial.PolicyError(f"{label}.min_binding_confidence liegt über 0 und höchstens bei 1.")
+    return SplitScreenRules(min_binding_confidence=conf)
+
+
+def _overlap(w: dict) -> bool:
+    return w.get("overlap") is True
+
+
+def _sprecher_allein(words: list[dict], t: float) -> str | None:
+    """Der Sprecher, der bei ``t`` allein spricht (Wort ohne ``overlap``), sonst None."""
+    treffer = {str(w.get("speaker")) for w in words if w.get("speaker") is not None and float(w["start"]) <= t <= float(w["end"])}
+    if len(treffer) != 1 or any(_overlap(w) for w in words if float(w["start"]) <= t <= float(w["end"])):
+        return None
+    return next(iter(treffer))
+
+
+def speaker_face_binding(
+    einstellung: Einstellung,
+    positionen_xy: list[tuple[float, float]],
+    words: list[dict],
+    vorsprung: float = SPRECHER_VORSPRUNG,
+) -> dict[str, dict]:
+    """Je Diarisierungs-Sprecher die Sitzposition in dieser Einstellung: ``{position, x, confidence, votes}``.
+
+    Je Abtastpunkt mit genau einem Sprecher ohne Überlappung stimmt ``sprecher_position`` für eine Position.
+    ``confidence`` = Anteil der häufigsten Position an den Stimmen des Sprechers mal
+    ``min(1, Stimmen / BINDUNG_MIN_STIMMEN)``. Landen zwei Sprecher auf derselben Position, ist keine der
+    beiden Bindungen gesichert (``confidence`` 0)."""
+    if len(positionen_xy) < 2:
+        return {}
+    stimmen: dict[str, list[int]] = {}
+    for a in einstellung.abtastungen:
+        spk = _sprecher_allein(words, a.t)
+        if spk is None:
+            continue
+        idx = sprecher_position([a], positionen_xy, vorsprung)
+        if idx is not None:
+            stimmen.setdefault(spk, []).append(idx)
+    aus: dict[str, dict] = {}
+    for spk, liste in sorted(stimmen.items()):
+        best = max(set(liste), key=lambda i: (liste.count(i), -i))
+        anteil = liste.count(best) / len(liste)
+        conf = anteil * min(1.0, len(liste) / BINDUNG_MIN_STIMMEN)
+        aus[spk] = {"position": best, "x": round(float(positionen_xy[best][0]), 1), "confidence": round(conf, 3), "votes": len(liste)}
+    belegt: dict[int, list[str]] = {}
+    for spk, b in aus.items():
+        belegt.setdefault(b["position"], []).append(spk)
+    for spks in belegt.values():
+        if len(spks) > 1:
+            for spk in spks:
+                aus[spk]["confidence"] = 0.0
+    return aus
+
+
+def overlap_spans(words: list[dict], luecke_s: float = OVERLAP_LUECKE_S) -> list[tuple[float, float, list[str]]]:
+    """Stellen mit überlappender Rede aus Wörtern mit ``overlap: true`` (Vertrag Lane P1, Sprecher aus
+    ``speakers`` oder ``speaker``): ``(start, ende, sprecher)``, sortiert."""
+    aus: list[list] = []
+    for w in sorted((w for w in words if _overlap(w)), key=lambda w: float(w["start"])):
+        spk = {str(s) for s in (w.get("speakers") or []) if s is not None} | ({str(w["speaker"])} if w.get("speaker") is not None else set())
+        if aus and float(w["start"]) - aus[-1][1] <= luecke_s:
+            aus[-1][1] = max(aus[-1][1], float(w["end"]))
+            aus[-1][2] |= spk
+        else:
+            aus.append([float(w["start"]), float(w["end"]), spk])
+    return [(round(a, 3), round(b, 3), sorted(s)) for a, b, s in aus]
+
+
+def split_bei_overlap(
+    ziele_liste: list[Ziel],
+    overlaps: list[tuple[float, float, list[str]]],
+    bindung: dict[str, dict],
+    rules: SplitScreenRules,
+    min_s: float = MIN_ZIEL_S,
+) -> list[Ziel]:
+    """An Stellen überlappender Rede (mindestens ``min_s`` lang) das Bild teilen, aber nur, wenn zwei der
+    beteiligten Sprecher mit ``confidence`` ab ``rules.min_binding_confidence`` an verschiedene Positionen
+    gebunden sind. Sonst bleibt jedes Ziel, wie es ist (konservativ)."""
+    stellen = []
+    for a, b, spk in overlaps:
+        gebunden = [bindung[s] for s in spk if s in bindung and bindung[s]["confidence"] >= rules.min_binding_confidence]
+        xs = sorted({g["x"] for g in gebunden})
+        if b - a >= min_s and len(xs) >= 2:
+            stellen.append((a, b, xs[0], xs[-1]))
+    if not stellen:
+        return ziele_liste
+    aus: list[Ziel] = []
+    for z in ziele_liste:
+        grenzen = sorted({z.start_s, z.ende_s, *(t for a, b, _x0, _x1 in stellen for t in (a, b) if z.start_s < t < z.ende_s)})
+        for t0, t1 in zip(grenzen, grenzen[1:]):
+            teil = Ziel(t0, t1, z.cx, z.cy, z.anker, z.grund, z.breite, list(z.auswahl), z.zoom, z.layout)
+            stelle = next(((x0, x1) for a, b, x0, x1 in stellen if a <= t0 and t1 <= b), None)
+            if stelle is not None and t1 - t0 >= min_s:
+                teil.cx, teil.auswahl, teil.layout, teil.grund, teil.anker = stelle[0], [stelle[0], stelle[1]], "geteilt", "overlap_gebunden", 0.5
+            aus.append(teil)
+    return aus
+
+
 __all__ = [
+    "BINDUNG_MIN_STIMMEN",
+    "SPLIT_SCREEN_SWITCH",
+    "SplitScreenRules",
+    "overlap_spans",
+    "speaker_face_binding",
+    "split_bei_overlap",
+    "split_screen_rules",
     "Abtastung",
     "ZOOM_MAX",
     "ZOOM_MIN",

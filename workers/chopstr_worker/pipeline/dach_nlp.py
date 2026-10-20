@@ -4,7 +4,9 @@
    („3. Platz" ist keine Grenze) und Dezimalzahlen.
 2) Verbklammer-Schutz (spaCy, optional): kein Schnitt zwischen finitem Hilfs-/Modalverb und
    Vollverb/Partikel. Fehlt spaCy oder das Modell, liefert ``forbidden_cut_ranges`` ``[]`` und
-   setzt ``verb_bracket_available = False``.
+   setzt ``verb_bracket_available = False``. Fassung 2 (Lane P1, ``rule = "v2"``): zusätzlich zu-Infinitiv,
+   Korrelate („zwar … aber") und trennbare Partikeln ohne Satzzeichen (``bracket_extensions``,
+   ``extension_cut_ranges``, ``open_correlates``); ohne ``rule`` gilt das Verhalten vor Lane P1.
 3) Verbotene Clip-Enden: letzter Satz endet auf Open-Loop-Konnektor („aber", „deshalb", „nämlich").
 4) Füllwörter: äh/ähm raus; Modalpartikeln (halt, eigentlich, mal, ja, doch) BEHALTEN. Nur Vorschläge.
 5) Negations-Flags pro Wort (Caption-QA, Sinntreue, „nicht" nie allein in neue Zeile).
@@ -278,6 +280,48 @@ _PERSONAL_PRONOUNS = frozenset({"ich", "du", "er", "sie", "es", "wir", "ihr", "m
 _BRACKET_MAX_WORDS = 40
 _RIGHT_SCAN_WORDS = 10
 
+# -- Verbklammer-Erweiterung (Lane P1, Fassung 2) ---------------------------------------------------
+# Nur über ``bracket_heuristic(..., rule="v2")``, ``forbidden_cut_ranges(..., rule="v2")`` und
+# ``open_correlates``. Die Satzgrenzen und ihr Web-Port lesen nichts davon (Parität P5 bleibt).
+BRACKET_RULES = ("v1", "v2")
+# Einleitungen eines Infinitivsatzes mit zu („um mehr zu investieren"). Bewusst NICHT in ``SUBORDINATORS``:
+# die Liste trägt die Satzgrenzen (``PAUSE_OPEN_END_WORDS``, ``_comma_boundary``) und ihren Web-Port, und
+# „um", „ohne", „statt" sind meist Präpositionen („um 8 Uhr", „ohne Zucker"). Als Einleitung zählen sie
+# nur, wenn ein zu-Infinitiv folgt.
+INFINITIVE_INTRODUCERS = ("um", "ohne", "statt", "anstatt")
+SUBORDINATORS_V2 = SUBORDINATORS + INFINITIVE_INTRODUCERS
+# Partikelinventar für trennbare Verben ohne Satzzeichen nach der Partikel (Fassung 2).
+SEPARABLE_PARTICLES_V2 = (
+    "ab", "an", "auf", "aus", "bei", "ein", "mit", "nach", "vor", "zu", "zurück", "weg", "weiter", "fest", "los",
+    "zusammen", "her", "hin",
+)  # fmt: skip
+# Korrelate: erster Teil und mögliche zweite Teile („zwar … aber", „je … desto").
+CORRELATES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("zwar", ("aber", "doch", "jedoch", "allerdings")),
+    ("nicht nur", ("sondern", "auch")),
+    ("entweder", ("oder",)),
+    ("weder", ("noch",)),
+    ("je", ("desto", "umso", "um so")),
+    ("sowohl", ("als", "wie")),
+)
+# Mit diesen Wörtern beginnt ein neuer Teilsatz: eine Partikel davor steht am Satzende („Wir fangen an und
+# dann …"), nicht vor ihrem Objekt („an der Kasse").
+_CLAUSE_BREAK_WORDS = frozenset(
+    {"und", "aber", "oder", "denn", "sondern", "doch", "jedoch", "also", "dann"} | set(SUBORDINATORS)
+)  # fmt: skip
+_ZU_INFIX = re.compile(
+    r"^(?:ab|an|auf|aus|bei|ein|mit|nach|vor|zurück|weg|weiter|fest|los|zusammen|her|hin|dar|durch|um|vorbei|fort)"
+    r"zu[a-zäöüß]{3,}(?:en|ern|eln)$"
+)
+_SHORT_INFINITIVES = frozenset({"sein", "tun"})
+# Adjektive auf -en nach „zu" („zu offen") sind kein Infinitiv.
+_ADJECTIVES_EN = frozenset({"offen", "trocken", "eigen", "verschieden", "gelegen", "verlegen", "bescheiden", "golden"})
+# „je" ist nur vor einem Komparativ Korrelat („je früher, desto besser"), nicht in „je Person", „je einer".
+_NOT_COMPARATIVE = frozenset(
+    {"einer", "jeder", "der", "ihrer", "unser", "euer", "dieser", "jener", "aber", "oder", "über", "unter", "hinter",
+     "wieder", "immer", "nachher", "vorher"}
+)  # fmt: skip
+
 
 def _text(w: dict | str) -> str:
     return str(w.get("text", "") if isinstance(w, dict) else w).strip()
@@ -367,10 +411,31 @@ def bracket_heuristic(
     particles: tuple[str, ...] | list[str] | None = None,
     subordinators: tuple[str, ...] | list[str] | None = None,
     auxiliaries: tuple[str, ...] | list[str] | None = None,
+    rule: str = "v1",
 ) -> dict:
     """Ist zwischen ``left_words`` und ``right_words`` eine Satzklammer offen? Ohne spaCy.
 
-    Drei Signale, jedes nur bei eindeutiger Lage (Plan AP3):
+    ``rule = "v1"`` (Standard) sind die drei Signale aus AP3 (``_bracket_heuristic_v1``), unverändert, denn die
+    Satzgrenzen (``_pause_boundary_accepted``, ``_comma_boundary``) und ihr Web-Port rufen die Funktion ohne
+    ``rule`` auf und müssen gleich bleiben (P5). ``rule = "v2"`` (Fassung 2, Lane P1) prüft danach zusätzlich
+    zu-Infinitiv, Korrelat und trennbare Partikel ohne Satzzeichen (``bracket_extensions``)."""
+    if rule not in BRACKET_RULES:
+        raise ValueError(f"unbekannte Klammerregel {rule!r} (erlaubt: {', '.join(BRACKET_RULES)})")
+    res = _bracket_heuristic_v1(left_words, right_words, particles, subordinators, auxiliaries)
+    if res["open"] or rule == "v1":
+        return res
+    ext = bracket_extensions(left_words, right_words, particles=particles)
+    return ext if ext["open"] else res
+
+
+def _bracket_heuristic_v1(
+    left_words: list,
+    right_words: list,
+    particles: tuple[str, ...] | list[str] | None = None,
+    subordinators: tuple[str, ...] | list[str] | None = None,
+    auxiliaries: tuple[str, ...] | list[str] | None = None,
+) -> dict:
+    """Die drei Signale aus AP3, jedes nur bei eindeutiger Lage (Plan AP3):
       (a) trennbares Verb: rechts beginnt kleingeschrieben eine Verbpartikel mit Satzzeichen
           („an."), links steht ein Verb;
       (b) Nebensatz: links steht im laufenden Teilsatz ein Konnektor („dass", „weil") und danach kein
@@ -470,6 +535,185 @@ def bracket_heuristic(
         if _has_terminal_punct(t):
             break
     return out
+
+
+def zu_infinitive_end(seq: list, k: int) -> int | None:
+    """Beginnt bei ``seq[k]`` ein zu-Infinitiv? Dann der Index des Infinitivs, sonst ``None``.
+
+    „zu" plus kleingeschriebener Infinitiv („zu investieren", „zu sein") oder ein Infinitiv mit eingeschobenem
+    „zu" („anzufangen", „zusammenzuarbeiten"). Kein zu-Infinitiv: „zu meinen Eltern" (Begleiter), „zu offen"
+    (Adjektiv), „zu großen Teilen" (Adjektiv vor Nomen), „zu." (Partikel am Satzende)."""
+    if k >= len(seq):
+        return None
+    t = _text(seq[k])
+    tok = core_token(t)
+    if not _is_lower(t):
+        return None
+    if tok == "zu":
+        if _ends_clause(t) or k + 1 >= len(seq):
+            return None
+        nxt = _text(seq[k + 1])
+        ntok = core_token(nxt)
+        if ntok in _ADJECTIVES_EN or _adjective_before_noun(seq, k + 1):
+            return None
+        if is_infinitive(nxt) or (_is_lower(nxt) and ntok in _SHORT_INFINITIVES):
+            return k + 1
+        return None
+    return k if _ZU_INFIX.match(tok) else None
+
+
+def _scan_zu_infinitive(right: list) -> tuple[int, int] | None:
+    """Erster zu-Infinitiv rechts im selben Teilsatz: ``(Beginn, Infinitiv)`` oder ``None``.
+
+    Der Teilsatz endet an Komma oder Satzzeichen, an einem Konnektor (``_CLAUSE_BREAK_WORDS``), an einer
+    eigenen Einleitung („um", „ohne"; der Infinitiv gehört dann zu ihr), an einem finiten Hilfsverb und an
+    einem Personalpronomen mit Verb (neuer Satz ohne Satzzeichen)."""
+    scan = right[:_RIGHT_SCAN_WORDS]
+    for k, w in enumerate(scan):
+        t = _text(w)
+        tok = core_token(t)
+        if tok in _CLAUSE_BREAK_WORDS or tok in INFINITIVE_INTRODUCERS or tok in AUXILIARY_FORMS:
+            return None
+        if tok in _PERSONAL_PRONOUNS and k + 1 < len(scan) and _is_finite_verb(scan, k + 1):
+            return None
+        end = zu_infinitive_end(scan, k)
+        if end is not None:
+            return k, end
+        if _ends_clause(t):
+            return None
+    return None
+
+
+def _correlate_hits(seq: list) -> list[dict]:
+    """Erste Korrelatteile in ``seq`` mit dem Index des zweiten Teils dahinter (``second_at``, sonst ``None``).
+
+    Kein Korrelat: „und zwar" (Erläuterung), „je" ohne Komparativ („je Person", „je nach Lage")."""
+    toks = [core_token(_text(w)) for w in seq]
+    out: list[dict] = []
+    for k, tok in enumerate(toks):
+        first, end = None, k
+        if tok == "zwar" and not (k > 0 and toks[k - 1] == "und"):
+            first = "zwar"
+        elif tok == "nicht" and k + 1 < len(toks) and toks[k + 1] == "nur":
+            first, end = "nicht nur", k + 1
+        elif tok in ("entweder", "weder", "sowohl"):
+            first = tok
+        elif tok == "je" and k + 1 < len(toks):
+            nxt_raw, nxt = _text(seq[k + 1]), toks[k + 1]
+            comparative = nxt == "mehr" or (len(nxt) >= 4 and nxt.endswith("er") and nxt not in _NOT_COMPARATIVE)
+            if comparative and _is_lower(nxt_raw):
+                first = "je"
+        if first is None:
+            continue
+        seconds = dict(CORRELATES)[first]
+        second_at = None
+        for j in range(end + 1, len(toks)):
+            pair = f"{toks[j]} {toks[j + 1]}" if j + 1 < len(toks) else ""
+            if toks[j] in seconds or pair in seconds:
+                second_at = j
+                break
+        out.append({"first": first, "index": k, "end": end, "expected": seconds, "second_at": second_at})
+    return out
+
+
+def open_correlates(words: list[dict]) -> list[dict]:
+    """Korrelate, deren erster Teil in ``words`` (Clip-Spanne) liegt und deren zweiter Teil dort nicht folgt.
+
+    ``[{first, index, expected}]``; leer, wenn jedes Korrelat in der Spanne geschlossen ist. Ein zweiter Teil
+    ohne ersten („aber", „oder") ist kein offenes Korrelat."""
+    return [
+        {"first": h["first"], "index": h["index"], "expected": h["expected"]}
+        for h in _correlate_hits(words)
+        if h["second_at"] is None
+    ]
+
+
+def bracket_extensions(left_words: list, right_words: list, particles: tuple[str, ...] | list[str] | None = None) -> dict:
+    """Die Prüfungen aus Fassung 2 (Lane P1) an einem Schnitt zwischen ``left_words`` und ``right_words``.
+
+      (d) zu-Infinitiv: rechts folgt im selben Teilsatz ein zu-Infinitiv, der zum Satz links gehört („Wir
+          haben beschlossen | das Projekt zu stoppen."), auch nach „um", „ohne", „statt", „anstatt" links
+          („um | mehr zu investieren"), oder der Schnitt liegt zwischen „zu" und Infinitiv;
+      (e) Korrelat: im Satz links steht ein erster Teil („zwar", „entweder", „nicht nur") ohne seinen
+          zweiten Teil davor;
+      (f) trennbares Verb ohne Satzzeichen: rechts beginnt kleingeschrieben eine Partikel aus
+          ``SEPARABLE_PARTICLES_V2``, danach endet der Text oder beginnt ein neuer Teilsatz, und links steht
+          ein finites Verb („Wir fangen morgen | an und …", aber nicht „| an der Kasse").
+    Ein Sprecherwechsel oder ein Satzzeichen am letzten Wort links schließt jede Klammer."""
+    left = [w for w in left_words if _text(w)]
+    right = [w for w in right_words if _text(w)]
+    out = {"open": False, "signal": None, "detail": "keine offene Klammer erkannt", "available": "heuristic"}
+    if not left or not right:
+        return out
+    lw, rw = left[-1], right[0]
+    if isinstance(lw, dict) and isinstance(rw, dict):
+        ls, rs = lw.get("speaker"), rw.get("speaker")
+        if ls is not None and rs is not None and ls != rs:
+            return out
+    if _has_terminal_punct(_text(lw)):
+        return out
+    r0 = _text(rw)
+    new_sentence = _is_upper(r0) and core_token(r0) in _NEW_SENTENCE_STARTERS
+
+    # (d) zu-Infinitiv
+    if core_token(_text(lw)) == "zu" and not _ends_clause(_text(lw)) and zu_infinitive_end(left[-1:] + right[:1], 0) is not None:
+        return {"open": True, "signal": "zu_infinitive", "detail": f"„zu“ und „{core_token(r0)}“ gehören zusammen", "available": "heuristic"}
+    hit = None if new_sentence else _scan_zu_infinitive(right)
+    if hit is not None:
+        part = _clause(left, clause_level=True)
+        intro = max((k for k, w in enumerate(part) if core_token(_text(w)) in INFINITIVE_INTRODUCERS), default=None)
+        inf = core_token(_text(right[hit[1]]))
+        detail = f"zu-Infinitiv „{inf}“ gehört zum Satz davor"
+        if intro is not None and not any(zu_infinitive_end(part, k) is not None for k in range(intro + 1, len(part))):
+            detail = f"„{core_token(_text(part[intro]))}“ und der zu-Infinitiv „{inf}“ gehören zusammen"
+        return {"open": True, "signal": "zu_infinitive", "detail": detail, "available": "heuristic"}
+
+    # (e) Korrelat
+    sentence = _clause(left, clause_level=False)
+    open_ = [h for h in _correlate_hits(sentence) if h["second_at"] is None]
+    if open_:
+        h = open_[-1]
+        return {
+            "open": True,
+            "signal": "correlate",
+            "detail": f"Korrelat „{h['first']}“ ohne „{h['expected'][0]}“ vor dem Schnitt",
+            "available": "heuristic",
+        }
+
+    # (f) trennbares Verb ohne Satzzeichen
+    inventory = set(SEPARABLE_PARTICLES_V2) | set(particles or ())
+    if _is_lower(r0) and core_token(r0) in inventory:
+        nxt = _text(right[1]) if len(right) > 1 else None
+        boundary = (
+            _ends_clause(r0)
+            or nxt is None
+            or core_token(nxt) in _CLAUSE_BREAK_WORDS
+            or (_is_upper(nxt) and core_token(nxt) in _NEW_SENTENCE_STARTERS)
+        )
+        if boundary and _has_finite_verb(sentence):
+            return {
+                "open": True,
+                "signal": "separable_particle",
+                "detail": f"Verbpartikel „{core_token(r0)}“ gehört zum Verb davor",
+                "available": "heuristic",
+            }
+    return out
+
+
+def extension_cut_ranges(words: list[dict]) -> list[tuple[float, float]]:
+    """Zeitbereiche (Fassung 2), in denen nicht geschnitten werden darf, ohne spaCy: von „um", „ohne", „statt",
+    „anstatt" bis zum Infinitiv ihres zu-Infinitivs und vom ersten bis zum zweiten Teil eines Korrelats."""
+    ranges: list[tuple[float, float]] = []
+    for k, w in enumerate(words):
+        if core_token(_text(w)) not in INFINITIVE_INTRODUCERS:
+            continue
+        hit = _scan_zu_infinitive(words[k + 1 :])
+        if hit is not None:
+            ranges.append((float(w["end"]), float(words[k + 1 + hit[1]]["start"])))
+    for h in _correlate_hits(words):
+        if h["second_at"] is not None:
+            ranges.append((float(words[h["end"]]["end"]), float(words[h["second_at"]]["start"])))
+    return ranges
 
 
 def resolve_sentence_rule(words: list[dict], rule: str) -> str:
@@ -820,8 +1064,12 @@ def bracket_open_at_cut(
     rule: str = "v2",
     fallback: str = "heuristic",
     lists: dict | None = None,
+    bracket_rule: str = "v1",
 ) -> dict:
     """Ist an einem Schnitt vor Wort ``cut_word_idx`` eine Verbklammer offen?
+
+    ``bracket_rule = "v2"`` (Fassung 2, Lane P1) prüft zusätzlich zu-Infinitiv, Korrelat und trennbare
+    Partikel ohne Satzzeichen (``bracket_extensions``, ``extension_cut_ranges``); ``"v1"`` ist das Tor aus AP3.
 
     Geprüft wird der Text aus Vorsatz und Folgesatz zusammen, nicht ein Satz für sich (Befund 2: so
     war das Tor per Konstruktion immer legal). Mit spaCy über ``forbidden_cut_ranges`` auf dem
@@ -835,7 +1083,7 @@ def bracket_open_at_cut(
     pipe = nlp()
     if pipe is not None:
         joined = left + right
-        ranges = forbidden_cut_ranges(" ".join(_text(x) for x in joined), joined)
+        ranges = forbidden_cut_ranges(" ".join(_text(x) for x in joined), joined, rule=bracket_rule)
         t = (float(left[-1].get("end", 0.0)) + float(right[0].get("start", 0.0))) / 2.0
         if not cut_is_legal(t, ranges):
             return {"open": True, "signal": "spacy", "detail": "Schnitt in einer Verbklammer", "available": "spacy"}
@@ -849,6 +1097,7 @@ def bracket_open_at_cut(
         particles=lists.get("particles"),
         subordinators=lists.get("subordinators"),
         auxiliaries=lists.get("auxiliaries"),
+        rule=bracket_rule,
     )
 
 
@@ -864,12 +1113,17 @@ def nlp_status() -> str:
     return "spacy" if nlp() is not None else "heuristic"
 
 
-def forbidden_cut_ranges(sentence_text: str, word_times: list[dict]) -> list[tuple[float, float]]:
+def forbidden_cut_ranges(sentence_text: str, word_times: list[dict], rule: str = "v1") -> list[tuple[float, float]]:
     """Zeitbereiche innerhalb eines Satzes, in denen NICHT geschnitten werden darf (Verbklammer).
-    Ohne spaCy: leere Liste (siehe ``verb_bracket_available``)."""
+    Ohne spaCy: leere Liste (siehe ``verb_bracket_available``). Mit ``rule = "v2"`` (Fassung 2, Lane P1)
+    kommen die Bereiche aus ``extension_cut_ranges`` dazu (zu-Infinitiv nach Einleitung, Korrelat), auch
+    ohne spaCy."""
+    if rule not in BRACKET_RULES:
+        raise ValueError(f"unbekannte Klammerregel {rule!r} (erlaubt: {', '.join(BRACKET_RULES)})")
+    extra = extension_cut_ranges(word_times) if rule == "v2" else []
     pipe = nlp()
     if pipe is None:
-        return []
+        return extra
     doc = pipe(sentence_text)
     offsets, pos = [], 0
     for i, w in enumerate(word_times):
@@ -899,7 +1153,7 @@ def forbidden_cut_ranges(sentence_text: str, word_times: list[dict]) -> list[tup
                 a, b = widx(tok), widx(right)
                 if a is not None and b is not None:
                     ranges.append((word_times[a]["end"], word_times[b]["start"]))
-    return ranges
+    return ranges + extra
 
 
 def cut_is_legal(t: float, forbidden: list[tuple[float, float]]) -> bool:
@@ -1061,6 +1315,15 @@ __all__ = [
     "VERB_PARTICLES",
     "bracket_heuristic",
     "bracket_open_at_cut",
+    "BRACKET_RULES",
+    "CORRELATES",
+    "INFINITIVE_INTRODUCERS",
+    "SEPARABLE_PARTICLES_V2",
+    "SUBORDINATORS_V2",
+    "bracket_extensions",
+    "extension_cut_ranges",
+    "open_correlates",
+    "zu_infinitive_end",
     "cut_boundary_kind",
     "is_infinitive",
     "is_participle",

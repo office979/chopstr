@@ -35,9 +35,9 @@ export function ProductMockup() {
                 <Tag>Zahl als Beleg</Tag>
               </div>
               <div className="mt-4 flex gap-2">
-                <span className="rounded-full bg-text px-3.5 py-1.5 text-xs font-medium text-black">Nehmen</span>
-                <span className="rounded-full border border-white/15 px-3.5 py-1.5 text-xs text-text-2">Länger</span>
-                <span className="rounded-full border border-white/15 px-3.5 py-1.5 text-xs text-text-2">Kürzer</span>
+                <span className="rounded-full bg-text px-3.5 py-1.5 text-xs font-medium text-black">Annehmen</span>
+                <span className="rounded-full border border-white/15 px-3.5 py-1.5 text-xs text-text-2">Ablehnen</span>
+                <span className="rounded-full border border-white/15 px-3.5 py-1.5 text-xs text-text-2">An Redaktion</span>
               </div>
             </div>
 
@@ -49,7 +49,7 @@ export function ProductMockup() {
               </div>
             ))}
 
-            {/* Zeitleiste */}
+            {/* Wo die Stelle im ganzen Video liegt: eine Anzeige, kein Schnittwerkzeug */}
             <div className="mt-1 flex h-8 items-end gap-[3px]">
               {BARS.map((h, i) => (
                 <span

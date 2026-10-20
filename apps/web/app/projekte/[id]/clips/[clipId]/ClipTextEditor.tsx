@@ -227,7 +227,7 @@ export function ClipTextEditor({
       <p className="mb-3 text-sm text-text-2">
         {!canEdit
           ? "Klick ein Wort an, um dorthin zu springen."
-          : "Klick ein Wort an. Mit dem Papierkorb oben nimmst du es aus dem Untertitel: gesagt bleibt gesagt, geschrieben steht es nicht mehr. Es bleibt durchgestrichen stehen - klickst du es wieder an, holt derselbe Knopf es zurück. Doppelklick ändert die Schreibweise. Soll ein Wort ganz aus dem Video, geht das unter „Schnitt“ mit „Teil entfernen“."}
+          : "Klick ein Wort an. Mit dem Papierkorb oben nimmst du es aus dem Untertitel: gesagt bleibt gesagt, geschrieben steht es nicht mehr. Es bleibt durchgestrichen stehen; klickst du es wieder an, holt derselbe Knopf es zurück. Doppelklick ändert die Schreibweise."}
       </p>
 
       {/* Zusammengeklappt nur rund drei Zeilen, die mit dem Ton mitlaufen. Der ganze Text stand

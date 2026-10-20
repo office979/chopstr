@@ -411,13 +411,48 @@ def _is_noun(words: Sequence[Mapping[str, Any]], toks: list[tuple[int, str]], k:
     return _upper(words, i) and core not in FORMAL_FORMS
 
 
+# Regel 3 (Launch-Auftrag, Review 3): expletives „es“ braucht kein Bezugswort („Es gibt drei häufige Fehler“).
+# Nur relevant, wenn eine Policy „es“ in ``einstieg.pronomen`` aufnimmt; Wortliste ohne Messung (H).
+EXPLETIVE_ES = (
+    "es gibt", "es geht um", "es geht darum", "es lohnt sich", "es kommt darauf an", "es hängt davon ab",
+    "es ist wichtig", "es ist so", "es fällt auf", "es braucht", "es fehlt", "es war einmal",
+)  # fmt: skip
+
+
+def _cataphora_resolved(words: Sequence[Mapping[str, Any]], toks: list[tuple[int, str]], k: int) -> bool:
+    """Regel 3: Das Pronomen an Position ``k`` wird im selben Satz nach vorn aufgelöst. Nach einem Doppelpunkt
+    oder Komma folgt ein Nomen, direkt oder nach Artikel oder Possessiv („Er hat mein Leben verändert: mein
+    Mentor Thomas.“, „Sie hat alles verändert, die Kündigung damals.“)."""
+    for n in range(k + 1, len(toks) - 1):
+        raw = _raw(words[toks[n][0]])
+        j, nxt = toks[n + 1]
+        if raw.endswith(":"):
+            if (_upper(words, j) and nxt not in FORMAL_FORMS and nxt not in NOT_A_NAME) or (
+                nxt in DETERMINERS and n + 2 < len(toks) and _upper(words, toks[n + 2][0])
+            ):
+                return True
+        elif raw.endswith(","):
+            # Nachgestellte Apposition am Satzende ohne eigenes Verb; „Sie hat gesagt, die Kunden zahlen nicht.“
+            # ist ein Nebensatz und löst nichts auf.
+            if nxt not in DETERMINERS or n + 2 >= len(toks) or not _upper(words, toks[n + 2][0]):
+                continue
+            rest = toks[n + 3 :]
+            verbish = any(not _upper(words, i) and (t in dach_nlp.AUXILIARY_FORMS or t.endswith(("t", "en", "st"))) for i, t in rest)
+            if len(rest) <= 2 and not verbish:
+                return True
+    return False
+
+
 def unresolved_pronoun(
     words: Sequence[Mapping[str, Any]], sents: Sequence[Sentence], first: int, last: int, policy: Any = None
 ) -> GateResult:
     """Pronomen aus ``einstieg.pronomen`` im ersten Satz vor jedem Nomen, also ohne Antezedens im Clip.
 
-    „Es“ steht nicht in der Liste (meist Platzhalter). Die Höflichkeitsform („Sie müssen wissen“, „Ihr
-    Unternehmen“) und „ihr“ als Anrede an mehrere sind keine Treffer; ein Name am Satzanfang ist Bezug.
+    „Es“ steht nicht in der Liste (meist Platzhalter); nimmt eine Policy es auf, bleibt expletives „es“
+    (``EXPLETIVE_ES``) trotzdem kein Treffer. Die Höflichkeitsform („Sie müssen wissen“, „Ihr Unternehmen“)
+    und „ihr“ als Anrede an mehrere sind keine Treffer; ein Name am Satzanfang ist Bezug. Ein kataphorisches
+    Pronomen, das im selben Satz aufgelöst wird (``_cataphora_resolved``), ist kein Treffer (Regel 3). Ein
+    Treffer ist nur ein regelbasierter Hinweis, kein bestätigter Fehler.
     Heilbar nach vorn: der Bezug steht meist im Satz davor."""
     key = "unresolved_pronoun"
     pronouns = _pronouns(policy)
@@ -426,6 +461,10 @@ def unresolved_pronoun(
         if _is_noun(words, toks, k):
             break
         if core not in pronouns or _is_formal_sie(words, toks, k) or _is_plural_address(toks, k):
+            continue
+        if core == "es" and _find(toks[k : k + 4], EXPLETIVE_ES):
+            continue
+        if _cataphora_resolved(words, toks, k):
             continue
         return _result(key, policy, False, f"Pronomen „{_raw(words[i])}“ ohne Bezug im Clip", [i], "front")
     return _result(key, policy, True, "kein Pronomen ohne Bezug am Anfang")
@@ -897,11 +936,16 @@ def later_correction(
     und ``laenge.kontext_zugabe_s``)."""
     key = "later_correction"
     hits = _in_clip_corrections(sents, first, last) + [
-        h for h in story_graph.find_later_qualifications(list(sents), first, last, rule="v2") if h.get("kind") == "correction"
+        h for h in story_graph.find_later_qualifications(list(sents), first, last, rule="v2", policy=policy)
+        if h.get("kind") == "correction"
     ]
     for h in hits:
         idx = int(h["sentence_idx"])
         target = min(idx + 1, len(sents) - 1)
+        if "context_class" in h:
+            # Claim-Index (Lane P3): die Eigenkorrektur mit anderer Zahl oder Verneinung ist selbst der Satz,
+            # der richtigstellt; mit Korrekturmarker im Satz davor bleibt es beim Markersatz plus einem Satz.
+            target = int(h["heal_to_sentence_idx"]) if h.get("heal_to_sentence_idx") is not None else idx
         out = _result(
             key, policy, False,
             f"Spätere Korrektur „{h['marker']}“ nach {h['seconds_after']} s bezieht sich auf den Clip",

@@ -418,7 +418,7 @@ def test_evaluation_of_a_filled_rating(tmp_path):
     assert clip["mittel"]["v1"]["quellentreue"] == 2.0 and clip["mittel"]["v2"]["quellentreue"] == 3.0
     assert clip["streuung"]["v1"]["quellentreue"] == 0.0 and clip["streuung"]["v1"]["natuerlichkeit"] is None
     assert clip["mittel"]["v1"]["natuerlichkeit"] is None and clip["anzahl"]["v2"]["eigenstaendigkeit"] == 4
-    assert clip["praeferenz"] == {"v1": 0, "v2": 3, "gleich": 1, "offen": 0}
+    assert clip["praeferenz"] == {"v1": 0, "v2": 3, "gleich": 1, "beide_unbrauchbar": 0, "offen": 0}
     assert clip["vorzeichentest_p"] == 0.25
     assert res["hook"]["mittel"]["v2"]["deckung"] == 3.0
     assert res["urteil"]["urteil"] == "Erfüllt"
@@ -442,7 +442,7 @@ def test_evaluation_of_a_filled_rating(tmp_path):
         "**Urteil: Erfüllt**",
         "| Quellentreue | 2,00 (0,00, n = 4) | 3,00 (0,00, n = 4) |",
         "| Natürlichkeit | nicht bewertet (keine, n = 0) | nicht bewertet (keine, n = 0) |",
-        "Präferenz: v1 0, v2 3, gleich 1, offen 0. Vorzeichentest (zweiseitig, ohne Gleichstände): p = 0,250.",
+        "Präferenz: v1 0, v2 3, gleich 1, beide unbrauchbar 0, offen 0. Vorzeichentest (zweiseitig, ohne Gleichstände): p = 0,250.",
         "| Tor (gate) | 1 (12,5 %) | 1 (16,7 %) |",
         "| zu lang (too_long) | 1 (12,5 %) | 0 |",
         "| ohne Grundangabe, Stufe Suche (ohne_grund/search) | 1 (12,5 %) | 0 |",
@@ -615,3 +615,264 @@ def test_kuerzung_passes_cases_with_local_seams(name):
     run = bc.run_variant(variant, _sources((name,))[0], dict(bc.DEFAULT_BRIEF), providers_llm.HEURISTIC_PROVIDER, 5)
     assert any(c["removed_spans"] for c in run["clip_candidates"] if c["decision"] == "accept"), "die Kürzung wirkt hier"
     assert run["editorial_v1"] == {"bestanden": True, "gruende": []}
+
+
+# -- Launch-Messsystem: beide unbrauchbar, Bewerter, Übereinstimmung, Wettbewerbsmodus ----------------
+
+
+def test_sheets_carry_an_empty_rater_field(generated):
+    assert _load(generated, "sheet")["rater"] is None and _load(generated, "hook_sheet")["rater"] is None
+    assert "beide_unbrauchbar" in _load(generated, "rubric")["praeferenz"]
+
+
+def test_both_unusable_needs_no_criteria(tmp_path):
+    out = _synthetic_dir(tmp_path)
+    _fill(out)
+    sheet = _load(out, "sheet")
+    sheet["paare"][1]["bewertung"] = {"A": dict.fromkeys(bc.CRITERIA), "B": dict.fromkeys(bc.CRITERIA), "praeferenz": "beide_unbrauchbar", "notiz": ""}
+    _write(out, "sheet", sheet)
+    clip = bc.evaluate(out)["clip"]
+    assert clip["praeferenz"]["beide_unbrauchbar"] == 1 and clip["bewertete_paare"] == 4
+    assert clip["bewerter"] == [None] and clip["uebereinstimmung"] is None
+
+
+def _rater_copy(out, tmp_path, rater, flip_first=False):
+    sheet = _load(out, "sheet")
+    sheet["rater"] = rater
+    if flip_first:
+        pair = sheet["paare"][1]["bewertung"]
+        pair["praeferenz"] = "B" if pair["praeferenz"] == "A" else "A"
+    path = tmp_path / f"{rater or 'ohne'}.json"
+    path.write_text(json.dumps(sheet, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_merging_raters_reports_agreement(tmp_path):
+    out = _synthetic_dir(tmp_path / "lauf")
+    _fill(out)
+    a, b = _rater_copy(out, tmp_path, "r1"), _rater_copy(out, tmp_path, "r2", flip_first=True)
+    hook = _load(out, "hook_sheet")
+    hook["rater"] = "r3"
+    (tmp_path / "hooks_r3.json").write_text(json.dumps(hook, ensure_ascii=False), encoding="utf-8")
+    res = bc.evaluate(out, [a, b, tmp_path / "hooks_r3.json"])
+    clip = res["clip"]
+    assert clip["bewerter"] == ["r1", "r2"] and clip["anzahl"]["v1"]["quellentreue"] == 8
+    assert clip["praeferenz"]["v2"] + clip["praeferenz"]["v1"] == 6 and clip["praeferenz"]["gleich"] == 2
+    pair = clip["uebereinstimmung"]["bewerterpaare"][0]
+    assert pair["bewerter"] == ["r1", "r2"] and pair["paare"] == 4 and pair["gleich_anteil"] == 0.75
+    assert res["hook"]["bewerter"] == ["r3"]
+    report = bc.report_markdown(res)
+    assert "| r1 und r2 | 4 | 75,0 % |" in report and "Bewerter: r1, r2." in report
+    assert "Bewerter: r3 (ein Bogen, keine Übereinstimmung berechenbar)." in report
+
+
+def test_merging_raters_errors(tmp_path):
+    out = _synthetic_dir(tmp_path / "lauf")
+    _fill(out)
+    with pytest.raises(SystemExit, match="braucht jeder Bogen eine Bewerter-ID"):
+        bc.evaluate(out, [_rater_copy(out, tmp_path, "r1"), _rater_copy(out, tmp_path, None)])
+    twin = tmp_path / "zwilling"
+    twin.mkdir()
+    with pytest.raises(SystemExit, match="Bewerter-ID r1 steht in mehreren Bögen"):
+        bc.evaluate(out, [_rater_copy(out, tmp_path, "r1"), _rater_copy(out, twin, "r1")])
+    stray = tmp_path / "fremd.json"
+    stray.write_text(json.dumps({"paare": [{"paar_id": "X1"}]}), encoding="utf-8")
+    with pytest.raises(SystemExit, match="passt zu keinem Bogen"):
+        bc.evaluate(out, [stray])
+    with pytest.raises(SystemExit, match="fehlt"):
+        bc.evaluate(out, [tmp_path / "nicht_da.json"])
+    with pytest.raises(SystemExit, match="kein Bogen mit Paaren"):
+        bc._sheet_kind({"paare": []}, {"paare": {}}, "leer.json")
+
+
+def test_cohen_kappa_and_agreement():
+    assert bc.cohen_kappa(["A", "A", "B", "B"], ["A", "A", "B", "B"]) == 1.0
+    assert bc.cohen_kappa(["A", "B", "A", "B"], ["A", "A", "B", "B"]) == 0.0
+    assert bc.cohen_kappa(["A", "A"], ["A", "A"]) is None and bc.cohen_kappa([], []) is None
+    agr = bc.agreement({"r1": {"P1": "v1", "P2": "v2", "P3": "offen"}, "r2": {"P1": "v1", "P2": "v1", "P3": "v2"}})
+    assert agr["bewerterpaare"][0]["paare"] == 2 and agr["gleich_anteil_mittel"] == 0.5
+    assert bc.agreement({"r1": {}}) is None
+
+
+def _clip_dir(base, name, quelle, start, end, rang=None, text="Ein Satz."):
+    folder = base / name
+    folder.mkdir(parents=True)
+    doc = {"start_s": start, "end_s": end, "text": text, "quelle": quelle}
+    if rang is not None:
+        doc["rang"] = rang
+    (folder / bc.EXTERNAL_CLIP_FILE).write_text(json.dumps(doc), encoding="utf-8")
+    (folder / f"{name}_opusclip_export.mp4").write_bytes(b"\x00\x00")
+    return folder
+
+
+def _extern_material(tmp_path):
+    own, ext = tmp_path / "eigene", tmp_path / "extern"
+    _clip_dir(own, "c1", "folge1", 0, 30, rang=1)
+    _clip_dir(own, "c2", "folge1", 100, 140, rang=2)
+    _clip_dir(own, "c3", "folge2", 10, 40)
+    _clip_dir(ext, "x1", "folge1", 102, 138, rang=1)
+    _clip_dir(ext, "x2", "folge1", 300, 330, rang=2)
+    _clip_dir(ext, "x3", "folge2", 12, 41)
+    _clip_dir(ext, "x4", "folge2", 500, 520)
+    return own, ext
+
+
+def test_load_clip_folder_and_errors(tmp_path):
+    own, ext = _extern_material(tmp_path)
+    clips = bc.load_clip_folder(ext)
+    assert [c["candidate_id"] for c in clips["folge1"]] == ["x1", "x2"] and clips["folge2"][0]["segmente"][0]["von_s"] == 12.0
+    bad = tmp_path / "kaputt"
+    _clip_dir(bad, "k1", "q", 5, 1)
+    with pytest.raises(SystemExit, match="end_s muss nach start_s"):
+        bc.load_clip_folder(bad)
+    two = tmp_path / "zwei"
+    folder = _clip_dir(two, "z1", "q", 0, 1)
+    (folder / "noch_eins.mp4").write_bytes(b"\x00")
+    with pytest.raises(SystemExit, match="genau eine .mp4"):
+        bc.load_clip_folder(two)
+    missing = tmp_path / "ohne_text"
+    (missing / "m1").mkdir(parents=True)
+    (missing / "m1" / bc.EXTERNAL_CLIP_FILE).write_text(json.dumps({"start_s": 0, "end_s": 1, "quelle": "q"}), encoding="utf-8")
+    with pytest.raises(SystemExit, match="text fehlt"):
+        bc.load_clip_folder(missing)
+    with pytest.raises(SystemExit, match="gibt es nicht"):
+        bc.load_clip_folder(tmp_path / "nichts")
+    (tmp_path / "leer").mkdir()
+    with pytest.raises(SystemExit, match="kein Unterordner"):
+        bc.load_clip_folder(tmp_path / "leer")
+
+
+@pytest.mark.parametrize(("comparison", "pairs", "surplus"), [("voller_output", 3, 1), ("momentwahl", 3, 1), ("schnitt", 2, 3)])
+def test_extern_pairs_by_source_and_overlap(tmp_path, comparison, pairs, surplus):
+    own, ext = _extern_material(tmp_path)
+    sheet, key, media = bc.make_extern_pairs(bc.load_clip_folder(own), bc.load_clip_folder(ext), 5, comparison)
+    assert len(sheet["paare"]) == pairs and len(key["nicht_gepaart"]) == surplus
+    assert key["modus"] == "extern" and key["vergleichsart"] == comparison and sheet["rater"] is None
+    by_source = {}
+    for entry in key["paare"].values():
+        by_source.setdefault(entry["quelle"], []).append(sorted((entry["candidate_A"], entry["candidate_B"])))
+    assert sorted(["c2", "x1"]) in by_source["folge1"] and by_source["folge2"] == [["c3", "x3"]]
+    assert len(media) == 2 * pairs
+    with pytest.raises(SystemExit, match="--vergleichsart"):
+        bc.make_extern_pairs({}, {}, 1, "alles")
+
+
+def test_generate_extern_hides_origin_and_evaluates(tmp_path):
+    own, ext = _extern_material(tmp_path)
+    out = tmp_path / "lauf"
+    bc.generate_extern(bc.load_clip_folder(own), bc.load_clip_folder(ext), out, "voller_output", seed=3)
+    text = (out / bc.FILES["sheet"]).read_text(encoding="utf-8")
+    assert "opusclip" not in text and "extern" not in text.replace("Herkunft", "") and "chopstr" not in text
+    sheet = _load(out, "sheet")
+    for pair in sheet["paare"]:
+        for side in ("A", "B"):
+            assert set(pair[side]) == {"ausgabe", "text", "segmente", "dauer_s", "video"}
+            assert pair[side]["video"] == f"medien/{pair['paar_id']}_{side}.mp4" and (out / pair[side]["video"]).is_file()
+    assert not (out / bc.FILES["hook_sheet"]).exists()
+    assert _load(out, "sources")["quellen"]["Q01"]["umfang"] == "kein Transkript"
+    key = _load(out, "key")
+    paths = []
+    for rater, prefer in (("r1", "chopstr"), ("r2", "extern")):
+        filled = copy.deepcopy(sheet)
+        filled["rater"] = rater
+        for i, pair in enumerate(filled["paare"]):
+            mapping = key["paare"][pair["paar_id"]]
+            pair["bewertung"]["A"] = dict.fromkeys(bc.CRITERIA, 2)
+            pair["bewertung"]["B"] = dict.fromkeys(bc.CRITERIA, 2)
+            pair["bewertung"]["praeferenz"] = "A" if mapping["A"] == prefer else "B"
+            if rater == "r2" and i == 0:
+                pair["bewertung"] = {"A": dict.fromkeys(bc.CRITERIA), "B": dict.fromkeys(bc.CRITERIA), "praeferenz": "beide_unbrauchbar", "notiz": ""}
+        path = tmp_path / f"{rater}.json"
+        path.write_text(json.dumps(filled, ensure_ascii=False), encoding="utf-8")
+        paths.append(str(path))
+    res = bc.evaluate(out, paths)
+    comp = res["wettbewerb"]
+    assert res["modus"] == "extern" and comp["urteile"] == 6 and comp["entschieden"] == 5
+    assert comp["gewinnrate"] == pytest.approx(3 / 5) and comp["gewinnrate_urteil"] == "erreicht"
+    assert comp["beide_unbrauchbar_anteil"] == pytest.approx(1 / 6) and comp["beide_unbrauchbar_urteil"] == "erreicht"
+    assert res["metriken"]["blind_gewinnrate"]["stichprobe"] == 5
+    report = bc.report_markdown(res)
+    assert report.startswith("# Blindvergleich chopstr gegen extern (Wettbewerbsmodus)")
+    assert "Vergleichsart (vorab festgelegt): voller_output" in report and "Schwelle mindestens 60,0 %: erreicht" in report
+    assert "| r1 und r2 |" in report and "—" not in report and "–" not in report
+    bc.main(["--auswerten", str(out), "--bewerter", *paths, "--json", str(tmp_path / "e.json")])
+    assert json.loads((tmp_path / "e.json").read_text(encoding="utf-8"))["metriken"]["beide_unbrauchbar_anteil"]["wert"] == pytest.approx(1 / 6)
+
+
+def test_competition_without_judgments_is_not_measurable():
+    comp = bc.competition({"praeferenz": {"chopstr": 0, "extern": 0, "gleich": 0, "beide_unbrauchbar": 0, "offen": 3}})
+    assert comp["gewinnrate"] is None and comp["gewinnrate_urteil"] == "nicht messbar"
+    assert comp["metriken"]["beide_unbrauchbar_anteil"]["ursache"] == "keine abgegebenen Urteile"
+
+
+def test_extern_cli(tmp_path, monkeypatch, capsys):
+    own, ext = _extern_material(tmp_path)
+    with pytest.raises(SystemExit, match="braucht --vergleichsart"):
+        bc.main(["--out", str(tmp_path / "a"), "--extern", str(ext)])
+    with pytest.raises(SystemExit, match="Quellen für die Engine"):
+        bc.main(["--out", str(tmp_path / "a"), "--extern", str(ext), "--vergleichsart", "schnitt"])
+    with pytest.raises(SystemExit, match="--bewerter gehört zu --auswerten"):
+        bc.main(["--out", str(tmp_path / "a"), "--bewerter", "x.json"])
+    bc.main(["--out", str(tmp_path / "files"), "--extern", str(ext), "--eigene", str(own), "--vergleichsart", "schnitt"])
+    assert "Wettbewerbsmodus (schnitt)" in capsys.readouterr().out
+    transcripts = tmp_path / "transkripte"
+    transcripts.mkdir()
+    words = [{"text": "Satz", "start": float(i), "end": float(i) + 0.5, "speaker": "S0"} for i in range(0, 40)]
+    (transcripts / "folge2.json").write_text(json.dumps({"words": words}), encoding="utf-8")
+    calls = []
+
+    def fake_run(variant, src, brief, provider, k, llm_factory=None):
+        calls.append((variant.name, src["name"], provider, k))
+        return {"angeboten": [{"candidate_id": "e1", "start_s": 11.0, "end_s": 40.0, "text": "Satz.", "segmente": [{"von_s": 11.0, "bis_s": 40.0, "rolle": "body"}], "dauer_s": 29.0}]}
+
+    monkeypatch.setattr(bc, "run_variant", fake_run)
+    bc.main(["--out", str(tmp_path / "engine"), "--extern", str(ext), "--transkripte", str(transcripts), "--vergleichsart", "voller_output", "--k", "4"])
+    assert calls == [("v2", "folge2", providers_llm.HEURISTIC_PROVIDER, 4)]
+    run_doc = _load(tmp_path / "engine", "run")
+    assert run_doc["eigene_herkunft"] == "engine" and run_doc["quellen"]["folge2"] == {"chopstr": 1, "extern": 2}
+    assert _load(tmp_path / "engine", "sources")["quellen"]
+
+
+def test_flaw_field_in_both_sheets_and_counted_per_version(tmp_path):
+    out = _synthetic_dir(tmp_path)
+    for kind in ("sheet", "hook_sheet"):
+        for pair in _load(out, kind)["paare"]:
+            assert pair["bewertung"]["mangel"] == {"kategorie": None, "text": ""}
+    assert _load(out, "rubric")["mangel"]["kategorien"] == list(bc.FLAW_CATEGORIES)
+    _fill(out)
+    key = _load(out, "key")
+    sheet = _load(out, "sheet")
+    # Paar 0 ist „gleich“, die übrigen bevorzugen v2: der Mangel gilt dann für v1
+    sheet["paare"][0]["bewertung"]["mangel"] = {"kategorie": "ton", "text": "beide etwas leise"}
+    sheet["paare"][1]["bewertung"]["mangel"] = {"kategorie": "einstieg", "text": "beginnt mit aber"}
+    sheet["paare"][2]["bewertung"]["mangel"] = {"kategorie": "kontext", "text": ""}
+    sheet["paare"][3]["bewertung"] = {"A": dict.fromkeys(bc.CRITERIA), "B": dict.fromkeys(bc.CRITERIA), "praeferenz": "beide_unbrauchbar",
+                                      "notiz": "", "mangel": {"kategorie": "inhalt", "text": ""}}  # fmt: skip
+    _write(out, "sheet", sheet)
+    assert key["paare"][sheet["paare"][1]["paar_id"]]
+    res = bc.evaluate(out)
+    flaws = res["clip"]["maengel"]
+    assert flaws["v1"]["einstieg"] == 1 and flaws["v1"]["kontext"] == 1 and flaws["v1"]["inhalt"] == 1 and flaws["v2"]["inhalt"] == 1
+    assert flaws["ohne_fassung"]["ton"] == 1 and flaws["v2"]["einstieg"] == 0
+    assert [t["text"] for t in res["clip"]["maengel_text"]] == ["beide etwas leise", "beginnt mit aber"]
+    report = bc.report_markdown(res)
+    assert "| einstieg | 1 | 0 | 0 |" in report and "| inhalt | 1 | 1 | 0 |" in report and "Freitexte: 2" in report
+    assert "Mängel (Was stimmt an dem anderen nicht?): keine Angaben." in report  # Hook-Bogen ohne Angaben
+    sheet["paare"][1]["bewertung"]["mangel"] = {"kategorie": "stil", "text": ""}
+    _write(out, "sheet", sheet)
+    with pytest.raises(SystemExit, match="mangel.kategorie"):
+        bc.evaluate(out)
+    sheet["paare"][1]["bewertung"]["mangel"] = {"kategorie": None, "text": 3}
+    _write(out, "sheet", sheet)
+    with pytest.raises(SystemExit, match="mangel.text"):
+        bc.evaluate(out)
+
+
+def test_old_sheets_without_flaw_field_still_evaluate(tmp_path):
+    out = _synthetic_dir(tmp_path)
+    _fill(out)
+    sheet = _load(out, "sheet")
+    for pair in sheet["paare"]:
+        pair["bewertung"].pop("mangel")
+    _write(out, "sheet", sheet)
+    assert sum(sum(c.values()) for c in bc.evaluate(out)["clip"]["maengel"].values()) == 0

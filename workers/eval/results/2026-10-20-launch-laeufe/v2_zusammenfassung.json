@@ -1,0 +1,262 @@
+{
+ "a_interview_handwerk": {
+  "tv_version": 2,
+  "sentence_rule": "v2",
+  "asr_route": {
+   "beta": false,
+   "hints": [],
+   "variant": "de",
+   "model_id": "cstr/whisper-large-v3-turbo-german-int8_float32",
+   "verbatim": true,
+   "time_source": "asr_word_timestamps",
+   "routing_reason": "profile",
+   "detected_variant": null,
+   "detected_language": null
+  },
+  "wer_v2": 0.013,
+  "gaps_over_2s": [
+   [
+    83.8,
+    86.2
+   ],
+   [
+    194.1,
+    196.9
+   ]
+  ],
+  "proposals": 10,
+  "candidates": 4,
+  "discarded": [
+   "too_short",
+   "chapter_limit",
+   "chapter_limit",
+   "chapter_limit",
+   "chapter_limit",
+   "overlap"
+  ],
+  "funnel_counts": {
+   "pool": 17,
+   "after_gates": 4,
+   "offered": 4,
+   "pool_by_source": {
+    "search": 17
+   },
+   "pool_reasons": {
+    "chapter_limit": 4,
+    "duplicate_payoff": 1,
+    "overlap": 1,
+    "same_opening": 6,
+    "too_short": 1
+   },
+   "pool_without_span": 0,
+   "pool_without_span_reasons": {}
+  },
+  "yield": {
+   "offered": 4,
+   "viable_per_source_hour": 48.35,
+   "distinct": 4,
+   "distinct_jaccard": 0.6,
+   "source_hours": 0.0827,
+   "min_candidates_enforced": false
+  },
+  "review_states": [
+   "uncertain",
+   "passed",
+   "uncertain",
+   "uncertain"
+  ],
+  "clips": [
+   [
+    33.1,
+    64.6,
+    11.12,
+    null,
+    "automatische Freigabe ausgesetzt: review_uncertain"
+   ],
+   [
+    214.2,
+    247.7,
+    9.88,
+    "accepted",
+    "automatisch angenommen (ohne Auswahlschritt)"
+   ],
+   [
+    12.5,
+    45.4,
+    9.84,
+    null,
+    "automatische Freigabe ausgesetzt: review_uncertain"
+   ],
+   [
+    86.2,
+    117.1,
+    9.5,
+    null,
+    "automatische Freigabe ausgesetzt: review_uncertain"
+   ]
+  ]
+ },
+ "b_monolog_gruenderin": {
+  "tv_version": 2,
+  "sentence_rule": "v2",
+  "asr_route": {
+   "beta": false,
+   "hints": [],
+   "variant": "de",
+   "model_id": "cstr/whisper-large-v3-turbo-german-int8_float32",
+   "verbatim": true,
+   "time_source": "asr_word_timestamps",
+   "routing_reason": "profile",
+   "detected_variant": null,
+   "detected_language": null
+  },
+  "wer_v2": 0.0143,
+  "gaps_over_2s": [
+   [
+    55.5,
+    58.5
+   ],
+   [
+    124.0,
+    126.6
+   ]
+  ],
+  "proposals": 6,
+  "candidates": 4,
+  "discarded": [
+   "chapter_limit",
+   "overlap"
+  ],
+  "funnel_counts": {
+   "pool": 12,
+   "after_gates": 4,
+   "offered": 4,
+   "pool_by_source": {
+    "search": 12
+   },
+   "pool_reasons": {
+    "chapter_limit": 1,
+    "duplicate_payoff": 4,
+    "overlap": 1,
+    "same_opening": 1,
+    "same_span": 1
+   },
+   "pool_without_span": 0,
+   "pool_without_span_reasons": {}
+  },
+  "yield": {
+   "offered": 4,
+   "viable_per_source_hour": 59.42,
+   "distinct": 4,
+   "distinct_jaccard": 0.6,
+   "source_hours": 0.0673,
+   "min_candidates_enforced": false
+  },
+  "review_states": [
+   "uncertain",
+   "uncertain",
+   "uncertain"
+  ],
+  "clips": [
+   [
+    0.0,
+    32.2,
+    9.42,
+    null,
+    "automatische Freigabe ausgesetzt: review_uncertain"
+   ],
+   [
+    75.4,
+    131.2,
+    7.53,
+    null,
+    "automatische Freigabe ausgesetzt: review_uncertain"
+   ],
+   [
+    214.6,
+    242.3,
+    6.63,
+    null,
+    "automatische Freigabe ausgesetzt: review_uncertain"
+   ]
+  ]
+ },
+ "c_debatte_viertagewoche": {
+  "tv_version": 2,
+  "sentence_rule": "v2",
+  "asr_route": {
+   "beta": false,
+   "hints": [],
+   "variant": "de",
+   "model_id": "cstr/whisper-large-v3-turbo-german-int8_float32",
+   "verbatim": true,
+   "time_source": "asr_word_timestamps",
+   "routing_reason": "profile",
+   "detected_variant": null,
+   "detected_language": null
+  },
+  "wer_v2": 0.0041,
+  "gaps_over_2s": [
+   [
+    95.0,
+    97.6
+   ],
+   [
+    132.8,
+    134.9
+   ]
+  ],
+  "proposals": 5,
+  "candidates": 2,
+  "discarded": [
+   "chapter_limit",
+   "no_viable_moment",
+   "overlap",
+   "overlap"
+  ],
+  "funnel_counts": {
+   "pool": 11,
+   "after_gates": 2,
+   "offered": 2,
+   "pool_by_source": {
+    "search": 11
+   },
+   "pool_reasons": {
+    "chapter_limit": 1,
+    "duplicate_payoff": 2,
+    "overlap": 2,
+    "same_opening": 4
+   },
+   "pool_without_span": 0,
+   "pool_without_span_reasons": {}
+  },
+  "yield": {
+   "offered": 2,
+   "viable_per_source_hour": 29.68,
+   "distinct": 2,
+   "distinct_jaccard": 0.6,
+   "source_hours": 0.0674,
+   "min_candidates_enforced": false
+  },
+  "review_states": [
+   "uncertain",
+   "uncertain"
+  ],
+  "clips": [
+   [
+    83.4,
+    120.0,
+    8.1,
+    null,
+    "automatische Freigabe ausgesetzt: review_uncertain"
+   ],
+   [
+    117.3,
+    149.1,
+    8.02,
+    null,
+    "automatische Freigabe ausgesetzt: review_uncertain"
+   ]
+  ]
+ }
+}

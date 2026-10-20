@@ -1,0 +1,21 @@
+{
+  "quelle": "beispiel_debatte",
+  "sprachvariante": "AT",
+  "bereich": {"start_s": 600.0, "end_s": 1800.0},
+  "hinweis": "Fiktiv und gekürzt. Manuell korrigierte Wörter mit Sprecher und Zeit; segmente optional, sonst aus den Wörtern.",
+  "woerter": [
+    {"wort": "Die", "start": 600.00, "end": 600.18, "sprecher": "S1"},
+    {"wort": "Mieten", "start": 600.18, "end": 600.62, "sprecher": "S1"},
+    {"wort": "steigen", "start": 600.62, "end": 601.05, "sprecher": "S1"},
+    {"wort": "nicht", "start": 601.05, "end": 601.40, "sprecher": "S1"},
+    {"wort": "überall.", "start": 601.40, "end": 601.95, "sprecher": "S1"},
+    {"wort": "Doch,", "start": 601.70, "end": 602.05, "sprecher": "S2"},
+    {"wort": "in", "start": 602.05, "end": 602.15, "sprecher": "S2"},
+    {"wort": "Wien", "start": 602.15, "end": 602.50, "sprecher": "S2"},
+    {"wort": "schon.", "start": 602.50, "end": 602.90, "sprecher": "S2"}
+  ],
+  "segmente": [
+    {"sprecher": "S1", "start": 600.00, "end": 601.95},
+    {"sprecher": "S2", "start": 601.70, "end": 602.90}
+  ]
+}

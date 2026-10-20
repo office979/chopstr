@@ -27,8 +27,25 @@ from typing import Any
 
 from .. import editorial, prompts
 from ..providers_llm import LLM
-from . import compose, dach_nlp, editorial_gates, fidelity, payoff_search, story_graph, story_score, trim_plan
-from .segment import Sentence, chapterize, numbered, sentences_from_annotated, sentences_from_words
+from . import (
+    compose,
+    dach_nlp,
+    editorial_gates,
+    fidelity,
+    payoff_search,
+    signals,
+    story_graph,
+    story_score,
+    trim_plan,
+)
+from .segment import (
+    Sentence,
+    chapterize,
+    chapterize_topic_shift,
+    numbered,
+    sentences_from_annotated,
+    sentences_from_words,
+)
 
 CONTRACT = "candidates_v1"
 # v2: Bewertung aus der redaktionellen Grundlage (sieben Kriterien statt fuenf), mit
@@ -149,6 +166,18 @@ class DetectReport:
     clip_candidates: list[dict] = field(default_factory=list)
     # Fassung 2 mit Suche: Kapitel ohne tragfähigen Moment (weder Modell- noch Suchvorschlag), je mit Grund.
     rejected_chapters: list[dict] = field(default_factory=list)
+    # Lane P2 (Launch Phase 2), nur Fassung 2. Trichter für die Abdeckungsmessung an drei Stellen (Review 2E):
+    # ``funnel`` mit ``pool`` (alle Vorschläge beider Quellen vor Dubletten und Gates), ``after_gates`` (nach Gates,
+    # Dubletten, Längen- und Qualitätsregeln) und ``offered`` (angeboten, mit Rang), je ``{start_s, end_s, chapter,
+    # source, reason?}``; ``funnel_counts`` die Zahlen dazu. ``yield_`` (JSON ``yield``): angeboten, je Quellstunde,
+    # unterschiedlich nach der Jaccard-Regel, bei null mit Begründung (Regel 15). ``chapter_meta`` je Kapitel mit
+    # Themenwechsel (``topic_boundary_score``), ``heat`` die Text-Heatmap v2, ``ranking`` der Paarvergleich.
+    funnel: dict = field(default_factory=dict)
+    funnel_counts: dict = field(default_factory=dict)
+    yield_: dict = field(default_factory=dict)
+    chapter_meta: list[dict] = field(default_factory=list)
+    heat: dict = field(default_factory=dict)
+    ranking: dict = field(default_factory=dict)
 
     @property
     def gate_passed(self) -> int:
@@ -173,6 +202,11 @@ class DetectReport:
         for key in ("overviews", "llm_budget", "gate_rejections", "search", "clip_candidates", "rejected_chapters"):
             if getattr(self, key):
                 out[key] = getattr(self, key)
+        for key in ("funnel", "funnel_counts", "chapter_meta", "heat", "ranking"):
+            if getattr(self, key):
+                out[key] = getattr(self, key)
+        if self.yield_:
+            out["yield"] = self.yield_
         return out
 
     @classmethod
@@ -195,6 +229,12 @@ class DetectReport:
             search=dict(data.get("search") or {}),
             clip_candidates=list(data.get("clip_candidates") or []),
             rejected_chapters=list(data.get("rejected_chapters") or []),
+            funnel=dict(data.get("funnel") or {}),
+            funnel_counts=dict(data.get("funnel_counts") or {}),
+            yield_=dict(data.get("yield") or {}),
+            chapter_meta=list(data.get("chapter_meta") or []),
+            heat=dict(data.get("heat") or {}),
+            ranking=dict(data.get("ranking") or {}),
         )
 
 
@@ -557,13 +597,21 @@ def _verb_bracket_gate(words: list[dict], sents: list[Sentence], first: int, las
             "available": False,
             "method": "off",
         }
-    _span, a, b = _span_words(words, sents, first, last)
+    span, a, b = _span_words(words, sents, first, last)
     rule = _cut_args(words, pol)["rule"]
+    # Fassung 2 (Lane P1): zu-Infinitiv, Korrelate und Partikel ohne Satzzeichen an beiden Kanten, dazu
+    # offene Korrelate über die ganze Spanne („zwar" ohne „aber" im Clip); Fassung 1 bleibt das Tor aus AP3.
+    bracket_rule = "v2" if pol.version >= 2 else "v1"
     problems = []
     for label, cut in (("Anfang", a), ("Ende", b + 1)):
-        res = dach_nlp.bracket_open_at_cut(words, cut, rule=rule, fallback=cfg["fallback"], lists=cfg["lists"])
+        res = dach_nlp.bracket_open_at_cut(
+            words, cut, rule=rule, fallback=cfg["fallback"], lists=cfg["lists"], bracket_rule=bracket_rule
+        )
         if res["open"]:
             problems.append(f"{label}: {res['detail']}")
+    if bracket_rule == "v2":
+        for corr in dach_nlp.open_correlates(span):
+            problems.append(f"Korrelat: „{corr['first']}“ ohne „{corr['expected']}“ im Clip")
     suffix = "" if method == "spacy" else " (Heuristik, spaCy-Modell fehlt)"
     if problems:
         return {"passed": False, "detail": "Schnitt in einer Verbklammer am " + "; ".join(problems) + suffix, "available": True, "method": method}
@@ -1632,6 +1680,19 @@ def _distinctiveness(cands: list[CandidateResult], lemmas: dict[int, set[str]]) 
 RESERVE_SIZE = 3  # Nachrücker für den Kritiker (AP6b): so viele über der Obergrenze bleiben in Reserve
 
 
+def _rank_key(c: CandidateResult) -> tuple:
+    """Rangfolge der Auswahl (absteigend sortiert): Gate erfüllt, vollständiger Vorschlag, dann ``total``.
+
+    Ein Vorschlag im alten Format (``proposal_missing_v2_fields``, nur Fassung 2) rückt hinter jeden
+    vollständigen; unter Fassung 1 fehlt der Schlüssel und die Reihenfolge bleibt wie bisher. Mit angewandtem
+    Paarvergleich (``rubric.pairwise_applied``, nur mit Schalter und Regel ``ranking.pairwise``) ordnet
+    ``pairwise_rank`` die verglichenen Top-N untereinander; sie waren schon vorher die ersten N, deshalb bleibt
+    ihre Stellung gegenüber allen anderen gleich. Ohne Paarvergleich sind die beiden Stellen konstant."""
+    applied = bool(c.rubric.get("pairwise_applied")) and c.rubric.get("pairwise_rank") is not None
+    pair = -int(c.rubric["pairwise_rank"]) if applied else 0
+    return (c.gate_passed, not c.rubric.get("proposal_missing_v2_fields"), applied, pair, c.total, -c.start_s)
+
+
 def select_best(
     cands: list[CandidateResult],
     limit: int = MAX_CANDIDATES,
@@ -1676,9 +1737,7 @@ def select_with_reserve(
         limit = min(limit, output["max_candidates"])
         lemmas = {id(c): content_lemmas(c) for c in cands}
         _distinctiveness(cands, lemmas)
-    # Ein Vorschlag im alten Format (``proposal_missing_v2_fields``, nur Fassung 2) rückt hinter jeden
-    # vollständigen; unter Fassung 1 fehlt der Schlüssel und die Reihenfolge bleibt wie bisher.
-    ordered = sorted(cands, key=lambda c: (c.gate_passed, not c.rubric.get("proposal_missing_v2_fields"), c.total, -c.start_s), reverse=True)
+    ordered = sorted(cands, key=_rank_key, reverse=True)
     kept: list[CandidateResult] = []
     dropped: list[dict] = []
     for c in ordered:
@@ -1757,6 +1816,8 @@ def prompt_versions() -> list[str]:
         out.append(prompts.load_pinned("episode_overview", pol).prompt_version)
     if editorial.critic_enabled(pol):
         out.append(prompts.load_pinned("critique_clip", pol).prompt_version)
+    if pairwise_settings(pol) is not None:
+        out.append(prompts.load_pinned("compare_clips", pol).prompt_version)
     return out
 
 
@@ -1803,12 +1864,25 @@ def run(
     search_cfg = search_wired(pol)
     gate_cfg = gates_wired(pol)
     heuristic = bool(getattr(llm, "is_heuristic", False))
-    if search_cfg is not None:
+    topic_cfg = topic_shift_settings(pol)
+    chapter_meta: list[dict] = []
+    if topic_cfg is not None:
+        # Lane P2: Kapitel an Themenwechseln statt fester 240 s, mit derselben Überlappung wie die Suche.
+        chapters, chapter_meta = chapterize_topic_shift(
+            sents, topic_cfg["min_s"], topic_cfg["max_s"], search_cfg["chapter_overlap_s"] if search_cfg is not None else 0.0,
+            topic_cfg["window_s"], topic_cfg["min_boundary_score"], topic_cfg["speaker_weight"],
+        )  # fmt: skip
+    elif search_cfg is not None:
         chapters = chapterize(sents, CHAPTER_SECONDS, search_cfg["chapter_overlap_s"])
-        # Heuristik-Provider: Aufrufe zählen, nie verweigern (kein Modell, keine Kosten).
-        llm = BudgetLLM(llm, llm_budget_for(sents, search_cfg, pol), enforce=not heuristic)  # type: ignore[assignment]
     else:
         chapters = chapterize(sents, CHAPTER_SECONDS)
+    if search_cfg is not None:
+        # Heuristik-Provider: Aufrufe zählen, nie verweigern (kein Modell, keine Kosten).
+        llm = BudgetLLM(llm, llm_budget_for(sents, search_cfg, pol), enforce=not heuristic)  # type: ignore[assignment]
+    heat_cfg = signals.text_heat_settings(pol)
+    if heat_cfg is not None:
+        # Lane P2: Text-Heatmap v2 aus Wortliste und gespeichertem Audioanteil; die gespeicherte Heatmap bleibt.
+        heat_payload = signals.payload_with_text_v2(heat_payload, words, heat_cfg)
     seeds = seeds_from_heat(heat_payload)
     order = chapter_order(chapters, seeds)
     report = DetectReport(
@@ -1820,25 +1894,42 @@ def run(
         weights=weights,
     )
     report.nlp_status = nlp_status_for(pol)
-    if pol is not None and pol.version >= 2:
+    track = pol is not None and pol.version >= 2
+    if track:
         report.engine = engine_version(pol)
+        report.chapter_meta = [{"chapter": n, **m} for n, m in enumerate(chapter_meta)]
+        if heat_cfg is not None and heat_payload is not None:
+            report.heat = {**heat_payload["text_v2"], "seeds": len(heat_payload.get("seeds") or [])}
     raw: list[CandidateResult] = []
     gate_rejected: list[CandidateResult] = []
     seen: set[tuple[int, int]] = set()
     proposed: list[tuple[int, int, int]] = []  # (erster, letzter Satz, Kapitel) unter AP5
     skipped_chapters: list[list[int]] = []
+    pool: list[dict] = []  # Trichter (nur Fassung 2): jeder Vorschlag beider Quellen
+    outcome: dict[tuple[int, int, int], dict] = {}  # (Kapitel, erster, letzter Satz) zu Grund oder Kandidat
+    cand_meta: dict[tuple[int, int], tuple[int, str]] = {}  # Kandidat zu (Kapitel, Quelle)
     for done, (chapter_no, chapter, _has_seed) in enumerate(order, start=1):
         refused_before = llm.refused if isinstance(llm, BudgetLLM) else 0
         if search_cfg is not None:
             gate_fn = opening_gate(words, sents, chapter, pol)
-            moments = _propose_v2(chapter, brief, llm, pol, seeds, heat_payload, report, heuristic=heuristic, gate_fn=gate_fn, words=words)
+            moments = _propose_v2(
+                chapter, brief, llm, pol, seeds, heat_payload, report, heuristic=heuristic, gate_fn=gate_fn, words=words,
+                pool=pool if track else None, chapter_no=chapter_no,
+            )  # fmt: skip
             if not moments:
                 no_viable_moment(report, chapter_no, chapter)
         else:
             moments = story_score.propose(chapter, brief, llm)[: _vorschlaege_fuer(chapter)]
             report.proposals += len(moments)
+            if track:
+                pool.extend(
+                    _pool_entry(chapter, chapter_no, int(m["first_sent"]), int(m["last_sent"]), "model", _key=(int(m["first_sent"]), int(m["last_sent"])))
+                    for m in moments
+                )  # fmt: skip
         for m in moments:
             first, last = int(m["first_sent"]), int(m["last_sent"])
+            key3 = (chapter_no, first, last)
+            source = str(m.get("source") or "model")
             if search_cfg is not None:
                 # Überlappende Kapitel schlagen denselben Moment zweimal vor (auch um einen Satz verschoben):
                 # ab CHAPTER_DUPLICATE_SHARE Überdeckung mit einem Vorschlag eines anderen Kapitels nur einmal.
@@ -1850,20 +1941,24 @@ def run(
                 )  # fmt: skip
                 if twin is not None:
                     note_duplicate(report, "chapter_overlap", [first, last], list(twin))
+                    outcome[key3] = {"reason": "chapter_overlap"}
                     continue
                 proposed.append((first, last, chapter_no))
             dur = _duration(sents, first, last)
             reason = _vorfilter_grund(sents, first, last)
             if reason:
                 report.discarded.append({"reason": reason, "first_sent": first, "last_sent": last, "duration_s": round(dur, 2)})
+                outcome[key3] = {"reason": reason}
                 continue
             try:
                 out = evaluate_span(words, sents, m, brief, llm, weights, heat_payload)
             except LLMBudgetExceeded:
                 report.discarded.append({"reason": "llm_budget", "first_sent": first, "last_sent": last, "duration_s": round(dur, 2)})
+                outcome[key3] = {"reason": "llm_budget"}
                 continue
             if isinstance(out, dict):
                 report.discarded.append(out)
+                outcome[key3] = {"reason": str(out.get("reason"))}
                 continue
             key = (out.first_sent, out.last_sent)
             if key in seen:
@@ -1871,6 +1966,7 @@ def run(
                     note_duplicate(report, "same_result", list(key), list(key))
                 else:
                     report.discarded.append({"reason": "duplicate", "first_sent": key[0], "last_sent": key[1]})
+                outcome[key3] = {"reason": "same_result" if search_cfg is not None else "duplicate"}
                 continue
             seen.add(key)
             if gate_cfg is not None:
@@ -1882,12 +1978,25 @@ def run(
                         "total": out.total, "detail": str(decision.get("detail") or ""),
                     })  # fmt: skip
                     gate_rejected.append(out)
+                    outcome[key3] = {"reason": str(decision.get("reason"))}
                     continue
             raw.append(out)
+            outcome[key3] = {"cand": key}
+            cand_meta[key] = (chapter_no, source)
         if isinstance(llm, BudgetLLM) and llm.refused > refused_before:
             skipped_chapters.append([chapter[0].idx, chapter[-1].idx])
         if on_progress:
             on_progress(done, len(order), len(raw))
+    pw_cfg = pairwise_settings(pol)
+    if pw_cfg is not None:
+        # Lane P2, Hypothese: Paarvergleich der Top-N über das ganze Video (rubric.pairwise_rank); die Auswahl
+        # nutzt ihn nur, wenn jedes Paar in beiden Reihenfolgen beantwortet wurde (rubric.pairwise_applied).
+        report.ranking = rank_pairwise(raw, sents, brief, llm, pol, pw_cfg)
+        if report.ranking.get("refused"):
+            report.discarded.append({
+                "reason": "llm_budget", "stage": "pairwise", "refused": report.ranking["refused"],
+                "detail": "Paarvergleich unvollständig, die Rangfolge bleibt nach total",
+            })  # fmt: skip
     critic_on = pol is not None and editorial.critic_enabled(pol)
     reserve: list[CandidateResult] = []
     if gate_cfg is not None:
@@ -1924,6 +2033,10 @@ def run(
                 "reason": "budget_exhausted", "limit": llm.limit, "used": llm.used, "refused": llm.refused,
                 "skipped_chapters": skipped_chapters, "detail": report.llm_budget["note"],
             })  # fmt: skip
+    if track:
+        critic_drops = [d for d in report.discarded if d.get("stage") == "critic" and str(d.get("reason", "")).startswith("critic:")]
+        build_funnel(report, sents, pool, outcome, raw, cand_meta, [*dropped, *critic_drops])
+        report.yield_ = yield_summary(report, sents, pol)
     if pol is not None and pol.version >= 2:
         attach_clip_candidates(report, words, sents, pol, brief)
     return report
@@ -2140,6 +2253,8 @@ def _propose_v2(
     heuristic: bool = False,
     gate_fn: Callable[[int], bool] | None = None,
     words: list[dict] | None = None,
+    pool: list[dict] | None = None,
+    chapter_no: int = 0,
 ) -> list[dict]:
     """Vorschläge eines Kapitels unter AP5: Episodenübersicht, Modellvorschläge mit Übersicht und Seeds,
     deterministische Suche, Abgleich über ``payoff_search.reconcile``.
@@ -2151,7 +2266,8 @@ def _propose_v2(
     ``discarded``. Ist das Budget aufgebraucht, fallen Übersicht und Modellvorschläge weg; die Suche läuft
     ohne Modell weiter. Mit dem Heuristik-Provider gibt es nur eine Quelle, die Suche: sein ``propose``
     rechnet dieselbe Suche auf geschätzten Zeiten und ergäbe nur Dubletten. ``gate_fn`` ist die Einstiegsregel
-    der Engine (``opening_gate``)."""
+    der Engine (``opening_gate``). ``pool`` (Lane P2, Trichter) sammelt jeden Vorschlag beider Quellen vor Dubletten
+    und Gates (``_pool_from_chapter``)."""
     stats = report.search.setdefault("chapters", [])
     span = {"first_sent": chapter[0].idx, "last_sent": chapter[-1].idx}
     overview = None
@@ -2221,6 +2337,8 @@ def _propose_v2(
         report.discarded.append({"reason": "chapter_limit", "stage": "search", "first_sent": m["first_sent"], "last_sent": m["last_sent"]})
     kept = sorted(merged[:MAX_PER_CHAPTER], key=lambda m: (m["first_sent"], m["last_sent"]))
     report.proposals += len(model) + len(found["proposals"]) + len(found["rejected"])
+    if pool is not None:
+        _pool_from_chapter(pool, chapter, chapter_no, model, found, res, duplicates, merged, kept)
     stats.append({
         **span, "model": len(model), "model_skipped": "heuristic" if heuristic else None,
         "search": len(found["proposals"]), "search_rejected": len(found["rejected"]) + len(res["rejected"]),
@@ -2229,6 +2347,384 @@ def _propose_v2(
         "openings": len(found.get("openings") or []), "diagnosis": found.get("diagnosis"), "rejected_reasons": sorted({str(d.get("reason")) for d in [*found["rejected"], *res["rejected"]]}),
     })  # fmt: skip
     return kept
+
+
+# -- Lane P2 (Launch Phase 2): Themenkapitel, Paarvergleich, Trichter, Ausbeute ------------------------------
+TOPIC_SHIFT_SWITCH = "chapters.topic_shift"
+PAIRWISE_SWITCH = "ranking.pairwise"
+
+
+def _impl_switch(pol: editorial.Policy, path: str) -> bool:
+    value: Any = pol.roh.get("implementation") or {}
+    for part in path.split("."):
+        if not isinstance(value, dict):
+            return False
+        value = value.get(part)
+    return value is True
+
+
+def _number(raw: dict, key: str, name: str, lo: float, hi: float | None = None) -> float:
+    try:
+        value = float(raw[key])
+    except (KeyError, TypeError, ValueError):
+        raise editorial.PolicyError(f"{name}.{key} fehlt oder ist keine Zahl.") from None
+    if value < lo or (hi is not None and value > hi):
+        raise editorial.PolicyError(f"{name}.{key} liegt außerhalb von {lo} bis {hi if hi is not None else 'unbegrenzt'}.")
+    return value
+
+
+def topic_shift_settings(pol: editorial.Policy | None) -> dict[str, Any] | None:
+    """Kapitel an Themenwechseln (``chapters.topic_shift``) oder ``None``.
+
+    ``None`` in Fassung 1, ohne Abschnitt ``chapters``, mit der Regel ``chapters.topic_shift.enabled`` auf false oder
+    mit dem Schalter ``implementation.chapters.topic_shift`` aus (Rollback: feste Kapitel von ``CHAPTER_SECONDS``).
+    Rückgabe ``{min_s, max_s, window_s, min_boundary_score, speaker_weight}`` für ``segment.chapterize_topic_shift``;
+    ``min_s`` muss unter ``max_s`` liegen. Ein unbrauchbarer Wert scheitert laut."""
+    if pol is None or pol.version < 2 or "chapters" not in pol.roh:
+        return None
+    name = f"clip_policy_v{pol.version}: chapters.topic_shift"
+    raw = (pol.roh.get("chapters") or {}).get("topic_shift")
+    if not isinstance(raw, dict) or not isinstance(raw.get("enabled"), bool):
+        raise editorial.PolicyError(f"{name}.enabled ist true oder false.")
+    if raw["enabled"] is not True or not _impl_switch(pol, TOPIC_SHIFT_SWITCH):
+        return None
+    cfg = {
+        "min_s": _number(raw, "min_s", name, 1.0),
+        "max_s": _number(raw, "max_s", name, 1.0),
+        "window_s": _number(raw, "window_s", name, 1.0),
+        "min_boundary_score": _number(raw, "min_boundary_score", name, 0.0, 1.0),
+        "speaker_weight": _number(raw, "speaker_weight", name, 0.0, 1.0),
+    }
+    if cfg["min_s"] >= cfg["max_s"]:
+        raise editorial.PolicyError(f"{name}: min_s muss unter max_s liegen.")
+    return cfg
+
+
+def pairwise_settings(pol: editorial.Policy | None) -> dict[str, Any] | None:
+    """Paarvergleich der Top-N (``ranking.pairwise``, Hypothese) oder ``None``.
+
+    ``None`` in Fassung 1, ohne Abschnitt ``ranking``, mit der Regel ``ranking.pairwise.enabled`` auf false oder mit
+    dem Schalter ``implementation.ranking.pairwise`` aus (Rollback: Rangfolge nach ``total`` wie bisher). Rückgabe
+    ``{top_n}`` (ganze Zahl ab 2). Ein unbrauchbarer Wert scheitert laut."""
+    if pol is None or pol.version < 2 or "ranking" not in pol.roh:
+        return None
+    name = f"clip_policy_v{pol.version}: ranking.pairwise"
+    raw = (pol.roh.get("ranking") or {}).get("pairwise")
+    if not isinstance(raw, dict) or not isinstance(raw.get("enabled"), bool):
+        raise editorial.PolicyError(f"{name}.enabled ist true oder false.")
+    if raw["enabled"] is not True or not _impl_switch(pol, PAIRWISE_SWITCH):
+        return None
+    top_n = raw.get("top_n")
+    if not isinstance(top_n, int) or isinstance(top_n, bool) or top_n < 2:
+        raise editorial.PolicyError(f"{name}.top_n ist eine ganze Zahl ab 2.")
+    return {"top_n": top_n}
+
+
+BT_PRIOR = 0.1  # virtuelle Siege je Paar und Richtung, damit ein Kandidat ohne Sieg eine endliche Stärke behält
+BT_MAX_ITER = 1000
+BT_TOL = 1e-10
+
+
+def bradley_terry(wins: list[list[float]], prior: float = BT_PRIOR) -> tuple[list[float], int]:
+    """Bradley-Terry-Stärken aus einer Siegmatrix (``wins[i][j]``: wie oft i gegen j gewann, ein Unentschieden
+    zählt je einen halben Sieg), MM-Iteration nach Hunter (2004), eigene Implementierung ohne Abhängigkeit.
+
+    Jedes Paar bekommt ``prior`` virtuelle Siege in beide Richtungen. Die Stärken sind auf das geometrische Mittel 1
+    normiert; deterministisch (feste Reihenfolge, feste Abbruchgrenzen). Rückgabe: Stärken und Iterationen."""
+    n = len(wins)
+    p = [1.0] * n
+    if n < 2:
+        return p, 0
+    for it in range(1, BT_MAX_ITER + 1):
+        new = []
+        for i in range(n):
+            won = sum(wins[i][j] for j in range(n) if j != i) + prior * (n - 1)
+            denom = sum((wins[i][j] + wins[j][i] + 2 * prior) / (p[i] + p[j]) for j in range(n) if j != i)
+            new.append(won / denom if denom > 0 else p[i])
+        g = math.exp(sum(math.log(x) for x in new) / n)
+        new = [x / g for x in new]
+        delta = max(abs(a - b) for a, b in zip(new, p))
+        p = new
+        if delta < BT_TOL:
+            return p, it
+    return p, BT_MAX_ITER
+
+
+def rank_pairwise(
+    raw: list[CandidateResult], sents: list[Sentence], brief: dict[str, Any], llm: Any, pol: editorial.Policy, cfg: dict
+) -> dict:
+    """Paarvergleich der ersten ``top_n`` Kandidaten (nach ``_rank_key``, nur mit erfülltem Gate) über das ganze Video.
+
+    Jedes Paar läuft in beiden Reihenfolgen (A/B und B/A), um den Positionsbias zu messen: widersprechen sich die
+    beiden Urteile, zählt das Paar als ``inconsistent`` und geht als Unentschieden ein. Aus den Urteilen schätzt
+    ``bradley_terry`` die Stärken; je verglichenem Kandidaten stehen ``rubric.pairwise_rank`` (1 ist der stärkste),
+    ``pairwise_strength`` und ``pairwise_applied`` in der Rubrik. Angewandt wird die Rangfolge nur, wenn jedes Paar in
+    beiden Reihenfolgen gültig beantwortet wurde; jeder Vergleich zählt im Modellbudget (``BudgetLLM``), ein
+    verweigerter Aufruf lässt die Rangfolge nach ``total``. Der Heuristik-Provider antwortet aus Punkten und Markern
+    (``heuristic_llm.compare_clips``, unkalibriert). Rückgabe: Bericht für ``report.ranking``."""
+    pool = sorted((c for c in raw if c.gate_passed), key=_rank_key, reverse=True)[: int(cfg["top_n"])]
+    n = len(pool)
+    wins = [[0.0] * n for _ in range(n)]
+    calls = refused = invalid = inconsistent = heuristic_answers = 0
+    position = {"A": 0, "B": 0, "tie": 0}
+    pairs: list[dict] = []
+    prompt_version = None
+    for i in range(n):
+        for j in range(i + 1, n):
+            verdicts: list[int | None] = []  # Index des Siegers, -1 Unentschieden, None ohne gültige Antwort
+            labels: list[str | None] = []
+            for a, b in ((i, j), (j, i)):
+                try:
+                    out = story_score.compare(
+                        sents[pool[a].first_sent : pool[a].last_sent + 1], sents[pool[b].first_sent : pool[b].last_sent + 1], brief, llm, pol
+                    )  # fmt: skip
+                except LLMBudgetExceeded:
+                    refused += 1
+                    verdicts.append(None)
+                    labels.append(None)
+                    continue
+                calls += 1
+                prompt_version = out["prompt_version"]
+                heuristic_answers += int(bool(out["heuristic"]))
+                w = out["winner"]
+                labels.append(w)
+                if w is None:
+                    invalid += 1
+                    verdicts.append(None)
+                    continue
+                position[w] += 1
+                verdicts.append(-1 if w == "tie" else (a if w == "A" else b))
+            consistent = None
+            if verdicts[0] is not None and verdicts[1] is not None:
+                consistent = verdicts[0] == verdicts[1]
+                if not consistent or verdicts[0] == -1:
+                    inconsistent += int(not consistent)
+                    wins[i][j] += 1.0
+                    wins[j][i] += 1.0
+                else:
+                    winner = int(verdicts[0])
+                    wins[winner][j if winner == i else i] += 2.0
+            pairs.append({
+                "a": [pool[i].first_sent, pool[i].last_sent], "b": [pool[j].first_sent, pool[j].last_sent],
+                "ab": labels[0], "ba": labels[1], "consistent": consistent,
+            })  # fmt: skip
+    strengths, iterations = bradley_terry(wins)
+    applied = n >= 2 and refused == 0 and invalid == 0
+    order = sorted(range(n), key=lambda k: (-strengths[k], k))
+    for rank, k in enumerate(order, start=1):
+        pool[k].rubric["pairwise_rank"] = rank
+        pool[k].rubric["pairwise_strength"] = round(strengths[k], 4)
+        pool[k].rubric["pairwise_applied"] = applied
+    answered = sum(position.values())
+    n_pairs = n * (n - 1) // 2
+    complete_pairs = sum(1 for x in pairs if x["consistent"] is not None)
+    if applied:
+        reason = "Jedes Paar in beiden Reihenfolgen beantwortet; Rangfolge der Top-N nach Bradley-Terry."
+    elif n < 2:
+        reason = "Weniger als zwei Kandidaten mit erfülltem Gate, nichts zu vergleichen."
+    else:
+        reason = f"Unvollständig ({refused} verweigert im Modellbudget, {invalid} ungültig); Rangfolge bleibt nach total."
+    return {
+        "method": "pairwise_bradley_terry", "status": "hypothesis", "top_n": int(cfg["top_n"]), "compared": n,
+        "pairs": n_pairs, "calls": calls, "refused": refused, "invalid": invalid, "inconsistent": inconsistent,
+        "inconsistent_share": round(inconsistent / complete_pairs, 4) if complete_pairs else None,
+        "position": {**position, "a_share": round(position["A"] / (position["A"] + position["B"]), 4) if position["A"] + position["B"] else None},
+        "answered": answered, "applied": applied, "reason": reason, "iterations": iterations,
+        "prompt_version": prompt_version, "heuristic": calls > 0 and heuristic_answers == calls,
+        "order": [[pool[k].first_sent, pool[k].last_sent] for k in order], "comparisons": pairs,
+    }  # fmt: skip
+
+
+def _pool_entry(chapter: list[Sentence], chapter_no: int, first: int, last: int, source: str, **extra: Any) -> dict:
+    by_idx = {x.idx: x for x in chapter}
+    a, b = by_idx.get(first), by_idx.get(last)
+    return {
+        "start_s": round(a.start, 2) if a else None, "end_s": round(b.end, 2) if b else None, "chapter": int(chapter_no),
+        "source": source, "first_sent": int(first), "last_sent": int(last), **extra,
+    }  # fmt: skip
+
+
+def _pool_from_chapter(
+    pool: list[dict], chapter: list[Sentence], chapter_no: int, model: list[dict], found: dict, res: dict,
+    duplicates: list[dict], merged: list[dict], kept: list[dict],
+) -> None:  # fmt: skip
+    """Trichter, Stufe Pool: jeder Vorschlag beider Quellen eines Kapitels vor Dubletten und Gates.
+
+    Modellvorschläge (``source`` ``model``) und Vorschläge der Suche (``search``, auch die von der Suche selbst als
+    Dublette zusammengeführten und die zu kurzen). Fällt ein Vorschlag schon hier heraus, steht sein Grund aus der
+    vorhandenen Struktur dabei (``search.duplicates``-Art, Grund aus ``discarded`` der Suche, ``chapter_limit``);
+    sonst trägt er den Schlüssel des Vorschlags, mit dem er weiterläuft (``_key``), und ``build_funnel`` ergänzt den
+    Grund aus dem weiteren Lauf. Verworfene der Suche ohne Spanne (``no_opening``, ``promise_unfulfilled``) sind
+    keine Vorschläge und zählen nur in ``funnel_counts.pool_without_span``."""
+    kept_keys = {(int(m["first_sent"]), int(m["last_sent"])) for m in kept}
+    limited = {(int(m["first_sent"]), int(m["last_sent"])) for m in merged[MAX_PER_CHAPTER:]}
+    dup_kind: dict[tuple[int, int], str] = {}
+    for d in duplicates:
+        kind = "duplicate_payoff" if d.get("reason") == "same_payoff" else str(d.get("reason") or "duplicate_payoff")
+        for dropped in d.get("dropped") or []:
+            dup_kind.setdefault((int(dropped[0]), int(dropped[1])), kind)
+    rejected_openings = {int(d["opening_sent"]): str(d["reason"]) for d in res["rejected"] if d.get("opening_sent") is not None}
+    by_payoff = {int(m["payoff_sent"]): (int(m["first_sent"]), int(m["last_sent"])) for m in merged}
+
+    def resolve(key: tuple[int, int], source: str, payoff: int | None) -> dict:
+        if key in kept_keys:
+            return {"_key": key}
+        if key in limited:
+            return {"reason": "chapter_limit"}
+        if key in dup_kind:
+            return {"reason": dup_kind[key]}
+        if source == "model" and key[0] in rejected_openings:
+            return {"reason": rejected_openings[key[0]]}
+        target = by_payoff.get(int(payoff)) if payoff is not None else None
+        if target in kept_keys:
+            return {"_key": target}
+        if target in limited:
+            return {"reason": "chapter_limit"}
+        return {"reason": "unresolved"}
+
+    for m in model:
+        key = (int(m["first_sent"]), int(m["last_sent"]))
+        pay = m.get("payoff_sent")
+        payoff = int(pay) if isinstance(pay, int) and not isinstance(pay, bool) else key[1]
+        pool.append(_pool_entry(chapter, chapter_no, key[0], key[1], "model", **resolve(key, "model", payoff)))
+    for p in found["proposals"]:
+        key = (int(p["first_sent"]), int(p["last_sent"]))
+        pool.append(_pool_entry(chapter, chapter_no, key[0], key[1], "search", **resolve(key, "search", p.get("payoff_sent"))))
+    for d in found.get("duplicates") or []:
+        kind = "duplicate_payoff" if d.get("reason") == "same_payoff" else str(d.get("reason") or "duplicate_payoff")
+        for dropped in d.get("dropped") or []:
+            pool.append(_pool_entry(chapter, chapter_no, int(dropped[0]), int(dropped[1]), "search", reason=kind))
+    for d in found["rejected"]:
+        if d.get("first_sent") is not None and d.get("last_sent") is not None:
+            pool.append(_pool_entry(chapter, chapter_no, int(d["first_sent"]), int(d["last_sent"]), "search", reason=str(d["reason"])))
+        else:
+            pool.append({"chapter": int(chapter_no), "source": "search", "without_span": True, "reason": str(d.get("reason"))})
+
+
+AFTER_GATES_REASONS = (None, "limit")  # nach den Qualitätsfiltern noch dabei: angeboten oder nur an der Obergrenze
+
+
+def build_funnel(
+    report: DetectReport,
+    sents: list[Sentence],
+    pool: list[dict],
+    outcome: dict[tuple[int, int, int], dict],
+    raw: list[CandidateResult],
+    cand_meta: dict[tuple[int, int], tuple[int, str]],
+    select_drops: list[dict],
+) -> None:
+    """Trichter für die Abdeckung an drei Stellen (Review 2E, Vertrag für die Messung): ``report.funnel`` und
+    ``report.funnel_counts``.
+
+    * ``pool``: jeder Vorschlag beider Quellen vor Dubletten und Gates (``_pool_from_chapter``); wer nicht angeboten
+      wird, trägt ``reason`` (derselbe Grund wie in ``discarded`` oder ``search.duplicates``).
+    * ``after_gates``: bewertete Kandidaten nach Gates, Dubletten, Längen- und Qualitätsregeln (``gate``,
+      ``below_threshold``, ``overlap``, ``redundant``, Kritiker); dabei bleibt, wer angeboten wird oder nur an der
+      Obergrenze scheiterte (``reason`` ``limit``).
+    * ``offered``: die angebotenen Kandidaten mit ``rank`` (1 zuerst, Rangfolge der Auswahl).
+    Zeiten der Stufen ab ``after_gates`` sind die des bewerteten Kandidaten (nach Heilung), im Pool die des
+    Vorschlags. ``source`` ist ``model`` oder ``search``; schlugen beide Quellen dieselbe Spanne vor, steht
+    ``model`` mit ``sources`` beider."""
+    status: dict[tuple[int, int], str | None] = {}
+    for d in select_drops:
+        status[(int(d["first_sent"]), int(d["last_sent"]))] = str(d.get("reason"))
+    offered_keys = {(c.first_sent, c.last_sent) for c in report.candidates}
+    for k in offered_keys:
+        status[k] = None
+
+    def source_fields(src: str) -> dict:
+        return {"source": "model", "sources": ["model", "search"]} if src == "both" else {"source": src}
+
+    out_pool = []
+    for e in pool:
+        entry = {k: v for k, v in e.items() if k != "_key"}
+        if "_key" in e and "reason" not in e:
+            o = outcome.get((int(e["chapter"]), *e["_key"]), {"reason": "unresolved"})
+            reason = o.get("reason") if "reason" in o else status.get(tuple(o["cand"]), "unresolved")
+            if reason is not None:
+                entry["reason"] = reason
+        out_pool.append(entry)
+    after_gates = []
+    for c in raw:
+        key = (c.first_sent, c.last_sent)
+        reason = status.get(key, "unresolved")
+        if reason not in AFTER_GATES_REASONS:
+            continue
+        chapter_no, src = cand_meta.get(key, (-1, "model"))
+        entry = {"start_s": round(c.start_s, 2), "end_s": round(c.end_s, 2), "chapter": chapter_no, **source_fields(src),
+                 "first_sent": c.first_sent, "last_sent": c.last_sent}  # fmt: skip
+        if reason is not None:
+            entry["reason"] = reason
+        after_gates.append(entry)
+    offered = []
+    for rank, c in enumerate(sorted(report.candidates, key=_rank_key, reverse=True), start=1):
+        chapter_no, src = cand_meta.get((c.first_sent, c.last_sent), (-1, "model"))
+        offered.append({
+            "start_s": round(c.start_s, 2), "end_s": round(c.end_s, 2), "chapter": chapter_no, **source_fields(src),
+            "first_sent": c.first_sent, "last_sent": c.last_sent, "rank": rank,
+        })  # fmt: skip
+    spans = [e for e in out_pool if not e.get("without_span")]
+    report.funnel = {"pool": spans, "after_gates": after_gates, "offered": offered}
+    by_source: dict[str, int] = {}
+    for e in spans:
+        by_source[e["source"]] = by_source.get(e["source"], 0) + 1
+    reasons: dict[str, int] = {}
+    without: dict[str, int] = {}
+    for e in out_pool:
+        if e.get("reason"):
+            target = without if e.get("without_span") else reasons
+            target[e["reason"]] = target.get(e["reason"], 0) + 1
+    report.funnel_counts = {
+        "pool": len(spans), "after_gates": len(after_gates), "offered": len(offered),
+        "pool_by_source": dict(sorted(by_source.items())), "pool_reasons": dict(sorted(reasons.items())),
+        "pool_without_span": len(out_pool) - len(spans), "pool_without_span_reasons": dict(sorted(without.items())),
+    }  # fmt: skip
+
+
+DEFAULT_DISTINCT_JACCARD = 0.6  # wie output.redundancy_jaccard, falls der Abschnitt output fehlt
+
+
+def yield_summary(report: DetectReport, sents: list[Sentence], pol: editorial.Policy | None) -> dict:
+    """Ausbeute (Regel 15, Review 5): ``offered`` (angeboten), ``viable_per_source_hour`` (angeboten je Stunde
+    Quelldauer) und ``distinct`` (angebotene, die nach der Jaccard-Dublettenregel ``output.redundancy_jaccard``
+    untereinander verschieden sind, in Rangfolge gezählt). Eine Mindestzahl gibt es nicht
+    (``min_candidates_enforced`` false): null Kandidaten sind zulässig und tragen ``reason`` mit den Gründen aus
+    ``discarded``."""
+    offered = len(report.candidates)
+    hours = (sents[-1].end - sents[0].start) / 3600.0 if sents else 0.0
+    threshold = DEFAULT_DISTINCT_JACCARD
+    raw_output = (pol.roh.get("output") or {}) if pol is not None else {}
+    if isinstance(raw_output, dict) and isinstance(raw_output.get("redundancy_jaccard"), (int, float)):
+        threshold = float(raw_output["redundancy_jaccard"])
+    distinct: list[set[str]] = []
+    for c in sorted(report.candidates, key=_rank_key, reverse=True):
+        lem = content_lemmas(c)
+        if all(lemma_jaccard(lem, d) < threshold for d in distinct):
+            distinct.append(lem)
+    out: dict[str, Any] = {
+        "offered": offered, "viable_per_source_hour": round(offered / hours, 2) if hours > 0 else None,
+        "distinct": len(distinct), "distinct_jaccard": threshold, "source_hours": round(hours, 4),
+        "min_candidates_enforced": False,
+    }  # fmt: skip
+    if offered == 0:
+        counts: dict[str, int] = {}
+        for d in report.discarded:
+            r = str(d.get("reason") or "")
+            if r:
+                counts[r] = counts.get(r, 0) + 1
+        dup = sum((report.search.get("duplicate_counts") or {}).values())
+        parts = [f"{r} {n}" for r, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))]
+        if not sents:
+            reason = "Kein Kandidat: das Transkript enthält keine Sätze."
+        else:
+            reason = (
+                "Kein Kandidat angeboten, das ist zulässig (Regel 15). "
+                + (f"{len(report.rejected_chapters)} Kapitel ohne tragfähigen Moment. " if report.rejected_chapters else "")
+                + ("Verworfen: " + ", ".join(parts) + "." if parts else "Kein Vorschlag erreichte die Bewertung.")
+                + (f" Dazu {dup} Dubletten." if dup else "")
+            )
+        out["reason"] = reason
+    return out
 
 
 def detect(
@@ -2254,6 +2750,8 @@ __all__ = [
     "CandidateResult",
     "DetectReport",
     "apply_critic",
+    "bradley_terry",
+    "build_funnel",
     "build_why",
     "chapter_order",
     "compare_openings",
@@ -2265,7 +2763,9 @@ __all__ = [
     "kontext_verlaengern",
     "start_defects",
     "later_qualifications",
+    "pairwise_settings",
     "prompt_versions",
+    "rank_pairwise",
     "resolve_weights",
     "risk_flags_for",
     "run",
@@ -2274,5 +2774,7 @@ __all__ = [
     "satz_staerke",
     "teaser_satz",
     "policy_total",
+    "topic_shift_settings",
     "weighted_total",
+    "yield_summary",
 ]

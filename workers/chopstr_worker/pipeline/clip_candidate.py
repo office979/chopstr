@@ -36,7 +36,7 @@ from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 from .. import editorial
-from . import compose, dach_nlp, fidelity, segment, story_engine, story_score
+from . import compose, dach_nlp, fidelity, release_gate, segment, story_engine, story_score
 from .segment import Sentence
 from .transcribe import LOW_CONF_THRESHOLD
 from .transitions import cut_rules, segment_confidence
@@ -819,8 +819,14 @@ def from_report(
     sents: list[Sentence] | None = None,
 ) -> list[ClipCandidate]:
     """Alle angebotenen (``accept``) und von ``select_best`` verworfenen (``reject``) Kandidaten eines
-    Laufs. Grund und Alternativen kommen aus ``report.discarded`` (``gate``, ``overlap``, ``limit``)."""
+    Laufs. Grund und Alternativen kommen aus ``report.discarded`` (``gate``, ``overlap``, ``limit``).
+
+    Lane P3 (Fassung 2): vorher ergänzt ``release_gate.annotate_review`` je Kandidat additiv in der Rubrik
+    Claim-Index, Gegenleser, Titelkarte und Ergebnisklasse (``review_state``); der ClipCandidate selbst bleibt
+    im Vertrag ``clip_candidate_v1`` unverändert."""
     sents = sents if sents is not None else sentences_for(words, policy)
+    for c in [*report.candidates, *report.verworfen]:
+        release_gate.annotate_review(c, words, sents, policy)
     versions = versions_for(policy, report)
     reasons = {
         (d.get("first_sent"), d.get("last_sent")): d for d in report.discarded

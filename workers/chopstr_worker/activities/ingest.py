@@ -4,6 +4,10 @@ Schreibt ``sources`` (sha256, duration_s, width, height, fps, audio_key, proxy_k
 Status ``ingesting`` zu ``transcribing``, Events und ``job_costs`` (ingest). Verbrauch: die Dauer der Quelle
 wird beim ersten Ingest (Zeile ohne ``duration_s``) als Quellminuten auf ``usage_periods`` gebucht.
 Idempotent: vorhandene Ableitungen im Storage werden übersprungen, die Buchung passiert nur einmal.
+
+Mehrspur (Lane P1, nur mit ``SPEAKERS_MULTITRACK=1``): hat die Datei mehr als eine Audiospur mit gemeinsamer
+Startzeit, wird zusätzlich jede Spur als 16-kHz-Mono-WAV abgelegt und ``sources.audio_tracks`` (Migration
+0018, Liste der Keys in Spurreihenfolge) geschrieben. Das Mono-Mix bleibt ``audio_key`` für ASR und Export.
 """
 
 from __future__ import annotations
@@ -12,10 +16,33 @@ import time
 
 from temporalio import activity
 
-from .. import costlog, db, events, ingest, usage
+from .. import costlog, db, events, ingest, storage, usage
 from . import common
 
 STEP = "probe_and_extract"
+HINT_TRACKS_UNSYNCED = "Mehrere Audiospuren mit verschiedener Startzeit, Sprecherzuordnung aus den Spuren nicht genutzt"
+
+
+def track_key_for(storage_key: str, audio_index: int) -> str:
+    """Key der 16-kHz-WAV einer einzelnen Audiospur (Lane P1)."""
+    return storage.derived_key(storage_key, {**ingest.AUDIO_PARAMS, "track": int(audio_index)}, ingest.INGEST_VERSION, "wav", prefix="audio")
+
+
+def _extract_tracks(ctx: common.Context, src: dict, original, work, info: ingest.ProbeResult) -> tuple[list[str] | None, str | None]:
+    """Spuren einzeln ablegen; ``(keys, hinweis)``. ``keys`` ist ``None`` bei einer Spur oder ohne gemeinsame Zeitbasis."""
+    if len(info.audio_streams) < 2:
+        return None, None
+    if not ingest.common_time_base(info.audio_streams):
+        return None, HINT_TRACKS_UNSYNCED
+    keys = []
+    for stream in info.audio_streams:
+        key = track_key_for(src["storage_key"], stream["index"])
+        if not ctx.store.exists("derived", key):
+            local = work / f"track{stream['index']}.wav"
+            ingest.extract_track(original, local, stream["index"])
+            ctx.store.put_file("derived", key, local, "audio/wav")
+        keys.append(key)
+    return keys, None
 
 
 def run(ctx: common.Context, source_id: str) -> dict:
@@ -61,6 +88,13 @@ def run(ctx: common.Context, source_id: str) -> dict:
                 ingest.make_proxy(original, local_proxy)
                 ctx.store.put_file("derived", proxy_key, local_proxy, "video/mp4")
         common.heartbeat("proxy")
+
+        tracks, track_hint = (None, None)
+        if ctx.settings.speakers_multitrack:
+            tracks, track_hint = _extract_tracks(ctx, src, original, work, info)
+            if tracks:
+                db.update(ctx.conn, "sources", {"id": source_id}, audio_tracks=db.jsonb(tracks))
+            common.heartbeat("tracks")
 
         db.update(
             ctx.conn,
@@ -108,6 +142,8 @@ def run(ctx: common.Context, source_id: str) -> dict:
             proxy_skipped=proxy_skipped,
             booked_minutes=round(info.duration_s / 60.0, 2) if booked else 0.0,
             overage_minutes=booked["overage_minutes"] if booked else None,
+            **({"audio_tracks": len(tracks)} if tracks else {}),
+            **({"hint": track_hint} if track_hint else {}),
         )
     return {
         "source_id": source_id,

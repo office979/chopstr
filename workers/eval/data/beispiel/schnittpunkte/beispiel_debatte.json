@@ -1,0 +1,14 @@
+{
+  "quelle": "beispiel_debatte",
+  "hinweis": "Fiktiv. Je Schnittpunkt ein Urteil je Hörer (natuerlich, abgehackt, zu_lang), dazu ein Urteil je ganzem Clip.",
+  "schnittpunkte": [
+    {"clip_id": "clip_01", "zeit_s": 120.0, "urteil": "natuerlich", "hoerer": "h1"},
+    {"clip_id": "clip_01", "zeit_s": 120.0, "urteil": "natuerlich", "hoerer": "h2"},
+    {"clip_id": "clip_01", "zeit_s": 165.0, "urteil": "zu_lang", "hoerer": "h1"},
+    {"clip_id": "clip_02", "zeit_s": 1500.0, "urteil": "abgehackt", "hoerer": "h2"}
+  ],
+  "clip_urteile": [
+    {"clip_id": "clip_01", "hoerer": "h1", "urteil": "brauchbar"},
+    {"clip_id": "clip_02", "hoerer": "h1", "urteil": "brauchbar"}
+  ]
+}

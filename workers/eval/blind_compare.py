@@ -33,6 +33,7 @@ import argparse
 import contextlib
 import copy
 import dataclasses
+import itertools
 import json
 import math
 import os
@@ -59,7 +60,27 @@ DEFAULT_K = 5
 DEFAULT_BRIEF: dict[str, Any] = {"platform": "linkedin"}
 OVERRIDES_ENV = "CHOPSTR_BLIND_OVERRIDES"
 NOTE = "beobachtend, kein A/B-Test, kein Viralitätsmaß"
-PREFERENCES = ("A", "B", "gleich")
+PREFERENCES = ("A", "B", "gleich", "beide_unbrauchbar")
+UNUSABLE = "beide_unbrauchbar"
+# Frage 6.4 „Was stimmt an dem anderen nicht?“: Kategorie und Freitext je Paar. Bei A oder B betrifft der Mangel die
+# nicht gewählte Seite, bei „beide unbrauchbar“ beide, bei „gleich“ keine bestimmte Fassung.
+FLAW_CATEGORIES = ("einstieg", "ende", "kontext", "ton", "untertitel", "inhalt", "keine")
+NO_VERSION = "ohne_fassung"
+PREFERENCE_LABELS = {"gleich": "gleich", UNUSABLE: "beide unbrauchbar", "offen": "offen"}
+# Wettbewerbsmodus (--extern): vorab festgelegt, was verglichen wird (Launch-Auftrag 6.4, Review 2D).
+COMPARISONS = {
+    "voller_output": "vollständiger Output: Momentwahl, Schnitt, Untertitel und Bildausschnitt zusammen",
+    "momentwahl": "nur die Wahl des Moments: welcher Ausschnitt ist der bessere Clip-Inhalt",
+    "schnitt": "nur der Schnitt desselben Moments: Paare überdecken sich zu mindestens der Hälfte",
+}
+OWN, EXTERNAL = "chopstr", "extern"
+SAME_MOMENT_MIN = 0.5
+EXTERNAL_CLIP_FILE = "clip.json"
+MEDIA_DIR = "medien"
+# Schwellen aus Abschnitt 1 des Launch-Auftrags (Vergleich): Gewinnrate unter den entschiedenen Urteilen und
+# höchstens dieser Anteil „beide unbrauchbar“ unter allen abgegebenen Urteilen.
+WIN_RATE_MIN = 0.6
+BOTH_UNUSABLE_MAX = 0.2
 PAIRINGS = ("ueberdeckung", "rang")
 CONTEXT_SENTENCES = 5
 FULL_TRANSCRIPT_MAX_SENTENCES = 40
@@ -747,7 +768,7 @@ def make_pairs(
         sheet_pairs.append({
             "paar_id": pid, "quelle": neutral[p["quelle"]], "kontext": p["kontext"],
             "A": _clip_side(p[side["A"]], p["labels"][side["A"]]), "B": _clip_side(p[side["B"]], p["labels"][side["B"]]),
-            "bewertung": {"A": dict.fromkeys(CRITERIA), "B": dict.fromkeys(CRITERIA), "praeferenz": None, "notiz": ""},
+            "bewertung": {"A": dict.fromkeys(CRITERIA), "B": dict.fromkeys(CRITERIA), "praeferenz": None, "notiz": "", "mangel": empty_flaw()},
         })  # fmt: skip
         key_pairs[pid] = _key_entry(p, side, neutral)
 
@@ -760,18 +781,20 @@ def make_pairs(
         hook_pairs.append({
             "paar_id": pid, "quelle": neutral[p["quelle"]],
             "A": _hook_side(p[side["A"]]), "B": _hook_side(p[side["B"]]),
-            "bewertung": {"A": dict.fromkeys(HOOK_CRITERIA), "B": dict.fromkeys(HOOK_CRITERIA), "praeferenz": None, "notiz": ""},
+            "bewertung": {"A": dict.fromkeys(HOOK_CRITERIA), "B": dict.fromkeys(HOOK_CRITERIA), "praeferenz": None, "notiz": "", "mangel": empty_flaw()},
         })  # fmt: skip
         key_hooks[pid] = _key_entry(p, side, neutral)
 
     sheet = {
         "raster": RATING_SHEET,
-        "hinweis": "Je Paar beide Clips nach raster.json (kriterien) bewerten, 0 bis 4, leer heißt nicht bewertet; dann praeferenz A, B oder gleich. Den Kontext unter kontext in quellen.json lesen. Die Herkunft der Clips ist verborgen.",
+        "hinweis": "Je Paar beide Clips nach raster.json (kriterien) bewerten, 0 bis 4, leer heißt nicht bewertet; dann praeferenz A, B, gleich oder beide_unbrauchbar. Den Kontext unter kontext in quellen.json lesen. Die Herkunft der Clips ist verborgen. Unter rater die eigene Bewerter-ID eintragen.",
+        "rater": None,
         "paare": sheet_pairs,
     }
     hook_sheet = {
         "raster": RATING_SHEET,
-        "hinweis": "Je Paar beide Hooks nach raster.json (hook_kriterien) bewerten, 0 bis 4; hook_text null heißt kein Overlay-Text. Getrennt vom Clip-Bogen bewerten, am besten von anderen Personen.",
+        "hinweis": "Je Paar beide Hooks nach raster.json (hook_kriterien) bewerten, 0 bis 4; hook_text null heißt kein Overlay-Text. Getrennt vom Clip-Bogen bewerten, am besten von anderen Personen. Unter rater die eigene Bewerter-ID eintragen.",
+        "rater": None,
         "paare": hook_pairs,
     }
     key = {
@@ -825,7 +848,7 @@ def sources_document(sources: list[dict], sentences: dict[str, list[segment.Sent
         full = len(sents) <= FULL_TRANSCRIPT_MAX_SENTENCES
         keep = range(len(sents)) if full else sorted(needed.get(neutral, set()))
         out[neutral] = {
-            "umfang": "ganzes Transkript" if full else f"plus/minus {CONTEXT_SENTENCES} Sätze um die Clips",
+            "umfang": "kein Transkript" if not sents else ("ganzes Transkript" if full else f"plus/minus {CONTEXT_SENTENCES} Sätze um die Clips"),
             "medien": media.get(name),
             "saetze": [
                 {"nr": s.idx, "von_s": round(s.start, 2), "bis_s": round(s.end, 2), "sprecher": s.speaker, "text": s.text}
@@ -896,6 +919,8 @@ def rubric_template() -> dict[str, Any]:
         "kriterien": CRITERIA,
         "hook_kriterien": HOOK_CRITERIA,
         "praeferenz": list(PREFERENCES),
+        "mangel": {"frage": "Was stimmt an dem anderen nicht?", "kategorien": list(FLAW_CATEGORIES),
+                   "regel": "Bei A oder B gilt der Mangel für die nicht gewählte Seite, bei beide_unbrauchbar für beide; Freitext unter text."},
         "hinweis": f"Ergebnis {NOTE}.",
     }
 
@@ -943,6 +968,138 @@ def generate(sources: list[dict], out_dir: str | Path, seed: int = DEFAULT_SEED,
     return paths
 
 
+# -- Wettbewerbsmodus (--extern) ---------------------------------------------------------------------
+
+
+def load_clip_folder(folder: str | Path) -> dict[str, list[dict[str, Any]]]:
+    """Fertige Clips aus Dateien: je Unterordner ein ``clip.json`` (``start_s``, ``end_s``, ``text``, ``quelle``,
+    optional ``rang``) und ein ``.mp4``. Je Quelle nach ``rang``, sonst nach Ordnername sortiert."""
+    base = Path(folder)
+    if not base.is_dir():
+        raise SystemExit(f"Clip-Ordner {folder} gibt es nicht.")
+    by_source: dict[str, list[dict[str, Any]]] = {}
+    for meta in sorted(base.glob(f"*/{EXTERNAL_CLIP_FILE}")):
+        where = f"{meta.parent.name}/{EXTERNAL_CLIP_FILE}"
+        doc = json.loads(meta.read_text(encoding="utf-8"))
+        for field_ in ("start_s", "end_s", "text", "quelle"):
+            if doc.get(field_) in (None, ""):
+                raise SystemExit(f"{where}: {field_} fehlt.")
+        start, end = float(doc["start_s"]), float(doc["end_s"])
+        if end <= start:
+            raise SystemExit(f"{where}: end_s muss nach start_s liegen.")
+        videos = sorted(meta.parent.glob("*.mp4"))
+        if len(videos) != 1:
+            raise SystemExit(f"{meta.parent.name}: genau eine .mp4 erwartet, gefunden {len(videos)}.")
+        rank = doc.get("rang")
+        by_source.setdefault(str(doc["quelle"]), []).append({
+            "candidate_id": str(doc.get("id") or meta.parent.name), "start_s": start, "end_s": end, "text": str(doc["text"]),
+            "segmente": [{"von_s": start, "bis_s": end, "rolle": "body"}], "dauer_s": round(end - start, 2),
+            "video_pfad": str(videos[0]), "rang": rank if isinstance(rank, int) and not isinstance(rank, bool) else None,
+        })  # fmt: skip
+    if not by_source:
+        raise SystemExit(f"Clip-Ordner {folder}: kein Unterordner mit {EXTERNAL_CLIP_FILE}.")
+    for clips in by_source.values():
+        clips.sort(key=lambda c: (c["rang"] is None, c["rang"] or 0, c["candidate_id"]))
+    return by_source
+
+
+def _extern_side(clip: dict, output_label: str, video: str | None) -> dict[str, Any]:
+    side = _clip_side(clip, output_label)
+    side["video"] = video
+    return side
+
+
+def make_extern_pairs(own: dict[str, list[dict]], ext: dict[str, list[dict]], seed: int, comparison: str,
+                      sentences: dict[str, list[segment.Sentence]] | None = None) -> tuple[dict, dict, list[dict]]:  # fmt: skip
+    """Bogen und Schlüssel für chopstr gegen fertige Clips eines anderen Werkzeugs. Gepaart wird je Quelle nach
+    größter Überdeckung bei gleicher Ausgabemenge; bei ``schnitt`` nur Paare desselben Moments (Überdeckung
+    mindestens ``SAME_MOMENT_MIN``). Videos werden für die Bewertenden neutral benannt."""
+    if comparison not in COMPARISONS:
+        raise SystemExit(f"--vergleichsart {comparison!r}: erlaubt sind {', '.join(COMPARISONS)}.")
+    rng = random.Random(seed)
+    names = sorted(set(own) | set(ext))
+    neutral = {name: f"Q{i:02d}" for i, name in enumerate(names, start=1)}
+    pairs, surplus = [], []
+    for name in names:
+        a, b = own.get(name, []), ext.get(name, [])
+        if comparison == "schnitt":
+            matched = [m for m in match_pairs(a, b, "ueberdeckung") if m[2] >= SAME_MOMENT_MIN]
+        else:
+            n = min(len(a), len(b))
+            matched = match_pairs(a[:n], b[:n], "ueberdeckung")
+        used = {OWN: {i for i, _j, _o in matched}, EXTERNAL: {j for _i, j, _o in matched}}
+        flip = rng.random() < 0.5
+        labels = {OWN: f"{neutral[name]}/{2 if flip else 1}", EXTERNAL: f"{neutral[name]}/{1 if flip else 2}"}
+        for i, j, ov in matched:
+            pairs.append({"quelle": name, "labels": labels, "rang": {OWN: i + 1, EXTERNAL: j + 1}, "ueberdeckung": ov, OWN: a[i], EXTERNAL: b[j]})
+        for version, clips in ((OWN, a), (EXTERNAL, b)):
+            surplus += [{"quelle": name, "version": version, "rang": r + 1, "candidate_id": c["candidate_id"]} for r, c in enumerate(clips) if r not in used[version]]
+    for p in pairs:
+        p["kontext"] = _context_range(sentences.get(p["quelle"]) if sentences else None, p[OWN], p[EXTERNAL], neutral[p["quelle"]])
+    rng.shuffle(pairs)
+    sheet_pairs, key_pairs, media = [], {}, []
+    for i, p in enumerate(pairs, start=1):
+        pid = f"P{i:03d}"
+        side = _sides(rng, OWN, EXTERNAL)
+        videos = {}
+        for s_ in ("A", "B"):
+            src = p[side[s_]].get("video_pfad")
+            videos[s_] = f"{MEDIA_DIR}/{pid}_{s_}.mp4" if src else None
+            if src:
+                media.append({"von": src, "nach": videos[s_]})
+        sheet_pairs.append({
+            "paar_id": pid, "quelle": neutral[p["quelle"]], "kontext": p["kontext"],
+            "A": _extern_side(p[side["A"]], p["labels"][side["A"]], videos["A"]), "B": _extern_side(p[side["B"]], p["labels"][side["B"]], videos["B"]),
+            "bewertung": {"A": dict.fromkeys(CRITERIA), "B": dict.fromkeys(CRITERIA), "praeferenz": None, "notiz": "", "mangel": empty_flaw()},
+        })  # fmt: skip
+        key_pairs[pid] = _key_entry(p, side, neutral)
+    sheet = {
+        "raster": RATING_SHEET,
+        "hinweis": f"Verglichen wird: {COMPARISONS[comparison]}. Je Paar beide Clips nach raster.json bewerten (0 bis 4, leer heißt nicht bewertet), "
+                   "dann praeferenz A, B, gleich oder beide_unbrauchbar. Videos liegen unter medien. Unter rater die eigene Bewerter-ID eintragen.",
+        "vergleichsart": comparison,
+        "rater": None,
+        "paare": sheet_pairs,
+    }  # fmt: skip
+    key = {
+        "raster": RATING_SHEET, "modus": "extern", "vergleichsart": comparison, "seed": seed, "links": OWN, "rechts": EXTERNAL,
+        "paarung": "ueberdeckung", "quellen": {v: k for k, v in neutral.items()}, "paare": key_pairs, "hook_paare": {}, "nicht_gepaart": surplus,
+    }  # fmt: skip
+    return sheet, key, media
+
+
+def generate_extern(own: dict[str, list[dict]], ext: dict[str, list[dict]], out_dir: str | Path, comparison: str, seed: int = DEFAULT_SEED,
+                    sources: list[dict] | None = None, own_origin: str = "dateien") -> dict[str, Path]:  # fmt: skip
+    """Schreibt Bogen, Quellen, Raster, Schlüssel und Lauf des Wettbewerbsmodus; kopiert die Videos neutral benannt."""
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    sentences = {src["name"]: neutral_sentences(src["words"]) for src in sources or []}
+    sheet, key, media = make_extern_pairs(own, ext, seed, comparison, sentences)
+    for m in media:
+        target = out / m["nach"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(m["von"], target)
+    srcs = sources or [{"name": name, "words": [], "medien": None} for name in sorted(set(own) | set(ext))]
+    run_doc = {
+        "hinweis": f"Nicht an die Bewertenden geben (enthält die Herkunft). Ergebnis {NOTE}.",
+        "modus": "extern", "vergleichsart": comparison, "eigene_herkunft": own_origin,
+        "quellen": {name: {OWN: len(own.get(name, [])), EXTERNAL: len(ext.get(name, []))} for name in sorted(set(own) | set(ext))},
+        "medien": media,
+    }  # fmt: skip
+    docs = {"sheet": sheet, "sources": sources_document(srcs, sentences, key, sheet), "key": key, "rubric": rubric_template(), "run": run_doc}
+    paths = {}
+    for kind, doc in docs.items():
+        paths[kind] = out / FILES[kind]
+        paths[kind].write_text(json.dumps(doc, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    return paths
+
+
+def own_clips_from_engine(sources: list[dict], provider: str, brief: dict[str, Any] | None, k: int, llm_factory: LLMFactory | None = None) -> dict[str, list[dict]]:
+    """chopstr-Seite aus der Engine (Fassung 2, ohne Schalter-Varianten), wenn keine fertigen Clips vorliegen."""
+    brief = dict(DEFAULT_BRIEF if brief is None else brief)
+    return {src["name"]: run_variant(BASE_VARIANTS[1], src, brief, provider, k, llm_factory)["angeboten"] for src in sources}
+
+
 # -- Auswertung ------------------------------------------------------------------------------------
 
 
@@ -955,10 +1112,18 @@ def sign_test(wins_a: int, wins_b: int) -> float | None:
     return round(min(1.0, 2 * tail), 4)
 
 
-def _read_sheet(sheet: dict, key_pairs: dict, criteria: dict, versions: tuple[str, str], what: str) -> dict[str, Any]:
-    """Werte je Fassung und Kriterium sowie Präferenzen aus einem Bogen, mit klaren Fehlermeldungen."""
+def empty_flaw() -> dict[str, Any]:
+    return {"kategorie": None, "text": ""}
+
+
+def _collect_sheet(sheet: dict, key_pairs: dict, criteria: dict, versions: tuple[str, str], what: str) -> dict[str, Any]:
+    """Werte je Fassung und Kriterium sowie Präferenz je Paar aus einem Bogen, mit klaren Fehlermeldungen.
+
+    ``beide_unbrauchbar`` darf ohne Kriterienwerte stehen; A, B und gleich nicht."""
     scores: dict[str, dict[str, list[float]]] = {v: {c: [] for c in criteria} for v in versions}
-    preference = Counter({v: 0 for v in versions} | {"gleich": 0, "offen": 0})
+    prefs: dict[str, str] = {}
+    flaws: dict[str, Counter] = {v: Counter() for v in (*versions, NO_VERSION)}
+    flaw_texts: list[dict[str, Any]] = []
     rated = 0
     for pair in sheet["paare"]:
         pid = pair.get("paar_id")
@@ -979,20 +1144,153 @@ def _read_sheet(sheet: dict, key_pairs: dict, criteria: dict, versions: tuple[st
                 any_value = True
         pref = rating.get("praeferenz")
         if pref not in (*PREFERENCES, None):
-            raise SystemExit(f"{what} {pid}: praeferenz {pref!r}, erlaubt sind A, B, gleich oder leer.")
-        if pref is not None and not any_value:
+            raise SystemExit(f"{what} {pid}: praeferenz {pref!r}, erlaubt sind A, B, gleich, beide_unbrauchbar oder leer.")
+        if pref is not None and pref != UNUSABLE and not any_value:
             raise SystemExit(f"{what} {pid}: Präferenz ohne Bewertung der Kriterien; erst die Kriterien bewerten.")
-        rated += int(any_value)
-        preference[mapping[pref] if pref in ("A", "B") else ("gleich" if pref == "gleich" else "offen")] += 1
+        rated += int(any_value or pref == UNUSABLE)
+        prefs[pid] = mapping[pref] if pref in ("A", "B") else (pref or "offen")
+        flaw = rating.get("mangel")
+        if flaw is not None:
+            if not isinstance(flaw, dict) or flaw.get("kategorie") not in (*FLAW_CATEGORIES, None):
+                raise SystemExit(f"{what} {pid}: mangel.kategorie, erlaubt sind {', '.join(FLAW_CATEGORIES)} oder leer.")
+            if not isinstance(flaw.get("text", ""), str):
+                raise SystemExit(f"{what} {pid}: mangel.text muss Text sein.")
+            if flaw.get("kategorie"):
+                if pref in ("A", "B"):
+                    targets = [mapping["B" if pref == "A" else "A"]]
+                elif pref == UNUSABLE:
+                    targets = list(versions)
+                else:
+                    targets = [NO_VERSION]
+                for t in targets:
+                    flaws[t][flaw["kategorie"]] += 1
+            if str(flaw.get("text") or "").strip():
+                flaw_texts.append({"paar_id": pid, "kategorie": flaw.get("kategorie"), "text": flaw["text"].strip()})
+    rater = sheet.get("rater")
+    return {"scores": scores, "prefs": prefs, "rated": rated, "paare": len(sheet["paare"]), "rater": None if rater in (None, "") else str(rater),
+            "maengel": flaws, "maengel_text": flaw_texts}  # fmt: skip
+
+
+def cohen_kappa(x: list[str], y: list[str]) -> float | None:
+    """Cohen-Kappa zweier Bewerter über dieselben Paare; ``None`` ohne Paare oder wenn beide immer dieselbe eine
+    Kategorie wählen (Zufallsübereinstimmung 1, Kappa nicht definiert)."""
+    n = len(x)
+    if n == 0 or n != len(y):
+        return None
+    po = sum(1 for a, b in zip(x, y) if a == b) / n
+    cx, cy = Counter(x), Counter(y)
+    pe = sum(cx[c] / n * cy[c] / n for c in set(cx) | set(cy))
+    if pe >= 1.0:
+        return None
+    return round((po - pe) / (1 - pe), 4)
+
+
+def agreement(prefs_by_rater: dict[str, dict[str, str]]) -> dict[str, Any] | None:
+    """Übereinstimmung der Präferenzen je Bewerterpaar: Anteil gleicher Urteile und Cohen-Kappa, über die Paare,
+    die beide entschieden haben (nicht offen); dazu die Mittel über alle Bewerterpaare."""
+    if len(prefs_by_rater) < 2:
+        return None
+    rows = []
+    for a, b in itertools.combinations(sorted(prefs_by_rater), 2):
+        common = sorted(p for p in prefs_by_rater[a] if p in prefs_by_rater[b] and "offen" not in (prefs_by_rater[a][p], prefs_by_rater[b][p]))
+        x, y = [prefs_by_rater[a][p] for p in common], [prefs_by_rater[b][p] for p in common]
+        same = sum(1 for u, v in zip(x, y) if u == v)
+        rows.append({"bewerter": [a, b], "paare": len(common), "gleich_anteil": round(same / len(common), 4) if common else None, "kappa": cohen_kappa(x, y)})
+    shares = [r["gleich_anteil"] for r in rows if r["gleich_anteil"] is not None]
+    kappas = [r["kappa"] for r in rows if r["kappa"] is not None]
+    return {
+        "bewerterpaare": rows,
+        "gleich_anteil_mittel": round(statistics.fmean(shares), 4) if shares else None,
+        "kappa_mittel": round(statistics.fmean(kappas), 4) if kappas else None,
+    }
+
+
+def _summarize(collected: list[dict[str, Any]], criteria: dict, versions: tuple[str, str], what: str) -> dict[str, Any]:
+    """Alle Urteile aller Bögen zusammen; Bewerter-IDs müssen beim Zusammenführen gesetzt und verschieden sein."""
+    if len(collected) > 1:
+        ids = [c["rater"] for c in collected]
+        if None in ids:
+            raise SystemExit(f"{what}: beim Zusammenführen braucht jeder Bogen eine Bewerter-ID unter rater.")
+        dup = sorted({i for i in ids if ids.count(i) > 1})
+        if dup:
+            raise SystemExit(f"{what}: Bewerter-ID {', '.join(dup)} steht in mehreren Bögen.")
+    scores: dict[str, dict[str, list[float]]] = {v: {c: [] for c in criteria} for v in versions}
+    preference = Counter({v: 0 for v in versions} | {"gleich": 0, UNUSABLE: 0, "offen": 0})
+    flaws = {v: dict.fromkeys(FLAW_CATEGORIES, 0) for v in (*versions, NO_VERSION)}
+    for c in collected:
+        for v in versions:
+            for crit in criteria:
+                scores[v][crit] += c["scores"][v][crit]
+        preference.update(c["prefs"].values())
+        for v, counts in c["maengel"].items():
+            for cat, n in counts.items():
+                flaws[v][cat] += n
     return {
         "mittel": {v: {c: round(statistics.fmean(x), 2) if x else None for c, x in crits.items()} for v, crits in scores.items()},
         "streuung": {v: {c: round(statistics.stdev(x), 2) if len(x) > 1 else None for c, x in crits.items()} for v, crits in scores.items()},
         "anzahl": {v: {c: len(x) for c, x in crits.items()} for v, crits in scores.items()},
         "praeferenz": dict(preference),
         "vorzeichentest_p": sign_test(preference[versions[0]], preference[versions[1]]),
-        "paare": len(sheet["paare"]),
-        "bewertete_paare": rated,
+        "paare": max(c["paare"] for c in collected),
+        "bewertete_paare": sum(c["rated"] for c in collected),
+        "bewerter": [c["rater"] for c in collected],
+        "uebereinstimmung": agreement({c["rater"]: c["prefs"] for c in collected}) if len(collected) > 1 else None,
+        "maengel": flaws,
+        "maengel_text": [{**t, "bewerter": c["rater"]} for c in collected for t in c["maengel_text"]],
     }
+
+
+def _read_sheet(sheet: dict, key_pairs: dict, criteria: dict, versions: tuple[str, str], what: str) -> dict[str, Any]:
+    """Ein Bogen allein (ohne Zusammenführung)."""
+    return _summarize([_collect_sheet(sheet, key_pairs, criteria, versions, what)], criteria, versions, what)
+
+
+def _sheet_kind(sheet: Any, key: dict, name: str) -> str:
+    if not isinstance(sheet, dict) or not isinstance(sheet.get("paare"), list) or not sheet["paare"]:
+        raise SystemExit(f"{name}: kein Bogen mit Paaren.")
+    ids = {p.get("paar_id") for p in sheet["paare"]}
+    if ids <= set(key["paare"]):
+        return "sheet"
+    if ids <= set(key.get("hook_paare") or {}):
+        return "hook_sheet"
+    raise SystemExit(f"{name}: paar_id passt zu keinem Bogen im Schlüssel (schluessel.json).")
+
+
+def load_rater_sheets(paths: list[str | Path], key: dict) -> dict[str, list[tuple[str, dict]]]:
+    """Bögen mehrerer Bewerter (``--bewerter a.json b.json``), nach Clip- und Hook-Bogen getrennt."""
+    out: dict[str, list[tuple[str, dict]]] = {"sheet": [], "hook_sheet": []}
+    for p in paths:
+        path = Path(p)
+        if not path.is_file():
+            raise SystemExit(f"{path} fehlt.")
+        sheet = json.loads(path.read_text(encoding="utf-8"))
+        out[_sheet_kind(sheet, key, path.name)].append((path.name, sheet))
+    return out
+
+
+def competition(clip: dict[str, Any]) -> dict[str, Any]:
+    """Gewinnrate von chopstr unter den entschiedenen Urteilen und Anteil „beide unbrauchbar“ unter allen
+    abgegebenen Urteilen, gegen die Schwellen aus Abschnitt 1."""
+    pref = clip["praeferenz"]
+    own, ext, same, unusable = pref.get(OWN, 0), pref.get(EXTERNAL, 0), pref.get("gleich", 0), pref.get(UNUSABLE, 0)
+    decided = own + ext
+    judged = decided + same + unusable
+    win = own / decided if decided else None
+    both = unusable / judged if judged else None
+
+    def state(value: float | None, ok: bool) -> str:
+        return "nicht messbar" if value is None else ("erreicht" if ok else "nicht erreicht")
+
+    return {
+        "urteile": judged, "entschieden": decided, "gewinnrate": win, "beide_unbrauchbar_anteil": both,
+        "gewinnrate_urteil": state(win, win is not None and win >= WIN_RATE_MIN),
+        "beide_unbrauchbar_urteil": state(both, both is not None and both <= BOTH_UNUSABLE_MAX),
+        "schwellen": {"gewinnrate_min": WIN_RATE_MIN, "beide_unbrauchbar_max": BOTH_UNUSABLE_MAX},
+        "metriken": {
+            "blind_gewinnrate": {"wert": win, "stichprobe": decided, "ursache": None if win is not None else "keine entschiedenen Urteile"},
+            "beide_unbrauchbar_anteil": {"wert": both, "stichprobe": judged, "ursache": None if both is not None else "keine abgegebenen Urteile"},
+        },
+    }  # fmt: skip
 
 
 def verdict(criterion: dict[str, Any], clip: dict[str, Any], versions: tuple[str, str]) -> dict[str, Any]:
@@ -1010,8 +1308,24 @@ def verdict(criterion: dict[str, Any], clip: dict[str, Any], versions: tuple[str
     return {"urteil": result, "zeilen": rows}
 
 
-def evaluate(out_dir: str | Path) -> dict[str, Any]:
-    """Liest Bögen, Schlüssel und Lauf und rechnet alle Kennzahlen des Berichts."""
+def _sheets(out: Path, kind: str, key: dict, raters: dict[str, list[tuple[str, dict]]] | None) -> list[tuple[str, dict]]:
+    """Bögen einer Art: die mit ``--bewerter`` übergebenen, sonst die Datei im Ordner (falls vorhanden)."""
+    if raters and raters.get(kind):
+        return raters[kind]
+    path = out / FILES[kind]
+    return [(path.name, json.loads(path.read_text(encoding="utf-8")))] if path.is_file() else []
+
+
+def _evaluate_sheets(sheets: list[tuple[str, dict]], key_pairs: dict, criteria: dict, versions: tuple[str, str], what: str) -> dict[str, Any] | None:
+    if not sheets:
+        return None
+    collected = [_collect_sheet(doc, key_pairs, criteria, versions, f"{what} ({name})" if len(sheets) > 1 else what) for name, doc in sheets]
+    return _summarize(collected, criteria, versions, what)
+
+
+def evaluate(out_dir: str | Path, rater_files: list[str | Path] | None = None) -> dict[str, Any]:
+    """Liest Bögen, Schlüssel und Lauf und rechnet alle Kennzahlen des Berichts. ``rater_files`` sind Bögen
+    mehrerer Bewerter (Clip- oder Hook-Bogen, an den Paar-IDs erkannt); sie ersetzen die Bögen im Ordner."""
     out = Path(out_dir)
 
     def load(kind: str) -> dict:
@@ -1021,10 +1335,18 @@ def evaluate(out_dir: str | Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8"))
 
     key, run_doc = load("key"), load("run")
+    raters = load_rater_sheets(rater_files, key) if rater_files else None
     versions = (key["links"], key["rechts"])
-    clip = _read_sheet(load("sheet"), key["paare"], CRITERIA, versions, "Clip-Bogen")
-    hook_path = out / FILES["hook_sheet"]
-    hook = _read_sheet(load("hook_sheet"), key.get("hook_paare", {}), HOOK_CRITERIA, versions, "Hook-Bogen") if hook_path.is_file() else None
+    clip_sheets = _sheets(out, "sheet", key, raters)
+    if not clip_sheets:
+        raise SystemExit(f"{out / FILES['sheet']} fehlt.")
+    clip = _evaluate_sheets(clip_sheets, key["paare"], CRITERIA, versions, "Clip-Bogen")
+    if key.get("modus") == "extern":
+        comp = competition(clip)
+        return {"modus": "extern", "vergleichsart": key["vergleichsart"], "versionen": list(versions), "paarung": key.get("paarung"),
+                "clip": clip, "wettbewerb": comp, "metriken": comp["metriken"], "nicht_gepaart": key["nicht_gepaart"],
+                "quellen": len(key["quellen"]), "lauf": run_doc}  # fmt: skip
+    hook = _evaluate_sheets(_sheets(out, "hook_sheet", key, raters), key.get("hook_paare", {}), HOOK_CRITERIA, versions, "Hook-Bogen")
 
     per_variant: dict[str, dict[str, Any]] = {}
     for name_src, runs in run_doc["quellen"].items():
@@ -1114,14 +1436,75 @@ def _rating_table(res: dict, criteria: dict, left: str, right: str) -> list[str]
     p = res["vorzeichentest_p"]
     lines += [
         "",
-        f"Präferenz: {left} {pref.get(left, 0)}, {right} {pref.get(right, 0)}, gleich {pref.get('gleich', 0)}, offen {pref.get('offen', 0)}. "
+        f"Präferenz: {left} {pref.get(left, 0)}, {right} {pref.get(right, 0)}, gleich {pref.get('gleich', 0)}, "
+        f"beide unbrauchbar {pref.get(UNUSABLE, 0)}, offen {pref.get('offen', 0)}. "
         + (f"Vorzeichentest (zweiseitig, ohne Gleichstände): p = {_num(p, 3)}." if p is not None else "Vorzeichentest: keine entschiedenen Paare."),
     ]
+    return lines + _flaw_lines(res, left, right) + _agreement_lines(res)
+
+
+def _flaw_lines(res: dict, left: str, right: str) -> list[str]:
+    """Häufigkeit der Mängel je Kategorie und Fassung (Frage „Was stimmt an dem anderen nicht?“)."""
+    flaws = res.get("maengel") or {}
+    total = sum(n for counts in flaws.values() for n in counts.values())
+    if not total:
+        return ["", "Mängel (Was stimmt an dem anderen nicht?): keine Angaben."]
+    lines = ["", "Mängel (Was stimmt an dem anderen nicht?), gezählt bei der nicht gewählten Fassung, bei beide unbrauchbar bei beiden:", "",
+             f"| Kategorie | {left} | {right} | ohne Fassung (gleich gut) |", "|---|---|---|---|"]  # fmt: skip
+    for cat in FLAW_CATEGORIES:
+        cells = [flaws.get(v, {}).get(cat, 0) for v in (left, right, NO_VERSION)]
+        if any(cells):
+            lines.append(f"| {cat} | {cells[0]} | {cells[1]} | {cells[2]} |")
+    texts = res.get("maengel_text") or []
+    if texts:
+        lines += ["", f"Freitexte: {len(texts)}, Wortlaut in der JSON-Auswertung unter maengel_text."]
     return lines
+
+
+def _agreement_lines(res: dict) -> list[str]:
+    raters = [r for r in res.get("bewerter") or [] if r]
+    if len(res.get("bewerter") or []) < 2:
+        return ["", f"Bewerter: {', '.join(raters) or 'ohne ID'} (ein Bogen, keine Übereinstimmung berechenbar)."]
+    agr = res["uebereinstimmung"]
+    lines = ["", f"Bewerter: {', '.join(raters)}. Die Präferenzen sind über alle Bewerter gezählt; Urteile derselben Paare sind nicht unabhängig, "
+                 "der Vorzeichentest ist deshalb nur ein Hinweis.", "",
+             "| Bewerterpaar | gemeinsam entschiedene Paare | gleiche Präferenz | Cohen-Kappa |", "|---|---|---|---|"]  # fmt: skip
+    for row in agr["bewerterpaare"]:
+        kappa = _num(row["kappa"], 2) if row["kappa"] is not None else "nicht berechenbar"
+        lines.append(f"| {' und '.join(row['bewerter'])} | {row['paare']} | {_pct(row['gleich_anteil'])} | {kappa} |")
+    mean_k = _num(agr["kappa_mittel"], 2) if agr["kappa_mittel"] is not None else "nicht berechenbar"
+    lines += ["", f"Mittel: gleiche Präferenz {_pct(agr['gleich_anteil_mittel'])}, Cohen-Kappa {mean_k}."]
+    return lines
+
+
+def report_extern(result: dict[str, Any]) -> str:
+    """Bericht des Wettbewerbsmodus: Vergleichsart, Gewinnrate gegen die Schwellen, Raster, Bewerter."""
+    left, right = result["versionen"]
+    comp = result["wettbewerb"]
+    lines = [f"# Blindvergleich {left} gegen {right} (Wettbewerbsmodus)", "",
+             f"Vergleichsart (vorab festgelegt): {result['vergleichsart']}, {COMPARISONS[result['vergleichsart']]}.",
+             f"Hinweis: {NOTE}. Gleiche Quellen, gleiches Briefing und gleiches Ausgabebudget sind Voraussetzung und nicht vom Werkzeug geprüft.", "",
+             "## Ergebnis gegen die Schwellen (Abschnitt 1)", "",
+             f"* Urteile: {comp['urteile']}, davon entschieden ({left} oder {right}): {comp['entschieden']}",
+             f"* Gewinnrate {left} unter den entschiedenen: {_pct(comp['gewinnrate']) if comp['gewinnrate'] is not None else 'nicht messbar: keine entschiedenen Urteile'}, "
+             f"Schwelle mindestens {_pct(WIN_RATE_MIN)}: {comp['gewinnrate_urteil']}",
+             f"* Beide unbrauchbar unter allen Urteilen: {_pct(comp['beide_unbrauchbar_anteil']) if comp['beide_unbrauchbar_anteil'] is not None else 'nicht messbar: keine Urteile'}, "
+             f"Schwelle höchstens {_pct(BOTH_UNUSABLE_MAX)}: {comp['beide_unbrauchbar_urteil']}",
+             f"* Quellen: {result['quellen']}, Clip-Paare: {result['clip']['paare']}, nicht gepaart: {len(result['nicht_gepaart'])}", ""]  # fmt: skip
+    for item in result["nicht_gepaart"]:
+        lines.append(f"  * {item['quelle']}: {item['version']} Rang {item['rang']}")
+    lines += ["## Clips (blind, Anker 0 bis 4)", ""] + _rating_table(result["clip"], CRITERIA, left, right)
+    lines += ["", "## Grenzen der Aussage", "",
+              "* Drei Bewerter über dieselben Paare liefern abhängige Urteile, keine unabhängigen Paare.",
+              "* Die Rechte am Material und an den Clips des Wettbewerbstools sind vorab zu klären.",
+              "* Negative und gleiche Ergebnisse werden wie positive berichtet."]  # fmt: skip
+    return "\n".join(lines) + "\n"
 
 
 def report_markdown(result: dict[str, Any]) -> str:
     """Bericht ohne Gedankenstriche; Werte mit Dezimalkomma."""
+    if result.get("modus") == "extern":
+        return report_extern(result)
     left, right = result["versionen"]
     var = result["varianten"]
     lines = [f"# Blindvergleich {left} gegen {right}", "", f"Hinweis: {NOTE}. Das Material ist klein; Unterschiede sind Beobachtungen, keine Belege.", ""]
@@ -1282,14 +1665,44 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--override", action="append", default=[], help=f"zusätzliche Variante: Schalter pfad=true|false oder Regel {RULE_PREFIX}pfad=wert (Whitelist), mehrfach; auch {OVERRIDES_ENV}")
     ap.add_argument("--brief", help="Brief als JSON-Datei (gleich für beide Versionen, platform steuert die Hooks)")
     ap.add_argument("--bericht", help="Pfad des Berichts, Standard <ordner>/bericht.md")
+    ap.add_argument("--bewerter", nargs="+", help="mit --auswerten: Bögen mehrerer Bewerter zusammenführen (je mit rater)")
+    ap.add_argument("--json", dest="json_out", help="mit --auswerten: Ergebnis als JSON (mit metriken für eval.baseline)")
+    ap.add_argument("--extern", help="Wettbewerbsmodus: Ordner mit fertigen Clips des anderen Werkzeugs (je Unterordner clip.json und .mp4)")
+    ap.add_argument("--eigene", help="Wettbewerbsmodus: fertige chopstr-Clips im selben Format statt eines Engine-Laufs")
+    ap.add_argument("--vergleichsart", choices=tuple(COMPARISONS), help="Wettbewerbsmodus: vorab festgelegt, was verglichen wird")
     args = ap.parse_args(argv)
 
     if args.auswerten:
-        text = report_markdown(evaluate(args.auswerten))
+        result = evaluate(args.auswerten, args.bewerter)
+        text = report_markdown(result)
         target = Path(args.bericht or Path(args.auswerten) / FILES["report"])
         target.write_text(text, encoding="utf-8")
         print(text)
         print(f"Bericht geschrieben: {target}")
+        if args.json_out:
+            result.setdefault("metriken", {})
+            Path(args.json_out).write_text(json.dumps(result, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        return
+    if args.bewerter:
+        raise SystemExit("--bewerter gehört zu --auswerten.")
+
+    if args.extern:
+        if not args.vergleichsart:
+            raise SystemExit("--extern braucht --vergleichsart (voller_output, momentwahl oder schnitt), vorab festgelegt.")
+        ext = load_clip_folder(args.extern)
+        sources = transcript_sources(args.transkripte) if args.transkripte else []
+        sources += database_sources(args.quelle)
+        if args.eigene:
+            own, origin = load_clip_folder(args.eigene), "dateien"
+        else:
+            if not sources:
+                raise SystemExit("Ohne --eigene braucht der Wettbewerbsmodus Quellen für die Engine (--transkripte oder --quelle).")
+            brief = json.loads(Path(args.brief).read_text(encoding="utf-8")) if args.brief else None
+            own, origin = own_clips_from_engine(sources, args.provider, brief, args.k), "engine"
+        paths = generate_extern(own, ext, args.out, args.vergleichsart, seed=args.seed, sources=sources, own_origin=origin)
+        print(f"Wettbewerbsmodus ({args.vergleichsart}): {len(set(own) | set(ext))} Quellen.")
+        print(f"An die Bewertenden: {paths['sheet']}, {paths['sources']}, {paths['rubric']} und der Ordner {Path(args.out) / MEDIA_DIR}")
+        print(f"Nicht weitergeben: {paths['key']}, {paths['run']}")
         return
 
     sources = [] if args.ohne_fixtures else fixture_sources()

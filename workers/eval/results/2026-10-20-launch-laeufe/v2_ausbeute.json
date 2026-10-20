@@ -1,0 +1,108 @@
+{
+  "quelle": "ausbeute: v2_report_a.json, v2_report_b.json, v2_report_c.json",
+  "je_quelle": {
+    "v2_report_a.json": {
+      "stunden": 0.0827,
+      "angeboten": 4,
+      "verschieden": 4,
+      "verwendbar": 1,
+      "ursache": null,
+      "verwendbar_ursache": null,
+      "gruende": {
+        "chapter_limit": 4,
+        "duplicate_payoff": 1,
+        "overlap": 1,
+        "same_opening": 6,
+        "too_short": 1
+      },
+      "nenner": 17,
+      "gruende_herkunft": "funnel_counts"
+    },
+    "v2_report_b.json": {
+      "stunden": 0.0673,
+      "angeboten": 4,
+      "verschieden": 4,
+      "verwendbar": 1,
+      "ursache": null,
+      "verwendbar_ursache": null,
+      "gruende": {
+        "chapter_limit": 1,
+        "duplicate_payoff": 4,
+        "overlap": 1,
+        "same_opening": 1,
+        "same_span": 1
+      },
+      "nenner": 12,
+      "gruende_herkunft": "funnel_counts"
+    },
+    "v2_report_c.json": {
+      "stunden": 0.0674,
+      "angeboten": 2,
+      "verschieden": 2,
+      "verwendbar": 0,
+      "ursache": null,
+      "verwendbar_ursache": null,
+      "gruende": {
+        "chapter_limit": 1,
+        "duplicate_payoff": 2,
+        "overlap": 2,
+        "same_opening": 4
+      },
+      "nenner": 11,
+      "gruende_herkunft": "funnel_counts"
+    }
+  },
+  "quell_stunden": 0.21739999999999998,
+  "metriken": {
+    "angeboten_je_quellstunde": {
+      "wert": 45.99816007359706,
+      "stichprobe": 3,
+      "ursache": null
+    },
+    "verwendbare_je_quellstunde": {
+      "wert": 9.199632014719413,
+      "stichprobe": 3,
+      "ursache": null
+    },
+    "verschiedene_je_quellstunde": {
+      "wert": 45.99816007359706,
+      "stichprobe": 3,
+      "ursache": null
+    },
+    "verwerfungsquote_gesamt": {
+      "wert": 0.75,
+      "stichprobe": 40,
+      "ursache": null
+    },
+    "verwerfungsquote_chapter_limit": {
+      "wert": 0.15,
+      "stichprobe": 40,
+      "ursache": null
+    },
+    "verwerfungsquote_duplicate_payoff": {
+      "wert": 0.175,
+      "stichprobe": 40,
+      "ursache": null
+    },
+    "verwerfungsquote_overlap": {
+      "wert": 0.1,
+      "stichprobe": 40,
+      "ursache": null
+    },
+    "verwerfungsquote_same_opening": {
+      "wert": 0.275,
+      "stichprobe": 40,
+      "ursache": null
+    },
+    "verwerfungsquote_same_span": {
+      "wert": 0.025,
+      "stichprobe": 40,
+      "ursache": null
+    },
+    "verwerfungsquote_too_short": {
+      "wert": 0.025,
+      "stichprobe": 40,
+      "ursache": null
+    }
+  }
+}

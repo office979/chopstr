@@ -24,7 +24,6 @@ import {
   hauptaktion,
   passtZuFilter,
   pruefstand,
-  rang,
   FREIGABE_LABEL,
   FREIGABE_SATZ,
   freigabeStand,
@@ -45,6 +44,8 @@ import { FASSUNG_FORMATE, FORMAT_HILFT_BEI, fassungMoeglich } from "@/lib/clips/
 import { kommtVomClip } from "@/lib/clips/rueckweg";
 import type { ClipExtras, Series } from "@/lib/repo/types-publishing";
 import { ClipSeries } from "./ClipSeries";
+import { CandidateReview } from "./CandidateReview";
+import { clipOffset, compareForReview } from "@/lib/candidates/review";
 import { Gepostet } from "./Gepostet";
 
 /* Serien-Zuordnung je Clip. Posten, Bildausschnitt und Experimente stehen nicht mehr auf der Karte. */
@@ -72,6 +73,8 @@ interface Props {
   planAllowsGuest: boolean;
   planName: string;
   canDelete: boolean;
+  /* Darf dieser Nutzer Vorschläge annehmen, ablehnen und an die Redaktion geben? */
+  canVerdict: boolean;
   /* Darf dieser Nutzer eintragen, dass ein Clip gepostet wurde, und Kennzahlen nachtragen? */
   canPublish: boolean;
   previewFont: PreviewFont | null;
@@ -145,17 +148,22 @@ export function ClipBoard({
   planAllowsGuest,
   planName,
   canDelete,
+  canVerdict,
   canPublish,
   previewFont,
   publishing,
   quellAspekt,
 }: Props) {
   const [clips, setClips] = useState<Clip[]>(initialClips);
+  /* Die Kandidaten als Zustand: ein Urteil aus der Karte ändert sie, ohne die Seite neu zu laden. */
+  const [kandidaten, setKandidaten] = useState<Candidate[]>(candidates);
   const [extras, setExtras] = useState<Record<string, ClipExtras>>(publishing?.extras ?? {});
   const [approvals, setApprovals] = useState<Map<string, GuestApproval>>(() => latestByClip(guestApprovals));
   const [deleteTarget, setDeleteTarget] = useState<Clip | null>(null);
   /* Clip, der gerade groß in einem Fenster läuft. Nicht Vollbild: das Fenster bleibt Teil der Seite. */
   const [zoomClip, setZoomClip] = useState<Clip | null>(null);
+  /* Die Stelle im Quellvideo, die das Fenster zeigen soll, wenn es über eine Belegstelle aufging. */
+  const [zoomAt, setZoomAt] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   /* Welche Karte hat ihre Klappe offen?
    *
@@ -392,13 +400,13 @@ export function ClipBoard({
           clip,
           freigabe: approvals.get(clip.id) ?? null,
           bearbeitet,
-          kandidat: candidates.find((k) => k.id === clip.candidate_id) ?? null,
+          kandidat: kandidaten.find((k) => k.id === clip.candidate_id) ?? null,
           quellformatAbweichend: quellAspekt != null && quellAspekt !== clip.aspect,
         }),
       );
     }
     return aus;
-  }, [clips, extras, approvals, candidates, quellAspekt]);
+  }, [clips, extras, approvals, kandidaten, quellAspekt]);
 
   /* Wie viele Clips passen zu welchem Filter? Ein Clip kann in mehreren stehen: ein freigegebener
    * ohne Fehler ist freigegeben UND postbereit. Das ist kein Fehler der Zählung, sondern der Punkt
@@ -411,8 +419,13 @@ export function ClipBoard({
     return aus;
   }, [staende]);
 
-  /* Die sichtbaren Clips: gefiltert und so sortiert, dass oben steht, was Arbeit braucht.
-   * Verworfene sind nur unter ihrem eigenen Filter zu sehen - sonst wäre Verwerfen folgenlos. */
+  /* Die sichtbaren Clips: gefiltert und so sortiert, dass oben steht, was freigabefähig ist.
+   * Verworfene sind nur unter ihrem eigenen Filter zu sehen - sonst wäre Verwerfen folgenlos.
+   *
+   * Reihenfolge nach Ergebnisklasse (bestanden, unsicher, nicht freigabefähig), darin nach
+   * Qualität absteigend; abgelehnte ans Ende (lib/candidates/review.ts, compareForReview). Vorher
+   * sortierte der Prüfstand und dann die Startzeit: oben stand, was Arbeit braucht, und der beste
+   * Vorschlag konnte ganz unten liegen (docs/decisions/051-kandidatenliste-freigabe.md). */
   const sichtbar = useMemo(() => {
     const liste = clips.filter((c) => {
       const p = staende.get(c.id);
@@ -421,15 +434,15 @@ export function ClipBoard({
       if (person !== "alle" && (approvals.get(c.id)?.guest_name ?? "") !== person) return false;
       return true;
     });
+    const zuKandidat = new Map(kandidaten.map((k) => [k.id, k]));
     return [...liste].sort((a, b) => {
-      const pa = staende.get(a.id);
-      const pb = staende.get(b.id);
-      const ra = pa ? rang(pa) : 9;
-      const rb = pb ? rang(pb) : 9;
-      if (ra !== rb) return ra - rb;
+      const ka = a.candidate_id ? (zuKandidat.get(a.candidate_id) ?? null) : null;
+      const kb = b.candidate_id ? (zuKandidat.get(b.candidate_id) ?? null) : null;
+      const k = compareForReview(ka, kb);
+      if (k !== 0) return k;
       return (a.composition[0]?.start ?? 0) - (b.composition[0]?.start ?? 0);
     });
-  }, [clips, staende, filter, plattform, person, approvals]);
+  }, [clips, staende, filter, plattform, person, approvals, kandidaten]);
 
   /* Welche Clips gehen zur Bestätigung hinaus?
    *
@@ -504,8 +517,9 @@ export function ClipBoard({
   /* Klick auf die kleine Vorschau: Fenster auf und, falls noch nicht geschehen, Hook und Untertitel
    * nachladen. Die werden für die Attrappe gebraucht, wenn der Clip noch nicht gebaut ist. */
   const openZoom = useCallback(
-    async (clip: Clip) => {
+    async (clip: Clip, at: number | null = null) => {
       setZoomClip(clip);
+      setZoomAt(at);
       if (details[clip.id]) return;
       try {
         const res = await fetch(`/api/projects/${sourceId}/clips/${clip.id}`);
@@ -666,7 +680,10 @@ export function ClipBoard({
           Lautstärke und Spulen. Geht jetzt mit einem Klick auf die kleine Vorschau auf. */}
       <Modal
         open={zoomClip != null}
-        onClose={() => setZoomClip(null)}
+        onClose={() => {
+          setZoomClip(null);
+          setZoomAt(null);
+        }}
         title={zoomClip ? `${PLATFORM_LABELS[zoomClip.platform]}, ${ASPECT_LABELS[zoomClip.aspect]}` : "Clip"}
         description="Ton, Lautstärke und Spulen über die Steuerung im Player."
         className="max-w-[min(92vw,720px)]"
@@ -674,7 +691,11 @@ export function ClipBoard({
         {zoomClip &&
           (mediaUrl(mediaBase, zoomClip.file_key) ? (
             <video
-              src={mediaUrl(mediaBase, zoomClip.file_key) ?? undefined}
+              /* Über eine Belegstelle geöffnet: an diese Stelle im fertigen Clip springen. */
+              src={
+                (mediaUrl(mediaBase, zoomClip.file_key) ?? "") +
+                (zoomAt != null ? `#t=${clipOffset(zoomClip.composition, zoomAt).toFixed(1)}` : "")
+              }
               poster={mediaUrl(mediaBase, zoomClip.poster_key) ?? undefined}
               controls
               autoPlay
@@ -683,6 +704,17 @@ export function ClipBoard({
               aria-label={`${PLATFORM_LABELS[zoomClip.platform]} abspielen`}
               className="mx-auto max-h-[70dvh] w-auto rounded-inner border border-line-strong bg-black"
               style={{ aspectRatio: ASPECT_RATIO_CSS[zoomClip.aspect] }}
+            />
+          ) : zoomAt != null && quelleSrc ? (
+            /* Noch nicht gebaut, aber eine Stelle gewählt: das Quellvideo ab dieser Stelle. */
+            <video
+              src={`${quelleSrc}#t=${zoomAt.toFixed(1)}`}
+              controls
+              autoPlay
+              playsInline
+              preload="metadata"
+              aria-label="Stelle im Video abspielen"
+              className="mx-auto max-h-[70dvh] w-auto rounded-inner border border-line-strong bg-black"
             />
           ) : details[zoomClip.id] ? (
             /* Noch nicht gebaut: Attrappe aus Hook, Untertiteln und Markenfarben */
@@ -871,7 +903,7 @@ export function ClipBoard({
         {sichtbar.map((clip) => {
           const ev = latest.get(clip.id);
           const p = staende.get(clip.id)!;
-          const kandidat = candidates.find((k) => k.id === clip.candidate_id) ?? null;
+          const kandidat = kandidaten.find((k) => k.id === clip.candidate_id) ?? null;
           const progress = clip.status === "rendering" ? (ev?.progress ?? 0) : isDone(clip) ? 1 : 0;
           const approval = approvals.get(clip.id);
           /* Wurde der Clip nach der Freigabe noch angefasst? Dann hat die Person eine andere
@@ -984,10 +1016,29 @@ export function ClipBoard({
                     )}
                   </div>
 
-                  {/* „Warum vorgeschlagen: Heuristik ohne Sprachmodell, Diskursmarker …" stand
-                      hier einmal. Das ist die Arbeitsweise der Maschine und keine Auskunft, mit
-                      der ein Kunde etwas anfängt - sie stand an jeder Karte und schob das
-                      Wesentliche nach unten. */}
+                  {/* Die Freigabe: Warum dieser Clip, Belegstellen, Flags, Ergebnisklasse,
+                      Haltegrund, eine Qualitätszahl und Annehmen, Ablehnen, An Redaktion. Hier
+                      stand einmal „Warum vorgeschlagen: Heuristik ohne Sprachmodell“, also die
+                      Arbeitsweise der Maschine. Jetzt steht der eine Satz aus `candidates.why`
+                      (Regel 12) und, was ein Mensch zum Entscheiden braucht. */}
+                  {kandidat && (
+                    <CandidateReview
+                      sourceId={sourceId}
+                      candidate={kandidat}
+                      canVerdict={canVerdict}
+                      onShow={(at) => void openZoom(clip, at)}
+                      onError={(text) => setMessage({ tone: "error", text })}
+                      onDecided={(neu, neueClips, text) => {
+                        setKandidaten((prev) => prev.map((k) => (k.id === neu.id ? neu : k)));
+                        if (neueClips.length) {
+                          const bekannt = new Map(clipsRef.current.map((c) => [c.id, c]));
+                          for (const c of neueClips) bekannt.set(c.id, c);
+                          applyClips([...bekannt.values()]);
+                        }
+                        setMessage({ tone: "ok", text });
+                      }}
+                    />
+                  )}
 
                   {/* EIN Zustand, nicht drei Plaketten nebeneinander.
                       Vorher standen „Vorgeschlagen", „Fehler" und „Wird geclippt" nebeneinander,

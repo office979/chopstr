@@ -751,7 +751,53 @@ def score_with_repair(sents: list[Sentence], first: int, last: int, brief: dict[
     return r
 
 
+# -- Paarvergleich (Launch Phase 2, Hypothese; Schalter implementation.ranking.pairwise) -------------------
+COMPARE_WINNERS = ("A", "B", "tie")
+COMPARE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "winner": {"type": "string", "enum": list(COMPARE_WINNERS)},
+        "criteria": {"type": "object", "additionalProperties": {"type": "string", "enum": list(COMPARE_WINNERS)}},
+        "reason": {"type": "string"},
+        "heuristic": {"type": "boolean"},
+    },
+    "required": ["winner", "reason"],
+}
+_PAIR_DELIMITER = re.compile(r"<(/?)(clip_a|clip_b)>", re.IGNORECASE)
+
+
+def compare(a_sents: list[Sentence], b_sents: list[Sentence], brief: dict[str, Any], llm: LLM, policy: editorial.Policy) -> dict:
+    """Ein Paarvergleich nach dem gepinnten ``compare_clips``: welcher der beiden Kandidaten ist nach der Grundlage
+    besser (``A``, ``B`` oder ``tie``). Beide stehen als Daten zwischen Begrenzern; ein Begrenzer im Transkript wird
+    entschärft. Eine Antwort ausserhalb des Schemas ergibt ``winner`` ``None`` (zählt nicht). Die Positionsrotation
+    (jedes Paar in beiden Reihenfolgen) macht der Aufrufer (``story_engine.rank_pairwise``)."""
+    p = prompts.load_pinned("compare_clips", policy)
+
+    def block(sents: list[Sentence]) -> str:
+        return _PAIR_DELIMITER.sub(lambda m: f"[{m.group(1)}{m.group(2)}]", numbered(sents))
+
+    user = p.render(
+        audience=brief.get("audience"),
+        platform=brief.get("platform", "linkedin"),
+        policy=policy.als_prompt_text(),
+        clip_a=block(a_sents),
+        clip_b=block(b_sents),
+    )
+    out = llm.structured(system_prompt(), user, COMPARE_SCHEMA, p.tool or "compare_clips", p.prompt_version, job_type="llm_compare")
+    winner = out.get("winner") if isinstance(out, dict) else None
+    criteria = out.get("criteria") if isinstance(out, dict) and isinstance(out.get("criteria"), dict) else {}
+    return {
+        "winner": winner if winner in COMPARE_WINNERS else None,
+        "criteria": {str(k): v for k, v in sorted(criteria.items()) if v in COMPARE_WINNERS},
+        "reason": str(out.get("reason") or "") if isinstance(out, dict) else "",
+        "heuristic": bool(out.get("heuristic")) if isinstance(out, dict) else False,
+        "prompt_version": p.prompt_version,
+    }
+
+
 __all__ = [
+    "COMPARE_SCHEMA",
+    "COMPARE_WINNERS",
     "DEFAULT_WEIGHTS",
     "DIRECTIONS",
     "EDITORIAL_SUBSCORE_KEYS",
@@ -765,6 +811,7 @@ __all__ = [
     "RUBRIC_SCHEMA",
     "STRUCTURES",
     "SUBSCORE_SCALE_MAX",
+    "compare",
     "editorial_subscores",
     "legacy_weights",
     "overview",

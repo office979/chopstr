@@ -7,6 +7,9 @@ Kandidaten werden als Satz-Spannen erzeugt, nicht als Sekunden-Fenster. Satzgren
 
 from __future__ import annotations
 
+import math
+import re
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 
 from . import dach_nlp
@@ -221,6 +224,173 @@ def chapterize(sents: list[Sentence], chunk_seconds=240.0, overlap_s: float = 0.
     return chapters
 
 
+# -- Kapitel an Themenwechseln (Launch Phase 2, Schalter implementation.chapters.topic_shift) -------------
+# TextTiling-artig (Hearst 1997) ohne Embeddings und ohne neue Abhängigkeit: Wortüberlappung benachbarter
+# Zeitfenster plus Sprecherwechsel. Die Stammformen sind eine grobe Endungskürzung (wie story_graph._stem),
+# kein Lemmatisierer; Funktionswörter fallen über eine feste Liste heraus. Alles deterministisch.
+
+TOPIC_STOPWORDS = frozenset({
+    "aber", "alle", "allem", "allen", "aller", "alles", "also", "andere", "anderen", "auch", "bevor", "beim", "bereits",
+    "bist", "bitte", "damit", "dann", "darauf", "daran", "darum", "dass", "dein", "deine", "denn", "deren", "dessen",
+    "dich", "diese", "diesem", "diesen", "dieser", "dieses", "doch", "dort", "durch", "eben", "eher", "eigentlich",
+    "eine", "einem", "einen", "einer", "eines", "einfach", "einmal", "etwa", "etwas", "euch", "euer", "ganz", "gerade",
+    "gibt", "haben", "habe", "halt", "hast", "hatte", "hatten", "heute", "hier", "ihre", "ihrem", "ihren", "ihrer",
+    "immer", "jede", "jedem", "jeden", "jeder", "jedes", "jetzt", "kann", "kannst", "keine", "keinen", "können", "könnte",
+    "machen", "macht", "mache", "mein", "meine", "meinem", "meinen", "meiner", "mich", "mehr", "muss", "müssen", "nach",
+    "natürlich", "nicht", "nichts", "noch", "oder", "ohne", "schon", "sehr", "sein", "seine", "seinem", "seinen",
+    "seiner", "selbst", "sich", "sind", "sollen", "sollte", "sondern", "über", "unser", "unsere", "unserem", "unseren",
+    "unserer", "viel", "viele", "vielleicht", "voll", "vom", "vorher", "wäre", "waren", "warum", "weil", "welche",
+    "wenn", "werden", "wieder", "wird", "wirklich", "wollen", "wurde", "wurden", "zwar", "zwischen", "genau", "okay",
+    "sagen", "sagt", "sage", "gesagt", "ehrlich", "glaube", "denke", "finde", "wissen", "weiß", "irgendwie", "dabei",
+})  # fmt: skip
+_TOPIC_SUFFIXES = ("ungen", "heiten", "keiten", "lich", "isch", "ung", "heit", "keit", "en", "er", "es", "em", "e", "n", "s")
+
+
+def _topic_stem(tok: str) -> str:
+    for suf in _TOPIC_SUFFIXES:
+        if tok.endswith(suf) and len(tok) - len(suf) >= 4:
+            return tok[: -len(suf)]
+    return tok
+
+
+def topic_terms(text: str) -> Counter:
+    """Inhaltswörter eines Textes als Zähler: klein geschrieben, länger als drei Zeichen, ohne Funktionswörter,
+    mit gekürzter Endung. Grundlage der Wortüberlappung in ``topic_boundary_scores``."""
+    return Counter(_topic_stem(t) for t in re.findall(r"[a-zäöüß]+", text.lower()) if len(t) > 3 and t not in TOPIC_STOPWORDS)
+
+
+def _cosine(a: Counter, b: Counter) -> float:
+    if not a or not b:
+        return 0.0
+    dot = sum(v * b.get(k, 0) for k, v in a.items())
+    na = math.sqrt(sum(v * v for v in a.values()))
+    nb = math.sqrt(sum(v * v for v in b.values()))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _turn_density(sents: list[Sentence], lo: int, hi: int) -> float:
+    """Anteil der Satzübergänge mit Sprecherwechsel zwischen ``lo`` und ``hi`` (einschließlich)."""
+    pairs = [(sents[k].speaker, sents[k + 1].speaker) for k in range(lo, hi)]
+    return sum(1 for a, b in pairs if a and b and a != b) / len(pairs) if pairs else 0.0
+
+
+def topic_boundary_scores(sents: list[Sentence], window_s: float = 60.0, speaker_weight: float = 0.25) -> list[dict]:
+    """Je Lücke zwischen Satz ``g`` und ``g + 1`` eine Bewertung als Themengrenze, 0 bis 1.
+
+    Wortüberlappung: Kosinus der Inhaltswörter (``topic_terms``) der Sätze im Fenster ``window_s`` vor und nach
+    der Lücke. Daraus die Tiefe wie bei TextTiling: der Anstieg bis zum nächsten Gipfel links und rechts,
+    bezogen auf die Summe der Gipfel (``lexical`` 1 heißt: an der Lücke keine Überlappung, beidseits viel).
+    Sprecher: Wechsel genau an der Lücke (halb) und Unterschied der Wechseldichte beider Fenster (halb).
+    ``score`` = (1 minus ``speaker_weight``) mal ``lexical`` plus ``speaker_weight`` mal ``speaker``."""
+    n = len(sents)
+    if n < 2:
+        return []
+    terms = [topic_terms(s.text) for s in sents]
+    gaps: list[dict] = []
+    lo, hi = 0, 1
+    for g in range(n - 1):
+        t = sents[g + 1].start
+        while lo < g and sents[lo].start < t - window_s:
+            lo += 1
+        hi = max(hi, g + 1)
+        while hi + 1 < n and sents[hi + 1].start < t + window_s:
+            hi += 1
+        left: Counter = Counter()
+        for k in range(lo, g + 1):
+            left.update(terms[k])
+        right: Counter = Counter()
+        for k in range(g + 1, hi + 1):
+            right.update(terms[k])
+        turn = 1.0 if sents[g].speaker and sents[g + 1].speaker and sents[g].speaker != sents[g + 1].speaker else 0.0
+        density = abs(_turn_density(sents, lo, g) - _turn_density(sents, g + 1, hi))
+        gaps.append({
+            "after_sent": sents[g].idx, "time_s": round(t, 2), "cohesion": _cosine(left, right),
+            "speaker": 0.5 * turn + 0.5 * min(1.0, density),
+        })  # fmt: skip
+    cohesion = [x["cohesion"] for x in gaps]
+    for g, gap in enumerate(gaps):
+        c = cohesion[g]
+        lpeak = c
+        for k in range(g - 1, -1, -1):
+            if cohesion[k] < lpeak:
+                break
+            lpeak = cohesion[k]
+        rpeak = c
+        for k in range(g + 1, len(cohesion)):
+            if cohesion[k] < rpeak:
+                break
+            rpeak = cohesion[k]
+        peaks = lpeak + rpeak
+        lexical = ((lpeak - c) + (rpeak - c)) / peaks if peaks > 0 else 0.0
+        gap["lexical"] = round(lexical, 4)
+        gap["cohesion"] = round(c, 4)
+        gap["speaker"] = round(gap["speaker"], 4)
+        gap["score"] = round((1.0 - speaker_weight) * lexical + speaker_weight * gap["speaker"], 4)
+    return gaps
+
+
+def chapterize_topic_shift(
+    sents: list[Sentence],
+    min_s: float = 120.0,
+    max_s: float = 300.0,
+    overlap_s: float = 0.0,
+    window_s: float = 60.0,
+    min_boundary_score: float = 0.5,
+    speaker_weight: float = 0.25,
+) -> tuple[list[list[Sentence]], list[dict]]:
+    """Kapitel an Themenwechseln statt fester 240 s (Launch Phase 2, Master-Prompt Schwachstelle 4).
+
+    Ab dem Beginn des Kapitels (ohne Überlappung gemessen) kommt jede Lücke in Frage, die mindestens ``min_s``
+    danach liegt, höchstens ``max_s`` danach und so, dass der Rest mindestens ``min_s`` lang bleibt. Die Lücke
+    mit der höchsten Bewertung (``topic_boundary_scores``; bei Gleichstand die spätere) wird Grenze, wenn sie
+    ``min_boundary_score`` erreicht (``boundary`` ``topic_shift``). Sonst endet das Kapitel nur, wenn der Rest
+    länger als ``max_s`` ist, und zwar an der besten Lücke (``max_length``). Ein kurzer Einschub erzeugt so nie
+    ein eigenes Kapitel, und ein durchgehendes Thema bis ``max_s`` bleibt ganz.
+
+    ``overlap_s`` wie in ``chapterize``: jedes folgende Kapitel beginnt zusätzlich mit den Sätzen des vorigen,
+    die in dessen letzten ``overlap_s`` Sekunden beginnen. Rückgabe: Kapitel und je Kapitel ``{first_sent,
+    last_sent, start_s, end_s, boundary, topic_boundary_score}``; ``topic_boundary_score`` ist die Bewertung der
+    Grenze am Kapitelanfang (beim ersten Kapitel ``None``)."""
+    if not sents:
+        return [], []
+    gaps = topic_boundary_scores(sents, window_s, speaker_weight)
+    pos = {s.idx: n for n, s in enumerate(sents)}
+    chapters: list[list[Sentence]] = []
+    meta: list[dict] = []
+    start = 0  # erster neuer Satz des aktuellen Kapitels
+    boundary, score = "start", None
+    end_t = sents[-1].end
+    while True:
+        t0 = sents[start].start
+        window = [x for x in gaps[start:] if t0 + min_s <= x["time_s"] <= t0 + max_s and x["time_s"] <= end_t - min_s]
+        best = max(window, key=lambda x: (x["score"], x["time_s"]), default=None)
+        if best is not None and best["score"] >= min_boundary_score:
+            cut, kind = pos[best["after_sent"]], "topic_shift"
+        elif end_t - t0 > max_s:
+            if best is None:  # kein Satzende im Fenster (sehr lange Sätze): das erste nach min_s
+                best = next((x for x in gaps[start:] if x["time_s"] >= t0 + min_s), None)
+            if best is None:
+                cut, kind = len(sents) - 1, ""
+            else:
+                cut, kind = pos[best["after_sent"]], "max_length"
+        else:
+            cut, kind = len(sents) - 1, ""
+        carry = [x for x in (chapters[-1] if chapters else []) if overlap_s > 0 and x.start >= chapters[-1][-1].end - overlap_s]
+        if chapters and len(carry) == len(chapters[-1]):
+            carry = carry[1:]
+        chapter = [*carry, *sents[start : cut + 1]]
+        chapters.append(chapter)
+        meta.append({
+            "first_sent": chapter[0].idx, "last_sent": chapter[-1].idx, "start_s": round(chapter[0].start, 2),
+            "end_s": round(chapter[-1].end, 2), "boundary": boundary, "topic_boundary_score": score,
+        })  # fmt: skip
+        if not kind or cut >= len(sents) - 1:
+            break
+        boundary, score = kind, best["score"] if best is not None else None
+        start = cut + 1
+    return chapters, meta
+
+
 def numbered(sents: list[Sentence]) -> str:
     """„[idx] (Sprecher) Text" pro Zeile, wie es die Prompts erwarten."""
     return "\n".join(f"[{s.idx}] ({s.speaker or '?'}) {s.text}" for s in sents)
@@ -232,10 +402,13 @@ __all__ = [
     "Sentence",
     "candidate_windows",
     "chapterize",
+    "chapterize_topic_shift",
     "has_sentence_idx",
     "numbered",
     "sentences_from_annotated",
     "sentences_from_words",
     "silence_changes_boundaries",
     "snap_candidates",
+    "topic_boundary_scores",
+    "topic_terms",
 ]

@@ -11,42 +11,15 @@ import { reclassify } from "@/lib/transcript/fillers";
 import { ASPECT_LABELS, formatClipDuration } from "@/lib/clips/labels";
 import type { Aspect, ClipStatus, RenderShot, TranscriptVersion, TranscriptWord, Zeitmarke } from "@/lib/repo/types";
 import { VorschauStatus } from "./VorschauStatus";
-import { Bildausschnitt, beschreibung as markeBeschreibung } from "./Bildausschnitt";
-import { Timeline, luecken } from "./timeline/Timeline";
-import { useFilmstreifen } from "./useFilmstreifen";
-import type { WellenformDaten, WellenformStand } from "./timeline/Wellenform";
-import {
-  dauer as schnittDauer,
-  inClipzeit,
-  gleich as schnittGleich,
-  type Schnitt,
-} from "@/lib/clips/schnitt";
+import { Bildausschnitt } from "./Bildausschnitt";
 import { pruefen } from "@/lib/clips/untertitel-pruefung";
 import { dialogOffen, leertasteGehoertDemElement, tipptGerade } from "@/lib/tastatur";
 import { rueckwegMerken } from "@/lib/clips/rueckweg";
-import {
-  dauerAendern as effektDauer,
-  gleich as effekteGleich,
-  entfernen as effektEntfernen,
-  lesen as effekteLesen,
-  verschieben as effektVerschieben,
-  type Effekt,
-} from "@/lib/clips/effekte";
-import { EffektListe } from "./EffektListe";
-import { MusikListe } from "./MusikListe";
-import { gleich as musikGleich, lesen as musikLesen, type Musik } from "@/lib/clips/musik";
 import { ClipPreview } from "./ClipPreview";
 import { LiveVorschau } from "./LiveVorschau";
 import { ClipTextEditor } from "./ClipTextEditor";
 import { CaptionStudio, type GespeicherteVorlage } from "./CaptionStudio";
 import type { CaptionStyle } from "@/lib/clips/caption-style";
-
-/* Eine Fassung im Verlauf: Schnitt und Marken gehoeren zusammen, weil „Rueckgaengig" den
- * letzten Schritt meint und nicht den letzten Schritt einer bestimmten Sorte. */
-interface Stand {
-  schnitt: Schnitt;
-  marken: Zeitmarke[];
-}
 
 function markenGleich(a: Zeitmarke[], b: Zeitmarke[]): boolean {
   if (a.length !== b.length) return false;
@@ -85,21 +58,8 @@ interface Props {
   outW: number;
   outH: number;
   zeitmarken: Zeitmarke[];
-  /* Effekte auf der Clip-Zeitachse (Migration 0015). */
-  effekte: Effekt[] | null;
-  /* Musik unter dem Clip. Null heisst: keine. */
-  musik: Musik | null;
   shots: RenderShot[];
   quelleBreite: number | null;
-  /* Der gespeicherte Schnitt: welche Abschnitte der Quelle dieser Clip zeigt. */
-  komposition: Schnitt;
-  /* Der Schnitt, der im gebauten Video steckt. Weicht er vom gespeicherten ab, zeigt das Video
-   * ein altes Ergebnis, und das muss dastehen. */
-  quelleDauerS: number;
-  wellenformSrc: string | null;
-  /* Ist das Video fertig analysiert? Ohne das lässt sich nicht sagen, ob eine fehlende Tonspur
-   * noch kommt oder nie kommen wird. */
-  quelleFertig: boolean;
   /* Die Farben dieser Marke, als schnelle Wahl bei den Untertiteln. Eine Agentur soll die
    * Kundenfarbe nicht bei jedem Clip aus einem Farbrad suchen. */
   markenFarben: string[];
@@ -113,22 +73,18 @@ interface Props {
 
 /* Ein Clip: oben Vorschau, daneben sein Text. Gespeichert wird mit einem Klick, ohne Rückfrage.
  * Die Rückfrage kommt nur beim Zurückgehen mit offenen Änderungen. */
-/* Die vier Arbeitsbereiche eines Clips.
+/* Die drei Arbeitsbereiche eines Clips: Korrekturen ohne Timeline.
  *
- * Vier und nicht acht: mehr Reiter beantworten die Frage „wo mache ich das?" nicht besser,
- * sondern verlagern sie nur. Die Reihenfolge ist die des Arbeitens - erst der Schnitt, dann der
- * Text, dann das Aussehen.
- *
- * Ein vierter Bereich „Fertigstellen" stand hier einmal: Renderstand, eine Liste „Was noch offen
- * ist" und ein Weg zurück in die Übersicht. Er ist weg. Seit Speichern sofort neu clippt, gibt es
- * nichts mehr fertigzustellen - der Stand des Videos steht ohnehin dauerhaft unter der Vorschau,
- * und der Weg zurück steht in der Brotkrume. */
-export type Bereich = "schnitt" | "text" | "untertitel";
+ * Einen Reiter „Schnitt“ mit Timeline, Effekten und Musik gibt es nicht mehr: chopstr ist eine
+ * Freigabe, kein Editor; Anfang und Ende setzt die Pipeline (docs/decisions/050-timeline-entfernen.md).
+ * Was bleibt, ändert keine Grenze: die geschriebenen Wörter, das Aussehen der Untertitel und wer
+ * wie nah im Bild ist. */
+export type Bereich = "text" | "untertitel" | "bildausschnitt";
 
-const BEREICHE: { id: Bereich; name: string; satz: string }[] = [
-  { id: "schnitt", name: "Schnitt", satz: "Timeline und Bildausschnitt" },
+export const BEREICHE: { id: Bereich; name: string; satz: string }[] = [
   { id: "text", name: "Text", satz: "Gesprochene Wörter prüfen" },
   { id: "untertitel", name: "Untertitel", satz: "Aussehen, Position, Lesbarkeit" },
+  { id: "bildausschnitt", name: "Bildausschnitt", satz: "Wer wie nah im Bild ist" },
 ];
 
 export function ClipDetail({
@@ -156,14 +112,8 @@ export function ClipDetail({
   outW,
   outH,
   zeitmarken: markenAnfang,
-  effekte: effekteAnfang,
-  musik: musikAnfang,
   shots,
   quelleBreite,
-  komposition,
-  quelleDauerS,
-  wellenformSrc,
-  quelleFertig,
   markenFarben,
   clipStatus,
   renderFehler,
@@ -202,7 +152,7 @@ export function ClipDetail({
   /* Wohin es gehen soll, sobald über die ungespeicherten Änderungen entschieden ist.
    *
    * Vorher war das ein blosses true/false und galt nur für den Weg zurück zur Liste. „Zurück",
-   * „Weiter" und der Wechsel zwischen Schnitt, Text und Untertiteln gingen daran vorbei - die
+   * „Weiter" und der Wechsel zwischen Text und Untertiteln gingen daran vorbei, die
    * Änderungen waren weg, ohne dass jemand gefragt wurde. Jetzt merkt sich die Seite den Weg und
    * geht ihn erst nach der Antwort. */
   const [verlassen, setVerlassen] = useState<{ was: string; gehen: () => void } | null>(null);
@@ -214,49 +164,26 @@ export function ClipDetail({
   const [stilSaving, setStilSaving] = useState(false);
   const [vorlagen, setVorlagen] = useState<GespeicherteVorlage[]>(captionPresets);
 
-  /* Zeitleiste: die Marken liegen hier, weil die Vorschau oben und die Leiste unten dieselben
+  /* Bildausschnitt: die Marken liegen hier, weil die Vorschau links und der Reiter rechts dieselben
    * brauchen. Gespeichert wird sofort beim Setzen, nicht ueber einen zweiten Knopf: eine Marke ist
    * eine einzelne kleine Entscheidung, und wer sie trifft, will nicht danach noch speichern. */
   const [marken, setMarken] = useState<Zeitmarke[]>(markenAnfang);
   /* Vorschau aus der Quelle (zeigt jede Aenderung sofort) oder das gebaute Video (zeigt das
    * Ergebnis des letzten Laufs). Voreingestellt ist die Vorschau: wer hier ist, stellt etwas ein. */
   const [zeigeGebautes, setZeigeGebautes] = useState(false);
-  /* Welcher Arbeitsbereich offen ist.
+  /* Welcher Arbeitsbereich offen ist. Das Video bleibt links stehen, nur der rechte Teil wechselt.
    *
-   * Vorher lag alles untereinander auf einer Seite: Vorschau und Timeline oben, darunter Text,
-   * Untertitel und Bildausschnitt. Wer einen Regler weiter unten anfasste, sah die Wirkung nicht,
-   * weil das Video zwei Bildschirme weiter oben stand. Jetzt bleibt das Video stehen und nur der
-   * rechte Teil wechselt.
-   *
-   * Alle vier Bereiche bleiben im Baum und werden nur ausgeblendet. Das ist der Grund, warum ein
+   * Alle Bereiche bleiben im Baum und werden nur ausgeblendet. Das ist der Grund, warum ein
    * Wechsel nichts zurücksetzt: nicht gespeicherte Eingaben, die gewählte Stelle und die
    * Abspielposition überleben, weil nichts neu aufgebaut wird. */
-  const [bereich, setBereich] = useState<Bereich>("schnitt");
-
-  /* Der Verlauf fuer Rueckgaengig und Wiederherstellen. Eine Fassung ist Schnitt UND Marken
-   * zusammen: wer einen Marker verschiebt und dann „Rueckgaengig" drueckt, meint den Marker.
-   * Zwei Listen alter Fassungen reichen; ein Diff waere Aufwand ohne Nutzen, sie sind winzig. */
-  const [schnitt, setSchnitt] = useState<Schnitt>(komposition);
-  const [gesichert, setGesichert] = useState<Schnitt>(komposition);
-  const [zurueckStapel, setZurueckStapel] = useState<Stand[]>([]);
-  const [vorStapel, setVorStapel] = useState<Stand[]>([]);
-  const [schnittSaving, setSchnittSaving] = useState(false);
-  const [wellenform, setWellenform] = useState<WellenformDaten | null>(null);
-  /* Warum es (noch) keine Tonspur gibt: „wird noch erzeugt" ist etwas anderes als „liess sich
-   * nicht laden", und der Nutzer soll den Unterschied sehen. */
-  const [wellenformStand, setWellenformStand] = useState<WellenformStand>(
-    wellenformSrc ? "laeuft" : quelleFertig ? "keine" : "fehlt",
-  );
-  const [laeuft, setLaeuft] = useState(false);
+  const [bereich, setBereich] = useState<Bereich>("text");
   const [spielen, setSpielen] = useState(0);
   const abspielen = useCallback(() => setSpielen((n) => n + 1), []);
 
   /* Leertaste spielt ab und hält an - im ganzen Fenster, nicht nur auf der Timeline.
    *
-   * Bisher lag das Kürzel am Timeline-Element: es wirkte erst, wenn man die Timeline vorher
-   * angeklickt hatte. Wer den Text prüft oder an den Untertiteln stellt, drückt die Leertaste und
-   * es passiert nichts, obwohl direkt daneben ein Video steht. Beim Transkript ist es längst so,
-   * und dort erwartet es jeder auch hier.
+   * Wer den Text prüft oder an den Untertiteln stellt, drückt die Leertaste und erwartet, dass
+   * das Video daneben läuft. Beim Transkript ist es längst so.
    *
    * Drei Fälle bleiben ausgenommen: ein Textfeld (dort ist die Leertaste ein Leerzeichen), ein
    * Knopf oder Reiter unter dem Fokus (dort löst sie ihn aus) und ein offener Dialog. */
@@ -272,41 +199,8 @@ export function ClipDetail({
     return () => document.removeEventListener("keydown", beiTaste);
   }, [abspielen]);
 
-  useEffect(() => {
-    if (!wellenformSrc) {
-      /* Fertig verarbeitet und trotzdem keine Tonspur: dann kommt auch keine mehr. Der alte Satz
-       * „Sie entsteht beim Verarbeiten" stand genau an diesen Videos und versprach etwas, worauf
-       * man beliebig lange warten konnte. */
-      setWellenformStand(quelleFertig ? "keine" : "fehlt");
-      return undefined;
-    }
-    let weg = false;
-    setWellenformStand("laeuft");
-    fetch(wellenformSrc)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (weg) return;
-        if (d && Array.isArray(d.werte)) {
-          setWellenform(d as WellenformDaten);
-          setWellenformStand("da");
-        } else {
-          setWellenformStand("fehler");
-        }
-      })
-      .catch(() => {
-        if (!weg) setWellenformStand("fehler");
-      });
-    return () => {
-      weg = true;
-    };
-  }, [wellenformSrc, quelleFertig]);
-
-  /* Der jeweils neueste Stand, auch mitten in einem Ziehen. Die Zustandsvariablen selbst taugen
-   * dafuer nicht: waehrend eines Zugs kommen Dutzende Ereignisse, bevor React neu zeichnet. */
-  const schnittRef = useRef(schnitt);
-  useEffect(() => {
-    schnittRef.current = schnitt;
-  }, [schnitt]);
+  /* Der jeweils neueste Stand der Marken. Die Zustandsvariable selbst taugt dafuer nicht: zwei
+   * schnelle Klicks kommen, bevor React neu zeichnet. */
   const markenRef = useRef(marken);
   useEffect(() => {
     markenRef.current = marken;
@@ -322,50 +216,7 @@ export function ClipDetail({
   /* Was die Anzeige zeigt: beim Ziehen die Vorschau, sonst der gespeicherte Stand. */
   const markenSicht = markenVorschau ?? marken;
 
-  const standJetzt = useCallback((): Stand => ({ schnitt: schnittRef.current, marken: markenRef.current }), []);
-  const merken = useCallback(
-    (stand: Stand) => {
-      setZurueckStapel((z) => [...z.slice(-29), stand]);
-      setVorStapel([]);
-    },
-    [],
-  );
-
-  /* Hier wird bewusst NICHT aufgeraeumt: aufraeumen zieht beruehrende Abschnitte zusammen, und
-   * genau die entstehen beim Teilen. Die einzelnen Schritte raeumen selbst auf, soweit noetig.
-   * Beim Bauen werden durchgehende Abschnitte wieder zusammengefasst (render_plan), damit an
-   * einer Naht ohne entfernten Teil keine Tonblende hoerbar wird. */
-  const schnittSetzen = useCallback(
-    (neu: Schnitt) => {
-      if (!neu.length || schnittGleich(neu, schnittRef.current)) return;
-      merken(standJetzt());
-      schnittRef.current = neu;
-      setSchnitt(neu);
-    },
-    [merken, standJetzt],
-  );
-
-  /* Ziehen an einer Kante: waehrend des Zugs nur anzeigen. Sonst stuende nach einem einzigen
-   * Zug fuer jede Mausbewegung eine Fassung im Verlauf, und „Rueckgaengig" ginge einen
-   * Bildpunkt zurueck statt einen Schritt. */
-  const zugStart = useRef<Stand | null>(null);
-  const schnittZiehen = useCallback(
-    (neu: Schnitt) => {
-      if (!neu.length) return;
-      if (!zugStart.current) zugStart.current = standJetzt();
-      schnittRef.current = neu;
-      setSchnitt(neu);
-    },
-    [standJetzt],
-  );
-  const schnittLoslassen = useCallback(() => {
-    const start = zugStart.current;
-    zugStart.current = null;
-    if (!start || schnittGleich(start.schnitt, schnittRef.current)) return;
-    merken(start);
-  }, [merken]);
-
-  /* Marken speichern, ohne den Verlauf anzufassen. Gerechnet wird immer vom neuesten Stand aus:
+  /* Marken speichern. Gerechnet wird immer vom neuesten Stand aus:
    * ohne das rechnet ein zweiter Klick, der vor der Antwort des ersten kommt, mit einer alten
    * Liste weiter, und aus einer verschobenen Marke werden zwei. */
   /* Benannter Funktionsausdruck, damit der Wiederholen-Knopf denselben Aufruf noch einmal machen
@@ -402,165 +253,6 @@ export function ClipDetail({
       }
     },
     [sourceId, clipId],
-  );
-
-  /* Eine Fassung wiederherstellen. Der Schnitt liegt nur hier, die Marken liegen auch auf dem
-   * Server: weichen sie ab, werden sie mitgespeichert, sonst zeigte die Seite nach dem Neuladen
-   * wieder den alten Stand. */
-  const standSetzen = useCallback(
-    (stand: Stand) => {
-      schnittRef.current = stand.schnitt;
-      setSchnitt(stand.schnitt);
-      if (!markenGleich(stand.marken, markenRef.current)) void markenSpeichern(stand.marken);
-    },
-    [markenSpeichern],
-  );
-
-  /* Bewusst ausserhalb der Aktualisierungsfunktionen gerechnet: setState darf nur den neuen
-   * Wert liefern. Ein Speichern von dort aus liefe im Entwicklungsmodus zweimal. */
-  const zurueck = useCallback(() => {
-    const letzte = zurueckStapel[zurueckStapel.length - 1];
-    if (!letzte) return;
-    const jetzt = standJetzt();
-    setZurueckStapel((z) => z.slice(0, -1));
-    setVorStapel((v) => [...v, jetzt]);
-    standSetzen(letzte);
-  }, [zurueckStapel, standJetzt, standSetzen]);
-
-  const vor = useCallback(() => {
-    const naechste = vorStapel[vorStapel.length - 1];
-    if (!naechste) return;
-    const jetzt = standJetzt();
-    setVorStapel((v) => v.slice(0, -1));
-    setZurueckStapel((z) => [...z, jetzt]);
-    standSetzen(naechste);
-  }, [vorStapel, standJetzt, standSetzen]);
-
-  const schnittGeaendert = !schnittGleich(schnitt, gesichert);
-  const neueDauer = schnittDauer(schnitt);
-
-  /* Die Effekte dieses Clips.
-   *
-   * Sie kommen entweder vom Menschen oder von der Automatik des letzten Renderlaufs - in beiden
-   * Fällen stehen sie am Clip und lassen sich hier verschieben, verlängern und entfernen. Eine
-   * leere Liste wird ausdrücklich gespeichert: sie heisst „ich will keine", und der nächste
-   * Renderlauf legt dann auch keine automatischen mehr an. */
-  const [effekte, setEffekte] = useState<Effekt[]>(() => effekteLesen(effekteAnfang ?? [], schnittDauer(komposition)));
-  const [effekteGesichert, setEffekteGesichert] = useState<Effekt[]>(effekte);
-  const effekteGeaendert = !effekteGleich(effekte, effekteGesichert);
-  /* Ein Knopf für beides: Schnitt und Effekte hängen an derselben Zeitleiste, und zwei
-   * Speicherknöpfe nebeneinander sind eine Auswahlaufgabe. */
-  /* Die Länge des Clips in Clipzeit: daran hängt, wie weit ein Effekt geschoben werden darf. */
-  const clipDauer = useMemo(() => schnittDauer(schnitt), [schnitt]);
-
-  /* Die Musik dieses Clips, und wie lang das Stück ist.
-   *
-   * Die Länge kommt nicht vom Server: sie steht in der Datei, und die kennt der Browser, sobald
-   * er sie geladen hat. Ohne sie lässt sich nicht sagen, wie weit sich die Spur schieben darf -
-   * deshalb bleibt sie bis dahin fest statt zu raten. */
-  const [musik, setMusik] = useState<Musik | null>(() => musikLesen(musikAnfang));
-  const [musikGesichert, setMusikGesichert] = useState<Musik | null>(musik);
-  const [musikDauer, setMusikDauer] = useState<number | null>(null);
-  const [musikLaeuft, setMusikLaeuft] = useState(false);
-  const [musikFehler, setMusikFehler] = useState<string | null>(null);
-  const musikGeaendert = !musikGleich(musik, musikGesichert);
-  /* Ein Knopf für alles: Schnitt, Effekte und Musik hängen an derselben Zeitleiste, und drei
-   * Speicherknöpfe nebeneinander sind eine Auswahlaufgabe. */
-  const etwasGeaendert = schnittGeaendert || effekteGeaendert || musikGeaendert;
-
-  /* Woher die Musikdatei kommt. Der Ablageschlüssel hängt als Kennung dran: lädt jemand ein
-   * anderes Stück hoch, ändert sich die Adresse, und der Browser holt die neue Datei statt der
-   * alten aus seinem Zwischenspeicher. */
-  const musikDatei = musik?.datei ?? null;
-  const musikSrc = useMemo(
-    () =>
-      musikDatei
-        ? `/api/projects/${sourceId}/clips/${clipId}/musik/datei?v=${encodeURIComponent(musikDatei)}`
-        : null,
-    [musikDatei, sourceId, clipId],
-  );
-
-  /* Die Länge des Stücks messen, sobald eine Datei da ist. Ein Audio-Element im Speicher, kein
-   * Abspielen: das geht in jedem Browser und kostet nichts.
-   *
-   * Ohne diese Zahl hätte das Verschieben der Musikspur keine Grenze - man könnte über das Ende
-   * des Stücks hinausziehen und bekäme Stille. */
-  useEffect(() => {
-    if (!musikSrc) {
-      setMusikDauer(null);
-      return undefined;
-    }
-    const url = musikSrc;
-    const a = new Audio();
-    let weg = false;
-    const fertig = () => {
-      if (!weg && Number.isFinite(a.duration)) setMusikDauer(a.duration);
-    };
-    a.addEventListener("loadedmetadata", fertig);
-    a.preload = "metadata";
-    a.src = url;
-    return () => {
-      weg = true;
-      a.removeEventListener("loadedmetadata", fertig);
-      a.src = "";
-    };
-  }, [musikSrc]);
-
-  /* Musik hochladen. Sie wird SOFORT gespeichert und nicht erst mit dem Speichern-Knopf: eine
-   * Datei liegt danach ohnehin auf dem Server, und ein „ungespeichertes Hochladen" gibt es nicht. */
-  const musikHochladen = useCallback(
-    async (datei: File) => {
-      setMusikLaeuft(true);
-      setMusikFehler(null);
-      try {
-        const form = new FormData();
-        form.append("datei", datei);
-        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/musik`, { method: "POST", body: form });
-        const d = (await res.json()) as { musik?: unknown; error?: string };
-        if (!res.ok) throw new Error(d.error ?? "Das Hochladen hat nicht geklappt");
-        const neu = musikLesen(d.musik);
-        setMusik(neu);
-        setMusikGesichert(neu);
-      } catch (err) {
-        setMusikFehler(err instanceof Error ? err.message : "Das Hochladen hat nicht geklappt");
-      } finally {
-        setMusikLaeuft(false);
-      }
-    },
-    [sourceId, clipId],
-  );
-
-  /* Eine Änderung an den Effekten wird NICHT sofort gespeichert.
-   *
-   * Vorher ging jede Bewegung sofort an den Server. Das war unsichtbar: unten stand „Schnitt
-   * gespeichert", und wer einen Effekt setzte, sah keinen Hinweis, dass sich etwas geändert hat -
-   * und hielt es für verloren. Jetzt gehören Schnitt und Effekte demselben Knopf. */
-  const effekteAendern = useCallback((naechste: Effekt[]) => setEffekte(naechste), []);
-
-  /* Der Zeitraum, den die Timeline zeigt: der geladene Schnitt plus zehn Sekunden Luft auf beiden
-   * Seiten, damit sich der Anfang auch wieder verlaengern laesst. Bewusst fest ab dem Laden und
-   * NICHT dem laufenden Schnitt folgend: sonst verschoebe sich die Zeitskala unter der Hand,
-   * waehrend jemand an einer Kante zieht. */
-  const bereichVon = useMemo(() => Math.max(0, (komposition[0]?.start ?? 0) - 10), [komposition]);
-  const bereichBis = useMemo(
-    () => Math.min(quelleDauerS || Infinity, (komposition[komposition.length - 1]?.end ?? 0) + 10),
-    [komposition, quelleDauerS],
-  );
-  /* Die Einzelbilder fuer die Bildspur. Sie haengen am festen Bereich, nicht am Schnitt: sonst
-   * wuerde der Streifen bei jeder Kante neu gezeichnet. */
-  const streifenBilder = useFilmstreifen(sourceSrc, bereichVon, bereichBis);
-
-  /* Anfang und Ende des Clips nach dem aktuellen Schnitt. Daran haengt die Vorschau: sie soll das
-   * zeigen, was gerade eingestellt ist, nicht den Stand vom Laden. */
-  const vorschauStart = schnitt[0]?.start ?? clipStart;
-  const vorschauEnde = schnitt[schnitt.length - 1]?.end ?? clipEnd;
-  /* Die entfernten Teile. Beim Abspielen springt die Vorschau darueber hinweg, damit sie denselben
-   * Ablauf zeigt wie der spaetere Clip. */
-  const vorschauLuecken = useMemo(() => luecken(schnitt, vorschauStart, vorschauEnde ?? vorschauStart), [schnitt, vorschauStart, vorschauEnde]);
-
-  const auswahlAusShots = useMemo(
-    () => [...new Set(shots.flatMap((sh) => sh.auswahl ?? []))].sort((a, b) => a - b),
-    [shots],
   );
 
   const hasText = wordFrom != null && wordTo != null && wordTo >= wordFrom;
@@ -606,12 +298,9 @@ export function ClipDetail({
 
   /* Ein Wort für die ganze Seite: gibt es irgendwo etwas Ungespeichertes? Steht in der Kopfzeile
    * und entscheidet, ob das Bauen gesperrt ist. */
-  const offeneAenderungen = dirty || stilGeaendert || schnittGeaendert || effekteGeaendert || musikGeaendert;
+  const offeneAenderungen = dirty || stilGeaendert;
   /* Was genau offen ist. „Du hast etwas geändert" lässt den Nutzer raten, was er verliert. */
   const offeneListe = [
-    schnittGeaendert ? "der Schnitt" : null,
-    effekteGeaendert ? "die Effekte" : null,
-    musikGeaendert ? "die Musik" : null,
     dirty ? "der Text" : null,
     stilGeaendert ? "die Untertitel" : null,
   ]
@@ -625,8 +314,8 @@ export function ClipDetail({
    * Zeiten - das folgende bleibt dadurch an seiner Stelle - und fällt im Renderer aus den Karten
    * heraus (captions_de.sichtbare_woerter).
    *
-   * Gesagt bleibt gesagt: am Ton ändert sich nichts. Wer ein Wort wirklich aus dem Video haben
-   * will, schneidet es unter „Schnitt" heraus. */
+   * Gesagt bleibt gesagt: am Ton ändert sich nichts. Den Schnitt setzt die Pipeline, eine
+   * Timeline gibt es nicht (docs/decisions/050-timeline-entfernen.md). */
   const deleteWords = useCallback(
     (indices: number[]) => {
       setWords((prev) => {
@@ -718,7 +407,7 @@ export function ClipDetail({
       if (!res.ok || !data.version) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
       setOriginal(words);
       setCorrections(new Map());
-      /* Und gleich neu clippen, genau wie beim Schnitt. Ein geänderter Untertiteltext, der erst
+      /* Und gleich neu clippen. Ein geänderter Untertiteltext, der erst
        * beim nächsten Lauf im Bild landet, ist eine Aufgabe, die das Programm dem Menschen gibt,
        * obwohl es sie selbst erledigen kann. Schlägt das Anstossen fehl, ist das Speichern
        * trotzdem sicher - die Änderung liegt in der Datenbank. */
@@ -780,94 +469,15 @@ export function ClipDetail({
     }
   };
 
-  /* Eine Marke aendern: erst die bisherige Fassung in den Verlauf, dann speichern. */
+  /* Eine Marke aendern und gleich speichern. */
   const markenAendern = useCallback(
     (rechnen: (vorher: Zeitmarke[]) => Zeitmarke[]) => {
       const naechste = rechnen(markenRef.current);
       if (markenGleich(naechste, markenRef.current)) return;
-      merken(standJetzt());
       void markenSpeichern(naechste);
     },
-    [merken, standJetzt, markenSpeichern],
+    [markenSpeichern],
   );
-
-  /* Ein Speichern für beides: Schnitt und Effekte.
-   *
-   * Der Schnitt zuerst, denn die Effekte werden am Server gegen die Cliplänge geprüft - und die
-   * hängt am Schnitt. Andersherum würde ein Effekt an einer Stelle abgewiesen, die es nach dem
-   * Speichern des Schnitts längst gibt. */
-  const schnittSichern = async () => {
-    setSchnittSaving(true);
-    setMessage(null);
-    try {
-      if (schnittGeaendert) {
-        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/schnitt`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ composition: schnitt }),
-        });
-        const data = (await res.json()) as { error?: string; composition?: Schnitt; needs_render?: boolean };
-        if (!res.ok || !data.composition) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
-        setSchnitt(data.composition);
-        setGesichert(data.composition);
-      }
-      if (effekteGeaendert) {
-        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/effekte`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ effekte }),
-        });
-        const data = (await res.json()) as { error?: string; effekte?: Effekt[]; needs_render?: boolean };
-        if (!res.ok || !data.effekte) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
-        setEffekte(data.effekte);
-        setEffekteGesichert(data.effekte);
-      }
-      if (musikGeaendert) {
-        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/musik`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ musik }),
-        });
-        const data = (await res.json()) as { error?: string; musik?: unknown };
-        if (!res.ok) throw new Error(data.error ?? "Das Speichern hat nicht geklappt");
-        setMusikGesichert(musikLesen(data.musik));
-      }
-      /* Und gleich neu clippen.
-       *
-       * „Gespeichert, das Video muss neu geclippt werden" war eine Aufgabe, die das Programm
-       * dem Menschen gab, obwohl es sie selbst erledigen kann: es gibt nichts zu entscheiden.
-       * Wer speichert, will das Ergebnis sehen. Der Lauf läuft im Hintergrund, die Vorschau
-       * zeigt ihn an.
-       *
-       * Immer, nicht nur wenn schon einmal geclippt wurde: auch beim ersten Mal will man das
-       * Ergebnis sehen, ohne noch einen Knopf zu suchen.
-       *
-       * Schlägt das Anstossen fehl, ist das kein verlorenes Speichern: die Änderung liegt sicher
-       * in der Datenbank, und der Knopf „Video clippen" steht weiterhin daneben. */
-      try {
-        const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/render`, { method: "POST" });
-        const data = (await res.json()) as { error?: string };
-        /* 409 heisst: es läuft schon. Das ist kein Fehler, sondern genau das, was man wollte. */
-        if (!res.ok && res.status !== 409) throw new Error(data.error ?? "Das Clippen liess sich nicht anstossen");
-        setMessage({ tone: "ok", text: "Gespeichert. Das Video wird geclippt." });
-      } catch (err) {
-        setMessage({
-          tone: "error",
-          text: `Gespeichert. Das Clippen liess sich nicht anstossen: ${
-            err instanceof Error ? err.message : "unbekannter Fehler"
-          }`,
-        });
-      }
-    } catch (err) {
-      setMessage({
-        tone: "error",
-        text: err instanceof Error ? err.message : "Das Speichern hat nicht geklappt",
-        nochmal: () => void schnittSichern(),
-      });
-    } finally {
-      setSchnittSaving(false);
-    }
-  };
 
   /* Jeder Weg aus dieser Seite heraus geht hier durch. Ohne offene Änderungen sofort, sonst
    * erst die Frage. */
@@ -877,10 +487,9 @@ export function ClipDetail({
   };
   const goBack = () => wechseln("zur Clip-Liste", zurueckZurListe);
 
-  /* Alles speichern, was offen ist - in der Reihenfolge, in der es gehört: erst Schnitt und
-   * Effekte (die stossen das Neuclippen an), dann Text und Untertitel. */
+  /* Alles speichern, was offen ist: erst die Untertitel, dann der Text (der stösst das
+   * Neuclippen an). */
   const allesSpeichern = async () => {
-    if (schnittGeaendert || effekteGeaendert) await schnittSichern();
     if (stilGeaendert) await stilSpeichern();
     if (dirty) await save();
   };
@@ -927,11 +536,10 @@ export function ClipDetail({
           <div>
             <p className="text-sm text-text-2">{sourceTitle}</p>
             <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Clip</h1>
-            {/* Die Laenge kommt aus dem aktuellen Schnitt und nicht aus dem gebauten Video: nach
-              * einer Kuerzung stuende hier sonst weiter die alte Dauer. */}
+
             <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-2">
               <span>
-                {ASPECT_LABELS[aspect]}, {formatClipDuration(neueDauer || durationS)}
+                {ASPECT_LABELS[aspect]}, {formatClipDuration(durationS)}
               </span>
               {/* Der Speicherstand gehört in die Kopfzeile: er gilt für die ganze Seite, und
                   unten am Ende eines Bereichs sieht man ihn nur, wenn man dort gerade ist. */}
@@ -1038,7 +646,6 @@ export function ClipDetail({
             onTime={setCurrentTime}
             seekTo={seekTo}
             spielen={spielen}
-            onLaeuft={setLaeuft}
             /* Die Vorschau der Untertitel NUR, solange das Quellvideo laeuft. Im fertigen Clip sind
              * sie eingebrannt; beides zugleich ergibt zwei Texte uebereinander. */
             overlay={null}
@@ -1052,23 +659,16 @@ export function ClipDetail({
               srcH={srcH}
               outW={outW}
               outH={outH}
-              clipStart={vorschauStart}
-              clipEnd={vorschauEnde}
-              luecken={vorschauLuecken}
+              clipStart={clipStart}
+              clipEnd={clipEnd}
               zeit={currentTime}
               onTime={setCurrentTime}
               seekTo={seekTo}
               spielen={spielen}
-              onLaeuft={setLaeuft}
-              shots={shots}
+                shots={shots}
               zeitmarken={markenSicht}
-              effekte={effekte}
-              clipStartQuelle={schnitt[0]?.start ?? 0}
               stil={stil}
               woerter={clipWords}
-              musik={musik}
-              musikSrc={musikSrc}
-              schnitt={schnitt}
               onCaptionHoehe={canEdit ? (px) => setStil((v) => ({ ...v, bottom_margin_px: px })) : undefined}
             />
           )}
@@ -1096,7 +696,7 @@ export function ClipDetail({
         <div className="flex min-w-0 flex-col gap-4">
           {/* Die drei Bereiche. Alle bleiben im Baum und werden nur ausgeblendet: ein Wechsel
               setzt deshalb nichts zurück, weder die Abspielposition noch eine begonnene
-              Texteingabe noch den gewählten Abschnitt in der Timeline. */}
+              Texteingabe noch die Abspielposition. */}
           <div role="tablist" aria-label="Arbeitsbereich" className="flex flex-wrap gap-1 rounded-inner border border-line p-1">
             {BEREICHE.map((b) => (
               <button
@@ -1105,7 +705,7 @@ export function ClipDetail({
                 role="tab"
                 aria-selected={bereich === b.id}
                 title={b.satz}
-                /* Schnitt, Text und Untertitel werden getrennt gespeichert. Wer mit offenen
+                /* Text und Untertitel werden getrennt gespeichert. Wer mit offenen
                    Änderungen den Bereich wechselt, verlöre sie - also erst die Frage. */
                 onClick={() => wechseln(`zu „${b.name}“`, () => setBereich(b.id))}
                 className={cn(
@@ -1121,51 +721,7 @@ export function ClipDetail({
             ))}
           </div>
 
-          <div hidden={bereich !== "schnitt"} className="flex min-w-0 flex-col gap-4">
-          <Timeline
-            effekte={effekte}
-            clipDauerS={clipDauer}
-            onEffektVerschieben={(i, abS) => effekteAendern(effektVerschieben(effekte, i, abS, clipDauer))}
-            onEffektDauer={(i, d) => effekteAendern(effektDauer(effekte, i, d, clipDauer))}
-            onEffektWeg={(i) => effekteAendern(effektEntfernen(effekte, i))}
-            musik={musik}
-            musikDauerS={musikDauer}
-            onMusikVerschieben={(abS) => setMusik((m) => (m ? { ...m, ab_s: abS } : m))}
-            bereichVonS={bereichVon}
-            bereichBisS={bereichBis}
-            schnitt={schnitt}
-            onSchnitt={(neu) => schnittSetzen(neu)}
-            onZiehen={schnittZiehen}
-            onZiehenFertig={schnittLoslassen}
-            quelleDauerS={quelleDauerS}
-            zeit={currentTime}
-            onSeek={seek}
-            laeuft={laeuft}
-            onPlayPause={abspielen}
-            wellenform={wellenform}
-            wellenformStand={wellenformStand}
-            filmstreifen={streifenBilder}
-            shots={shots}
-            zeitmarken={markenSicht}
-            onMarkeWeg={(abS) => markenAendern((vorher) => vorher.filter((x) => x.ab_s !== abS))}
-            onMarkeVerschieben={(vonS, nachS) =>
-              markenAendern((vorher) =>
-                vorher
-                  .map((x) => (Math.abs(x.ab_s - vonS) < 1e-6 ? { ...x, ab_s: Math.round(nachS * 100) / 100 } : x))
-                  .sort((a, b) => a.ab_s - b.ab_s),
-              )
-            }
-            markeBeschriftung={(m) => markeBeschreibung(m, auswahlAusShots)}
-            canEdit={canEdit}
-            kannZurueck={zurueckStapel.length > 0}
-            kannVor={vorStapel.length > 0}
-            onZurueck={zurueck}
-            onVor={vor}
-          />
-
-          {/* Der Bildausschnitt gehört zum Schneiden: beides hängt an der Stelle, an der der
-              Abspielkopf steht. Vorher lag er in einer eigenen Spalte weit unten, und man musste
-              zwischen Timeline und Ausschnitt hin und her scrollen. */}
+          <div hidden={bereich !== "bildausschnitt"} className="flex min-w-0 flex-col gap-4">
           <Bildausschnitt
             zeit={currentTime}
             shots={shots}
@@ -1189,44 +745,26 @@ export function ClipDetail({
             quelleBreite={quelleBreite}
             canEdit={canEdit}
           />
-
-          {/* Effekte. Unter dem Bildausschnitt, weil beides dasselbe beantwortet: wie das Bild
-              sich bewegt. Die Liste ist bewusst eine Liste - es werden mehr Effekte dazukommen,
-              und dann steht hier jeder für sich mit seiner eigenen Auswahl. */}
-          <MusikListe
-            musik={musik}
-            canEdit={canEdit}
-            laeuft={musikLaeuft}
-            fehler={musikFehler}
-            onAendern={setMusik}
-            onHochladen={(d) => void musikHochladen(d)}
-          />
-
-          <EffektListe
-            effekte={effekte}
-            zeitImClip={inClipzeit(schnitt, currentTime)}
-            clipDauer={clipDauer}
-            canEdit={canEdit}
-            onAendern={effekteAendern}
-          />
-
-          {/* Speichern ganz unten rechts, wo man nach dem Arbeiten hinkommt.
-              Vorher stand hier eine ganze Karte mit einem Satz über den Speicherstand. Der Satz
-              beantwortete eine Frage, die links unter der Vorschau schon beantwortet ist, und
-              nahm dafür eine Zeile quer über die Seite. */}
-          {canEdit && (
-            <div className="flex justify-end">
-              {/* Ein Knopf, ein Wort. Er ist aus, solange es nichts zu speichern gibt - ein
-                  Knopf, der immer klickbar ist, sagt nichts darüber, ob etwas offen ist. */}
-              <Button
-                variant={etwasGeaendert ? "primary" : "ghost"}
-                disabled={!etwasGeaendert || schnittSaving}
-                onClick={() => void schnittSichern()}
-              >
-                {schnittSaving ? "Wird gespeichert" : "Speichern"}
-              </Button>
+            {/* Gespeichert wird beim Setzen; die Antwort steht hier, wo gesetzt wurde. Immer im Baum,
+                auch leer: ein Screenreader kündigt eine Live-Region nur an, wenn sie schon dastand. */}
+            <div role="status" aria-live="polite" className="flex min-w-0 flex-wrap items-center gap-3">
+              {message && bereich === "bildausschnitt" && (
+                <p className={cn("text-sm", message.tone === "ok" ? "text-text" : "text-attention")}>{message.text}</p>
+              )}
+              {message?.nochmal && bereich === "bildausschnitt" && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    const wieder = message.nochmal;
+                    setMessage(null);
+                    wieder?.();
+                  }}
+                >
+                  Nochmal versuchen
+                </Button>
+              )}
             </div>
-          )}
           </div>
 
           <div hidden={bereich !== "text"} className="flex min-w-0 flex-col gap-4">
@@ -1336,7 +874,7 @@ export function ClipDetail({
             Ohne Speichern
           </Button>
           <Button
-            disabled={saving || stilSaving || schnittSaving}
+            disabled={saving || stilSaving}
             onClick={async () => {
               const weg = verlassen;
               await allesSpeichern();

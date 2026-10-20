@@ -126,7 +126,7 @@ export default function LandingPage() {
         <Section id="so-gehts" eyebrow="So geht's" title="In drei Schritten zum fertigen Clip">
           <ol className="grid gap-4 md:grid-cols-3">
             <Step n={1} title="Video hochladen" text="Podcast, Interview oder Vortrag reinziehen. Bis 5 GB, der Upload läuft auch nach einer Pause weiter." />
-            <Step n={2} title="Clips auswählen" text="chopstr zeigt dir die Vorschläge und schreibt dazu, warum die Stelle trägt. Du nimmst, was passt, oder ziehst den Anfang und das Ende zurecht." />
+            <Step n={2} title="Clips auswählen" text="chopstr zeigt dir die Vorschläge und schreibt dazu, warum die Stelle trägt. Du nimmst an, was passt, lehnst ab, was nicht passt, oder gibst es an die Redaktion." />
             <Step n={3} title="Clips herunterladen" text="Mit Untertiteln, Hook und Beitragstext. Fertig zum Posten auf TikTok, Reels, Shorts oder LinkedIn." />
           </ol>
           <div className="mt-10 flex justify-center">

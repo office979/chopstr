@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -60,6 +61,9 @@ AUTO_VERDICT_REASON = "automatisch angenommen (ohne Auswahlschritt)"
 # ``release_gate.release_relevant_claims`` am Text des Kandidaten (``docs/ENTSCHEIDUNGEN.md`` P27).
 AUTO_ACCEPT_HARD_FLAGS = ("humor", "sensitive_topic")
 AUTO_HOLD_REASON_PREFIX = "automatische Freigabe ausgesetzt: "
+# Lane P3 (Regel 14): Ergebnisklasse aus ``rubric.review_state`` als Blocker. ``review_blocked`` heißt bestätigter
+# Fehler, nicht freigabefähig; die Web-Route verlangt für eine Annahme dann eine Begründung (Lane W).
+REVIEW_BLOCKERS = {"blocked": "review_blocked", "uncertain": "review_uncertain"}
 # Rundung der Kandidatenfenster für den Dublettenschutz (Zehntelsekunden)
 _WINDOW_DIGITS = 1
 
@@ -365,14 +369,20 @@ def clip_platform(ctx: common.Context, source_id: str, brief: dict | None = None
     return default_clip_platform(value, brief)
 
 
-def auto_accept_blockers(risk_flags: Any, text: str, title_card: str = "") -> list[str]:
+def auto_accept_blockers(risk_flags: Any, text: str, title_card: str = "", review_state: Any = None) -> list[str]:
     """Was eine automatische Annahme verbietet: die harten Risikohinweise in der Reihenfolge des
     Kandidaten, danach ``claim``, wenn Text oder Titelkarte eine freigaberelevante Behauptung
     enthalten. Ist der Text leer, lässt sich das nicht prüfen; dann hält ``claim_unchecked`` den
     Kandidaten sicher zurück.
 
+    Lane P3 (Regel 14): trägt der Kandidat ``rubric.review_state`` (Fassung 2), hält ``review_blocked`` einen
+    blockierten und ``review_uncertain`` einen unsicheren Kandidaten zurück; angenommen wird automatisch nur
+    ``passed``. Ohne ``review_state`` (Fassung 1, Schalter aus) bleibt es beim Verhalten davor.
+
     Der ``claim``-Eintrag in ``risk_flags`` zählt hier nicht, nur ``release_gate``."""
     blockers: list[str] = []
+    if isinstance(review_state, dict) and review_state.get("state") in ("blocked", "uncertain"):
+        blockers.append(REVIEW_BLOCKERS[str(review_state["state"])])
     for flag in risk_flags or ():
         if flag in AUTO_ACCEPT_HARD_FLAGS and flag not in blockers:
             blockers.append(flag)
@@ -438,7 +448,8 @@ def auto_create_clips(
             created_by=None,
         )
         blockers = auto_accept_blockers(
-            row.get("risk_flags"), str((row.get("rubric") or {}).get("text") or ""), title_card or ""
+            row.get("risk_flags"), str((row.get("rubric") or {}).get("text") or ""), title_card or "",
+            (row.get("rubric") or {}).get("review_state"),
         )
         if blockers:
             db.update(ctx.conn, "candidates", {"id": candidate_id}, verdict_reason=auto_hold_reason(blockers))
@@ -548,7 +559,10 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
             log.info("silence source=%s veraendert die Satzgrenzen, Kandidaten werden neu gesucht", source_id)
         key = candidates_key_for(tv_id, tv_version, brief, versions, llm.provider, model, weights, heat)
 
-        cached = ctx.store.exists("derived", key)
+        # Reproduzierbarkeitsläufe (Launch-Auftrag 6.2): mit CHOPSTR_ANALYZE_NO_CACHE=1 wird das
+        # gespeicherte Ergebnis ignoriert und frisch gerechnet; der Schlüssel bleibt derselbe.
+        no_cache = os.environ.get("CHOPSTR_ANALYZE_NO_CACHE", "").strip() in ("1", "true", "yes")
+        cached = (not no_cache) and ctx.store.exists("derived", key)
         if cached:
             report = story_engine.DetectReport.from_json(ctx.store.get_json("derived", key))
             log.info("candidates source=%s cached key=%s n=%s", source_id, key[:24], len(report.candidates))

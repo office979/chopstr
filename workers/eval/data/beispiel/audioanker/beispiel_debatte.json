@@ -1,0 +1,12 @@
+{
+  "quelle": "beispiel_debatte",
+  "pruefer": "anker_1",
+  "hinweis": "Fiktiv. Wortanfang und Wortende am Audio kontrolliert (Wellenform), Zeiten in Sekunden ab Dateibeginn.",
+  "anker": [
+    {"wort": "Wien", "anker_start": 602.16, "anker_ende": 602.47, "kategorie": "name"},
+    {"wort": "nicht", "anker_start": 601.07, "anker_ende": 601.36, "kategorie": "verneinung"},
+    {"wort": "2400", "anker_start": 905.30, "anker_ende": 906.10, "kategorie": "betrag"},
+    {"wort": "zwölf", "anker_start": 1210.40, "anker_ende": 1210.71, "kategorie": "prozent"},
+    {"wort": "meistens", "anker_start": 1460.02, "anker_ende": 1460.55, "kategorie": "einschraenkung"}
+  ]
+}

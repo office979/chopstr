@@ -8,9 +8,125 @@ Werkzeuge, alle ohne GPU lauffähig:
 | `eval_harness.py` | Wie nah kommen die Kandidaten an die Redaktion? | `python -m eval.eval_harness gold_clips/ preds/ --k 10 --json clips.json` |
 | `referenzsatz.py` | Mit welchen Dateien wurde gemessen, und sind es noch dieselben? | `python -m eval.referenzsatz pruefen --positiv "…" --negativ "…"` |
 | `clip_eval.py` | Wie sauber schneiden die Vorschläge einer Quelle, unter welcher Richtlinie? | `python -m eval.clip_eval --titel "…" --policy-version 2 --json messung.json` |
-| `blind_compare.py` | Ist Fassung 2 bei gleicher Ausgabemenge redaktionell besser als Fassung 1? | `python -m eval.blind_compare --out blind/` und `--auswerten blind/` |
+| `blind_compare.py` | Ist Fassung 2 bei gleicher Ausgabemenge redaktionell besser als Fassung 1? Schlägt chopstr ein Wettbewerbstool? | `python -m eval.blind_compare --out blind/` und `--auswerten blind/ [--bewerter a.json b.json]`; Wettbewerb `--extern clips/ --vergleichsart voller_output` |
+| `data_loader.py` | Ist der Referenzdatensatz in `eval/data` gültig? | `python -m eval.data_loader eval/data` |
+| `eval_harness.py --daten` | Findet die Pipeline die Referenzmomente, und wo verliert sie sie (Pool, Gates, Ranking)? | `python -m eval.eval_harness --daten eval/data --berichte berichte/ --teil entwicklung --json h.json` |
+| `speaker_eval.py` | Stimmt der Sprecher je Wort, auch in Überlappung? cpWER, DER? | `python -m eval.speaker_eval --referenz ref.json --hypothese transkript.json --json s.json` |
+| `alignment_eval.py` | Wie weit liegen Wortanfang und Wortende neben dem Audio? | `python -m eval.alignment_eval --anker anker.json --transkript transkript.json --json a.json` |
+| `repro_eval.py` | Kommt bei gleichem Video dieselbe Top-5? | `python -m eval.repro_eval lauf1.json lauf2.json ... [--art gespeichert] --json r.json` |
+| `cost_eval.py` | Was kostet eine Quellstunde, wie lange dauert sie? | `python -m eval.cost_eval --export kosten.json --json k.json` oder `--database-url ... --quelle <uuid>` |
+| `sinnfehler.py` | Wie viele Clips haben einen bestätigten kritischen Sinnfehler, mit welcher Unsicherheit? | `python -m eval.sinnfehler --bogen-aus clips.json --out bogen.json`, dann `--auswerten bogen.json --json f.json` |
+| `baseline.py` | Ist eine Änderung schlechter als die Baseline, über der Toleranz? | `python -m eval.baseline --vergleich h.json s.json ... --aenderung kurzname` |
 
-Beide laufen aus `workers/` mit aktivierter venv (`.venv/bin/python -m eval.wer_eval ...`).
+Alle laufen aus `workers/` mit dem Interpreter der venv (`.venv/bin/python -m eval.wer_eval ...`).
+
+**Regel für alle Werkzeuge:** Ein fehlender Messwert ist nie 0 und nie bestanden. Im JSON steht `None` mit
+`ursache`, im Bericht „nicht messbar: <Ursache>“. Jedes Werkzeug schreibt mit `--json` einen Block
+`"metriken": {name: {"wert", "stichprobe", "ursache"}}`, den `baseline.py` liest.
+
+## Messsystem für den Launch (Auftrag Abschnitt 6)
+
+### Referenzdatensatz und Split
+
+Datenvertrag, Beispiele und Validierung stehen in `eval/data/README.md`. `eval/data/split.json` teilt jede
+vollständige Quelle in `entwicklung`, `kalibrierung` oder `abschluss`; Ausschnitte derselben Aufnahme müssen im
+selben Teil liegen. Der Abschlussteil wird nur mit `--abschluss-bestaetigt` ausgewertet. Heute ist alles
+vorhandene Material `entwicklung` und `abschluss` leer.
+
+### Momentfindung (`eval_harness.py --daten`)
+
+Eingaben: `eval/data` (Spannen, Redakteurs-Top-10, Schnittpunkte) und je Quelle ein DetectReport-JSON
+`berichte/<quelle>.json`. Abdeckung der Referenzmomente (IoU >= 0,5) an drei Stellen aus
+`report["funnel"]` (`pool`, `after_gates`, `offered`). Fehlt `funnel`, kommt der Pool aus
+`search.chapters[*].proposals` (nur mit Zeiten), angeboten aus `candidates`, und „nach Gates“ ist nicht
+messbar. Recall@20 gegen alle Referenzmomente und gegen Gold getrennt; Precision@5 und @10 je Redakteur und
+gemittelt (Treffer durch Zahl der angebotenen, weniger als k sind zulässig); Grenzfehler Start und Ende
+getrennt, der Gesamtwert gewichtet den Start doppelt; angebotene Momente ohne jede Referenz zählen als „neu
+entdeckt“ (Prüfauftrag, kein Fehler). Über Quellen werden Treffer und Nenner addiert. Dazu
+Schnitt-Natürlichkeit aus `schnittpunkte/` (`cut_quality`): ein abgehackter Punkt macht den Clip unbrauchbar.
+Tests: `tests/test_launch_eval_harness.py`, `tests/test_launch_eval_data_loader.py`.
+
+### Sprecher (`speaker_eval.py`)
+
+Referenz: `transkript_referenz/<quelle>.json` (Wörter mit Sprecher und Zeit), RTTM (nur DER) oder
+`sprecherwechsel.json` des Testmaterials (Turns und Sätze, Wortzeiten interpoliert). Hypothese:
+Transkript-JSON mit `speaker` je Wort oder RTTM. Je Referenzwort genau eines von korrekt, falsch, nicht
+zugeordnet (Hypothese ohne Sprecher), nicht erkannt; gesamt und in Überlappung. cpWER mit bester
+Sprecherzuordnung (exakt bis zwölf Sprecher). DER ohne Collar mit Überlappung, verpasst, Fehlalarm und
+Verwechslung getrennt. Ohne jiwer und ohne pyannote.metrics. Tests: `tests/test_launch_eval_speaker.py`.
+
+### Wortzeiten (`alignment_eval.py`)
+
+Versatz in ms gegen `audioanker/<quelle>.json`: Median und 95. Perzentil (nächster Rang) für Wortanfang und
+Wortende, Median mit Vorzeichen, fehlende Alignments getrennt (nicht gefunden, ohne Zeit), alles auch je
+Kategorie. Mit `sprecherwechsel.json` als `--anker` entstehen synthetische Anker aus den Satzgrenzen der
+Montage; das ist ein Regressionssignal, kein Launch-Messwert. Tests: `tests/test_launch_eval_alignment.py`.
+
+### Reproduzierbarkeit (`repro_eval.py`)
+
+n DetectReports desselben Videos und Briefings. Top-5 aus `funnel.offered` (sonst `candidates` nach `total`),
+Spannen auf 0,1 s gerundet (`--iou` erlaubt unscharfen Abgleich). Jeder Lauf gegen Lauf 1: Jaccard, Rang 1
+gleich, bestanden bei Jaccard >= 0,8 und gleichem Rang 1; dazu Jaccard paarweise gemittelt. Frische Läufe
+brauchen `CHOPSTR_ANALYZE_NO_CACHE=1` beim Worker; gespeicherte Wiederholungen mit `--art gespeichert` (müssen
+identisch sein). Tests: `tests/test_launch_eval_repro.py`.
+
+### Kosten und Laufzeit (`cost_eval.py`)
+
+`job_costs` als JSON-Export (`{"job_costs": [...], "sources": [...], "laufzeiten": [...]}`) oder aus Postgres
+nur über `--database-url`. EUR, Rechenzeit (CPU plus GPU) und Wartezeit je Quellstunde, je Quelle und gesamt,
+je Job-Typ. Die EUR stammen aus der Preistabelle in `costlog.py` (Standardwerte sind Platzhalter). Tests:
+`tests/test_launch_eval_cost.py`.
+
+### Sinnfehler (`sinnfehler.py`)
+
+Bogen je Clip mit `geprueft` und kritischen Sinnfehlern (`attribution`, `negation`, `certainty`, `condition`,
+`number`, `time`, `context`; `bestaetigt` true oder false). Auswertung: Clips mit bestätigtem Fehler,
+Stichprobe, beobachteter Anteil, einseitige obere 95-%-Grenze nach Clopper-Pearson (0 von 20 ergibt 13,9 %,
+1 von 20 ergibt 21,6 %), Verteilung je Quelle und Kategorie, gesperrte Clips, Warnung unter 20 Clips oder
+drei Quellen. Tests: `tests/test_launch_eval_sinnfehler.py`.
+
+### Baseline und Vergleich (`baseline.py`)
+
+`eval/results/baseline.json` hält je Metrik Wert oder `None` mit Ursache, Einheit, Richtung, Toleranz,
+Stichprobe sowie Provider, Policy und Hardware. Die Messungen, aus denen sie entstand, liegen daneben in
+`eval/results/2026-10-20-baseline-messungen/`. Neue Läufe:
+
+```bash
+.venv/bin/python -m eval.baseline --vergleich h.json s.json a.json --aenderung satzregel-at
+```
+
+schreibt `eval/results/<datum>-satzregel-at.md` (Metrik, Baseline, neu, Differenz, Toleranz, Urteil ok,
+verschlechtert oder nicht messbar) und endet mit Exit-Code 1, wenn eine Metrik über die Toleranz schlechter ist.
+Metriken, Einheiten, Richtungen und Toleranzen stehen in `METRICS`; eine Messung mit unbekannter Metrik bricht
+ab. Die Baseline vom 20.10.2026 misst nur drei Werte (WER und Wortzeiten des synthetischen Testmaterials):
+`.venv/bin/python -m eval.baseline --messen-testmaterial eval/runs/testmaterial --out m.json`.
+`eval/results/` ist versioniert. Tests: `tests/test_launch_eval_baseline.py`.
+
+Ausbeute: `.venv/bin/python -m eval.baseline --messen-ausbeute berichte/*.json --out ausbeute.json` liest je
+DetectReport `yield` (`offered`, `distinct`, `source_hours`) und rechnet angebotene, verwendbare und verschiedene
+Clips je Quellstunde über alle Quellen. Verwendbar heißt `rubric.review_state == "passed"`; fehlt
+`review_state` an einem Kandidaten, ist der Wert nicht messbar. Verwerfungsquoten je Grund kommen aus
+`funnel_counts.pool_reasons` geteilt durch `funnel_counts.pool`, sonst aus `discarded` (ohne Laufereignisse)
+geteilt durch Verwerfungen plus angebotene; sie heißen `verwerfungsquote_<grund>`, dazu
+`verwerfungsquote_gesamt`, und sind reine Information ohne Toleranz.
+
+### Was ohne Menschen oder echtes Material nicht messbar ist
+
+| Metrik | Was fehlt |
+|---|---|
+| Abdeckung, Recall@20, Grenzfehler | menschlich gewählte Spannen (`spannen/`) zu echten Langvideos; dazu DetectReports mit `funnel` |
+| Precision@5 und @10 | drei Redakteure, die unabhängig ihre Top-10 markieren (`redakteure/`) |
+| WER DE, AT, CH | manuell korrigiertes Transkript eigenen Materials je Sprachvariante (`transkript_referenz/`) |
+| Sprecher je Wort in Überlappung, cpWER, DER | 20 Minuten Debatte mit manueller Sprecherreferenz; das Testmaterial ist synthetisch montiert und ohne Überlappung |
+| Highlight-Versatz | manuell am Audio kontrollierte Anker (`audioanker/`); Whisper ist keine Referenz |
+| Schnitt-Natürlichkeit, Urteil je Clip | 50 Schnittpunkte mit drei Hörern (`schnittpunkte/`) |
+| Sinnfehler | Prüfung von mindestens 20 Clips aus mindestens drei Quellen gegen den Vollkontext |
+| Blindvergleich und Wettbewerb | drei Bewerter; Wettbewerbs-Clips mit geklärten Rechten, gleiches Briefing und Ausgabebudget |
+| Verwendbarkeit (würde posten) | Redaktionsurteil über den fertigen Export |
+| Reproduzierbarkeit, Kosten, Laufzeit | kein Mensch, aber echte Läufe: fünf frische Läufe je Video, ein `job_costs`-Export, Wanduhrzeiten |
+
+Bis diese Daten vorliegen, steht jede dieser Metriken in der Baseline als nicht messbar mit Ursache. Eine
+Launch-Freigabe ist dann ausgeschlossen (Auftrag Abschnitt 1).
 
 ## Gold-Format ASR (`wer_eval`)
 
@@ -45,7 +161,9 @@ Ausgabe: Tabelle pro Dialekt (WER, Eigennamen-Fehlerrate) und optional JSON mit 
 
 `rating`: 3 = sofort posten, 2 = mit Nacharbeit, 1 = Notlösung (zählt nicht als Treffer).
 Vorhersage: `{"episode": "ep01.mp4", "clips": [{"start": ..., "end": ..., "total": ...}]}`.
-Treffer = IoU >= 0,5. Boundary-Error misst, wie weit Anfang/Ende vom Redaktionsschnitt abweichen.
+Treffer = IoU >= 0,5. Boundary-Error misst, wie weit Anfang/Ende vom Redaktionsschnitt abweichen; getrennt
+stehen `boundary_start_s`, `boundary_end_s` und `boundary_weighted_s` (Start doppelt). Leere Eingaben ergeben
+`None` (Tabelle: „n. m.“), nicht 0. Dieses alte Format kennt keine Personen; für den Launch gilt `--daten`.
 
 Die Vorhersage-Datei erzeugt `export_predictions.py` aus den Kandidaten einer Quelle (Phase 2):
 
@@ -164,7 +282,11 @@ Ergebnis ist beobachtend, kein A/B-Test, kein Viralitätsmaß.
    derselbe Seed ergibt dieselben Dateien. `schluessel.json` und `lauf.json` nicht an die Bewertenden
    geben.
 4. Bewerten: je Paar beide Seiten nach dem Raster (ganze Zahlen 0 bis 4, leer heißt nicht bewertet),
-   dann `praeferenz` `A`, `B` oder `gleich`; eine Präferenz ohne Kriterienwerte gilt als Fehler.
+   dann `praeferenz` `A`, `B`, `gleich` oder `beide_unbrauchbar`; eine Präferenz A, B oder gleich ohne
+   Kriterienwerte gilt als Fehler, `beide_unbrauchbar` darf ohne Werte stehen. Unter `rater` (oben im Bogen)
+   steht die Bewerter-ID. Je Paar zusätzlich `mangel`: `{"kategorie": einstieg|ende|kontext|ton|untertitel|inhalt|keine,
+   "text": "..."}` (Frage 6.4 „Was stimmt an dem anderen nicht?“). Der Bericht zählt die Kategorien je Fassung: bei
+   A oder B für die nicht gewählte Seite, bei „beide unbrauchbar“ für beide, bei „gleich“ ohne Fassung.
    Quellentreue mit `quellen.json`, Natürlichkeit am Audio der Quelle prüfen. Clips und Hooks getrennt
    bewerten, damit der Stil eines Hooks die Clip-Bewertung nicht verrät.
 5. Auswerten: `.venv/bin/python -m eval.blind_compare --auswerten blind/` schreibt `blind/bericht.md`.
@@ -183,11 +305,13 @@ Der Reiter Clips zeigt je Paar Seite A und Seite B nebeneinander (Text, Dauer, S
 darunter den Quellkontext aus `quellen.json` mit Markierung, welche Sätze zu A und zu B gehören. Hook,
 Versionskennung und Score erscheinen dort nicht. Der Reiter Hooks zeigt gesprochenen Hook, Overlay-Text
 und den Clip-Text zur Deckung. Je Kriterium aus `raster.json` stehen die Anker 0 bis 4 mit Text, dazu
-Präferenz (A, B, gleich) und ein Freitextfeld.
+Präferenz (A, B, gleich, beide unbrauchbar), die Frage „Was stimmt an dem anderen nicht?“ (Kategorie
+Einstieg, Ende, Kontext, Ton, Untertitel, Inhalt oder nichts, dazu ein kurzer Freitext) und ein Freitextfeld. Oben steht das Feld „Bewerter-ID“; sie geht als
+`rater` in den Export.
 
 Tastatur: `0` bis `4` setzen den Wert am Cursor und rücken vor (erst alle Kriterien von Seite A, dann
-von Seite B), Pfeiltasten bewegen den Cursor, `Entf` löscht den Wert, `A`, `B` und `G` setzen die
-Präferenz, `W` und `Z` blättern. Der Fortschritt liegt im `localStorage` des Browsers, getrennt je Bogen
+von Seite B), Pfeiltasten bewegen den Cursor, `Entf` löscht den Wert, `A`, `B`, `G` und `U` (beide
+unbrauchbar) setzen die Präferenz, `W` und `Z` blättern. Der Fortschritt liegt im `localStorage` des Browsers, getrennt je Bogen
 und Inhalt; „Lokalen Stand verwerfen“ setzt auf den Stand der geladenen Dateien zurück.
 
 „Bewertung exportieren“ lädt `bewertung.json` und `hooks_bewertung.json` im Format des Erzeugers
@@ -197,7 +321,36 @@ Paare unvollständig, warnt die Seite und exportiert trotzdem: solche Paare trag
 Liste steht in `offene_paare`; die Auswertung ignoriert beides und zählt ein Paar ohne Präferenz als
 „offen“. Eine Präferenz ohne einen einzigen Kriterienwert wird nicht exportiert (sie ließe die
 Auswertung abbrechen) und in der Warnung genannt. Clips und Hooks am besten von verschiedenen Personen
-bewerten lassen; jede Person exportiert ihren Bogen, die Dateien eines Bogens sind nicht zusammenführbar.
+bewerten lassen; jede Person exportiert ihren Bogen mit eigener Bewerter-ID.
+
+### Mehrere Bewerter (`--bewerter`)
+
+```bash
+.venv/bin/python -m eval.blind_compare --auswerten blind/ --bewerter bewertung_r1.json bewertung_r2.json hooks_r3.json
+```
+
+Clip- und Hook-Bögen werden an den Paar-IDs erkannt und ersetzen die Bögen im Ordner. Jeder Bogen braucht eine
+eigene `rater`-ID. Die Kennzahlen zählen alle Urteile zusammen; der Bericht nennt die Bewerter und je
+Bewerterpaar die gemeinsam entschiedenen Paare, den Anteil gleicher Präferenzen und Cohen-Kappa (nicht
+berechenbar, wenn beide immer dieselbe eine Kategorie wählen). Urteile derselben Paare sind nicht unabhängig;
+der Vorzeichentest ist dann nur ein Hinweis.
+
+### Wettbewerbsmodus (`--extern`)
+
+```bash
+.venv/bin/python -m eval.blind_compare --out wett/ --extern opus_clips/ --eigene chopstr_clips/ --vergleichsart voller_output
+.venv/bin/python -m eval.blind_compare --out wett/ --extern opus_clips/ --transkripte transkripte/ --vergleichsart momentwahl
+```
+
+Je Unterordner von `--extern` (und `--eigene`) ein `clip.json` mit `start_s`, `end_s`, `text`, `quelle`
+(optional `rang`, `id`) und genau eine `.mp4`. Ohne `--eigene` rechnet die Engine (Fassung 2) die chopstr-Seite
+aus den Quellen (`--transkripte` oder `--quelle`, Namen gleich `quelle`). `--vergleichsart` ist Pflicht und vorab
+festgelegt: `voller_output` (Momentwahl, Schnitt, Untertitel, Bildausschnitt), `momentwahl` oder `schnitt`
+(nur Paare desselben Moments, Überdeckung mindestens die Hälfte). Gepaart wird je Quelle nach Überdeckung bei
+gleicher Ausgabemenge, der Überhang steht im Schlüssel. Die Videos liegen neutral benannt unter `medien/`. Die
+Auswertung meldet die Gewinnrate von chopstr unter den entschiedenen Urteilen (Schwelle mindestens 60 %) und
+den Anteil „beide unbrauchbar“ unter allen Urteilen (höchstens 20 %). Rechte am Material und an fremden
+Clips vorab klären.
 
 ### Raster (Master-Prompt Abschnitte 19 und 26)
 

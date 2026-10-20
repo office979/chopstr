@@ -30,13 +30,13 @@ interface Props {
    * Steuerung des Browsers erreichbar bleibt. */
   overlay?: ReactNode;
   /* Zaehler von aussen: jede Erhoehung startet oder stoppt das Video, damit der Knopf in der
-   * Timeline denselben Player bedient. */
+   * Seite denselben Player bedient. */
   spielen?: number;
   onLaeuft?: (laeuft: boolean) => void;
 }
 
 /* Vorschau des Clips. Die Steuerung ist die des Browsers: abspielen, anhalten, schieben.
- * Mehr steht hier nicht, der Schnitt kommt später. */
+ * Mehr steht hier nicht. */
 export function ClipPreview({
   src,
   posterSrc,

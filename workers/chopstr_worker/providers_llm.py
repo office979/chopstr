@@ -204,7 +204,31 @@ class LLM:
             raise SchemaError(f"Pflichtfelder fehlen: {missing}")
 
 
+# Zweiter Provider (Lane P3, Gegenleser): nur, wenn ``LLM_PROVIDER_SECOND`` gesetzt ist. Gelesen direkt aus der
+# Umgebung des Worker-Prozesses, wie ``CHOPSTR_POLICY_VERSION``. Der Heuristik-Provider ist kein zweites Modell;
+# ``critic.counter_read_model`` ruft ihn nie und markiert ihn so.
+SECOND_PROVIDER_ENV = "LLM_PROVIDER_SECOND"
+
+
+def second_llm(primary: Any) -> LLM | None:
+    """Zweite Instanz für den Gegenleser oder ``None``, wenn ``LLM_PROVIDER_SECOND`` leer ist oder das erste
+    Modell keinen Tenant trägt. Tenant, Redis und Kostenerfassung kommen vom ersten Modell; der Residency-Guard
+    prüft den zweiten Provider wie jeden anderen (``assert_allowed`` im Konstruktor)."""
+    import os
+
+    provider = os.environ.get(SECOND_PROVIDER_ENV, "").strip()
+    tenant = getattr(primary, "tenant", None)
+    if not provider or not isinstance(tenant, Tenant):
+        return None
+    return LLM(
+        tenant, redis=getattr(primary, "redis", None), cost_sink=getattr(primary, "cost_sink", None),
+        s=getattr(primary, "s", None), provider=provider,
+    )  # fmt: skip
+
+
 __all__ = [
+    "SECOND_PROVIDER_ENV",
+    "second_llm",
     "EU_OK",
     "HEURISTIC_MODEL_ID",
     "HEURISTIC_PROVIDER",

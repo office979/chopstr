@@ -1,0 +1,130 @@
+{
+  "quelle": "Phase 0, Lane E: Metriken ohne Eingabedaten am 20.10.2026",
+  "metriken": {
+    "wer_de": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine manuelle Transkript-Referenz eigenen Materials (eval/data/transkript_referenz leer); synthetischer Wert unter wer_de_synthetisch"
+    },
+    "wer_at": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein österreichisches Referenzmaterial mit manuellem Transkript"
+    },
+    "wer_ch": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein Schweizer Referenzmaterial mit manuellem Transkript"
+    },
+    "versatz_anfang_median_ms": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine manuell kontrollierten Audioanker (eval/data/audioanker leer)"
+    },
+    "versatz_anfang_p95_ms": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine manuell kontrollierten Audioanker (eval/data/audioanker leer)"
+    },
+    "versatz_ende_median_ms": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine manuell kontrollierten Audioanker (eval/data/audioanker leer)"
+    },
+    "versatz_ende_p95_ms": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine manuell kontrollierten Audioanker (eval/data/audioanker leer)"
+    },
+    "alignment_fehlend_anteil": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine manuell kontrollierten Audioanker (eval/data/audioanker leer)"
+    },
+    "jaccard_top5_mittel": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine frischen Läufe (CHOPSTR_ANALYZE_NO_CACHE=1) mit gespeicherten DetectReports ausgewertet"
+    },
+    "rang1_gleich_anteil": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine frischen Läufe (CHOPSTR_ANALYZE_NO_CACHE=1) mit gespeicherten DetectReports ausgewertet"
+    },
+    "repro_bestanden_anteil": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine frischen Läufe (CHOPSTR_ANALYZE_NO_CACHE=1) mit gespeicherten DetectReports ausgewertet"
+    },
+    "jaccard_top5_mittel_gespeichert": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Cache-Wiederholungen ausgewertet"
+    },
+    "rang1_gleich_anteil_gespeichert": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Cache-Wiederholungen ausgewertet"
+    },
+    "repro_bestanden_anteil_gespeichert": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Cache-Wiederholungen ausgewertet"
+    },
+    "eur_je_quellstunde": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein job_costs-Export ausgewertet; die Datenbank des laufenden Baseline-Laufs wurde nicht benutzt"
+    },
+    "rechenzeit_s_je_quellstunde": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein job_costs-Export ausgewertet; die Datenbank des laufenden Baseline-Laufs wurde nicht benutzt"
+    },
+    "wartezeit_s_je_quellstunde": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine Wanduhr-Messung Upload bis Kandidatenliste erfasst"
+    },
+    "sinnfehler_obere_grenze": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein ausgefüllter Sinnfehler-Bogen (braucht Prüfung gegen Vollkontext durch Menschen)"
+    },
+    "sinnfehler_beobachtet": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein ausgefüllter Sinnfehler-Bogen (braucht Prüfung gegen Vollkontext durch Menschen)"
+    },
+    "blind_gewinnrate": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein Wettbewerbsvergleich: keine Wettbewerbs-Clips mit geklärten Rechten, keine Bewerter"
+    },
+    "beide_unbrauchbar_anteil": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "kein Wettbewerbsvergleich: keine Wettbewerbs-Clips mit geklärten Rechten, keine Bewerter"
+    },
+    "angeboten_je_quellstunde": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine DetectReports mit yield ausgewertet; Lane P2 liefert das Feld, ein Bericht aus dem Baseline-Lauf liegt Lane E nicht vor"
+    },
+    "verwendbare_je_quellstunde": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine DetectReports mit yield ausgewertet; Lane P2 liefert das Feld, ein Bericht aus dem Baseline-Lauf liegt Lane E nicht vor"
+    },
+    "verschiedene_je_quellstunde": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine DetectReports mit yield ausgewertet; Lane P2 liefert das Feld, ein Bericht aus dem Baseline-Lauf liegt Lane E nicht vor"
+    },
+    "verwerfungsquote_gesamt": {
+      "wert": null,
+      "stichprobe": null,
+      "ursache": "keine DetectReports mit funnel_counts oder discarded ausgewertet"
+    }
+  }
+}

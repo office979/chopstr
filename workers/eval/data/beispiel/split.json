@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hinweis": "Beispiel, fiktiv. Zeigt das Format; keine echten Quellen.",
+  "quellen": [
+    {"id": "beispiel_debatte", "dateiname": "debatte_folge12.mp4", "aufnahme": "debatte_folge12", "teil": "entwicklung", "format": "debatte", "sprachvariante": "AT", "dauer_s": 3540.0},
+    {"id": "beispiel_debatte_ausschnitt", "dateiname": "debatte_folge12_teil2.mp4", "aufnahme": "debatte_folge12", "teil": "entwicklung", "format": "debatte", "sprachvariante": "AT", "dauer_s": 1200.0},
+    {"id": "beispiel_podcast", "dateiname": "podcast_07.mp4", "teil": "kalibrierung", "format": "podcast", "sprachvariante": "DE", "dauer_s": 2700.0},
+    {"id": "beispiel_erklaerformat", "dateiname": "erklaer_03.mp4", "teil": "abschluss", "format": "erklaerformat", "sprachvariante": "CH", "dauer_s": 1800.0}
+  ],
+  "abschluss_hinweis": "Abschlussquellen werden vor jeder Entwicklung eingetragen und erst nach dem Festschreiben der Regeln ausgewertet."
+}

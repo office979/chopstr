@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/components/ui/cn";
 import { formatBytes } from "@/lib/format";
+import { PLATFORMS, PLATFORM_LABELS } from "@/lib/clips/labels";
+import { BRIEF_MAX_CHARS, briefDefaults, briefMetadata, type BriefInput } from "@/lib/uploads/brief";
 import type { Platform, RightsStatus } from "@/lib/repo/types";
 import { createDemoProject } from "./actions";
 
@@ -56,6 +58,12 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
   const [sourceUrl, setSourceUrl] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  /* Das Briefing: drei Felder und die Plattform, alle freiwillig und eingeklappt. Die Plattform
+   * kommt aus dem gewählten Markenprofil, bis jemand sie selbst ändert. */
+  const [brandId, setBrandId] = useState<string>(profiles[0]?.id ?? "");
+  const [briefOpen, setBriefOpen] = useState(false);
+  const [brief, setBrief] = useState<BriefInput>(() => briefDefaults(profiles[0]));
+  const platformTouched = useRef(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [phase, setPhase] = useState<Phase>("form");
   const [progress, setProgress] = useState(0);
@@ -128,13 +136,26 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
     source_owner: sourceOwner.trim(),
     source_title: sourceTitle.trim(),
     source_url: sourceUrl.trim(),
+    brief: briefMetadata(brief),
   });
+
+  const chooseBrand = (id: string) => {
+    setBrandId(id);
+    if (!platformTouched.current) {
+      setBrief((b) => ({ ...b, platform: briefDefaults(profiles.find((p) => p.id === id)).platform }));
+    }
+  };
 
   const finishDemo = async (data: ReturnType<typeof collect>) => {
     if (!file) return;
     setPhase("finishing");
+    const { brief: briefMeta, ...rest } = data;
     const result = await createDemoProject({
-      ...data,
+      ...rest,
+      brief_audience: briefMeta.brief_audience,
+      brief_wanted: briefMeta.brief_wanted,
+      brief_exclude: briefMeta.brief_exclude,
+      platform: (briefMeta.platform as BriefInput["platform"] | undefined) ?? "",
       filename: file.name,
       filetype: file.type || "application/octet-stream",
       size_bytes: file.size,
@@ -179,9 +200,10 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
     if (!file) return;
     const uploadToken = await fetchUploadToken(data.brand_profile_id);
     const { Upload } = await import("tus-js-client");
-    /* Zielgruppe, Wünsche, Plattform und Sprecherzahl werden nicht mehr erhoben. Der Server
-     * behandelt sie als optional: fehlende Felder werden zu null beziehungsweise undefined. */
+    /* Das Briefing geht nur mit, wenn etwas ausgefüllt ist (lib/uploads/brief.ts). Die
+     * Sprecherzahl wird nicht erhoben; der Server behandelt fehlende Felder als optional. */
     const metadata: Record<string, string> = {
+      ...data.brief,
       upload_token: uploadToken,
       brand_profile_id: data.brand_profile_id ?? "",
       title: data.title,
@@ -259,6 +281,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
     fd.append("title", data.title);
     fd.append("rights_status", rights);
     fd.append("rights_confirmed", "true");
+    for (const [key, value] of Object.entries(data.brief)) fd.append(key, value);
     if (rights === "third_party") {
       fd.append("source_owner", data.source_owner);
       fd.append("source_title", data.source_title);
@@ -363,7 +386,13 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
           {/* Die Marke bestimmt Anrede, Farben, Schrift und Untertitel. Wer für mehrere Kunden
             * arbeitet, wählt hier den Kunden, bevor es losgeht. */}
           <Field label="Marke" htmlFor="brand_profile_id" hint="Bestimmt Anrede, Aussehen und Schreibweisen.">
-            <Select id="brand_profile_id" name="brand_profile_id" defaultValue={profiles[0]?.id ?? ""} disabled={busy}>
+            <Select
+              id="brand_profile_id"
+              name="brand_profile_id"
+              value={brandId}
+              onChange={(e) => chooseBrand(e.target.value)}
+              disabled={busy}
+            >
               {profiles.length === 0 && <option value="">Noch keiner angelegt</option>}
               {profiles.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -417,6 +446,72 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
             </Button>
           </div>
         </Field>
+
+        {/* Das Briefing, eingeklappt: wer nichts angibt, lädt hoch wie bisher. Drei Fragen, die die
+          * Auswahl der Momente wirklich ändern, und die Plattform aus dem Markenprofil. */}
+        <div className="flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={() => setBriefOpen((o) => !o)}
+            aria-expanded={briefOpen}
+            disabled={busy}
+            className="transition-soft self-start text-sm text-text-2 underline-offset-4 hover:text-text hover:underline disabled:opacity-60"
+          >
+            {briefOpen ? "Briefing ausblenden" : "Briefing angeben (freiwillig)"}
+          </button>
+          {briefOpen && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Zielgruppe" htmlFor="brief_audience" hint="Für wen sind die Clips?">
+                <Input
+                  id="brief_audience"
+                  value={brief.audience}
+                  maxLength={BRIEF_MAX_CHARS}
+                  onChange={(e) => setBrief((b) => ({ ...b, audience: e.target.value }))}
+                  placeholder="z. B. Gründerinnen in Österreich"
+                  disabled={busy}
+                />
+              </Field>
+              <Field label="Plattform" htmlFor="brief_platform" hint="Vorbelegt aus der Marke.">
+                <Select
+                  id="brief_platform"
+                  value={brief.platform}
+                  onChange={(e) => {
+                    platformTouched.current = true;
+                    setBrief((b) => ({ ...b, platform: e.target.value as BriefInput["platform"] }));
+                  }}
+                  disabled={busy}
+                >
+                  <option value="">Keine Angabe</option>
+                  {PLATFORMS.map((p) => (
+                    <option key={p} value={p}>
+                      {PLATFORM_LABELS[p]}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Gewünscht" htmlFor="brief_wanted" hint="Welche Momente suchst du?">
+                <Input
+                  id="brief_wanted"
+                  value={brief.wanted}
+                  maxLength={BRIEF_MAX_CHARS}
+                  onChange={(e) => setBrief((b) => ({ ...b, wanted: e.target.value }))}
+                  placeholder="z. B. konkrete Tipps zur Finanzierung"
+                  disabled={busy}
+                />
+              </Field>
+              <Field label="Ausschließen" htmlFor="brief_exclude" hint="Was soll nicht in einen Clip?">
+                <Input
+                  id="brief_exclude"
+                  value={brief.exclude}
+                  maxLength={BRIEF_MAX_CHARS}
+                  onChange={(e) => setBrief((b) => ({ ...b, exclude: e.target.value }))}
+                  placeholder="z. B. Werbeblock am Anfang"
+                  disabled={busy}
+                />
+              </Field>
+            </div>
+          )}
+        </div>
 
         {/* Ein angefangener Upload derselben Datei. Ohne diesen Hinweis fängt nach einem
           * Verbindungsabbruch jeder von vorn an, obwohl schon Stunden übertragen sein können. */}

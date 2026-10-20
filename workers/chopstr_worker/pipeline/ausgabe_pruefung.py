@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -269,3 +270,197 @@ def fehlertext(befunde: list[Befund]) -> str | None:
         if b.ergebnis == "fehler":
             return b.text
     return None
+
+
+# -- Lane P4: Export als Abnahmeobjekt (Regel 16) ----------------------------------------------------
+# Fassung 2 mit dem Schalter ``implementation.export.strict`` und der Regel ``export.strict`` (Standard aus,
+# Fassung 1 bleibt unverändert). Zusätzlich zu ``pruefen``: Dauer gegen die Schnittbeschreibung, Untertitel
+# innerhalb der Timeline, Untertitelzeiten aus derselben Schnittbeschreibung, Synchronität, Ton nicht stumm,
+# Bild nicht schwarz, Datei abrufbar. Am Ende ein Eintrag ``abnahme`` mit ``export_ok``: nur dann gilt der
+# Clip als fertig (``rendered``) und ``clips.file_key`` wird freigegeben.
+EXPORT_SWITCH = "export.strict"
+# Unter diesem Pegel gilt der Ton als stumm (integrierte Lautheit in LUFS; Stille misst ebur128 als -70).
+STUMM_UNTER_LUFS = -60.0
+# Ab diesem Anteil Schwarzbild an der Dauer gilt das Bild als schwarz.
+SCHWARZ_ANTEIL = 0.9
+# Zeitvergleich der Untertitel: Wortzeiten sind auf ms gerundet, SRT auch.
+ZEIT_EPS_S = 0.002
+_SRT_ZEIT = re.compile(r"(\d+):(\d\d):(\d\d)[,.](\d{3})\s*-->\s*(\d+):(\d\d):(\d\d)[,.](\d{3})")
+
+
+def export_rules(policy=None) -> dict[str, float] | None:
+    """``export.strict`` und ``export.duration_tolerance_s``; ``None`` heißt: Abnahme wie bisher (Fassung 1,
+    Schalter ``implementation.export.strict`` aus oder Regel ``export.strict`` false; Rollback)."""
+    from .. import editorial
+
+    pol = policy if policy is not None else editorial.load()
+    impl = (pol.roh.get("implementation") or {}).get("export") or {}
+    if pol.version < 2 or impl.get("strict") is not True:
+        return None
+    raw = pol.roh.get("export")
+    name = f"clip_policy_v{pol.version}"
+    if not isinstance(raw, dict) or not isinstance(raw.get("strict"), bool):
+        raise editorial.PolicyError(f"{name}: export.strict ist true oder false ({EXPORT_SWITCH} ist an).")
+    if not raw["strict"]:
+        return None
+    try:
+        tol = float(raw["duration_tolerance_s"])
+    except (KeyError, TypeError, ValueError):
+        raise editorial.PolicyError(f"{name}: export.duration_tolerance_s fehlt oder ist keine Zahl.") from None
+    if tol < 0:
+        raise editorial.PolicyError(f"{name}: export.duration_tolerance_s darf nicht negativ sein.")
+    return {"duration_tolerance_s": tol}
+
+
+def srt_cues(text: str) -> list[tuple[float, float]]:
+    """Zeiten der Einträge einer SRT- oder VTT-Datei in Sekunden."""
+    out = []
+    for m in _SRT_ZEIT.finditer(text or ""):
+        g = [int(x) for x in m.groups()]
+        out.append((g[0] * 3600 + g[1] * 60 + g[2] + g[3] / 1000.0, g[4] * 3600 + g[5] * 60 + g[6] + g[7] / 1000.0))
+    return out
+
+
+def plan_timeline(plan: dict) -> list[dict]:
+    """``plan.timeline`` (AP10b) oder, ohne sie, dieselbe Rechnung aus ``plan.segments``."""
+    if plan.get("timeline"):
+        return list(plan["timeline"])
+    from . import compose
+
+    return compose.output_timeline(compose.Composition.from_json([dict(s) for s in plan["segments"]]))
+
+
+def erwartete_woerter(timeline: list[dict], source_words: list[dict], by_midpoint: bool = True) -> list[tuple[str, float]]:
+    """Wörter mit Ausgabezeit, abgeleitet nur aus der Schnittbeschreibung (``source_in`` bis ``output_out``):
+    ein Wort gehört zu dem Segment, in dem seine Mitte liegt (``by_midpoint``, wie unter ``cut.padding``), sonst
+    nur, wenn es ganz darin liegt; Ausgabezeit = ``output_in`` plus Abstand zu ``source_in``."""
+    out: list[tuple[str, float]] = []
+    for e in timeline:
+        s0, s1, o0 = float(e["source_in"]), float(e["source_out"]), float(e["output_in"])
+        for w in source_words:
+            ws, we = float(w["start"]), float(w["end"])
+            if (s0 <= (ws + we) / 2.0 < s1) if by_midpoint else (s0 <= ws and we <= s1):
+                out.append((str(w.get("text", "")), round(o0 + max(ws, s0) - s0, 3)))
+    return out
+
+
+def abnahme_pruefen(
+    *,
+    plan: dict,
+    dauer_s: float | None,
+    srt_text: str,
+    out_words: list[dict],
+    source_words: list[dict],
+    hat_ton: bool,
+    lufs: float | None,
+    schwarzbilder: list[tuple[float, float]],
+    toleranz_s: float,
+) -> list[Befund]:
+    """Die zusätzlichen Prüfungen der Abnahme (Modulabschnitt Lane P4), jede mit Ergebnis ``ok`` oder ``fehler``."""
+    aus: list[Befund] = []
+    timeline = plan_timeline(plan)
+    soll = round(sum(float(e["source_out"]) - float(e["source_in"]) for e in timeline), 3)
+    if dauer_s is None:
+        aus.append(Befund("timeline_dauer", "fehler", "Die Länge der fertigen Datei ließ sich nicht messen.", None))
+    else:
+        ab = abs(float(dauer_s) - soll)
+        aus.append(
+            Befund("timeline_dauer", "ok", "Die Länge entspricht der Schnittbeschreibung.", f"{dauer_s:.3f} s, Soll {soll:.3f} s")
+            if ab <= toleranz_s + 1e-9
+            else Befund(
+                "timeline_dauer", "fehler",
+                f"Die Datei ist {ab:.2f} Sekunden {'länger' if dauer_s > soll else 'kürzer'} als die Schnittbeschreibung.",
+                f"{dauer_s:.3f} s statt {soll:.3f} s, Toleranz {toleranz_s:.2f} s",
+            )
+        )  # fmt: skip
+
+    cues = srt_cues(srt_text)
+    ausserhalb = [c for c in cues if c[0] < -ZEIT_EPS_S or c[1] > soll + ZEIT_EPS_S or c[1] < c[0]]
+    aus.append(
+        Befund("untertitel_abdeckung", "ok", "Alle Untertitel liegen innerhalb des Clips.", f"{len(cues)} Einträge")
+        if not ausserhalb
+        else Befund(
+            "untertitel_abdeckung", "fehler", "Untertitel stehen ausserhalb des Clips oder laufen über sein Ende hinaus.",
+            f"{len(ausserhalb)} von {len(cues)} Einträgen, erster {ausserhalb[0][0]:.3f} bis {ausserhalb[0][1]:.3f} s, Clip {soll:.3f} s",
+        )
+    )  # fmt: skip
+
+    erwartet = erwartete_woerter(timeline, source_words, by_midpoint=bool(plan.get("timeline")))
+    ist = [(str(w.get("text", "")), round(float(w["start"]), 3)) for w in out_words]
+    abweichend = len(erwartet) != len(ist) or any(a[0] != b[0] or abs(a[1] - b[1]) > ZEIT_EPS_S for a, b in zip(erwartet, ist))
+    aus.append(
+        Befund("untertitel_zeiten", "ok", "Die Untertitelzeiten folgen der Schnittbeschreibung.", f"{len(ist)} Wörter")
+        if not abweichend
+        else Befund(
+            "untertitel_zeiten", "fehler", "Die Untertitel passen nicht zur Schnittbeschreibung. Text und Bild laufen auseinander.",
+            f"{len(ist)} Wörter im Untertitel, {len(erwartet)} laut Schnittbeschreibung",
+        )
+    )  # fmt: skip
+
+    def im_segment(t: float) -> bool:
+        return any(float(e["output_in"]) - ZEIT_EPS_S <= t <= float(e["output_out"]) + ZEIT_EPS_S for e in timeline)
+
+    asynchron = [w for w in out_words if not im_segment(float(w["start"]))]
+    aus.append(
+        Befund("synchron", "ok", "Jeder Wortanfang der Untertitel liegt in einem geschnittenen Abschnitt.", None)
+        if not asynchron
+        else Befund(
+            "synchron", "fehler", "Untertitel beginnen an Stellen, an denen im Clip kein Ton aus der Quelle liegt.",
+            f"{len(asynchron)} Wörter, erstes bei {float(asynchron[0]['start']):.3f} s",
+        )
+    )  # fmt: skip
+
+    stumm = not hat_ton or lufs is None or float(lufs) < STUMM_UNTER_LUFS
+    aus.append(
+        Befund("ton_stumm", "fehler", "Der Clip ist stumm.", None if lufs is None else f"{float(lufs):.1f} LUFS")
+        if stumm
+        else Befund("ton_stumm", "ok", "Im Clip ist Ton zu hören.", f"{float(lufs):.1f} LUFS")
+    )
+    schwarz = sum(max(0.0, b - a) for a, b in schwarzbilder)
+    anteil = schwarz / float(dauer_s) if dauer_s else 0.0
+    aus.append(
+        Befund("bild_schwarz", "fehler", "Das Bild ist fast durchgehend schwarz.", f"{anteil:.0%} schwarz")
+        if anteil >= SCHWARZ_ANTEIL
+        else Befund("bild_schwarz", "ok", "Das Bild ist nicht schwarz.", None)
+    )
+    return aus
+
+
+def abrufbar_befund(abrufbar: bool) -> Befund:
+    """Ist die Exportdatei nach dem Hochladen im Speicher abrufbar?"""
+    if abrufbar:
+        return Befund("abrufbar", "ok", "Die Exportdatei ist abrufbar.", None)
+    return Befund("abrufbar", "fehler", "Die Exportdatei liegt nicht im Speicher. Bitte neu clippen.", None)
+
+
+def anrede_befund(ergebnis: dict, marke: str | None = None) -> Befund:
+    """Du/Sie-Hinweis aus ``captions_de.anrede_pruefen``. Nie ein Fehler und keine Textänderung: die Untertitel
+    geben wieder, was gesagt wurde."""
+    gemessen = f"{ergebnis['du']} Du-Formen, {ergebnis['sie']} Sie-Formen" + (f", Markenprofil {marke}" if marke else "")
+    if ergebnis.get("gemischt"):
+        return Befund(
+            "anrede", "hinweis",
+            "Im Untertitel stehen Du und Sie gemischt. Bitte prüfen, ob die Anrede so stehen bleiben soll; der Text gibt wieder, was gesagt wurde.",
+            gemessen,
+        )  # fmt: skip
+    return Befund("anrede", "ok", "Die Anrede im Untertitel ist einheitlich.", gemessen)
+
+
+def abnahme_zusammenfassung(befunde: list[Befund]) -> dict[str, Any]:
+    """Letzter Eintrag in ``export_checks`` unter ``export.strict``: ``export_ok`` ist true, wenn kein Befund
+    ``fehler`` ist; nur dann ist der Clip fertig."""
+    ok = schlimmstes(befunde) != "fehler"
+    return {
+        "pruefung": "abnahme",
+        "ergebnis": "ok" if ok else "fehler",
+        "text": "Die Exportdatei ist abgenommen." if ok else "Die Exportdatei ist nicht abgenommen und wird nicht freigegeben.",
+        "gemessen": None,
+        "export_ok": ok,
+    }
+
+
+def export_ok_aus(export_checks: Any) -> bool:
+    """``export_ok`` aus gespeicherten ``export_checks`` (Liste); ohne Abnahme-Eintrag false."""
+    if not isinstance(export_checks, list):
+        return False
+    return any(isinstance(e, dict) and e.get("pruefung") == "abnahme" and e.get("export_ok") is True for e in export_checks)

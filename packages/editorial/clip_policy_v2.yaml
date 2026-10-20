@@ -410,6 +410,13 @@ captions:
   min_event_s: 0.8
   # Bruch nach einem Komma nur, wenn die Karte sonst die Zeilenbreite der Karte überschreitet (P30).
   comma_break_only_on_overflow: true
+  # Lane P4: Lesetempo in Zeichen je Sekunde als Mindeststandzeit einer Karte mit mehreren Wörtern (nie in
+  # die nächste Karte, nie über das Clipende). Profil aus dem Untertitelstil (Feld reading_speed), sonst
+  # standard. Gelesen von captions_de.reading_speed; wirksam mit implementation.captions.reading_speed.
+  reading_speed:
+    chars_per_s:
+      standard: 15
+      langsam: 12
 
 # ------------------------------------------------------------------------------------------------
 # Schnittkanten (neu in Fassung 2, AP10b)
@@ -429,6 +436,35 @@ cut:
   # Unter dieser Sicherheit liegt die Kante konservativ in der Mitte der Stille und wird markiert.
   # Verweis auf die Schwelle der Transkription (keine eigene Zahl).
   low_confidence_threshold: transcribe.LOW_CONF_THRESHOLD
+  # Lane P4: Kante auf das Pegelminimum des 16-kHz-Audios im Suchfenster, nie ins Nachbarwort, Atem vor dem
+  # Wortbeginn bleibt draussen (transitions.prosody_edges). Wirksam mit implementation.cut.prosody und
+  # cut.padding; aus, bis ein Hörtest die Natürlichkeit bestätigt (docs/decisions/040).
+  prosody:
+    enabled: false
+    search_window_s: 0.35
+  # Lane P4: Sprache beginnt im Clip spätestens nach max_lead_s, der Hook-Satz spätestens nach hook_window_s;
+  # Vorgeplänkel aus ganzen Sätzen wird übersprungen (transitions.shift_preamble, hook_audio_report).
+  # Wirksam mit implementation.cut.hook_audio und cut.padding (docs/decisions/042).
+  hook_audio:
+    enabled: false
+    max_lead_s: 1.0
+    hook_window_s: 3.0
+  # Lane P4: Split-Screen bei überlappender Rede nur mit gesicherter Zuordnung Sprecher zu Gesicht
+  # (tracking.speaker_face_binding); sonst konservative Ansicht. Wirksam mit implementation.cut.split_screen.
+  split_screen:
+    enabled: false
+    min_binding_confidence: 0.8
+
+# ------------------------------------------------------------------------------------------------
+# Export als Abnahmeobjekt (Lane P4, Regel 16)
+# ------------------------------------------------------------------------------------------------
+# Fertig (rendered) nur mit bestandener Abnahme der Exportdatei, sonst failed ohne Freigabe von file_key
+# (ausgabe_pruefung.export_rules, abnahme_pruefen). Wirksam mit implementation.export.strict; aus, damit
+# Fassung 1 und bestehende Clips unverändert bleiben (docs/decisions/041).
+export:
+  strict: false
+  # Größte Abweichung der Dateilänge von der Summe der Timeline-Segmente in Sekunden.
+  duration_tolerance_s: 0.2
 
 # ------------------------------------------------------------------------------------------------
 # Hook (neu in Fassung 2, AP6a)
@@ -734,6 +770,121 @@ roles:
   critic: true
 
 # ------------------------------------------------------------------------------------------------
+# Kapitel an Themenwechseln (neu in Fassung 2, Launch Phase 2, Lane P2)
+# ------------------------------------------------------------------------------------------------
+# Feste Kapitel von 240 s zerschneiden Argumente (Master-Prompt Schwachstelle 4). Mit der Regel und dem Schalter
+# implementation.chapters.topic_shift legt segment.chapterize_topic_shift die Grenzen an Themenwechsel: Wortüberlappung
+# benachbarter Fenster (TextTiling-artig, ohne Embeddings) plus Sprecherwechsel. Ein Kapitel ist mindestens min_s und
+# höchstens max_s lang; die Überlappung bleibt search.chapter_overlap_s. Grenze nur ab min_boundary_score, sonst erst
+# an max_s. Alle Zahlen sind Startwerte ohne Messung. Rollback: enabled false (feste 240 s).
+chapters:
+  topic_shift:
+    enabled: false
+    min_s: 120
+    max_s: 300
+    window_s: 60
+    min_boundary_score: 0.5
+    speaker_weight: 0.25
+
+# ------------------------------------------------------------------------------------------------
+# Text-Heatmap v2 (neu in Fassung 2, Launch Phase 2, Lane P2)
+# ------------------------------------------------------------------------------------------------
+# Die gespeicherte Heatmap mischt einen z-normierten Audioanteil mit rohen Textzählern; ruhig vorgetragene
+# Kernargumente fallen gegen laute Stellen ab (Master-Prompt Schwachstelle 5). Mit der Regel text_v2 und dem
+# Schalter implementation.heat.text_v2 mischt story_engine.run die Heatmap neu (signals.payload_with_text_v2):
+# Überraschung, Negation einer Erwartung, Zahlen mit Einheit, Stakes, Reaktionen des Gegenübers (nur kurze
+# Einwürfe; Lachen nur, wenn Daten vorliegen) und Zitate, z-normiert wie der Audioanteil, gemischt mit text_weight.
+# Die Wortlisten sind Übertragungshypothesen ohne Messung (origins). Rollback: text_v2 false.
+heat:
+  text_v2: false
+  text_weight: 0.5
+  markers:
+    surprise: ["plötzlich", "auf einmal", "überraschenderweise", "überraschend", "ausgerechnet", "stattdessen", "im gegenteil", "wider erwarten", "entgegen", "stellte sich heraus", "stellt sich heraus", "hätte nie gedacht", "hätte ich nie gedacht", "das hat mich überrascht", "verrückterweise", "kurioserweise"]
+    expectation_negation: ["eben nicht", "gerade nicht", "gar nicht so", "überhaupt nicht", "nicht das, was", "das stimmt nicht", "ist ein mythos", "ist falsch", "nicht weil", "sondern weil", "alle denken", "viele glauben", "man würde denken", "das gegenteil"]
+    stakes_money: ["geld", "umsatz", "gewinn", "kosten", "gehalt", "investiert", "investition", "schulden", "kredit", "budget", "marge"]
+    stakes_time: ["deadline", "frist", "zu spät", "in letzter minute", "über nacht", "jahrelang", "monatelang", "rund um die uhr", "keine zeit"]
+    stakes_loss: ["verloren", "verlust", "verlieren", "pleite", "insolvenz", "insolvent", "gekündigt", "kündigung", "gescheitert", "scheitern", "aufgegeben", "ruiniert"]
+    stakes_risk: ["risiko", "riskant", "gefahr", "gefährlich", "existenz", "existenziell", "haftung", "strafe", "abmahnung", "alles auf eine karte", "aufs spiel"]
+    reaction: ["wow", "krass", "wahnsinn", "echt", "wirklich", "ernsthaft", "unglaublich", "boah", "heftig", "verrückt", "haha", "lacht"]
+    quote: ["hat gesagt", "hat mir gesagt", "sagte mir", "meinte zu mir", "hat gemeint", "zitat", "wörtlich", "seine worte", "ihre worte", "hat geschrieben"]
+  units: ["prozent", "%", "euro", "€", "franken", "chf", "dollar", "million", "millionen", "milliarde", "milliarden", "tausend", "jahre", "jahren", "monate", "monaten", "woche", "wochen", "tage", "tagen", "stunde", "stunden", "minuten", "sekunden", "kunden", "mitarbeiter", "mitarbeitende", "leute", "menschen", "mal", "kilo", "kg", "kilometer", "km"]
+
+# ------------------------------------------------------------------------------------------------
+# Vergleich über das ganze Video (neu in Fassung 2, Launch Phase 2, Lane P2, Hypothese)
+# ------------------------------------------------------------------------------------------------
+# Paarvergleich der Top-N mit compare_clips_v1, jedes Paar in beiden Reihenfolgen (Positionsbias wird gemessen),
+# Bradley-Terry ergibt rubric.pairwise_rank. Hypothese nach Master-Prompt Abschnitt 4: Übernahme erst mit Nachweis
+# gegen die Baseline. Jeder Vergleich zählt im Modellbudget (top_n 8 sind 56 Aufrufe). Rollback: enabled false.
+ranking:
+  pairwise:
+    enabled: false
+    top_n: 8
+
+# ------------------------------------------------------------------------------------------------
+# Transkription (neu in Fassung 2, Lane P1, Master-Prompt Phase 1 und Regel 13)
+# ------------------------------------------------------------------------------------------------
+# Gelesen von chopstr_worker/pipeline/transcribe.py:asr_settings, nur mit ASR_AUTO_ROUTE=1 (Standard aus).
+# routing: vor der Transkription Sprache und Variante aus einer Stichprobe (erste 60 s und Mitte) bestimmen;
+# das Markenprofil (asr_variant) bleibt Vorgabe, bis die Erkennung mindestens min_confidence erreicht.
+# hotwords: Marken-Wörterbuch, geschützte Begriffe und bei erkanntem AT Austriazismen, höchstens max_terms
+# Begriffe. decode: ob sie in den Decoder gehen; false, weil faster-whisper sie als Prompt vor jeden 30-s-Abschnitt
+# setzt und das am Testmaterial ganze Sätze verschluckt hat (docs/decisions/010-asr-routing.md). Ohne decode
+# wirkt das Wörterbuch als Nachkorrektur. ch_route.beta: die CH-Route trägt das Beta-Label.
+asr:
+  routing:
+    enabled: true
+    min_confidence: 0.6
+  hotwords:
+    max_terms: 40
+    decode: false
+  ch_route:
+    beta: true
+
+# ------------------------------------------------------------------------------------------------
+# Sprecher (neu in Fassung 2, Lane P1, Review 4B)
+# ------------------------------------------------------------------------------------------------
+# overlap.min_ratio_for_flag: ein Wort ist Überlappung, wenn mindestens zwei Sprecher der nicht exklusiven
+# Sprecherstruktur je mindestens diesen Anteil seiner Dauer abdecken (transcribe.assign_speakers).
+# multitrack: Sprecher aus getrennten Mikrofonspuren (SPEAKERS_MULTITRACK=1): je Fenster von energy_window_s die
+# lauteste Spur; eine zweite Spur, die höchstens overlap_db darunter und über silence_dbfs liegt, ist Überlappung,
+# eine leisere ist Übersprechen; unter silence_dbfs spricht niemand (transcribe.energy_diarization).
+speakers:
+  overlap:
+    min_ratio_for_flag: 0.3
+  multitrack:
+    energy_window_s: 0.1
+    overlap_db: 10
+    silence_dbfs: -45
+
+# ------------------------------------------------------------------------------------------------
+# Kontexttreue (Lane P3, Launch Phase 3; Master-Prompt Regeln 2, 3, 6 und 12)
+# ------------------------------------------------------------------------------------------------
+# claim_index: Index aller Sätze mit Zahl, Verneinung, Bedingung, Einschränkung, Zeitbezug oder Zuschreibung über
+# das ganze Video (chopstr_worker/pipeline/story_graph.py, claim_index_settings). Je Kandidat höchstens max_hits
+# Treffer, verwandt ab Lemma-Jaccard min_overlap; Klassen self_correction, addition, contradiction_by_other,
+# unrelated mit eigener Schnittreaktion (rubric.context_hits). Bleibt aus, bis ein Lauf an echtem Material die
+# Trefferquote zeigt (docs/decisions/030-claim-index.md). counter_reader: deterministischer Gegenleser nach sechs
+# Dimensionen gegen Kontext und Hook, Hook-Verdichtung nach Regel 6 (fidelity.counter_reader_settings); model
+# schaltet den Prompt counter_reader_v1 im Kritikerschritt zu (Modellaufrufe im Budget, 031). title_card:
+# Titelkarte als zweite Wahl mit wörtlichem Quellsatz und erneuter Prüfung (rubric.repair_applied).
+context:
+  claim_index:
+    enabled: false
+    max_hits: 5
+    min_overlap: 0.2
+  counter_reader:
+    enabled: true
+    model: false
+  title_card:
+    enabled: true
+    max_words: 20
+
+# Drei Ergebnisklassen (Regel 14): rubric.review_state passed, uncertain, blocked (release_gate.review_settings,
+# docs/decisions/032-ergebnisklassen.md). Automatisch angenommen wird nur passed.
+review:
+  review_state: true
+
+# ------------------------------------------------------------------------------------------------
 # Prompt-Pins (neu in Fassung 2)
 # ------------------------------------------------------------------------------------------------
 # Welche Datei packages/prompts/<name>_v<N>.md gilt. Eine neue Prompt-Version wird erst wirksam, wenn
@@ -748,6 +899,8 @@ prompts:
   post_caption: 1
   episode_overview: 1         # AP5: Übersicht je Kapitel, nur für die Suche
   critique_clip: 1            # AP6b: Kritiker, sucht gezielt Widerlegung, unklares Pronomen, entfernte Bedingung, falschen Übergang, fremde Position
+  compare_clips: 1            # Lane P2: Paarvergleich (Hypothese), wirksam nur mit Regel und Schalter ranking.pairwise
+  counter_reader: 1           # Lane P3: Gegenleser, sieht nur Clip und Hook; wirksam nur mit context.counter_reader.model und roles.critic
 
 # ------------------------------------------------------------------------------------------------
 # Schalter der Arbeitspakete (neu in Fassung 2)
@@ -768,8 +921,15 @@ implementation:
     enabled: true             # AP7: Remove- und Keep-Logik (gebaut); wirksam erst mit der Regel trim.enabled, die bis zum Blindvergleich false bleibt
   cut:
     padding: true             # AP10b: Vor- und Nachlauf an Wortgrenzen (gebaut, liest Abschnitt cut)
+    prosody: true             # Lane P4: Kanten auf dem Pegelminimum (gebaut); wirksam erst mit der Regel cut.prosody.enabled
+    hook_audio: true          # Lane P4: Hook gegen den Ton, Vorgeplänkel (gebaut); wirksam erst mit der Regel cut.hook_audio.enabled
+    split_screen: true        # Lane P4: Split-Screen nur mit gesicherter Bindung (gebaut); wirksam erst mit der Regel cut.split_screen.enabled
   captions:
     word_bridge: true         # AP10a: Wort-Events bis zum nächsten Wort (gebaut, liest Abschnitt captions)
+    reading_speed: true       # Lane P4: Lesetempo als Mindeststandzeit (gebaut, liest captions.reading_speed)
+    address_check: true       # Lane P4: Du/Sie-Hinweis in export_checks (gebaut, keine Textänderung)
+  export:
+    strict: true              # Lane P4: Export als Abnahmeobjekt (gebaut); wirksam erst mit der Regel export.strict
   output:
     max_candidates: true      # AP9: Obergrenze und Redundanz über Inhalt in select_best (gebaut, liest Abschnitt output)
   # Register der Schlüssel (AP9): Status je Regel aus origins (implemented, partial, not_implemented), Grund
@@ -918,11 +1078,72 @@ implementation:
     cut.lead_out_s: {status: implemented}
     cut.min_gap_s: {status: implemented}
     cut.low_confidence_threshold: {status: implemented}
+    cut.prosody.enabled: {status: implemented}
+    cut.prosody.search_window_s: {status: implemented}
+    cut.hook_audio.enabled: {status: implemented}
+    cut.hook_audio.max_lead_s: {status: implemented}
+    cut.hook_audio.hook_window_s: {status: implemented}
+    cut.split_screen.enabled: {status: partial, reason: "gebaut und getestet, wirkt aber nur mit Gesichtsdetektor (YuNet und OpenCV), der lokal und im Image fehlt; ohne Detektor bleibt die Ansicht konservativ"}
+    cut.split_screen.min_binding_confidence: {status: partial, reason: "wie cut.split_screen.enabled: ohne Gesichtsdetektor entsteht keine Bindung"}
+    captions.reading_speed.chars_per_s.standard: {status: implemented}
+    captions.reading_speed.chars_per_s.langsam: {status: partial, reason: "gelesen, aber kein Markenprofil und keine Oberfläche setzt heute das Feld reading_speed im Untertitelstil; es gilt standard"}
+    export.strict: {status: implemented}
+    export.duration_tolerance_s: {status: implemented}
     roles.critic: {status: implemented}
     output.max_candidates: {status: implemented}
     output.redundancy_jaccard: {status: implemented}
+    asr.routing.enabled: {status: partial, reason: "nur mit ASR_AUTO_ROUTE=1 (Standard aus); ohne Schalter gelten die Code-Standards in transcribe.ASR_DEFAULTS"}
+    asr.routing.min_confidence: {status: partial, reason: "nur mit ASR_AUTO_ROUTE=1 (Standard aus); ohne Schalter gelten die Code-Standards in transcribe.ASR_DEFAULTS"}
+    asr.hotwords.max_terms: {status: partial, reason: "nur mit ASR_AUTO_ROUTE=1 (Standard aus); ohne Schalter gelten die Code-Standards in transcribe.ASR_DEFAULTS"}
+    asr.hotwords.decode: {status: partial, reason: "nur mit ASR_AUTO_ROUTE=1 (Standard aus); ohne Schalter gelten die Code-Standards in transcribe.ASR_DEFAULTS"}
+    asr.ch_route.beta: {status: partial, reason: "nur mit ASR_AUTO_ROUTE=1 (Standard aus); ohne Schalter gelten die Code-Standards in transcribe.ASR_DEFAULTS"}
+    speakers.overlap.min_ratio_for_flag: {status: implemented}
+    speakers.multitrack.energy_window_s: {status: partial, reason: "nur mit SPEAKERS_MULTITRACK=1 (Standard aus) und mindestens zwei Spuren in sources.audio_tracks"}
+    speakers.multitrack.overlap_db: {status: partial, reason: "nur mit SPEAKERS_MULTITRACK=1 (Standard aus) und mindestens zwei Spuren in sources.audio_tracks"}
+    speakers.multitrack.silence_dbfs: {status: partial, reason: "nur mit SPEAKERS_MULTITRACK=1 (Standard aus) und mindestens zwei Spuren in sources.audio_tracks"}
+    chapters.topic_shift.enabled: {status: implemented}
+    chapters.topic_shift.min_s: {status: implemented}
+    chapters.topic_shift.max_s: {status: implemented}
+    chapters.topic_shift.window_s: {status: implemented}
+    chapters.topic_shift.min_boundary_score: {status: implemented}
+    chapters.topic_shift.speaker_weight: {status: implemented}
+    heat.text_v2: {status: implemented}
+    heat.text_weight: {status: implemented}
+    heat.markers.surprise: {status: implemented}
+    heat.markers.expectation_negation: {status: implemented}
+    heat.markers.stakes_money: {status: implemented}
+    heat.markers.stakes_time: {status: implemented}
+    heat.markers.stakes_loss: {status: implemented}
+    heat.markers.stakes_risk: {status: implemented}
+    heat.markers.reaction: {status: implemented}
+    heat.markers.quote: {status: implemented}
+    heat.units: {status: implemented}
+    ranking.pairwise.enabled: {status: implemented}
+    ranking.pairwise.top_n: {status: implemented}
+    context.claim_index.enabled: {status: implemented}
+    context.claim_index.max_hits: {status: implemented}
+    context.claim_index.min_overlap: {status: implemented}
+    context.counter_reader.enabled: {status: implemented}
+    context.counter_reader.model: {status: implemented}
+    context.title_card.enabled: {status: implemented}
+    context.title_card.max_words: {status: implemented}
+    review.review_state: {status: implemented}
   roles:
     critic: true              # AP6b: Kritiker nach select_best (gebaut, story_engine.run liest roles.critic)
+  # Lane P2 (Launch Phase 2): gebaut; wirksam erst mit der jeweiligen Regel, die bis zum Nachweis false bleibt
+  chapters:
+    topic_shift: true         # Kapitel an Themenwechseln (story_engine.topic_shift_settings, Regel chapters.topic_shift.enabled)
+  heat:
+    text_v2: true             # Text-Heatmap v2 (signals.text_heat_settings, Regel heat.text_v2)
+  ranking:
+    pairwise: true            # Paarvergleich der Top-N, Hypothese (story_engine.pairwise_settings, Regel ranking.pairwise.enabled)
+  # Lane P3 (Launch Phase 3): gebaut; der Claim-Index wirkt erst mit der Regel context.claim_index.enabled (false)
+  context:
+    claim_index: true         # Claim-Index über das ganze Video (story_graph.claim_index_settings)
+    counter_reader: true      # Gegenleser und Regel-6-Prüfung im Hook (fidelity.counter_reader_settings)
+    title_card: true          # Titelkarte als zweite Wahl (fidelity.title_card_settings)
+  review:
+    review_state: true        # Ergebnisklassen in rubric.review_state (release_gate.review_settings)
 
 # ------------------------------------------------------------------------------------------------
 # Herkunft je Regel (neu in Fassung 2)
@@ -995,6 +1216,17 @@ origins:
   cut.lead_out_s: {origin: H, source: "Entscheidung P31 (Startwert 0,18 s, auf den Beginn des nächsten Wortes begrenzt); RK 2 Befund 8 (Referenzsatz: Nachlauf 0,63 s im Median bei guten gegen 0,19 s bei schlechten Clips, als nicht belastbar markiert); DSCVRY-Richtwert Auslaut plus 60 bis 120 ms"}
   cut.min_gap_s: {origin: H, source: "RK 7, Zeile „Pausen“ (Median 288 ms Wortlücke, DSCVRY n = 62); Startwert deutlich darunter, damit nur aneinanderstoßende Wörter auffallen; nicht gemessen"}
   cut.low_confidence_threshold: {origin: H, source: "Verweis auf transcribe.LOW_CONF_THRESHOLD (0,5, dieselbe Schwelle wie für unsichere Wörter im ClipCandidate); Master-Prompt Abschnitt 20 (unsichere Grenzen kennzeichnen); Formel in pipeline/transitions.py, nicht gemessen"}
+  cut.prosody.enabled: {origin: R, source: "docs/MASTER-PROMPT-LAUNCH.md Abschnitt 8 Phase 4 (prosodische Schnittgrenzen, Pegelminimum, Atem, mit Fades); aus bis zum Hörtest, docs/decisions/040"}
+  cut.prosody.search_window_s: {origin: H, source: "Startwert 0,35 s, etwas über dem Median der Wortlücke (RK 7, Zeile Pausen: 288 ms, DSCVRY n = 62), damit das Fenster eine typische Pause abdeckt; nicht gemessen, docs/decisions/040"}
+  cut.hook_audio.enabled: {origin: R, source: "docs/MASTER-PROMPT-LAUNCH.md Abschnitt 8 Phase 4 (Hook gegen die ersten Sekunden Ton, Vorgeplänkel verschieben); aus bis zum Blindvergleich, docs/decisions/042"}
+  cut.hook_audio.max_lead_s: {origin: H, source: "Startwert 1,0 s Stille vor der ersten Sprache aus dem Auftrag der Lane P4; nicht gemessen, docs/decisions/042"}
+  cut.hook_audio.hook_window_s: {origin: H, source: "Hook-Satz in den ersten 3 s, gleich der Dauer des Hook-Overlays (render_plan.HOOK_OVERLAY_S 3,0 s); nicht gemessen, docs/decisions/042"}
+  cut.split_screen.enabled: {origin: R, source: "docs/MASTER-PROMPT-LAUNCH.md Regel 16 (Sprecher-ID ist keine Zuordnung zu einem Gesicht; Split-Screen bei Überlappung nur mit abgesicherter Zuordnung, sonst konservative Ansicht); docs/REVIEW-MASTER-PROMPT-LAUNCH.md Abschnitt 6"}
+  cut.split_screen.min_binding_confidence: {origin: H, source: "Startwert 0,8 (Anteil der Stimmen aus der Mundbewegung mal Belegung, tracking.speaker_face_binding); nicht gemessen, kein Detektor lokal"}
+  captions.reading_speed.chars_per_s.standard: {origin: H, source: "15 Zeichen je Sekunde als Lesetempo für Erwachsene (Auftrag Lane P4; Orientierung RK 5 Netflix German Timed Text Style Guide, dort höher für Erwachsenenprogramm); unter der Warnschwelle captions_de.MAX_CPS 17; nicht gemessen"}
+  captions.reading_speed.chars_per_s.langsam: {origin: H, source: "12 Zeichen je Sekunde für langsamere Lesende (Auftrag Lane P4; Orientierung RK 5, Kinderprogramm niedriger); aus brief.audience nicht ableitbar, nur über das Feld reading_speed im Untertitelstil; nicht gemessen"}
+  export.strict: {origin: R, source: "docs/MASTER-PROMPT-LAUNCH.md Regel 16 (fertig erst, wenn die Exportdatei abrufbar ist und Bild, Ton, Schnittfolge, Synchronität und Untertitel stimmen); docs/REVIEW-MASTER-PROMPT-LAUNCH.md Abschnitt 6; aus, damit Fassung 1 unverändert bleibt, docs/decisions/041"}
+  export.duration_tolerance_s: {origin: H, source: "0,2 s: ein Bild bei 25 fps je Naht plus AAC-Rahmen; gemessen an den Medientests 0,000 s Abweichung bei bildgenauen Segmenten, gepaddete Segmente nicht bildgenau; docs/decisions/041"}
   hook.native_spoken: {origin: R, source: "Master-Prompt Abschnitt 8 (gesprochener Hook muss im Original vorhanden sein); RK 2 Befund 7 (spoken_hook wird nie verwendet); RK 7, Zeile „Clickbait“ (Sinntreue)"}
   hook.hyperbole: {origin: R, source: "RK 7, Tabelle Zeile „Niemand redet darüber“ (Anti-Hyperbel, leere Intensivierung ersetzt keine Substanz); Masterfile 3.3; Master-Prompt Abschnitt 9"}
   hook.allow_partial_opening: {origin: R, source: "Master-Prompt Abschnitt 8 (gesprochener Hook im Original, keine sinnverändernde Montage) und Abschnitt 20 (Schneiden auf echten Grenzen); RK 2 Befund 7 (Hook gehört nicht zum Clip); Produktentscheidung nach Review AP6a: ganzer Satz oder kein Overlay statt Bruchstück"}
@@ -1077,3 +1309,39 @@ origins:
   gates.discard_hard: {origin: R, source: "Master-Prompt Abschnitt 19 (harte Prüfungen vor dem Ranking); RK 2 Befund 4; Rollback über implementation.gates.discard_hard"}
   search.payoff_markers.resolution: {origin: H, source: "Master-Prompt Abschnitt 7 (Auflösung als Payoff); Befund Blindvergleich mit echtem Material (Werbeanzeige ohne Frage davor); Wortliste ohne Messung"}
   search.cta_markers: {origin: H, source: "Master-Prompt Abschnitt 12 (kein unpassender Verkaufsaufruf am Ende); Befund Blindvergleich mit echtem Material (Werbeanzeige); Wortliste ohne Messung"}
+  chapters.topic_shift.enabled: {origin: R, source: "Master-Prompt Abschnitt 3 Nr. 4 (Kapitel bei 4 Minuten zerschneiden Argumente) und Phase 2 (Kapitel über Themenwechsel); Rollback über implementation.chapters.topic_shift; bleibt false bis zum Nachweis gegen die Baseline (docs/decisions/020)"}
+  chapters.topic_shift.min_s: {origin: H, source: "docs/decisions/020: Untergrenze 120 s, damit ein kurzer Einschub kein Kapitel wird; Startwert ohne Messung"}
+  chapters.topic_shift.max_s: {origin: H, source: "docs/decisions/020: Obergrenze 300 s hält Prompt und Budget in der Größenordnung der festen 240 s; Startwert ohne Messung"}
+  chapters.topic_shift.window_s: {origin: H, source: "TextTiling (Hearst 1997, Fenster benachbarter Blöcke) auf Sekunden übertragen; 60 s Startwert ohne Messung"}
+  chapters.topic_shift.min_boundary_score: {origin: H, source: "docs/decisions/020: relative Tiefe der Überlappung ab 0,5 als Themenwechsel; Startwert an synthetischen Transkripten, nicht an echtem Material"}
+  chapters.topic_shift.speaker_weight: {origin: H, source: "docs/decisions/020: Sprecherwechsel an der Lücke und Wechseldichte als Nebensignal mit Gewicht 0,25; ohne Messung"}
+  heat.text_v2: {origin: R, source: "Master-Prompt Abschnitt 3 Nr. 5 (Heatmap audio-lastig) und Phase 2 (Text-Heatmap neben Audio-Heatmap); Rollback über implementation.heat.text_v2; bleibt false bis zum Nachweis (docs/decisions/021)"}
+  heat.text_weight: {origin: H, source: "docs/decisions/021: Text und Audio zu gleichen Teilen wie bisher in signals.combined, jetzt beide z-normiert; Startwert ohne Messung"}
+  heat.markers.surprise: {origin: H, source: "Master-Prompt Phase 2 (Überraschung); Kontrast und Wendung wie search.hook_type_markers.punchline; Wortliste ohne Messung, Übertragungshypothese"}
+  heat.markers.expectation_negation: {origin: H, source: "Master-Prompt Phase 2 (Überraschung als Negation einer Erwartung); Hook-Typ concrete_contradiction und perspective_shift (Master-Prompt Abschnitt 9); Wortliste ohne Messung, Übertragungshypothese"}
+  heat.markers.stakes_money: {origin: H, source: "Master-Prompt Phase 2 (Stakes); Hook-Typ scene_with_stakes (Master-Prompt Abschnitt 9); Wortliste ohne Messung, Übertragungshypothese"}
+  heat.markers.stakes_time: {origin: H, source: "Master-Prompt Phase 2 (Stakes); Hook-Typ scene_with_stakes (Master-Prompt Abschnitt 9); Wortliste ohne Messung, Übertragungshypothese"}
+  heat.markers.stakes_loss: {origin: H, source: "Master-Prompt Phase 2 (Stakes); Hook-Typ mistake_with_consequence (Master-Prompt Abschnitt 9); Wortliste ohne Messung, Übertragungshypothese"}
+  heat.markers.stakes_risk: {origin: H, source: "Master-Prompt Phase 2 (Stakes); Hook-Typ scene_with_stakes (Master-Prompt Abschnitt 9); Wortliste ohne Messung, Übertragungshypothese"}
+  heat.markers.reaction: {origin: H, source: "Master-Prompt Phase 2 (Reaktionen); zählt nur in kurzen Einwürfen eines anderen Sprechers; Lachen nicht als Bonus (Master-Prompt Abschnitt 4, Widerspruch B); Wortliste ohne Messung, Übertragungshypothese"}
+  heat.markers.quote: {origin: H, source: "Master-Prompt Phase 2 (Text-Heatmap), Zitate als Szene mit Person; gates.reported_speech prüft die Zuordnung getrennt; Wortliste ohne Messung, Übertragungshypothese"}
+  heat.units: {origin: H, source: "Master-Prompt Phase 2 (Zahlen); Einheiten wie heuristic_llm._NUMBER_PHRASE und captions Zahl plus Einheit; Liste ohne Messung"}
+  ranking.pairwise.enabled: {origin: R, source: "Master-Prompt Abschnitt 3 Nr. 3 (kein Vergleich über Kapitel) und Abschnitt 4 (Pairwise-Ranking ist Hypothese, Übernahme erst mit Nachweis gegen die Baseline); Review Abschnitt 8 (Positionsbias, arxiv.org/abs/2406.07791); bleibt false (docs/decisions/022)"}
+  ranking.pairwise.top_n: {origin: H, source: "docs/decisions/022: acht Kandidaten ergeben 28 Paare und 56 Aufrufe mit Positionsrotation; Startwert ohne Messung"}
+  asr.routing.enabled: {origin: R, source: "Master-Prompt Regel 13 (Routing nach der tatsächlichen Sprache der Aufnahme, nicht nach dem Land des Kunden) und Phase 1; Review Abschnitt 4A"}
+  asr.routing.min_confidence: {origin: H, source: "docs/decisions/010-asr-routing.md; Startwert 0,6 ohne Messung, kein AT- oder CH-Material im Repo"}
+  asr.hotwords.max_terms: {origin: H, source: "faster-whisper 1.2.1 WhisperModel.get_prompt kürzt Hotwords still auf 223 Token; 40 Begriffe bleiben darunter; ohne Messung"}
+  asr.hotwords.decode: {origin: H, source: "docs/decisions/010-asr-routing.md: drei synthetische Testgespräche, Marken-Wörterbuch [chopstr, PLACEMedia] als Decoder-Hotwords; c_debatte_viertagewoche WER 0,41 % ohne gegen 8,78 % mit (38 Auslassungen, darunter die Bedingung „nur, wenn“), a 1,30 % gegen 2,27 %, b 1,43 % gegen 1,07 %; Markenwörter kommen im Material nicht vor"}
+  asr.ch_route.beta: {origin: R, source: "Master-Prompt Phase 1 (CH-Route mit Beta-Label); Review Abschnitt 4A (Flix-Modellkarte: Übertragung in Standarddeutsch)"}
+  speakers.overlap.min_ratio_for_flag: {origin: H, source: "Review Abschnitt 4B (überlappungsfähige Sprecherstruktur erhalten); Startwert 0,3 ohne Messung, pyannote lokal nicht installiert"}
+  speakers.multitrack.energy_window_s: {origin: H, source: "Master-Prompt Phase 1 (getrennte Mikrofonspuren bevorzugt); Fenster 100 ms aus dem Auftrag Lane P1, ohne Messung"}
+  speakers.multitrack.overlap_db: {origin: H, source: "docs/decisions/011-sprecher-ueberlappung-mehrspur.md; Übersprechen eines Ansteckmikrofons liegt typisch deutlich mehr als 10 dB unter dem eigenen Sprecher, nicht gemessen"}
+  speakers.multitrack.silence_dbfs: {origin: H, source: "docs/decisions/011-sprecher-ueberlappung-mehrspur.md; Stilleschwelle -45 dBFS ohne Messung"}
+  context.claim_index.enabled: {origin: R, source: "Master-Prompt Phase 3 (Claim-Index über das ganze Video); Review Abschnitt 8 (größerer Suchraum hilfreich, nicht gefundener Bezug kein Beweis); aus bis zur Messung, docs/decisions/030-claim-index.md"}
+  context.claim_index.max_hits: {origin: H, source: "Startwert 5 ohne Messung (Begrenzung der Bestätigungsaufrufe im Modellbudget P41); docs/decisions/030-claim-index.md"}
+  context.claim_index.min_overlap: {origin: H, source: "Startwert 0,2 Lemma-Jaccard ohne Messung, nahe story_graph.MIN_OVERLAP 0,15; Wortlisten in story_graph.py ohne Messung"}
+  context.counter_reader.enabled: {origin: R, source: "Master-Prompt Phase 3 (Gegenleser nach Zuschreibung, Verneinung, Sicherheit, Bedingung, Zahlen, Zeitbezug); Review Abschnitt 8 (Ein-Satz-Paraphrase kann die Bedingung weglassen); Wortlisten in fidelity.py ohne Messung"}
+  context.counter_reader.model: {origin: R, source: "Review Abschnitt 8 (zweites Modell nur mit Messung von Zusatzfunden und Fehlablehnungen); aus wegen Modellbudget P41, docs/decisions/031-gegenleser-zweites-modell.md"}
+  context.title_card.enabled: {origin: R, source: "Master-Prompt Regel 2 (Titelkarte nur zweite Wahl, Reparatur am Ergebnis erneut prüfen); Review Abschnitt 3"}
+  context.title_card.max_words: {origin: H, source: "Startwert 20 Wörter ohne Messung (lesbar in etwa drei Sekunden bei rund sieben Wörtern je Sekunde)"}
+  review.review_state: {origin: R, source: "Master-Prompt Regel 14 (drei Ergebnisklassen); Review Abschnitt 5; docs/decisions/032-ergebnisklassen.md"}

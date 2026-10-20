@@ -11,7 +11,7 @@ import json
 import os
 import shutil
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from fractions import Fraction
 from pathlib import Path
 
@@ -45,6 +45,9 @@ class ProbeResult:
     # Variable Bildrate (AP10b): mittlere und nominelle Bildrate weichen ab; ``None``, wenn eine fehlt.
     # Nur ein Kennzeichen für den Render-Plan, ungeprüft (Halbbildmaterial kann ebenfalls abweichen).
     vfr: bool | None = None
+    # Lane P1: alle Audiospuren in Containerreihenfolge (``index`` ist der Audio-Index für ``-map 0:a:<index>``),
+    # mit Kanälen, Codec und Startzeit; mehr als eine Spur heißt Mehrspuraufnahme (``extract_track``).
+    audio_streams: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -90,6 +93,16 @@ def probe(path: str | os.PathLike) -> ProbeResult:
     streams = data.get("streams", []) or []
     video = next((s for s in streams if s.get("codec_type") == "video" and s.get("disposition", {}).get("attached_pic", 0) != 1), None)
     audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    audio_streams = [
+        {
+            "index": k,
+            "stream_index": s.get("index"),
+            "codec": s.get("codec_name"),
+            "channels": s.get("channels"),
+            "start_time": _parse_float(s.get("start_time")),
+        }
+        for k, s in enumerate(x for x in streams if x.get("codec_type") == "audio")
+    ]
 
     duration = fmt.get("duration")
     if duration is None and video is not None:
@@ -120,7 +133,26 @@ def probe(path: str | os.PathLike) -> ProbeResult:
         size_bytes=int(fmt.get("size") or p.stat().st_size),
         format_name=fmt.get("format_name"),
         vfr=vfr,
+        audio_streams=audio_streams,
     )
+
+
+def _parse_float(raw) -> float | None:
+    try:
+        return round(float(raw), 3) if raw not in (None, "N/A") else None
+    except (TypeError, ValueError):
+        return None
+
+
+# Spuren gelten als gemeinsame Zeitbasis, wenn ihre Startzeiten höchstens so weit auseinanderliegen
+# (ein Fenster der Spurenergie, ``speakers.multitrack.energy_window_s``; Regel 16).
+TRACK_START_TOLERANCE_S = 0.1
+
+
+def common_time_base(audio_streams: list[dict], tolerance_s: float = TRACK_START_TOLERANCE_S) -> bool:
+    """Haben alle Audiospuren dieselbe Startzeit (bis ``tolerance_s``)? Fehlt eine Startzeit, gilt 0."""
+    starts = [float(a.get("start_time") or 0.0) for a in audio_streams]
+    return not starts or max(starts) - min(starts) <= tolerance_s
 
 
 def sha256_file(path: str | os.PathLike, chunk_size: int = 4 * 1024 * 1024) -> str:
@@ -145,6 +177,23 @@ def extract_audio(src: str | os.PathLike, out_wav: str | os.PathLike) -> str:
     )
     if not out.is_file() or out.stat().st_size < 100:
         raise IngestError("Audio-Extraktion lieferte keine Daten (hat die Quelle eine Tonspur?)")
+    return str(out)
+
+
+def extract_track(src: str | os.PathLike, out_wav: str | os.PathLike, audio_index: int) -> str:
+    """Eine Audiospur (``-map 0:a:<audio_index>``) als 16-kHz-Mono-WAV, für die Sprecherzuordnung aus
+    getrennten Mikrofonspuren. Das Mono-Mix aus ``extract_audio`` bleibt die Spur für ASR und Export."""
+    out = Path(out_wav)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _run(
+        [
+            "ffmpeg", "-y", "-nostdin", "-v", "error", "-i", str(src), "-map", f"0:a:{int(audio_index)}", "-vn",
+            "-ac", "1", "-ar", str(AUDIO_SAMPLE_RATE), "-c:a", "pcm_s16le", str(out),
+        ],  # fmt: skip
+        f"Extraktion der Audiospur {int(audio_index)}",
+    )
+    if not out.is_file() or out.stat().st_size < 100:
+        raise IngestError(f"Audiospur {int(audio_index)} lieferte keine Daten")
     return str(out)
 
 
@@ -179,6 +228,9 @@ __all__ = [
     "INGEST_VERSION",
     "PROXY_PARAMS",
     "IngestError",
+    "TRACK_START_TOLERANCE_S",
+    "common_time_base",
+    "extract_track",
     "ProbeResult",
     "extract_audio",
     "ffmpeg_available",

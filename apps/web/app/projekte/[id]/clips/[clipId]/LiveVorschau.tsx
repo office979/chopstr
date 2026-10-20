@@ -5,9 +5,7 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import { cn } from "@/components/ui/cn";
 import { ausschnittBerechnen, blickraumAnker } from "@/lib/clips/ausschnitt";
 import type { CaptionStyle } from "@/lib/clips/caption-style";
-import { faktor as effektFaktor, type Effekt } from "@/lib/clips/effekte";
-import { tonLage, type Musik } from "@/lib/clips/musik";
-import { dauer as schnittDauer, inClipzeit, type Schnitt } from "@/lib/clips/schnitt";
+import { timecode } from "@/lib/clips/timecode";
 import type { Aspect, RenderShot, TranscriptWord, Zeitmarke } from "@/lib/repo/types";
 import { CaptionVorschau } from "./CaptionStudio";
 
@@ -30,42 +28,21 @@ interface Props {
   outH: number;
   clipStart: number;
   clipEnd: number | null;
-  /* Was aus dem Clip entfernt ist, in Quellzeit. Beim Abspielen springt die Vorschau darueber
-   * hinweg, damit sie denselben Ablauf zeigt wie der spaetere Clip. */
-  luecken?: { von: number; bis: number }[];
   zeit: number;
   onTime: (quellzeit: number) => void;
   seekTo: { at: number; nonce: number } | null;
-  /* Zaehler von aussen: jede Erhoehung startet oder stoppt das Video. So bedient der Knopf in der
-   * Timeline denselben Player wie der Knopf im Bild. */
+  /* Zaehler von aussen: jede Erhoehung startet oder stoppt das Video. So bedient die Leertaste
+   * denselben Player wie der Knopf im Bild. */
   spielen?: number;
   onLaeuft?: (laeuft: boolean) => void;
   shots: RenderShot[];
   zeitmarken: Zeitmarke[];
-  /* Die Effekte dieses Clips, in Clipzeit. Der Zoom wird hier Bild für Bild gerechnet.
-   *
-   * Nicht als fertiger Faktor von aussen: der hing an ``timeupdate``, und das feuert je nach
-   * Browser vier- bis fünfmal in der Sekunde. Eine Fahrt über eine Sekunde bestand dann aus fünf
-   * Sprüngen - genau das „Springen", das man sah. Gerechnet wird mit derselben Kurve wie im
-   * Renderer (lib/clips/effekte, Spiegel von pipeline/effekte). */
-  effekte?: Effekt[];
-  /* Wo der Clip im Originalvideo beginnt: daraus wird die Clipzeit. */
-  clipStartQuelle?: number;
   stil: CaptionStyle;
   woerter: TranscriptWord[];
   /* Die Höhe der Untertitel lässt sich direkt im Bild ziehen. Ohne diese Rückmeldung bleibt es
    * bei einem Schieber, und „wo steht der Text" ist eine Frage, die man sehen und nicht rechnen
    * will. */
   onCaptionHoehe?: (bottomMarginPx: number) => void;
-  /* Die Musik, wie sie GERADE eingestellt ist - auch ungespeichert. Wer die Lautstärke schiebt,
-   * soll das hören, ohne vorher zu speichern. */
-  musik?: Musik | null;
-  /* Woher die Musikdatei kommt. Getrennt von ``musik``, weil die Einstellung im Browser liegt und
-   * die Datei auf dem Server. */
-  musikSrc?: string | null;
-  /* Der Schnitt, um die Stelle im Clip zu kennen. Aus Quellzeit wird damit Clipzeit - und nur die
-   * zählt für die Musik, die entfernte Stellen ja nicht mitspielt. */
-  schnitt?: Schnitt;
 }
 
 /* Die Vorschau aus dem Quellvideo, mit allem was gerade eingestellt ist.
@@ -76,7 +53,11 @@ interface Props {
  * CSS so gelegt, wie der Renderer ihn schneiden wuerde. Die Untertitel kommen als Ueberlagerung
  * darueber.
  *
- * Das Ergebnis: jede Aenderung ist sofort zu sehen, ohne zu rendern. */
+ * Das Ergebnis: jede Aenderung ist sofort zu sehen, ohne zu rendern.
+ *
+ * Schnitt, Effekte und Musik zeigt sie nicht mehr: die Timeline, an der sie hingen, ist entfernt
+ * (docs/decisions/050-timeline-entfernen.md). Was der Renderer daraus macht, zeigt „Zuletzt
+ * geclippt“. */
 export function LiveVorschau({
   src,
   posterSrc,
@@ -87,7 +68,6 @@ export function LiveVorschau({
   outH,
   clipStart,
   clipEnd,
-  luecken = [],
   zeit,
   onTime,
   seekTo,
@@ -95,134 +75,12 @@ export function LiveVorschau({
   onLaeuft,
   shots,
   zeitmarken,
-  effekte,
-  clipStartQuelle = 0,
   stil,
   woerter,
   onCaptionHoehe,
-  musik = null,
-  musikSrc = null,
-  schnitt = [],
 }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const musikRef = useRef<HTMLAudioElement | null>(null);
-  const zoomRahmen = useRef<HTMLDivElement | null>(null);
-
-  /* Den Zoom Bild für Bild setzen, nicht bei jedem ``timeupdate``.
-   *
-   * ``timeupdate`` feuert je nach Browser vier- bis fünfmal in der Sekunde. Eine Fahrt über eine
-   * Sekunde bestand daraus: fünf Sprünge. Mit ``requestAnimationFrame`` wird bei jedem Bild
-   * nachgerechnet, und die Fahrt ist so weich wie die Kurve.
-   *
-   * Geschrieben wird direkt ins ``style`` und nicht über den Zustand: ein setState je Bild wären
-   * sechzig Durchläufe der ganzen Seite in der Sekunde. */
-  useEffect(() => {
-    const rahmen = zoomRahmen.current;
-    if (!rahmen) return;
-    if (!effekte || effekte.length === 0) {
-      rahmen.style.transform = "";
-      return;
-    }
-    let laufend = true;
-    const takt = () => {
-      if (!laufend) return;
-      const v = videoRef.current;
-      const jetzt = v ? v.currentTime - clipStartQuelle : 0;
-      const z = effektFaktor(effekte, jetzt);
-      rahmen.style.transform = Math.abs(z - 1) < 0.0005 ? "" : `scale(${z.toFixed(4)})`;
-      window.requestAnimationFrame(takt);
-    };
-    window.requestAnimationFrame(takt);
-    return () => {
-      laufend = false;
-      rahmen.style.transform = "";
-    };
-  }, [effekte, clipStartQuelle]);
   const [laeuft, setLaeuft] = useState(false);
-
-  /* Wie lang der fertige Clip wird. Aus dem Schnitt, denn entfernte Stellen zählen nicht mit. */
-  const clipDauer = useMemo(() => {
-    const ausSchnitt = schnittDauer(schnitt);
-    if (ausSchnitt > 0) return ausSchnitt;
-    return clipEnd != null ? Math.max(0, clipEnd - clipStart) : 0;
-  }, [schnitt, clipStart, clipEnd]);
-
-  /* Die Musik in der Vorschau: ein zweites Tonelement, das dem Video hinterherläuft.
-   *
-   * Die Vorschau spielt das Quellvideo - darin ist keine Musik, die steckt erst im geclippten
-   * Clip. Ohne das hier stellt man eine Musik ein, drückt auf Abspielen und hört nichts.
-   *
-   * Drei Dinge müssen stimmen, sonst klingt es anders als das Ergebnis:
-   *   - die STELLE im Stück: ``ab_s`` plus die bisher abgespielte Clipzeit, nicht die Quellzeit.
-   *     Wer eine Stelle aus dem Clip entfernt hat, überspringt sie auch in der Musik.
-   *   - die BLENDEN am Anfang und Ende, sonst setzt die Musik mit einem Schlag ein.
-   *   - die ABSENKUNG unter der Stimme. Der Renderer misst dafür den Sprachpegel; hier gibt es
-   *     nur die Wortzeiten aus dem Transkript, also eine Schätzung (siehe lib/clips/musik).
-   *
-   * Nachgeführt wird Bild für Bild, aus demselben Grund wie beim Zoom: ``timeupdate`` feuert vier-
-   * bis fünfmal in der Sekunde, und eine Lautstärke, die fünfmal je Sekunde springt, pumpt hörbar. */
-  useEffect(() => {
-    const ton = musikRef.current;
-    if (!ton || !musik || !musikSrc) return undefined;
-    let laufend = true;
-    let absenkung = 1;
-    let startet = false;
-    let letzte = performance.now();
-    ton.volume = 0;
-
-    const takt = () => {
-      if (!laufend) return;
-      const video = videoRef.current;
-      window.requestAnimationFrame(takt);
-      if (!video) return;
-
-      const jetztMs = performance.now();
-      const dt = jetztMs - letzte;
-      letzte = jetztMs;
-
-      const quellzeit = video.currentTime;
-      const lage = tonLage({
-        musik,
-        clipzeit: schnitt.length > 0 ? inClipzeit(schnitt, quellzeit) : quellzeit - clipStart,
-        clipDauer,
-        spricht: woerter.some((w) => quellzeit >= w.start && quellzeit <= w.end),
-        absenkung,
-        dtMs: dt,
-        tonZeit: ton.currentTime,
-        tonLaenge: Number.isFinite(ton.duration) ? ton.duration : null,
-      });
-      absenkung = lage.absenkung;
-      ton.volume = lage.pegel;
-
-      /* Das Stück ist vor dem Clip zu Ende: anhalten und stehen lassen. */
-      if (lage.zuEnde) {
-        if (!ton.paused) ton.pause();
-        return;
-      }
-      if (lage.nachziehen) ton.currentTime = Math.max(0, lage.stelle);
-
-      /* Laufen und Stehen folgen dem Video, egal welcher Knopf es gestartet hat. */
-      if (video.paused) {
-        if (!ton.paused) ton.pause();
-      } else if (ton.paused && !startet) {
-        startet = true;
-        /* Kein Grund, die Vorschau zu stören, wenn der Browser den Ton verweigert: das Bild läuft
-         * weiter, und beim nächsten Klick - dann liegt eine Nutzereingabe vor - klappt es. */
-        void ton
-          .play()
-          .catch(() => undefined)
-          .finally(() => {
-            startet = false;
-          });
-      }
-    };
-
-    window.requestAnimationFrame(takt);
-    return () => {
-      laufend = false;
-      ton.pause();
-    };
-  }, [musik, musikSrc, schnitt, woerter, clipStart, clipDauer]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -310,20 +168,10 @@ export function LiveVorschau({
           links und rechts blieb ein Streifen Kartenhintergrund neben dem Video stehen. Jetzt ist
           die Karte so breit wie das Bild, und ihre runden Ecken schneiden es mit. */}
       <div className="relative w-full overflow-hidden bg-black" style={{ aspectRatio: ASPEKT[aspect] }}>
-        {/* Der Zoom greift NUR hier hinein, nicht am Rahmen.
-          *
-          * Vorher lag die Skalierung am Rahmen - dann wuchs der ganze Kasten auf der Seite, statt
-          * dass das Bild naeher kommt. Das sah aus, als sei nur die Vorschau groesser geworden,
-          * und die Frage „wird das Video ueberhaupt gezoomt" war berechtigt.
-          *
-          * Der Rahmen bleibt jetzt, wie er ist, und schneidet ab: bei „naeher heran" waechst das
-          * Bild darueber hinaus, bei „weiter weg" wird sein schwarzer Grund rundherum sichtbar -
-          * genau wie im fertigen Video. Die Untertitel bleiben draussen, denn der Renderer brennt
-          * sie NACH dem Zoom ein. */}
-        <div ref={zoomRahmen} className="absolute inset-0" style={{ transformOrigin: "center center" }}>
+        <div className="absolute inset-0">
         {/* Keine eigenen Bedienelemente des Browsers: das Video ist vergroessert, damit der
           * Ausschnitt den Rahmen fuellt, und seine Leiste waere es dann auch - halb ausserhalb des
-          * Bildes. Gespult wird in der Zeitleiste darunter, hier braucht es nur Start und Pause. */}
+          * Bildes. Gespult wird mit dem Regler unter dem Bild, hier braucht es nur Start und Pause. */}
         <video
           ref={videoRef}
           src={src}
@@ -339,22 +187,12 @@ export function LiveVorschau({
               v.pause();
               v.currentTime = clipEnd;
             }
-            /* Ueber eine entfernte Stelle hinwegspringen. Nur beim Abspielen: wer von Hand in eine
-             * Luecke zieht, soll dort stehen bleiben und sehen, was er weggeschnitten hat. */
-            const luecke = v.paused ? null : luecken.find((l) => v.currentTime > l.von + 0.02 && v.currentTime < l.bis);
-            if (luecke) {
-              v.currentTime = luecke.bis;
-              return;
-            }
             onTime(v.currentTime);
           }}
         >
           Dein Browser kann dieses Video nicht abspielen.
         </video>
         </div>
-        {/* Die Musik. Ohne Bedienelemente und unsichtbar: sie gehört zum Video, nicht daneben -
-          * gespult und angehalten wird oben im Bild und unten in der Zeitleiste. */}
-        {musik && musikSrc && <audio ref={musikRef} src={musikSrc} preload="auto" hidden />}
         {woerter.length > 0 && (
           <CaptionVorschau stil={stil} woerter={woerter} zeit={zeit} onHoehe={onCaptionHoehe} />
         )}
@@ -407,6 +245,31 @@ export function LiveVorschau({
           </span>
         </button>
       </div>
+      {/* Die Stelle im Clip, als Regler. Kein Trimmen und kein Verschieben von Grenzen: der Regler
+          reicht genau von Anfang bis Ende des Clips und bewegt nur den Abspielkopf. Gebraucht wird
+          er für den Bildausschnitt, der ab der Stelle des Abspielkopfs gilt. */}
+      {clipEnd != null && clipEnd > clipStart && (
+        <label className="flex items-center gap-3 px-3 py-2.5">
+          <span className="sr-only">Stelle im Clip</span>
+          <input
+            type="range"
+            min={0}
+            max={Math.round((clipEnd - clipStart) * 10) / 10}
+            step={0.1}
+            value={Math.min(Math.max(0, zeit - clipStart), clipEnd - clipStart)}
+            onChange={(e) => {
+              const v = videoRef.current;
+              const ziel = clipStart + Number(e.target.value);
+              if (v) v.currentTime = ziel;
+              onTime(ziel);
+            }}
+            className="w-full accent-white"
+          />
+          <span className="shrink-0 font-mono text-xs tabular-nums text-text-2">
+            {timecode(Math.max(0, zeit - clipStart))} von {timecode(clipEnd - clipStart)}
+          </span>
+        </label>
+      )}
     </GlassCard>
   );
 }

@@ -172,6 +172,13 @@ Felder Redaktions-Briefing. **Das ist eine Formular-Wand vor dem ersten Erfolgse
    "Wünsche angeben (optional)" in Schritt 3, wo es sinnvoll wird, weil Lena dann sieht,
    was der Computer gefunden hat.
 
+**Stand 20.10.2026 (Phase 5, `docs/decisions/051-kandidatenliste-freigabe.md`):** Das Briefing steht
+wieder beim Upload, aber eingeklappt: „Briefing angeben (freiwillig)“ öffnet Zielgruppe, Gewünscht,
+Ausschließen und Plattform. Die Plattform ist aus dem gewählten Markenprofil vorbelegt; die drei Texte
+bleiben leer, weil das Profil sie nicht kennt. Wer nichts angibt, lädt hoch wie bisher. Gespeichert wird
+in `sources.brief` (`apps/web/lib/uploads/brief.ts`). Grund: die Auswahl der Momente braucht das
+Briefing, bevor sie läuft, nicht danach.
+
 **Rechtsbestätigung:** Bleibt Pflicht, aber als eine Frage mit zwei Knöpfen statt als
 Dropdown plus Checkbox. Die juristische Wirkung ist identisch, der Audit-Eintrag auch.
 
@@ -264,6 +271,14 @@ Ist heute das "Hook-Studio" und über die Clip-Karte verstreut. Wird zusammengef
 - Wortgrenzen (12 gesprochen, 9 auf dem Bild) werden als Restzähler gezeigt, nicht als
   Fehlermeldung nach dem Tippen.
 - "Neu rendern" heißt **"Änderungen übernehmen"**.
+
+**Stand 20.10.2026 (Phase 5, `docs/decisions/050-timeline-entfernen.md`):** Es gibt keine Timeline und
+keinen Reiter „Schnitt“ mehr; Anfang und Ende setzt die Pipeline. Der Clip hat drei Reiter: **Text**
+(Wörter korrigieren, aus dem Untertitel nehmen, Sprecher ändern), **Untertitel** (Aussehen, Position,
+Lesbarkeit) und **Bildausschnitt** (wer wie nah im Bild ist, ab der Stelle des Abspielkopfs). Unter der
+Vorschau bewegt ein Regler nur den Abspielkopf, er trimmt nichts. Effekte und Musik lassen sich nicht mehr
+von Hand setzen. Die Hook-Varianten bleiben unter `/experimente`. Annehmen, Ablehnen und „An Redaktion“
+stehen an der Karte in der Liste (`docs/decisions/051-kandidatenliste-freigabe.md`).
 
 ### 5.7 Schritt 5: Fertig und posten
 

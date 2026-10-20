@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import dach_nlp
 from .dach_nlp import NEGATIONS
@@ -444,7 +444,7 @@ def _scope_issues(low_hook: str, clip_text: str) -> list[tuple[str, str]]:
 
 
 def hook_claim_check_v2(
-    hook_text: str, clip_text: str, uncertain_tokens: list[str] | tuple[str, ...] = ()
+    hook_text: str, clip_text: str, uncertain_tokens: list[str] | tuple[str, ...] = (), meaning: bool | None = None
 ) -> list[str]:
     """Hook darf nicht mehr behaupten als der Clip (Policy-Fassung 2; ``hook_claim_check`` bleibt für v1).
 
@@ -453,7 +453,10 @@ def hook_claim_check_v2(
     * Zahlwörter, die nicht gelesen werden können, sind ein Befund.
     * Zahlen, die im Clip unsicher erkannt sind (``uncertain_tokens``), dürfen im Hook nicht stehen.
     * Geltungsbereich: ein Verallgemeinerer im Hook gegen einen Einschränker im Clip ist ein Befund.
-    * Zuspitzungen wie in v1, aber an Wortgrenzen und ohne Doppelbefund mit dem Geltungsbereich."""
+    * Zuspitzungen wie in v1, aber an Wortgrenzen und ohne Doppelbefund mit dem Geltungsbereich.
+    * Regel 6 (Lane P3, ``meaning``): Zuschreibung, Sicherheit, Zeitraum, Größenordnung und Kausalität bleiben
+      erhalten (``hook_meaning_issues``). Ohne Angabe gilt der Gegenleser der aktiven Fassung
+      (``counter_reader_settings``); unter Fassung 1 und ohne Schalter bleibt die Prüfung wie vorher."""
     issues: list[str] = []
     clip_mentions = number_mentions(clip_text)
     low_words = {_word_key(t) for t in clip_text.split()}
@@ -478,6 +481,11 @@ def hook_claim_check_v2(
             issues.append(f"Zuspitzung '{sup}' nicht durch Clip gedeckt")
     for gen, restrictor in scope:
         issues.append(f"Geltungsbereich: '{gen}' im Hook, der Clip schränkt ein ('{restrictor}')")
+    if meaning is None:
+        meaning = counter_reader_settings(_active_policy()) is not None
+    if meaning:
+        known = " ".join(issues)
+        issues.extend(i["detail"] for i in hook_meaning_issues(hook_text, clip_text) if f"'{i['hook_quote']}'" not in known)
     return issues
 
 
@@ -527,7 +535,324 @@ def number_values(texts: list[str] | tuple[str, ...]) -> set[float]:
     return {m.value for t in texts for m in number_mentions(str(t))}
 
 
+# -- Gegenleser und Hook-Verdichtung (Lane P3, Launch-Auftrag Phase 3, Regeln 2 und 6) -------------------------
+# Deterministischer Vergleich nach sechs Dimensionen (Review 8: eine Ein-Satz-Paraphrase kann gerade die
+# entscheidende Bedingung weglassen). Jede Dimension ist ein Befund mit Zitat aus Clip und Quelle. Die Wortlisten
+# sind Übertragungshypothesen ohne Messung (Herkunft H in ``origins.context.counter_reader.*``). Ein Befund ist ein
+# regelbasierter Hinweis, kein bestätigter Fehler; bestätigt wird nur über den Modellprompt ``counter_reader_v1``
+# (``critic.counter_read_model``).
+COUNTER_READER_SWITCH = "context.counter_reader"
+TITLE_CARD_SWITCH = "context.title_card"
+COUNTER_DIMENSIONS = ("attribution", "negation", "certainty", "condition", "number", "time")
+ATTRIBUTION_MARKERS = (
+    "laut", "zufolge", "sagt", "sagte", "meint", "meinte", "behauptet", "behauptete", "angeblich", "heißt es",
+    "hieß es", "schreibt", "schrieb",
+)  # fmt: skip
+NEGATION_MARKERS = (
+    "nicht", "kein", "keine", "keinen", "keinem", "keiner", "keines", "nie", "niemals", "nichts", "niemand",
+    "ned", "nöd", "nid", "nit", "net",
+)  # fmt: skip
+HEDGES = (
+    "ich glaube", "glaube ich", "ich denke", "denke ich", "vielleicht", "wahrscheinlich", "vermutlich",
+    "eventuell", "möglicherweise", "soweit ich weiß", "ich bin nicht sicher", "keine ahnung", "ich schätze",
+    "schätze ich", "unter umständen",
+)  # fmt: skip
+ABSOLUTES = ("garantiert", "sicher", "definitiv", "bewiesen", "immer", "nie", "niemals", "100 prozent", "auf jeden fall")
+CONDITION_MARKERS = (
+    "nur wenn", "es sei denn", "vorausgesetzt", "wenn", "falls", "sofern", "außer", "ausser", "nur", "bei uns",
+    "bei mir", "in unserem fall", "in meinem fall", "meistens", "manchmal", "teilweise", "in der regel",
+)  # fmt: skip
+TIME_MARKERS = (
+    "damals", "früher", "heute", "inzwischen", "mittlerweile", "seit", "letztes jahr", "letzte woche",
+    "letzten monat", "dieses jahr", "in einer woche", "in einem monat", "in einem jahr", "pro tag", "pro woche",
+    "pro monat", "pro jahr", "täglich", "wöchentlich", "monatlich", "jährlich", "im jahr",
+)  # fmt: skip
+APPROXIMATORS = ("rund", "etwa", "ungefähr", "circa", "ca", "gut", "bis zu", "knapp", "fast", "über", "mehr als")
+CAUSAL_MARKERS = (
+    "weil", "deshalb", "deswegen", "dadurch", "darum", "führt zu", "sorgt für", "verursacht", "kostet", "kosten",
+    "bringt", "bringen", "wegen", "schuld", "macht dich", "macht euch", "macht sie",
+)  # fmt: skip
+FIRST_PERSON = frozenset({"ich", "wir", "mir", "mich", "uns", "mein", "meine", "meinen", "meinem", "meiner", "unser", "unsere", "unseren", "unserem"})
+SECOND_PERSON = frozenset({"du", "dich", "dir", "dein", "deine", "deinen", "deinem", "deiner", "euch", "euer", "eure", "ihr"})
+GENERIC_SUBJECTS = ("man", "jeder", "jede", "alle", "diese methode", "die methode", "dieser trick")
+_YEAR_RE = re.compile(r"(?<!\d)(?:19|20)\d\d(?!\d)")
+RELATED_OVERLAP = 0.15
+ELLIPTIC_WORDS = 5
+CONNECTOR_STARTS = ("und", "aber", "also", "dann", "deshalb", "deswegen", "sondern", "doch", "trotzdem", "darum", "allerdings", "jedoch", "wobei", "außer", "ausser", "nur")
+
+
+def _setting(policy: Policy | None, switch: str, section: str) -> dict | None:
+    """Abschnitt ``context.<section>`` der Fassung 2, wenn Schalter ``implementation.<switch>`` und Regel
+    ``context.<section>.enabled`` beide an sind, sonst ``None``."""
+    from .. import editorial
+
+    if policy is None or getattr(policy, "version", 1) < 2:
+        return None
+    roh = policy.roh
+    if editorial._switch_value(roh.get("implementation") or {}, switch) is not True:
+        return None
+    raw = ((roh.get("context") or {}).get(section)) or {}
+    if not isinstance(raw, dict) or raw.get("enabled") is not True:
+        return None
+    return raw
+
+
+def counter_reader_settings(policy: Policy | None) -> dict | None:
+    """Gegenleser (``context.counter_reader``): ``None`` ohne Schalter oder Regel. ``model`` sagt, ob der
+    Modellprompt ``counter_reader_v1`` im Kritikerschritt läuft (nur mit ``roles.critic``)."""
+    raw = _setting(policy, COUNTER_READER_SWITCH, "counter_reader")
+    if raw is None:
+        return None
+    model = raw.get("model", False)
+    if not isinstance(model, bool):
+        from ..editorial import PolicyError
+
+        raise PolicyError("context.counter_reader.model ist true oder false.")
+    return {"model": model}
+
+
+def title_card_settings(policy: Policy | None) -> dict | None:
+    """Titelkarte als Kontextreparatur (``context.title_card``): ``None`` ohne Schalter oder Regel, sonst
+    ``max_words`` (höchstens so viele Wörter hat der wörtliche Quellsatz auf der Karte)."""
+    raw = _setting(policy, TITLE_CARD_SWITCH, "title_card")
+    if raw is None:
+        return None
+    try:
+        max_words = int(raw.get("max_words", 20))
+    except (TypeError, ValueError):
+        max_words = 0
+    if max_words < 1:
+        from ..editorial import PolicyError
+
+        raise PolicyError("context.title_card.max_words ist eine ganze Zahl ab 1.")
+    return {"max_words": max_words}
+
+
+def _active_policy() -> Policy | None:
+    from .. import editorial
+
+    try:
+        return editorial.load()
+    except editorial.PolicyError:
+        return None
+
+
+def _core_seq(text: str) -> list[str]:
+    return [t for t in (dach_nlp.core_token(x) for x in str(text or "").split()) if t]
+
+
+def _markers(text: str, phrases: tuple[str, ...]) -> list[str]:
+    seq = _core_seq(text)
+    out = []
+    for p in phrases:
+        pt = tuple(t for t in (dach_nlp.core_token(x) for x in p.split()) if t)
+        if pt and any(tuple(seq[k : k + len(pt)]) == pt for k in range(len(seq) - len(pt) + 1)):
+            out.append(p)
+    return out
+
+
+def dimension_markers(text: str) -> dict[str, list[str]]:
+    """Marker je Dimension in ``text``: Zuschreibung, Verneinung, Sicherheit (Abschwächung), Bedingung und
+    Einschränkung, Zahl (Rohform mit Einheit), Zeitbezug (Wendung oder Jahreszahl)."""
+    numbers = [f"{m.raw}{_unit_label(m.unit)}" for m in number_mentions(text)]
+    time = _markers(text, TIME_MARKERS) + _YEAR_RE.findall(text)
+    return {
+        "attribution": _markers(text, ATTRIBUTION_MARKERS),
+        "negation": _markers(text, NEGATION_MARKERS),
+        "certainty": _markers(text, HEDGES),
+        "condition": _markers(text, CONDITION_MARKERS),
+        "number": numbers,
+        "time": time,
+    }
+
+
+def _content(text: str) -> set[str]:
+    return {t for t in _core_seq(text) if len(t) > 3}
+
+
+def _overlap(a: str, b: str) -> float:
+    ca, cb = _content(a), _content(b)
+    return len(ca & cb) / max(len(cb), 1)
+
+
+def related_to_clip(source: str, clip_side: str) -> bool:
+    """Bezieht sich ein Nachbarsatz auf den Clip? Kurz und elliptisch, mit Anschlusswort am Anfang oder mit
+    lexikalischer Überlappung ab ``RELATED_OVERLAP`` (wie der Story-Graph)."""
+    seq = _core_seq(source)
+    if not seq:
+        return False
+    return len(seq) <= ELLIPTIC_WORDS or seq[0] in CONNECTOR_STARTS or _overlap(clip_side, source) >= RELATED_OVERLAP
+
+
+def _number_differs(source: str, clip: str) -> list[str]:
+    src, cl = number_mentions(source), number_mentions(clip)
+    clip_units = {m.unit for m in cl}
+    clip_values = {(m.value, m.unit) for m in cl}
+    return [m.raw for m in src if m.unit in clip_units and (m.value, m.unit) not in clip_values]
+
+
+def _finding(dimension: str, verdict: str, source: str | None = None, clip_quote: str | None = None,
+             source_quote: str | None = None, span: dict | None = None, detail: str = "") -> dict:  # fmt: skip
+    return {
+        "dimension": dimension, "verdict": verdict, "source": source, "clip_quote": clip_quote,
+        "source_quote": source_quote, "source_span": span, "detail": detail,
+    }  # fmt: skip
+
+
+DIMENSION_LABELS = {
+    "attribution": "Zuschreibung", "negation": "Verneinung", "certainty": "Sicherheit", "condition": "Bedingung",
+    "number": "Zahl", "time": "Zeitbezug", "causality": "Kausalität", "magnitude": "Größenordnung",
+}  # fmt: skip
+
+
+def context_findings(clip_first: str, clip_last: str, before: dict | None, after: dict | None) -> dict[str, dict]:
+    """Je Dimension ein Befund aus dem Vergleich des Clips mit dem direkt angrenzenden Kontext desselben
+    Sprechers (``before`` und ``after`` als ``{"text", "start_s", "end_s"}``): ``differs``, wenn der Nachbarsatz
+    sich auf den Clip bezieht und einen Marker dieser Dimension trägt, den der Clip nicht hat (bei Zahlen: eine
+    andere Zahl derselben Einheit)."""
+    clip_all = f"{clip_first} {clip_last}"
+    clip_marks = dimension_markers(clip_all)
+    out: dict[str, dict] = {}
+    for side, ctx, clip_side in (("context_before", before, clip_first), ("context_after", after, clip_last)):
+        if not ctx or not related_to_clip(ctx["text"], clip_side):
+            continue
+        marks = dimension_markers(ctx["text"])
+        span = {"start_s": ctx["start_s"], "end_s": ctx["end_s"]}
+        for dim in COUNTER_DIMENSIONS:
+            if dim in out:
+                continue
+            if dim == "number":
+                extra = _number_differs(ctx["text"], clip_all)
+            else:
+                extra = [m for m in marks[dim] if m not in clip_marks[dim]]
+            if extra:
+                where = "davor" if side == "context_before" else "danach"
+                out[dim] = _finding(
+                    dim, "differs", side, clip_side, ctx["text"], span,
+                    f"{DIMENSION_LABELS[dim]}: der Satz direkt {where} sagt „{extra[0]}“, der Clip nicht",
+                )  # fmt: skip
+    return out
+
+
+def _best_sentence(hook: str, clip_text: str) -> str:
+    sents = text_sentences(clip_text) or [clip_text]
+    return max(sents, key=lambda s: (len(_content(hook) & _content(s)), -len(s)))
+
+
+def hook_meaning_issues(hook_text: str, clip_text: str) -> list[dict]:
+    """Regel 6: Ein Hook darf verdichten und gewichten, Zuschreibung, Sicherheit, Zeitraum, Größenordnung und
+    Kausalität bleiben erhalten. Je Befund ``dimension``, ``hook_quote``, ``clip_quote`` und ``detail``.
+
+    * Zuschreibung: der Hook spricht das Publikum an („du“, „dich“) oder verallgemeinert („man“, „diese
+      Methode“), der Clip spricht von sich („ich“, „wir“) ohne diese Form; oder der Hook nennt eine Quelle
+      („laut“), die der Clip nicht nennt.
+    * Sicherheit: der Hook sagt absolut („garantiert“, „immer“), was der Clip nicht sagt, oder der passende
+      Clipsatz schwächt ab („ich glaube“, „vielleicht“) und der Hook nicht.
+    * Zeitraum: der Hook nennt einen Zeitbezug, den der Clip nicht nennt, oder lässt den Zeitbezug des passenden
+      Clipsatzes weg, obwohl er dessen Zahl übernimmt.
+    * Größenordnung: der passende Clipsatz nähert an („rund“, „etwa“, „fast“), der Hook nennt die Zahl ohne.
+    * Kausalität: der Hook behauptet eine Ursache („kostet dich“, „weil“, „führt zu“), die der Clip nicht nennt.
+    Das Beispiel aus Regel 6: „Rund 40.000 Euro Verlust in einer Woche“ ist zulässig, „Diese Methode kostet dich
+    40.000 Euro“ verletzt Zuschreibung und Kausalität."""
+    hook, clip = str(hook_text or ""), str(clip_text or "")
+    if not hook.strip() or not clip.strip():
+        return []
+    best = _best_sentence(hook, clip)
+    hook_seq, clip_seq = set(_core_seq(hook)), set(_core_seq(clip))
+    issues: list[dict] = []
+
+    def add(dim: str, quote: str, clip_quote: str, detail: str) -> None:
+        issues.append({"dimension": dim, "hook_quote": quote, "clip_quote": clip_quote, "detail": detail})
+
+    addressed = sorted((hook_seq & SECOND_PERSON) - clip_seq)
+    generic = [g for g in _markers(hook, GENERIC_SUBJECTS) if g not in _markers(clip, GENERIC_SUBJECTS)]
+    if (addressed or generic) and clip_seq & FIRST_PERSON:
+        word = (addressed or generic)[0]
+        add("attribution", word, best, f"Zuschreibung: der Hook macht mit „{word}“ eine allgemeine Aussage, der Clip spricht vom eigenen Fall")
+    for m in _markers(hook, ATTRIBUTION_MARKERS):
+        if m not in _markers(clip, ATTRIBUTION_MARKERS):
+            add("attribution", m, best, f"Zuschreibung: „{m}“ steht so nicht im Clip")
+    for m in _markers(hook, ABSOLUTES):
+        if m not in _markers(clip, ABSOLUTES):
+            add("certainty", m, best, f"Sicherheit: „{m}“ im Hook ist im Clip nicht gedeckt")
+    hedges = _markers(best, HEDGES)
+    if hedges and not _markers(hook, HEDGES):
+        add("certainty", hook, hedges[0], f"Sicherheit: der Clip schwächt mit „{hedges[0]}“ ab, der Hook nicht")
+    hook_time = _markers(hook, TIME_MARKERS) + _YEAR_RE.findall(hook)
+    clip_time = _markers(clip, TIME_MARKERS) + _YEAR_RE.findall(clip)
+    for t in hook_time:
+        if t not in clip_time:
+            add("time", t, best, f"Zeitraum: „{t}“ steht so nicht im Clip")
+    best_time = _markers(best, TIME_MARKERS) + _YEAR_RE.findall(best)
+    hook_numbers = {(m.value, m.unit) for m in number_mentions(hook)}
+    best_numbers = {(m.value, m.unit) for m in number_mentions(best)}
+    if best_time and not hook_time and hook_numbers & best_numbers:
+        add("time", hook, best_time[0], f"Zeitraum: der Clip nennt „{best_time[0]}“, der Hook lässt ihn weg")
+    approx = _markers(best, APPROXIMATORS)
+    if approx and hook_numbers & best_numbers and not _markers(hook, APPROXIMATORS):
+        add("magnitude", hook, approx[0], f"Größenordnung: der Clip sagt „{approx[0]}“, der Hook nennt die Zahl ohne")
+    for c in _markers(hook, CAUSAL_MARKERS):
+        if c not in _markers(clip, CAUSAL_MARKERS):
+            add("causality", c, best, f"Kausalität: „{c}“ behauptet eine Ursache, die der Clip nicht nennt")
+    return issues
+
+
+def hook_findings(hook_text: str, clip_text: str) -> dict[str, dict]:
+    """Je Dimension des Gegenlesers ein Befund aus ``hook_meaning_issues`` und dem Abgleich der Verneinung und
+    Bedingung im passenden Clipsatz. Größenordnung zählt als ``number``, Kausalität steht nur in den Hinweisen
+    zu Regel 6."""
+    out: dict[str, dict] = {}
+    if not str(hook_text or "").strip():
+        return out
+    for issue in hook_meaning_issues(hook_text, clip_text):
+        dim = "number" if issue["dimension"] == "magnitude" else issue["dimension"]
+        if dim in COUNTER_DIMENSIONS and dim not in out:
+            out[dim] = _finding(dim, "differs", "hook", issue["clip_quote"], issue["hook_quote"], None, issue["detail"])
+    best = _best_sentence(hook_text, clip_text)
+    hook_m, best_m = dimension_markers(hook_text), dimension_markers(best)
+    if "negation" not in out and bool(hook_m["negation"]) != bool(best_m["negation"]):
+        out["negation"] = _finding("negation", "differs", "hook", best, hook_text, None, "Verneinung: Hook und Clipsatz unterscheiden sich in der Verneinung")
+    if "condition" not in out and best_m["condition"] and not hook_m["condition"] and _overlap(best, hook_text) > 0:
+        out["condition"] = _finding(
+            "condition", "differs", "hook", best, hook_text, None,
+            f"Bedingung: der Clipsatz schränkt mit „{best_m['condition'][0]}“ ein, der Hook nicht",
+        )  # fmt: skip
+    if "number" not in out:
+        for issue in hook_claim_check_v2(hook_text, clip_text, meaning=False):
+            if issue.startswith(("Zahl", "Mengenwort")):
+                out["number"] = _finding("number", "differs", "hook", best, hook_text, None, issue)
+                break
+    return out
+
+
+def counter_read(clip_sentences: list[dict], before: dict | None, after: dict | None, hook: str = "") -> dict[str, Any]:
+    """Deterministischer Gegenleser (Regel 2 und 6): Clip gegen den angrenzenden Kontext und gegen den Hook.
+
+    ``clip_sentences`` sind ``{"text", "start_s", "end_s"}``. Zurück ``findings`` (genau eine je Dimension aus
+    ``COUNTER_DIMENSIONS``, ``verdict`` ``same`` oder ``differs``, Zitat aus Clip und Quelle, Quelle
+    ``context_before``, ``context_after`` oder ``hook``), ``hook_meaning`` (Befunde zu Regel 6, auch Kausalität)
+    und ``differs`` (die Dimensionen mit Befund). Gleich heißt nur: diese Regeln fanden nichts."""
+    if not clip_sentences:
+        return {"findings": [], "hook_meaning": [], "differs": []}
+    first, last = clip_sentences[0]["text"], clip_sentences[-1]["text"]
+    clip_text = " ".join(s["text"] for s in clip_sentences)
+    ctx = context_findings(first, last, before, after)
+    hk = hook_findings(hook, clip_text) if hook else {}
+    findings = []
+    for dim in COUNTER_DIMENSIONS:
+        f = ctx.get(dim) or hk.get(dim)
+        findings.append(f or _finding(dim, "same", detail=f"{DIMENSION_LABELS[dim]}: kein Unterschied nach den Regeln gefunden"))
+    return {
+        "findings": findings,
+        "hook_meaning": hook_meaning_issues(hook, clip_text) if hook else [],
+        "differs": [f["dimension"] for f in findings if f["verdict"] == "differs"],
+    }
+
+
 __all__ = [
+    "COUNTER_DIMENSIONS",
+    "COUNTER_READER_SWITCH",
+    "TITLE_CARD_SWITCH",
     "CONTRAST_STARTS",
     "CONTRAST_STARTS_V2",
     "GENERALIZERS",
@@ -537,6 +862,14 @@ __all__ = [
     "SUPERLATIVES",
     "NumberMention",
     "check_cut",
+    "context_findings",
+    "counter_read",
+    "counter_reader_settings",
+    "dimension_markers",
+    "hook_findings",
+    "hook_meaning_issues",
+    "related_to_clip",
+    "title_card_settings",
     "hook_claim_check",
     "hook_claim_check_v2",
     "number_mentions",

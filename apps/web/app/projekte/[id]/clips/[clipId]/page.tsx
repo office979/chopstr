@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: Props) {
   return { title: source ? `Clip · ${source.title}` : "Clip" };
 }
 
-/* Ein einzelner Clip: Vorschau, Text und die Timeline mit dem Schnitt. */
+/* Ein einzelner Clip: Vorschau und die Korrekturen ohne Timeline (Text, Untertitel, Bildausschnitt). */
 export default async function ClipPage({ params }: Props) {
   const { id, clipId } = await params;
   const session = await requireSession();
@@ -105,21 +105,13 @@ export default async function ClipPage({ params }: Props) {
          * und gelesen werden muss dieselbe Stelle. Im Testmodus sind das zwei getrennte Ablagen,
          * dort waren gesetzte Marken nach dem Neuladen sonst weg. */
         zeitmarken={extras[0]?.zeitmarken ?? clip.zeitmarken}
-        /* null heisst „noch nie gesetzt": dann betont die Automatik beim nächsten Clippen. Eine
-           leere Liste ist eine Entscheidung und wird nicht überschrieben. */
-        effekte={extras[0]?.effekte ?? null}
-        musik={extras[0]?.musik ?? null}
         shots={clip.render_plan?.shots ?? []}
         quelleBreite={source.width ?? null}
-        komposition={clip.composition}
         clipStatus={clip.status}
         renderFehler={clip.render_error}
         markeVorhanden={Boolean(source.brand_profile_id)}
         /* Vom Server, weil nur er den Schriftordner sieht. */
         schriftenVorhanden={vorhandeneSchriften()}
-        quelleDauerS={source.duration_s ?? 0}
-        wellenformSrc={mediaUrl(mediaBase, source.waveform_key)}
-        quelleFertig={source.status === "ready"}
         markenFarben={[marke?.ci?.colors?.primary, marke?.ci?.colors?.secondary, marke?.ci?.colors?.accent, marke?.caption_style?.highlight_color]
           .filter((c): c is string => typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c))
           .filter((c, i, alle) => alle.indexOf(c) === i)}

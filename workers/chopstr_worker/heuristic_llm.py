@@ -967,12 +967,53 @@ def critique_clip(user: str) -> dict:
     return {"findings": findings, "confirmed": False, "heuristic": True}
 
 
+COMPARE_MARKER_WEIGHT = 0.25  # je Marker im Kandidaten, höchstens COMPARE_MARKER_CAP Marker
+COMPARE_MARKER_CAP = 4
+COMPARE_TIE_MARGIN = 0.05  # kleinere Unterschiede gelten als tie
+
+
+def _compare_markers(text: str, p: editorial.Policy) -> int:
+    """Diskursmarker plus die Marker der Text-Heatmap v2 aus der Policy (``heat.markers``, falls vorhanden)."""
+    low = " " + " ".join(re.findall(r"[a-zäöüß0-9%€]+", text.lower())) + " "
+    phrases = list(DISCOURSE_MARKERS)
+    heat = p.roh.get("heat") if isinstance(p.roh.get("heat"), dict) else {}
+    for group in (heat.get("markers") or {}).values():
+        phrases += [str(x).lower() for x in group or ()]
+    hits = sum(1 for m in phrases if f" {' '.join(re.findall(r'[a-zäöüß0-9%€]+', m))} " in low)
+    return min(hits, COMPARE_MARKER_CAP)
+
+
+def compare_clips(user: str) -> dict:
+    """Paarvergleich als Heuristik, gekennzeichnet mit ``heuristic: true``: je Kandidat die Punkte der Rubrik aus
+    ``score_clip`` (Gesamtwert der Grundlage nach Längenabzug, ohne Audio) plus ``COMPARE_MARKER_WEIGHT`` je Marker;
+    der höhere gewinnt, ein Unterschied unter ``COMPARE_TIE_MARGIN`` ist ``tie``. Unkalibriert und von der Position
+    unabhängig: dieselben Kandidaten in umgekehrter Reihenfolge ergeben das gespiegelte Urteil."""
+    p = policy()
+    blocks = {}
+    for tag in ("clip_a", "clip_b"):
+        sents = _block(user, tag)
+        text = "\n".join(f"[{s['idx']}] ({s['speaker']}) {s['text']}" for s in sents)
+        points = float(score_clip(text)["punkte"]) if sents else 0.0
+        markers = _compare_markers(" ".join(s["text"] for s in sents), p)
+        blocks[tag] = (round(points + COMPARE_MARKER_WEIGHT * markers, 4), points, markers)
+    diff = blocks["clip_a"][0] - blocks["clip_b"][0]
+    winner = "tie" if abs(diff) < COMPARE_TIE_MARGIN else ("A" if diff > 0 else "B")
+    (a, ap, am), (b, bp, bm) = blocks["clip_a"], blocks["clip_b"]
+    return {
+        "winner": winner,
+        "criteria": {},
+        "reason": f"Heuristik ohne Sprachmodell, unkalibriert: A {ap:.2f} Punkte und {am} Marker ({a:.2f}), B {bp:.2f} Punkte und {bm} Marker ({b:.2f}).",
+        "heuristic": True,
+    }
+
+
 HANDLERS = {
     "propose_moments": propose_moments,
     "episode_overview": episode_overview,
     "score_clip": score_clip,
     "confirm_qualification": confirm_qualification,
     "critique_clip": critique_clip,
+    "compare_clips": compare_clips,
     "write_hooks": write_hooks,
     "write_post_caption": write_post_caption,
 }
@@ -1001,6 +1042,7 @@ __all__ = [
     "address_of",
     "answer",
     "clip_text_of",
+    "compare_clips",
     "confirm_qualification",
     "critique_clip",
     "episode_overview",

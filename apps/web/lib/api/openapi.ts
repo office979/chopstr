@@ -63,6 +63,7 @@ export const SCHEMAS: Record<string, JsonSchema> = {
     properties: {
       verdict: { type: "string", enum: ["accepted", "rejected"] },
       reason: { type: "string", maxLength: 500, description: "Pflicht bei rejected (Lernsignal)" },
+      override_reason: { type: "string", maxLength: 500, description: "Pflicht bei accepted, wenn der Kandidat nicht freigabefähig ist (Ergebnisklasse blocked): warum trotz Befund" },
       platforms: { type: "array", items: { type: "string", enum: PLATFORMS }, minItems: 1, description: "Zielplattformen bei accepted. Ohne Angabe gilt genau eine Plattform: die eines schon vorhandenen Clips des Kandidaten (etwa des Entwurfs der Analyse), sonst die Standard-Plattform des Markenprofils, sonst die Plattform aus dem Briefing, sonst reels. Mit Angabe fallen Automatik-Entwürfe auf nicht gewählten Plattformen weg." },
     },
     additionalProperties: false,

@@ -154,6 +154,150 @@ def check_findings(raw: Any, meta: dict[str, Any]) -> tuple[list[dict], list[dic
     return kept, dropped
 
 
+# -- Gegenleser mit Modell (Lane P3, ``counter_reader_v1``) ----------------------------------------------------
+# Sieht nur Clip und Text-Hook und liefert je Dimension same oder differs mit Zitaten. Die Zitate werden
+# deterministisch geprüft wie beim Kritiker (``_contains``). Verwerfen nur bei bestätigtem Befund hoher Schwere des
+# ersten Modells, nie aus der Heuristik (P42). Ein zweites Modell (``LLM_PROVIDER_SECOND``) wird nur gemessen:
+# ``additional_findings`` (nur vom zweiten) und ``rejected_by_second_only``; es verwirft nicht.
+COUNTER_SEVERITIES = ("high", "low")
+COUNTER_VERDICTS = ("same", "differs")
+COUNTER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "dimension": {"type": "string", "enum": list(fidelity.COUNTER_DIMENSIONS)},
+                    "verdict": {"type": "string", "enum": list(COUNTER_VERDICTS)},
+                    "clip_quote": {"type": "string"},
+                    "hook_quote": {"type": "string"},
+                    "severity": {"type": "string", "enum": list(COUNTER_SEVERITIES)},
+                    "explanation": {"type": "string"},
+                },
+                "required": ["dimension", "verdict"],
+            },
+        },
+        "confirmed": {"type": "boolean"},
+    },
+    "required": ["findings", "confirmed"],
+}
+
+
+def check_counter_findings(raw: Any, clip_text: str, hook: str) -> tuple[list[dict], list[dict]]:
+    """Deterministische Prüfung der Gegenleser-Antwort: Dimension und Urteil aus der festen Liste, bei
+    ``differs`` beide Zitate wörtlich (``clip_quote`` im Clip, ``hook_quote`` im Hook), sonst ``ungrounded``.
+    Zurück (behaltene ``differs``-Befunde, verworfene mit ``drop_reason``); ``same`` wird nicht gespeichert."""
+    kept: list[dict] = []
+    dropped: list[dict] = []
+    if not isinstance(raw, list):
+        return kept, [{"drop_reason": "invalid", "detail": "findings ist keine Liste"}]
+    clip_n, hook_n = _norm(clip_text), _norm(hook)
+    for item in raw:
+        if not isinstance(item, dict):
+            dropped.append({"drop_reason": "invalid", "detail": "Befund ist kein Objekt"})
+            continue
+        f = {
+            "dimension": item.get("dimension"),
+            "verdict": item.get("verdict"),
+            "clip_quote": str(item.get("clip_quote") or ""),
+            "hook_quote": str(item.get("hook_quote") or ""),
+            "severity": item.get("severity") if item.get("severity") in COUNTER_SEVERITIES else "low",
+            "explanation": str(item.get("explanation") or ""),
+        }
+        if f["dimension"] not in fidelity.COUNTER_DIMENSIONS or f["verdict"] not in COUNTER_VERDICTS:
+            dropped.append({**f, "drop_reason": "invalid"})
+            continue
+        if f["verdict"] == "same":
+            continue
+        if not (_contains(clip_n, _norm(f["clip_quote"])) and _contains(hook_n, _norm(f["hook_quote"]))):
+            dropped.append({**f, "drop_reason": "ungrounded"})
+            continue
+        kept.append(f)
+    return kept, dropped
+
+
+def _budget_allows(llm: Any) -> bool:
+    used, limit = getattr(llm, "used", None), getattr(llm, "limit", None)
+    if not isinstance(used, int) or not isinstance(limit, int) or getattr(llm, "enforce", False) is not True:
+        return True
+    return used < limit
+
+
+def _count_call(llm: Any) -> None:
+    if isinstance(getattr(llm, "used", None), int) and isinstance(getattr(llm, "limit", None), int):
+        llm.used += 1
+
+
+def _ask_counter_reader(model: Any, user: str, p: prompts.Prompt, clip_text: str, hook: str) -> dict[str, Any]:
+    from .story_score import system_prompt
+
+    out = model.structured(system_prompt(), user, COUNTER_SCHEMA, p.tool or "counter_reader", p.prompt_version, job_type="llm_critic")
+    findings, dropped = check_counter_findings(out.get("findings"), clip_text, hook)
+    high = [f for f in findings if f["severity"] == "high"]
+    return {
+        "status": "checked",
+        "provider": str(getattr(model, "provider", "") or ""),
+        "findings": findings,
+        "dropped": dropped,
+        "model_confirmed": out.get("confirmed") is True,
+        "confirmed": out.get("confirmed") is True and bool(high),
+        "reject": high[0] if out.get("confirmed") is True and high else None,
+    }
+
+
+def counter_read_model(clip_text: str, hook: str, llm: Any, policy: editorial.Policy | None = None, second: Any = None) -> dict[str, Any]:
+    """Gegenleser mit Modell für einen Clip. Ohne Text-Hook kein Aufruf (``no_hook``), mit dem Heuristik-Provider
+    kein Aufruf (``heuristic``: die Heuristik ist kein Modell). ``second`` ist das zweite Modell aus
+    ``providers_llm.second_llm`` oder ``None``; ein Heuristik-Provider als zweites wird nie gerufen und als
+    ``not_a_second_model`` markiert. Modellbudget: das erste Modell zählt über ``llm`` (``BudgetLLM``), das
+    zweite wird im selben Budget mitgezählt. Rückgabe: ``model``, ``second``, ``additional_findings``,
+    ``rejected_by_second_only``, ``confirmed`` und ``reject`` (der verwerfende Befund des ersten Modells)."""
+    from ..providers_llm import HEURISTIC_PROVIDER, SchemaError
+    from .story_engine import LLMBudgetExceeded
+
+    result: dict[str, Any] = {"model": None, "second": None, "additional_findings": [], "rejected_by_second_only": False, "confirmed": False, "reject": None}
+    if not hook:
+        result["model"] = {"status": "no_hook"}
+        return result
+    if bool(getattr(llm, "is_heuristic", False)):
+        result["model"] = {"status": "heuristic", "detail": "Heuristik-Provider: kein Modell, Gegenleser nur regelbasiert"}
+        return result
+    p = prompts.load_pinned("counter_reader", policy)
+    user = p.render(clip_text=clip_text, text_hook=hook)
+    try:
+        first = _ask_counter_reader(llm, user, p, clip_text, hook)
+    except LLMBudgetExceeded:
+        first = {"status": "llm_budget"}
+    except SchemaError as exc:
+        first = {"status": "invalid_answer", "detail": str(exc)[:300]}
+    first["prompt_version"] = p.prompt_version
+    result["model"] = {k: v for k, v in first.items() if k != "reject"}
+    result["confirmed"] = bool(first.get("confirmed"))
+    result["reject"] = first.get("reject")
+    if second is None:
+        return result
+    if getattr(second, "provider", None) == HEURISTIC_PROVIDER or bool(getattr(second, "is_heuristic", False)):
+        result["second"] = {"status": "not_a_second_model", "provider": HEURISTIC_PROVIDER, "heuristic": True}
+        return result
+    if not _budget_allows(llm):
+        result["second"] = {"status": "llm_budget", "provider": str(getattr(second, "provider", ""))}
+        return result
+    _count_call(llm)
+    try:
+        other = _ask_counter_reader(second, user, p, clip_text, hook)
+    except SchemaError as exc:
+        other = {"status": "invalid_answer", "detail": str(exc)[:300], "provider": str(getattr(second, "provider", ""))}
+    other["prompt_version"] = p.prompt_version
+    result["second"] = {k: v for k, v in other.items() if k != "reject"}
+    if other.get("status") == "checked":
+        seen = {f["dimension"] for f in (first.get("findings") or [])}
+        result["additional_findings"] = [f for f in other["findings"] if f["dimension"] not in seen]
+        result["rejected_by_second_only"] = bool(other.get("confirmed")) and not result["confirmed"]
+    return result
+
+
 def critique(
     candidate: Any,
     sents: list[Sentence],
@@ -178,12 +322,30 @@ def critique(
     model_confirmed = out.get("confirmed") is True
     fidelity_findings = [f for f in findings if f["severity"] == "fidelity"]
     confirmed = model_confirmed and bool(fidelity_findings) and not heuristic
+    reject = fidelity_findings[0] if confirmed else None
+    cr_cfg = fidelity.counter_reader_settings(policy)
+    if cr_cfg is not None and cr_cfg["model"]:
+        # Lane P3: Gegenleser mit Modell im selben Schritt, Ergebnis additiv in rubric.counter_reader; die
+        # regelbasierten Befunde ergänzt clip_candidate.from_report. Verwerfen nur bestätigt und hoch (P42).
+        from ..providers_llm import second_llm
+
+        clip_text = " ".join(s.text for s in sents[first : last + 1])
+        cr = counter_read_model(clip_text, meta["hook"], llm, policy, second_llm(llm))
+        rubric = getattr(candidate, "rubric", None)
+        if isinstance(rubric, dict):
+            rubric["counter_reader"] = {**(rubric.get("counter_reader") or {}), **{k: v for k, v in cr.items() if k != "reject"}}
+        if reject is None and cr["reject"] is not None and not heuristic:
+            f = cr["reject"]
+            reject = {
+                "kind": f"counter_reader_{f['dimension']}", "severity": "fidelity", "evidence_quote": f["clip_quote"],
+                "sentence_refs": [], "explanation": f["explanation"] or f"Hook weicht in {f['dimension']} vom Clip ab", "location": "clip",
+            }  # fmt: skip
     return {
         "findings": findings,
         "dropped": dropped,
         "confirmed": confirmed,
         "model_confirmed": model_confirmed,
-        "reject": fidelity_findings[0] if confirmed else None,
+        "reject": reject,
         "heuristic": heuristic,
         "hook_source": meta["hook_source"],
         "prompt_version": p.prompt_version,
@@ -191,14 +353,17 @@ def critique(
 
 
 __all__ = [
+    "COUNTER_SCHEMA",
     "CONTEXT_AFTER_MAX",
     "CONTEXT_BEFORE",
     "CRITIC_KINDS",
     "CRITIQUE_SCHEMA",
     "SEVERITIES",
     "build_prompt",
+    "check_counter_findings",
     "check_findings",
     "context_window",
+    "counter_read_model",
     "critique",
     "text_hook",
 ]

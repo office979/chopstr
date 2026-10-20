@@ -15,8 +15,9 @@ export interface DemoUploadInput {
   size_bytes: number;
   rights_status: RightsStatus;
   rights_confirmed: boolean;
-  /* Das Formular erhebt Zielgruppe, Wünsche, Plattform und Sprecherzahl nicht mehr. Die Felder
-   * bleiben optional, damit ältere Aufrufer (API, Tests) weiterhin gültig sind. */
+  /* Das Briefing (Zielgruppe, Gewünscht, Ausschließen, Plattform) ist freiwillig und kommt aus
+   * dem eingeklappten Teil des Formulars (lib/uploads/brief.ts). Die Sprecherzahl erhebt das
+   * Formular nicht; das Feld bleibt optional für ältere Aufrufer. */
   expected_speakers?: number | null;
   brief_audience?: string;
   brief_wanted?: string;

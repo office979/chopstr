@@ -97,6 +97,64 @@ fehlen sie und der Plan ist byte-gleich zu vorher:
   ffprobe (mittlere gegen nominelle Bildrate), das Verhalten bei variabler Bildrate ist ungeprüft.
 * `versions.render` ist `render_v2` (sonst `render_v1`); der Idempotenz-Hash ändert sich damit nur bei aktivem Schalter.
 
+Lane P4 (Launch Phase 4, Fassung 2, je ein Schalter in `implementation`, Regeln in `clip_policy_v2.yaml`; ohne sie
+fehlen die Felder und der Plan ist byte-gleich; Entscheidungen `docs/decisions/040` bis `043`):
+
+* `timeline[k].edges` (Regel `cut.prosody.enabled`, Standard aus, nur mit `cut.padding`): je Segment
+  `{"in": edge, "out": edge}` mit `edge = { "chosen_s", "text_s", "rms_min_s", "breath", "confidence" }`. `chosen_s` ist
+  die Schnittzeit in Quellzeit (gleich `source_in` bzw. `source_out`), `text_s` die Wortgrenze aus der ASR,
+  `rms_min_s` das leiseste 20-ms-Fenster im Suchfenster `cut.prosody.search_window_s` (0,35 s; `null` ohne Audio
+  oder ohne Raum zwischen den Wörtern), `breath` true, wenn ein Atem direkt vor dem Wortbeginn erkannt und
+  ausgelassen wurde, `confidence` 1 minus Pegel an der Kante durch Sprachpegel (0 bis 1, `null` ohne Audio). Nie im
+  Nachbarwort, nie in einer geschützten Spanne; gemessen am 16-kHz-WAV der Quelle, gerendert aus dem Original.
+* `hook_audio` (Regel `cut.hook_audio.enabled`, Standard aus, nur mit `cut.padding`):
+  `{ "speech_onset_s", "hook_onset_s", "preamble_removed_s", "ok", "basis" }` auf der Ausgabezeit. `ok` heisst:
+  Sprache beginnt bis `cut.hook_audio.max_lead_s` (1,0 s) und der Hook-Satz bis `cut.hook_audio.hook_window_s`
+  (3,0 s). `preamble_removed_s` ist die Länge des übersprungenen Vorgeplänkels (ganze Sätze nur aus Füllwörtern,
+  Rückmeldesignalen, Begrüssungen), gerechnet gegen den Beginn des Kandidaten. `basis` `audio` oder `words`.
+* `captions.reading_speed` (Schalter `implementation.captions.reading_speed`, mit AP10a): `{ "profile": "standard" |
+  "langsam", "chars_per_s": 15 | 12 }`. Profil aus dem Feld `reading_speed` im Untertitelstil (Markenprofil oder
+  Clip), sonst `standard`. Eine Karte mit mehreren Wörtern steht mindestens Zeichen durch `chars_per_s`, nie in die
+  nächste Karte und nie über das Clipende; Schrift, Farbe, Position und Animation bleiben.
+* `reframe.speaker_face_binding` (Regel `cut.split_screen.enabled`, Standard aus): je Einstellung
+  `{ "start_s", "end_s", "binding": { "<SPEAKER>": { "position", "x", "confidence", "votes" } } }`, gemessen aus
+  der Mundbewegung bei Alleinrede. Split-Screen (`layout = "geteilt"`, `grund = "overlap_gebunden"`) nur an Stellen
+  mit Wörtern `overlap: true` (Vertrag Lane P1, Sprecher aus `speakers`) ab 1,2 s und nur, wenn zwei beteiligte
+  Sprecher mit `confidence` ab `cut.split_screen.min_binding_confidence` (0,8) an verschiedene Positionen gebunden
+  sind; sonst die bisherige Ansicht. Ohne Gesichtsdetektor eine leere Liste.
+* `title_card` mit `source = "repair"` und `source_span` (Fassung 2): kommt aus `rubric.repair = { "kind":
+  "title_card", "text", "source_span" }` (Lane P3) und ersetzt den Text der vorhandenen Titelkarte; Dauer
+  (`seconds` 2,5) und Stil bleiben.
+
+## Export als Abnahmeobjekt (`export.strict`, Lane P4)
+
+Fassung 2 mit Schalter `implementation.export.strict` und Regel `export.strict` (Standard false, damit Fassung 1
+unverändert bleibt). Zusätzlich zu den Einträgen der Ausgabeprüfung (Migration 0014) stehen in `export_checks`:
+
+| `pruefung` | geprüft |
+|---|---|
+| `timeline_dauer` | Dauer der Datei gleich Summe der Timeline-Segmente, Toleranz `export.duration_tolerance_s` (0,2 s) |
+| `untertitel_abdeckung` | kein SRT-Eintrag vor 0 oder nach dem Clipende, letzte Karte endet vor dem Clipende |
+| `untertitel_zeiten` | Wörter und Zeiten der Untertitel entsprechen der Schnittbeschreibung (`source_in`/`source_out` zu `output_in`/`output_out`) |
+| `synchron` | jeder Wortanfang der Untertitel liegt in einem Segment der Ausgabe |
+| `ton_stumm` | Tonspur vorhanden und lauter als -60 LUFS |
+| `bild_schwarz` | weniger als 90 Prozent der Dauer schwarz |
+| `abrufbar` | die MP4 liegt nach dem Hochladen im Speicher |
+| `anrede` | Du/Sie-Hinweis (Schalter `implementation.captions.address_check`, auch ohne `export.strict`): `hinweis` bei gemischter Anrede, nie `fehler`, keine Textänderung |
+
+Letzter Eintrag: `{ "pruefung": "abnahme", "ergebnis": "ok" | "fehler", "text", "gemessen": null, "export_ok": bool }`.
+`status = 'rendered'` und `file_key` nur mit `export_ok: true`; sonst `status = 'failed'`, `render_error` mit dem
+ersten Fehler, `file_key` leer (die Datei bleibt unter `renders/<clip_id>/<hash>.mp4` im Speicher, ist aber nicht
+zum Download freigegeben). Ein erneuter Aufruf mit demselben Plan überspringt den Render nur, wenn das gespeicherte
+`export_checks` `export_ok: true` trägt; er legt nie eine zweite `clips`-Zeile oder eine zweite Datei an. Ein
+abgebrochener Render endet `failed` (oder bleibt `rendering`, wenn der Prozess stirbt), nie `rendered`.
+
+Tonregel 10 (Test `tests/test_launch_p4_export.py`): jeder Segment-Eingang ist das Original der Quelle, nie das
+16-kHz-WAV (das dient nur der Analyse der Kanten) und nie eine separierte Spur. Auf dem Weg der Sprache stehen nur
+`asetpts`, `afade` (Blenden an den Kanten), `concat`, `asplit`, `amix` (Musik), `acompressor` (LRA über 7),
+`loudnorm` und `aresample`; die Musik darf zusätzlich `atrim`, `apad`, `volume` und `sidechaincompress` (Sprache nur
+als Auslöser) nutzen.
+
 Ausgabegrößen: `9:16` 1080×1920, `4:5` 1080×1350, `1:1` 1080×1080, `16:9` 1920×1080. Bildrate = Quellrate,
 nie mischen (25 oder 30 oder 50/60 bleiben).
 

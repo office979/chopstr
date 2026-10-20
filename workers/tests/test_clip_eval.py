@@ -265,3 +265,8 @@ def test_check_boundaries_without_policy_files_measures_with_v1(monkeypatch, tmp
         assert "grenze_nur_aus_pause" not in clip_eval.check_boundaries(_clip(woerter, 0, 2), woerter)
     finally:
         editorial.clear_cache()
+
+
+def test_prozent_never_prints_missing_as_zero():
+    assert clip_eval.prozent(None, "keine Referenzstellen") == "nicht messbar: keine Referenzstellen"
+    assert clip_eval.prozent(0.0, "x") == "0.0 %" and clip_eval.prozent(0.5, "x") == "50.0 %"

@@ -14,6 +14,10 @@
                            und ClipCandidates wie im bisherigen Pfad. Der Claim-Check läuft danach unverändert in
                            ``analyze.auto_accept_blockers`` und im Copy-Schritt.
 
+T2c (nach dem ersten echten Lauf): ``editor_v2`` mit Wortnummern im Prompt und Ablehnung nur aus ``REJECT_REASONS``;
+genau ein Reparaturversuch (``editor_repair_v1``) bei Befund zu Kontext oder Einstieg; Mindestausbeute mit Nachschieben
+aus dem Vorfilter; Bewertungsstufe ``score_tier``; optionale Editor-Segmente (``multi_segment``, Standard aus).
+
 Volumen nach Länge: ``candidates_per_source_hour`` mal Quellstunden (zwischen ``min_candidates`` und
 ``max_candidates``), Short-Form-Mindestlänge ``min_len_s``. Alles aus ``implementation.engine`` der Policy v2.
 

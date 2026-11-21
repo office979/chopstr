@@ -130,10 +130,11 @@ im lokalen Worker und im Temporal-Workflow über dieselben `run_*`-Funktionen (U
 - Befund 3, 11.
 
 ### 1.6a Mehrstufige Engine (T2, Schalter `CHOPSTR_ENGINE=tiered` oder `implementation.engine.tiered`, Standard aus)
-- Code `W/pipeline/tiered_engine.py`, Prompts `prefilter_v1`, `editor_v1`; `detect_candidates` wählt die Engine und nimmt `tiered_engine_v1` samt Prompts in den Idempotenz-Key. Ersetzt 1.5 und 1.6; ab 1.7 läuft alles wie bisher.
+- Code `W/pipeline/tiered_engine.py`, Prompts `prefilter_v1`, `editor_v2` (T2c; `editor_v1` ohne Wortnummern im Text), `editor_repair_v1`; `detect_candidates` wählt die Engine und nimmt `tiered_engine_v1` samt Prompts in den Idempotenz-Key. Ersetzt 1.5 und 1.6; ab 1.7 läuft alles wie bisher.
 - Stufe A Seeds (Heatmap plus Szenen-Ereignisse), Stufe B Vorfilter je Block von 480 s (Modellstufe `prefilter`, Standard Haiku; Richtlinie und Block als Cache-Blöcke), Rangfolge mit Bonus für Seeds und starke Ereignisse, Stufe C Editor nur für `ceil(Ausgabe x 1,5)` Kandidaten (Modellstufe `editor`, Standard Sonnet): Wortnummern, Hook, Titel, On-Screen-Text, Post-Text je Plattform, Bewertung.
 - `evaluate_span` bekommt die Editor-Bewertung als Antwort auf `score_clip` für genau diese Spanne (`EditorScoreLLM`); Neubewertung nach Heilung, Bestätigung späterer Relativierungen und Kritiker gehen an die Stufe `judge`. Die Wortgrenzen des Editors werden auf Satzgrenzen gelegt (`cut_inside_sentence` vermerkt Abweichungen).
 - Ausgabemenge `candidates_per_source_hour` (12) mal Quellstunden, 3 bis 40; Länge 8 bis 75 s nur während des Laufs (`story_engine.tiered_limits`). Budget je Stufe über `costlog.RunLedger`, Übersprungenes in `report.search.tiered.skipped`. Ohne Sprachmodell laufen Vorfilter (Payoff-Suche, Seeds) und Editor lokal.
+- T2c: ein Reparaturversuch bei Befund zu Kontext oder Einstieg (`repair`, 60 s mehr Transkript), Mindestausbeute mit Nachschieben (`editor_per_source_hour`, `target_clips_per_source_hour`, `backfill`), Bewertungsstufe `score_tier` (Haiku), optionale Editor-Segmente (`multi_segment`, aus). Details `docs/TRAINING-WORKFLOW.md` Abschnitt 2.
 - Messung: `workers/eval/train.py`, `docs/TRAINING-WORKFLOW.md`.
 
 ### 1.7 Bewertung (Rubrik, Heilung, Teaser)

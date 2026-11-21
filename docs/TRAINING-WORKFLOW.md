@@ -34,6 +34,30 @@ gold validate ─► job create ─► run ─► compare ─► scorecard ─�
 - Ohne Sprachmodell (`LLM_PROVIDER=local-heuristic`) laufen Vorfilter und Editor lokal (Payoff-Suche, Seeds). Das ist
   nur für Trockenläufe gedacht.
 
+Nach dem ersten echten Lauf (T2c, 0 Clips aus 16 min Interview):
+
+- Editor ab `editor_v2`: `editor_v1` hatte den Platzhalter `{candidate_words}` nicht im Text, der Editor sah also keine
+  Wortnummern. v2 reicht sie durch, legt den Start auf den Anfang des Gedankens bzw. auf die Frage im Interview und
+  lehnt nur mit einem Grund aus `tiered_engine.REJECT_REASONS` ab. Eine Ablehnung ohne gültigen Grund gilt nicht.
+- Reparatur (`repair`, `editor_repair_v1`): scheitert ein Kandidat an Eigenständigkeit oder Satzanfang, oder lehnt der
+  Editor mit `needs_context` ab, gibt es genau einen Versuch mit dem Befund und 60 s mehr Transkript davor
+  (`repair_context_s`). Ergebnis je Versuch in `report.search.tiered.editor.repairs`.
+- Ausbeute: mindestens `editor_per_source_hour` (12) Kandidaten je Quellstunde an den Editor, Ziel
+  `target_clips_per_source_hour` (16, also 4 Clips bei 15 min, mindestens `min_target_clips`). Liegen weniger über den
+  Toren, schiebt `backfill` die nächstbesten Vorfilter-Kandidaten nach, solange Budget da ist (`max_backfill`).
+  Gezählt wird vor der Redundanzprüfung, ein nachgeschobener Kandidat kann dort noch fallen.
+- Diagnose: jede Ablehnung in `report.discarded` trägt Spanne (`source_in`, `source_out`, `word_range`); Editor-
+  Ablehnungen dazu `reject_code`, `reject_reason`, `reason_detail`, `scores`, `suggestion`; Gate-Ablehnungen
+  `failed_gates`, `reason_detail`, `scores`.
+- Robustes JSON: CLI-Hülle (Objekt oder Ereignisliste, `result`, `structured_output`), Codeblöcke auch ohne
+  schließende Zäune, Vor- und Nachtext; ohne Tool-Block liest Anthropic den Text genauso. Danach genau ein
+  Wiederholversuch mit Korrekturhinweis, der gescheiterte Versuch steht mit seinen Tokens im Kostenbuch.
+- Bewertungsstufe: Neubewertung nach Heilung, Bestätigung und Kritiker laufen über `score_tier` (Standard `judge`,
+  also Haiku) und sehen nur die Sätze des Kandidaten plus die Richtlinie, nie das ganze Transkript.
+- Mehrsegment (Vorbereitung, `multi_segment: false`): der Editor darf `segments` (Wortspannen) liefern. Nur mit dem
+  Schalter ersetzen sie die Segmente des Kandidaten bis `ClipCandidate.segments`; eine Umstellung (Cold Open) bleibt
+  durch die Vertrauensregel in `compose` gesperrt.
+
 ## 3. Datenmodell
 
 ### Gold-Clip `gold_clip_v1` (`workers/eval/gold/gold_clip_v1.schema.json`)
@@ -148,6 +172,12 @@ schon vor dem Verbindungsaufbau.
 - Budget: vor jeder Stufe prüft das Kostenbuch. Ist das Budget erreicht, fallen die restlichen Modellstufen weg (der
   Vorfilter läuft lokal weiter, der Editor übernimmt die Grenzen des Vorfilters), und `skipped` im Bericht nennt die
   Stufe. Der Lauf endet sauber mit dem, was bis dahin da ist.
+- `claude-cli` kostet 0 € (Abo), aber jede Zeile im Kostenbuch trägt `eur_api_equivalent`: dieselben Tokens zum
+  Listenpreis der Tabelle (Alias `haiku` als `claude-haiku` usw.). Scorecard und Verlauf zeigen den Wert. Die CLI-Tokens
+  enthalten den eigenen Systemprompt und die Werkzeuge der CLI (im ersten Lauf rund 70 000 Tokens je Aufruf, fast
+  alles Cache), deshalb liegt das Äquivalent deutlich über einem echten API-Lauf. `CHOPSTR_CLAUDE_CLI_ARGS` reicht
+  Zusatzflags an `claude -p` durch, etwa um diesen Systemprompt zu verkleinern (Flags vorher gegen die installierte
+  Version prüfen).
 
 ## 8. Grenzen (ehrlich)
 
@@ -164,5 +194,5 @@ schon vor dem Verbindungsaufbau.
 - `eval/gold/dach_v1.json` hat 25 Clips, aber nur 7 mit Fundstelle (`ready_for_compare`); die übrigen 18 zählen erst
   nach Ausrichtung. Die Fundstellen stammen aus einem 4-Gramm-Abgleich mit Auto-Untertiteln (Konfidenz teils unter
   0,5), kurze Quellstellen können Fehltreffer sein (`gold validate` meldet Stellen außerhalb der Spanne als Hinweis).
-- Die Engine baut keine Clips aus mehreren Quellstellen. Bei verdichteten Gold-Clips misst `compare` nur, ob die
-  Spanne getroffen ist und wie viel der Quellstellen der Vorschlag enthält.
+- Die Engine baut standardmäßig keine Clips aus mehreren Quellstellen (`multi_segment: false`). Bei verdichteten
+  Gold-Clips misst `compare` nur, ob die Spanne getroffen ist und wie viel der Quellstellen der Vorschlag enthält.

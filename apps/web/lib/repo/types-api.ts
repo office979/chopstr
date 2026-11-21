@@ -203,7 +203,7 @@ export interface LinkPublicationCreateInput {
   platform: string;
   external_id: string;
   external_url: string;
-  published_at: string;
+  published_at: string | null;
   tracking_until: string;
   next_snapshot_at: string | null;
   link_check: Record<string, unknown>;

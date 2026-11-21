@@ -201,11 +201,13 @@ describe("planLinkPublication", () => {
     expect(out.plan.link_check.checks.parsed).toBe(true);
   });
 
-  it("nimmt jetzt, wenn die Plattform keinen Zeitpunkt nennt", async () => {
+  it("lässt published_at leer, wenn die Plattform keinen Zeitpunkt nennt, und misst ab jetzt", async () => {
     const check = await runLinkCheck("https://youtu.be/dQw4w9WgXcQ", deps({ readPublic: async () => ({ ok: false, platform: "youtube", error: "nicht_konfiguriert", message: "x" }) }));
     const out = planLinkPublication(check, { now: NOW, trackDays: 7 });
-    expect(out.ok && out.plan.published_at).toBe("2026-11-21T12:00:00.000Z");
+    expect(out.ok && out.plan.published_at).toBeNull();
     expect(out.ok && out.plan.tracking_until).toBe("2026-11-28T12:00:00.000Z");
+    expect(out.ok && out.plan.remaining_days).toBe(7);
+    expect(out.ok && out.plan.link_check.tracking_days).toBe(7);
   });
 
   it("begrenzt track_days auf 1 bis 90", async () => {

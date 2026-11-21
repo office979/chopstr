@@ -139,7 +139,9 @@ export interface LinkPublicationPlan {
   external_id: string;
   external_url: string;
   connection_id: string | null;
-  published_at: string;
+  /* Zeitpunkt laut Plattform; null, wenn sie ihn nicht nennt (dann übernimmt der Worker ihn bei der ersten
+   * erfolgreichen Messung, bis dahin gibt es keine festen Fenster) */
+  published_at: string | null;
   tracking_until: string;
   tracking_days: number;
   /* Gerundete Tage, die ab jetzt noch gemessen werden (0: Beitrag älter als die Messdauer, eine Messung) */
@@ -149,7 +151,7 @@ export interface LinkPublicationPlan {
   measurable: boolean;
   /* null, wenn nichts zu messen ist: dann fragt der Worker gar nicht erst */
   next_snapshot_at: string | null;
-  link_check: { checks: LinkChecks; hinweise: string[]; metrics: LinkCheckMetrics | null; author: LinkCheckResult["author"]; checked_at: string };
+  link_check: { checks: LinkChecks; hinweise: string[]; metrics: LinkCheckMetrics | null; author: LinkCheckResult["author"]; checked_at: string; tracking_days: number };
 }
 
 export type LinkPlanOutcome = { ok: true; plan: LinkPublicationPlan } | { ok: false; status: 400 | 409; code: string; message: string; duplicate_publication_id?: string };
@@ -157,8 +159,8 @@ export type LinkPlanOutcome = { ok: true; plan: LinkPublicationPlan } | { ok: fa
 /* Plattformen mit öffentlichem Leser (lib/publishing/public-metrics.ts) */
 export const PUBLIC_READER_PLATFORMS: readonly LinkPlatform[] = ["youtube", "x"];
 
-/* Aus dem Linktest wird eine Publikation zum Verfolgen: veröffentlicht laut Plattform (sonst jetzt), gemessen
- * bis published_at + trackDays, erste Messung sofort. Ohne eingerichteten öffentlichen Leser und ohne eigene
+/* Aus dem Linktest wird eine Publikation zum Verfolgen: veröffentlicht laut Plattform (sonst unbekannt), gemessen
+ * bis published_at + trackDays (ohne Zeitpunkt ab jetzt), erste Messung sofort. Ohne eingerichteten öffentlichen Leser und ohne eigene
  * Verbindung (TikTok, Instagram, LinkedIn fremder Konten, YouTube oder X ohne Schlüssel) gibt es nichts zu
  * messen: dann kein Termin, statt 30 Tage lang Fehlerzeilen zu schreiben. Dubletten werden abgelehnt (409). */
 export function planLinkPublication(result: LinkCheckResult, opts: { now: number; trackDays?: number }): LinkPlanOutcome {
@@ -173,9 +175,11 @@ export function planLinkPublication(result: LinkCheckResult, opts: { now: number
   }
   const days = Math.min(MAX_TRACK_DAYS, Math.max(1, Math.round(opts.trackDays ?? DEFAULT_TRACK_DAYS)));
   const platformTime = result.published_at ? Date.parse(result.published_at) : NaN;
-  /* Ein Zeitpunkt aus der Zukunft wäre ein Uhrenfehler; dann gilt jetzt */
-  const publishedAt = Number.isFinite(platformTime) && platformTime <= opts.now ? platformTime : opts.now;
-  const until = publishedAt + days * 86_400_000;
+  /* Ohne Zeitpunkt der Plattform bleibt published_at leer und die Messdauer zählt ab jetzt; ein Zeitpunkt
+   * aus der Zukunft wäre ein Uhrenfehler, dann gilt jetzt */
+  const known = Number.isFinite(platformTime);
+  const publishedAt = known ? Math.min(platformTime, opts.now) : null;
+  const until = (publishedAt ?? opts.now) + days * 86_400_000;
   const measurable = result.measurable;
   return {
     ok: true,
@@ -184,13 +188,13 @@ export function planLinkPublication(result: LinkCheckResult, opts: { now: number
       external_id: result.external_id,
       external_url: result.normalized_url,
       connection_id: result.connection_id,
-      published_at: new Date(publishedAt).toISOString(),
+      published_at: publishedAt == null ? null : new Date(publishedAt).toISOString(),
       tracking_until: new Date(until).toISOString(),
       tracking_days: days,
       remaining_days: Math.max(0, Math.round((until - opts.now) / 86_400_000)),
       measurable,
       next_snapshot_at: measurable ? new Date(opts.now).toISOString() : null,
-      link_check: { checks: result.checks, hinweise: result.hinweise, metrics: result.metrics, author: result.author, checked_at: new Date(opts.now).toISOString() },
+      link_check: { checks: result.checks, hinweise: result.hinweise, metrics: result.metrics, author: result.author, checked_at: new Date(opts.now).toISOString(), tracking_days: days },
     },
   };
 }

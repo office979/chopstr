@@ -119,6 +119,7 @@ def snapshot(publication_id: str, window: str = "7d", s: config.Settings | None 
         "raw": data.get("raw"),
         "error": error,
         "error_code": str(code) if code else None,
+        "published_at": data.get("published_at") or None,
     }
 
 

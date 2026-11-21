@@ -20,7 +20,7 @@ export type Metrics = Record<(typeof METRIC_KEYS)[number], unknown>;
 interface Registry {
   publish?: (publicationId: string) => Promise<Partial<PublishResult> | null | undefined>;
   metrics?: (publicationId: string, window: MetricWindow) => Promise<{ metrics?: Partial<Metrics> | null } | null | undefined>;
-  snapshot?: (publicationId: string, window: MetricWindow) => Promise<{ metrics?: Partial<SnapshotMetrics> | null; source?: string; raw?: unknown; error?: string | null; error_code?: string | null } | null | undefined>;
+  snapshot?: (publicationId: string, window: MetricWindow) => Promise<{ metrics?: Partial<SnapshotMetrics> | null; source?: string; raw?: unknown; error?: string | null; error_code?: string | null; published_at?: string | null } | null | undefined>;
 }
 
 /* Messreihe (Migration 0019): die acht Fenster-Kennzahlen plus engaged_views, reach, skip_rate */
@@ -63,18 +63,18 @@ export async function publishViaRegistry(publicationId: string): Promise<Publish
 export async function snapshotViaRegistry(
   publicationId: string,
   window: MetricWindow,
-): Promise<{ metrics: SnapshotMetrics; source: string; raw: unknown; available: boolean; error: string | null; error_code: string | null }> {
+): Promise<{ metrics: SnapshotMetrics; source: string; raw: unknown; available: boolean; error: string | null; error_code: string | null; published_at: string | null }> {
   const empty = Object.fromEntries(SNAPSHOT_KEYS.map((k) => [k, null])) as SnapshotMetrics;
   const registry = await loadRegistry();
-  if (!registry?.snapshot) return { metrics: empty, source: "oauth", raw: null, available: false, error: PROVIDER_UNAVAILABLE, error_code: "messdienst_fehler" };
+  if (!registry?.snapshot) return { metrics: empty, source: "oauth", raw: null, available: false, error: PROVIDER_UNAVAILABLE, error_code: "messdienst_fehler", published_at: null };
   try {
     const r = (await registry.snapshot(publicationId, window)) ?? {};
     const raw = r.metrics ?? {};
     const metrics = { ...empty };
     for (const k of SNAPSHOT_KEYS) metrics[k] = raw[k] ?? null;
-    return { metrics, source: r.source ?? "oauth", raw: r.raw ?? null, available: true, error: r.error ?? null, error_code: r.error_code ?? (r.error ? "messdienst_fehler" : null) };
+    return { metrics, source: r.source ?? "oauth", raw: r.raw ?? null, available: true, error: r.error ?? null, error_code: r.error_code ?? (r.error ? "messdienst_fehler" : null), published_at: r.published_at ?? null };
   } catch (error) {
-    return { metrics: empty, source: "oauth", raw: null, available: false, error: error instanceof Error ? error.message : "Messung nicht abrufbar", error_code: "messdienst_fehler" };
+    return { metrics: empty, source: "oauth", raw: null, available: false, error: error instanceof Error ? error.message : "Messung nicht abrufbar", error_code: "messdienst_fehler", published_at: null };
   }
 }
 

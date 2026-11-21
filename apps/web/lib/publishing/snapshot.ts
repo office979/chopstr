@@ -48,6 +48,8 @@ export interface SnapshotResult {
   raw: unknown;
   error: string | null;
   error_code: SnapshotErrorCode | null;
+  /* Zeitpunkt der Veröffentlichung laut öffentlichem Leser; der Worker übernimmt ihn, wenn er noch fehlt */
+  published_at: string | null;
 }
 
 function readerCode(error: PublicMetricsErrorCode): SnapshotErrorCode {
@@ -71,18 +73,18 @@ function merge(partial: Partial<MetricSet>): PublicMetricSet {
 export async function takeSnapshot(pub: SnapshotPublication, window: MetricWindow, deps: SnapshotDeps): Promise<SnapshotResult> {
   const viaOauth = async (fallback: { error: string; code: SnapshotErrorCode } | null): Promise<SnapshotResult> => {
     const r = await deps.viaConnection(window).catch((e: unknown) => ({ metrics: {}, error: e instanceof Error ? e.message : String(e) }));
-    if (!r) return { metrics: emptyPublicMetrics(), source: "oauth", raw: null, error: fallback?.error ?? "Keine nutzbare Verbindung.", error_code: fallback?.code ?? "keine_verbindung" };
-    return { metrics: merge(r.metrics), source: "oauth", raw: null, error: r.error ?? null, error_code: r.error ? "plattform_fehler" : null };
+    if (!r) return { metrics: emptyPublicMetrics(), source: "oauth", raw: null, error: fallback?.error ?? "Keine nutzbare Verbindung.", error_code: fallback?.code ?? "keine_verbindung", published_at: null };
+    return { metrics: merge(r.metrics), source: "oauth", raw: null, error: r.error ?? null, error_code: r.error ? "plattform_fehler" : null, published_at: null };
   };
 
-  if (pub.tracking === "off") return { metrics: emptyPublicMetrics(), source: "oauth", raw: null, error: "Messung ist abgeschaltet.", error_code: "abgeschaltet" };
+  if (pub.tracking === "off") return { metrics: emptyPublicMetrics(), source: "oauth", raw: null, error: "Messung ist abgeschaltet.", error_code: "abgeschaltet", published_at: null };
   if (pub.tracking !== "link") return viaOauth(null);
 
   const platform = linkPlatformOf(pub.platform);
-  if (!platform || !pub.external_id) return { metrics: emptyPublicMetrics(), source: "public_api", raw: null, error: "Publikation ohne Plattform oder externe ID.", error_code: "ungueltig" };
+  if (!platform || !pub.external_id) return { metrics: emptyPublicMetrics(), source: "public_api", raw: null, error: "Publikation ohne Plattform oder externe ID.", error_code: "ungueltig", published_at: null };
   const pr = await deps.readPublic(platform, pub.external_id);
-  if (pr.ok) return { metrics: pr.metrics, source: pr.source, raw: pr.raw, error: null, error_code: null };
+  if (pr.ok) return { metrics: pr.metrics, source: pr.source, raw: pr.raw, error: null, error_code: null, published_at: pr.published_at };
   const text = pr.detail ? `${pr.message} ${pr.detail}` : pr.message;
   if (pub.connection_id && pr.error !== "nicht_gefunden") return viaOauth({ error: text, code: readerCode(pr.error) });
-  return { metrics: emptyPublicMetrics(), source: "public_api", raw: null, error: text, error_code: readerCode(pr.error) };
+  return { metrics: emptyPublicMetrics(), source: "public_api", raw: null, error: text, error_code: readerCode(pr.error), published_at: null };
 }

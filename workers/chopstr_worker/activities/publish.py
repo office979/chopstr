@@ -318,6 +318,8 @@ WINDOW_AGES = (("6h", 6 * HOUR_S), ("48h", 48 * HOUR_S), ("7d", 7 * 24 * HOUR_S)
 # Eine Messung zählt nur für ein Fenster, solange sie jünger als das Doppelte des Fensters ist: wer einen Link
 # erst nach zehn Tagen einträgt, bekommt kein 6h- und kein 48h-Fenster mit Zehn-Tage-Zahlen (die würden den
 # Account-Median und damit den Reward verzerren). Der Zeitplan oben trifft jedes Fenster innerhalb dieser Spanne.
+# Bewusst 2,0 auch für 7d (Review R1-13): ein engerer Faktor erst mit echten Messreihen, nicht geschätzt.
+# Fenster gibt es nur mit bekanntem Veröffentlichungszeitpunkt (run_snapshot).
 WINDOW_MAX_FACTOR = 2.0
 SNAPSHOT_METRICS = ("views", "engaged_views", "likes", "comments", "shares", "saves", "follows", "reach", "avg_watch_time_s", "skip_rate")
 SNAPSHOT_STATUSES = {"oauth": ("published",), "link": ("published", "manual")}
@@ -428,12 +430,15 @@ def run_snapshot(ctx: common.Context, publication_id: str, http=None) -> dict[st
         _set(ctx, publication_id, next_snapshot_at=None)
         return {"publication_id": publication_id, "status": "skipped", "reason": f"Status {pub['status']} wird bei tracking {pub['tracking']} nicht gemessen"}
 
-    published_at = _as_dt(pub.get("published_at")) or _as_dt(pub.get("created_at")) or now
-    age_s = max(0, int((now - published_at).total_seconds()))
+    # Ohne bekannten Zeitpunkt (published_at leer) zählt der Zeitplan ab dem Eintragen, age_s bleibt leer und es
+    # gibt keine festen Fenster, bis eine Messung den Zeitpunkt der Plattform liefert
+    known_at = _as_dt(pub.get("published_at"))
+    base_at = known_at or _as_dt(pub.get("created_at")) or now
+    hint_age = max(0, int((now - base_at).total_seconds()))
     error: str | None = None
     code: str | None = None
     try:
-        result = internal_api.snapshot(publication_id, window_hint(age_s), ctx.settings, http)
+        result = internal_api.snapshot(publication_id, window_hint(hint_age), ctx.settings, http)
     except Exception as exc:  # Web-App weg, Secret falsch oder kaputte Antwort: als Fehlerzeile festhalten
         result = {"metrics": {}, "source": "oauth" if pub["tracking"] == "oauth" else "public_api", "raw": None, "error": None}
         code = _exception_code(exc)
@@ -443,6 +448,19 @@ def run_snapshot(ctx: common.Context, publication_id: str, http=None) -> dict[st
         error = str(result["error"])
         code = str(result.get("error_code") or "messdienst_fehler")
     has_numbers = any(metrics.get(k) is not None for k in SNAPSHOT_METRICS)
+
+    updates: dict[str, Any] = {}
+    tracking_until = _as_dt(pub.get("tracking_until"))
+    platform_at = _as_dt(result.get("published_at")) if has_numbers and not error else None
+    if known_at is None and platform_at is not None:
+        # Erste erfolgreiche Messung mit Zeitpunkt: übernehmen und den Zeitplan daran ausrichten
+        known_at = base_at = min(platform_at, now)
+        updates["published_at"] = known_at
+        days = pub["link_check"].get("tracking_days")
+        if isinstance(days, int | float) and days > 0:
+            tracking_until = known_at + timedelta(days=float(days))
+            updates["tracking_until"] = tracking_until
+    age_s = max(0, int((now - known_at).total_seconds())) if known_at else None
 
     values: dict[str, Any] = {k: metrics.get(k) for k in SNAPSHOT_METRICS}
     db.insert(
@@ -462,8 +480,7 @@ def run_snapshot(ctx: common.Context, publication_id: str, http=None) -> dict[st
             bridge = {k: metrics.get(k) for k in internal_api.METRIC_KEYS}
             reward = write_window_feedback(ctx, {**pub, "id": publication_id}, window, bridge)["reward"]
 
-    tracking_until = _as_dt(pub.get("tracking_until"))
-    nxt = next_snapshot_at(published_at, now, tracking_until)
+    nxt = next_snapshot_at(base_at, now, tracking_until)
     link_check = dict(pub["link_check"])
     streak = int(link_check.get("not_found_streak") or 0) + 1 if code == "nicht_gefunden" else 0
     link_check["not_found_streak"] = streak
@@ -474,7 +491,7 @@ def run_snapshot(ctx: common.Context, publication_id: str, http=None) -> dict[st
         nxt = None
     elif code in CONFIG_ERROR_CODES:
         nxt = None
-    updates: dict[str, Any] = {"next_snapshot_at": nxt, "metrics_fetched_at": now}
+    updates.update(next_snapshot_at=nxt, metrics_fetched_at=now)
     if pub["tracking"] == "link" and link_check != {"not_found_streak": 0, **pub["link_check"]}:
         updates["link_check"] = db.jsonb(link_check)
     _set(ctx, publication_id, **updates)

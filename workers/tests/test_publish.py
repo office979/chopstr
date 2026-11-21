@@ -374,10 +374,53 @@ def test_snapshot_status_rules(fake_db, fake_context, tracked, web):
     assert publish.run_snapshot(fake_context, "fehlt")["status"] == "missing"
 
 
+def test_snapshot_without_known_publish_time_writes_no_window(fake_db, fake_context, tracked, web):
+    p = fake_db.publications[tracked["pub"]]
+    p["published_at"] = None
+    p["created_at"] = datetime.now(UTC) - timedelta(hours=6, minutes=10)
+    out = publish.run_snapshot(fake_context, tracked["pub"])
+    assert out["status"] == "ok" and out["age_s"] is None and out["window"] is None
+    assert fake_db.metric_snapshots[-1]["age_s"] is None
+    assert fake_db.performance_feedback == []  # ohne bekannten Zeitpunkt kein 6h-Fenster
+    # Zeitplan zählt ab dem Eintragen: über 6 h alt, also Takt 6 h
+    assert timedelta(hours=5, minutes=59) < p["next_snapshot_at"] - datetime.now(UTC) <= timedelta(hours=6)
+    assert p["published_at"] is None
+
+
+def test_snapshot_adopts_platform_publish_time_and_reschedules(fake_db, fake_context, tracked, web):
+    p = fake_db.publications[tracked["pub"]]
+    now = datetime.now(UTC)
+    p["published_at"] = None
+    p["created_at"] = now - timedelta(minutes=5)
+    p["tracking_until"] = now + timedelta(days=30)
+    p["link_check"] = {"tracking_days": 30}
+    platform_at = now - timedelta(days=3)
+    web.snapshot_response = {**web.snapshot_response, "published_at": platform_at.isoformat()}
+    out = publish.run_snapshot(fake_context, tracked["pub"])
+    assert p["published_at"] == platform_at
+    assert p["tracking_until"] == platform_at + timedelta(days=30)
+    assert 3 * 24 * H - 60 <= out["age_s"] <= 3 * 24 * H + 60
+    assert fake_db.metric_snapshots[-1]["age_s"] == out["age_s"]
+    # drei Tage alt: täglicher Takt statt stündlich ab dem Eintragen
+    assert timedelta(hours=23) < p["next_snapshot_at"] - now <= timedelta(hours=24, minutes=1)
+    # ein bekannter Zeitpunkt wird nicht wieder überschrieben
+    web.snapshot_response = {**web.snapshot_response, "published_at": (now - timedelta(days=9)).isoformat()}
+    publish.run_snapshot(fake_context, tracked["pub"])
+    assert p["published_at"] == platform_at
+
+
+def test_snapshot_does_not_adopt_publish_time_from_failed_measurements(fake_db, fake_context, tracked, web):
+    p = fake_db.publications[tracked["pub"]]
+    p["published_at"] = None
+    web.snapshot_response = {"metrics": {}, "source": "public_api", "raw": None, "error": "weg", "error_code": "plattform_fehler", "published_at": "2026-01-01T00:00:00Z"}
+    publish.run_snapshot(fake_context, tracked["pub"])
+    assert p["published_at"] is None
+
+
 def test_internal_api_snapshot_shape(web):
     data = internal_api.snapshot("p1", "48h")
     assert web.calls[-1][1] == {"publication_id": "p1", "mode": "snapshot", "window": "48h"}
-    assert set(data) == {"metrics", "source", "raw", "error", "error_code"} and set(data["metrics"]) == set(internal_api.SNAPSHOT_KEYS)
+    assert set(data) == {"metrics", "source", "raw", "error", "error_code", "published_at"} and set(data["metrics"]) == set(internal_api.SNAPSHOT_KEYS)
     assert data["error_code"] is None
     web.snapshot_response = {**web.snapshot_response, "source": "irgendwas"}
     assert internal_api.snapshot("p1", "1h")["source"] == "oauth"  # unbekannte Quelle fällt auf oauth zurück

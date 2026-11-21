@@ -110,12 +110,13 @@ export interface InternalSnapshotResult {
   raw: unknown;
   error: string | null;
   error_code: SnapshotErrorCode | null;
+  published_at: string | null;
 }
 
 /* Von /api/internal/metrics mit mode "snapshot": eine Messung für metric_snapshots (lib/publishing/snapshot.ts) */
 export async function snapshot(publicationId: string, window: MetricWindow): Promise<InternalSnapshotResult> {
   const ctx = await loadPublicationInternal(publicationId);
-  if (!ctx) return { publication_id: publicationId, metrics: emptyPublicMetrics(), source: "oauth", raw: null, error: "Publikation nicht gefunden.", error_code: "ungueltig" };
+  if (!ctx) return { publication_id: publicationId, metrics: emptyPublicMetrics(), source: "oauth", raw: null, error: "Publikation nicht gefunden.", error_code: "ungueltig", published_at: null };
   const { publication, connection } = ctx;
   const result = await takeSnapshot(publication, window, {
     readPublic: (platform, externalId) => readPublicMetrics(platform, externalId),

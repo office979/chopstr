@@ -60,6 +60,8 @@ export interface ApiRepo {
   /* Lese-API Performance (Migration 0019): Publikationen eines Clips, Messreihe, feste Fenster */
   listPublicationsForClip(clipId: string): Promise<Publication[]>;
   listMetricSnapshots(publicationIds: string[]): Promise<MetricSnapshot[]>;
+  /* Jüngste Messung mit Zahlen (ohne Fehler), eine Zeile; null ohne Messung oder ohne Migration 0019 */
+  latestMetricSnapshot(publicationId: string): Promise<MetricSnapshot | null>;
   listWindowFeedback(publicationIds: string[]): Promise<WindowFeedback[]>;
   setPublicationWorkflow(id: string, workflowId: string | null): Promise<void>;
   /* Upload per API: Quelle war `uploading`, tusd-Hook ergänzt die Datei */
@@ -494,6 +496,23 @@ export const apiPostgresRepo: ApiRepo = {
       });
     } catch (error) {
       if (isMissingSchema(error)) return [];
+      throw error;
+    }
+  },
+
+  async latestMetricSnapshot(publicationId) {
+    const session = await currentSession();
+    try {
+      return await withContext(session, async (tx) => {
+        const rows = await tx`
+          select * from metric_snapshots
+          where workspace_id = ${session.workspaceId} and publication_id = ${publicationId} and error is null
+            and (views is not null or likes is not null or comments is not null)
+          order by fetched_at desc limit 1`;
+        return rows.length ? toSnapshot(rows[0] as Row) : null;
+      });
+    } catch (error) {
+      if (isMissingSchema(error)) return null;
       throw error;
     }
   },

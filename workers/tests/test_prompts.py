@@ -15,7 +15,7 @@ def test_all_repo_prompts_load():
         "episode_overview": ("episode_overview", 1),  # AP5, gepinnt nur in Fassung 2
         "score_clip": ("score_clip", 3),  # score_clip_v3 (AP9), gepinnt nur in Fassung 2
         "story_graph_confirm": ("confirm_qualification", 1),
-        "hooks": ("write_hooks", 2),  # hooks_v2 (AP6a), gepinnt nur in Fassung 2
+        "hooks": ("write_hooks", 3),  # hooks_v3 (A2.1), gepinnt nur mit implementation.hook.sop_v3
         "post_caption": ("write_post_caption", 1),
         "critique_clip": ("critique_clip", 1),  # AP6b, gepinnt nur in Fassung 2
     }
@@ -35,7 +35,7 @@ def test_bestandsfassung_score_clip_v1_bleibt_ladbar():
 
 
 def test_render_replaces_inputs_and_joins_lists():
-    p = prompts.load("hooks")
+    p = prompts.load("hooks", 2)
     out = p.render(address="DU", country="AT", platform="tiktok", protected_terms=["Jause", "Marille"], clip_text="Text hier")
     assert "Anrede: DU" in out
     assert "Jause, Marille" in out
@@ -126,7 +126,8 @@ def test_new_prompt_file_does_not_switch_the_path(prompts_copy, monkeypatch, pol
 def test_load_without_version_warns(prompts_copy, caplog):
     with caplog.at_level("WARNING", logger="chopstr.prompts"):
         prompts.load("hooks")
-    assert any("ohne Version" in r.getMessage() and "hooks_v2.md" in r.getMessage() for r in caplog.records)
+    # Höchste Datei ist hooks_v3 (A2.1); gepinnt bleibt hooks 2, bis implementation.hook.sop_v3 an ist
+    assert any("ohne Version" in r.getMessage() and "hooks_v3.md" in r.getMessage() for r in caplog.records)
 
 
 def test_load_pinned_follows_the_given_policy():

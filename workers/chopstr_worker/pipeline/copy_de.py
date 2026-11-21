@@ -63,14 +63,103 @@ class BrandProfile:
     protected_terms: list[str] = field(default_factory=list)  # Austriazismen, die NIE ersetzt werden
     tone_adjectives: list[str] = field(default_factory=list)
     platform: str = "linkedin"  # "tiktok" | "reels" | "shorts" | "linkedin"
+    # Trichterstufe für hooks_v3 (TOF Reichweite, MOF Vertrauen, BOF Entscheidung); ohne Angabe TOF
+    funnel_stage: str = "TOF"
 
 
 # Hinweise, die eine Hook-Variante in der Auswahl v2 disqualifizieren (copy_engine.select_variant_v2). Die
 # übrigen sind korrigiert (Em-Dash, ß) oder nur Prüfhinweise (Durchkopplung, mögliche Sie-Form, Muster).
 VIOLATION_PREFIXES = (
     "Floskel:", "Abgenutzter Hook:", "Hyperbel:", "Du-Form in Sie-Profil", "Genderzeichen",
-    "Mehrere Gedankenstriche",
+    "Mehrere Gedankenstriche", "Zahl nicht im Clip:",
 )  # fmt: skip
+
+# -- SOP-Regeln für den Text-Hook (A2.2, nur mit editorial.Policy.hook_sop_v3) ---------------------
+# Aus den Agentur-SOPs für Visual Hooks: kein Schlusspunkt, höchstens zwei kurze Zeilen, kein Rückbezug
+# ohne Nomen, Zahlen nur mit Bezug und nur, wenn der Clip sie nennt, ein Gedanke, keine Striche und Emojis.
+SOP_MAX_LINES = 2
+SOP_MAX_LINE_CHARS = 32
+SOP_DEMONSTRATIVES = frozenset({"das", "dies", "dieses", "darum", "deshalb", "deswegen", "daher", "genau"})
+SOP_COPULAS = frozenset({"ist", "war", "sind", "waren", "wird", "bleibt"})
+SOP_UNIT_WORDS = frozenset({
+    "%", "€", "prozent", "euro", "eur", "chf", "franken", "dollar", "cent", "mio", "mio.", "millionen", "million",
+    "milliarden", "tausend", "jahre", "jahren", "jahr", "monate", "monaten", "monat", "wochen", "woche", "tage",
+    "tagen", "tag", "stunden", "stunde", "minuten", "minute", "sekunden", "uhr", "mal", "fach", "kilo", "kg",
+    "km", "meter", "stück", "leute", "menschen", "kunden",
+})  # fmt: skip
+# Emojis und Bildzeichen (grobe Blöcke, genügt für Hooks): Symbole, Piktogramme, Dingbats, Variationswähler
+EMOJI_RE = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
+SPACED_DASH_RE = re.compile(r"\s+[–-]\s+")
+
+
+def _wrap(text: str, width: int) -> list[str]:
+    """Gieriger Zeilenumbruch an Leerzeichen, wie ein Overlay ohne festen Umbruch ihn setzt."""
+    lines: list[str] = []
+    for part in text.split("\n"):
+        line = ""
+        for word in part.split():
+            cand = f"{line} {word}".strip()
+            if line and len(cand) > width:
+                lines.append(line)
+                line = word
+            else:
+                line = cand
+        lines.append(line)
+    return lines
+
+
+def lint_sop(text: str, clip_text: str | None = None) -> tuple[str, list[str]]:
+    """SOP-Regeln für den Text-Hook. Korrigiert Schlusspunkt, Striche und Emojis; der Rest sind Hinweise,
+    nur eine Zahl, die der Clip nicht nennt, ist ein Verstoß (``Zahl nicht im Clip:``). ``clip_text`` fehlt:
+    die Zahlenprüfung gegen den Clip entfällt."""
+    notes: list[str] = []
+    out = text.strip()
+
+    if EMOJI_RE.search(out):
+        out = " ".join(EMOJI_RE.sub("", out).split())
+        notes.append("Emoji entfernt")
+    if SPACED_DASH_RE.search(out):
+        out = SPACED_DASH_RE.sub(", ", out)
+        notes.append("Gedankenstrich ersetzt")
+    if out.endswith(".") and not out.endswith("..."):
+        out = out[:-1].rstrip()
+        notes.append("Schlusspunkt entfernt")
+
+    explicit = out.split("\n")
+    long_lines = [ln for ln in explicit if len(ln.strip()) > SOP_MAX_LINE_CHARS] if len(explicit) > 1 else []
+    if len(explicit) > SOP_MAX_LINES:
+        notes.append(f"Mehr als {SOP_MAX_LINES} Zeilen")
+    elif long_lines:
+        notes.append(f"Zeile über {SOP_MAX_LINE_CHARS} Zeichen: '{long_lines[0].strip()}'")
+    elif len(_wrap(out, SOP_MAX_LINE_CHARS)) > SOP_MAX_LINES:
+        notes.append(f"Passt nicht in {SOP_MAX_LINES} Zeilen zu {SOP_MAX_LINE_CHARS} Zeichen")
+
+    words = re.findall(r"[\wÄÖÜäöüß%€.]+", out)
+    low = [w.lower().strip(".") for w in words]
+    if low and (
+        (len(low) == 1 and low[0] in SOP_DEMONSTRATIVES)
+        or (low[0] in SOP_DEMONSTRATIVES and len(low) <= 4 and len(low) > 1 and low[1] in SOP_COPULAS)
+    ):
+        notes.append(f"Rückbezug ohne Nomen: '{out}' versteht man ohne Clip nicht")
+
+    for mention in fidelity.number_mentions(out):
+        if mention.unit is not None:
+            continue
+        at = out.find(mention.raw)
+        after = out[at + len(mention.raw) :].split()[:2] if at >= 0 else []
+        has_ref = any(w[:1].isupper() or w.lower().strip(".,!?") in SOP_UNIT_WORDS or w[:1] in "%€" for w in after)
+        if not has_ref:
+            notes.append(f"Zahl ohne Bezug: '{mention.raw}'")
+    if clip_text is not None:
+        clip_values = {m.value for m in fidelity.number_mentions(clip_text)}
+        for mention in fidelity.number_mentions(out):
+            if mention.value not in clip_values:
+                notes.append(f"Zahl nicht im Clip: '{mention.raw}'")
+
+    if len(re.findall(r"\bund\b", out, flags=re.IGNORECASE)) > 1 and "," in out:
+        notes.append("Mehr als ein Gedanke? Mehrere 'und' und Kommas")
+
+    return out, notes
 
 
 def lint_violations(notes: list[str]) -> list[str]:
@@ -91,14 +180,25 @@ def lint(
     p: BrandProfile,
     hyperbole: tuple[str, ...] | list[str] | None = None,
     word_bounds: bool | None = None,
+    onscreen: bool = False,
+    clip_text: str | None = None,
+    sop_v3: bool | None = None,
 ) -> tuple[str, list[str]]:
     """Gibt (korrigierter_text, hinweise) zurück. Korrigiert nur Eindeutiges, der Rest sind Hinweise.
 
     ``hyperbole``: leere Intensivierungen; ohne Angabe ``hook.hyperbole`` der aktiven Grundlage (Fassung 1
     hat keine, dort bleibt der Linter wie bisher). ``word_bounds``: Floskeln, abgenutzte Hooks und
     Hyperbeln nur an Wortgrenzen („spannend“ trifft nicht „Hochspannend“); ohne Angabe an, wenn die aktive
-    Grundlage ``hook.native_spoken`` hat (Fassung 2), in Fassung 1 Teilstring wie bisher."""
+    Grundlage ``hook.native_spoken`` hat (Fassung 2), in Fassung 1 Teilstring wie bisher.
+
+    ``onscreen``: der Text ist ein Text-Hook. Dann gelten zusätzlich die SOP-Regeln (``lint_sop``, mit
+    ``clip_text`` für die Zahlenprüfung), sofern ``sop_v3`` an ist; ohne Angabe ``Policy.hook_sop_v3``."""
     notes, out = [], text
+    if onscreen:
+        if sop_v3 is None:
+            sop_v3 = editorial.load().hook_sop_v3
+        if sop_v3:
+            out, notes = lint_sop(out, clip_text)
     policy = editorial.load() if hyperbole is None or word_bounds is None else None
     if hyperbole is None:
         hyperbole = policy.hyperbole if policy else ()
@@ -201,5 +301,5 @@ def ad_disclosure(p: BrandProfile, is_paid_partnership: bool, brand_mentioned: b
 
 __all__ = [
     "AD_LABELS", "AI_FLOSKELN", "HOOK_SCHEMA", "VIOLATION_PREFIXES", "WORN_HOOKS", "BrandProfile", "ad_disclosure",
-    "build_hook_prompt", "generate_hooks", "lint", "lint_violations", "prompt_clip_text",
+    "build_hook_prompt", "generate_hooks", "lint", "lint_sop", "lint_violations", "prompt_clip_text",
 ]  # fmt: skip

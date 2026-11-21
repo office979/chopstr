@@ -36,6 +36,34 @@ log = logging.getLogger("chopstr.copy")
 
 PLATFORMS = ("tiktok", "reels", "shorts", "linkedin")
 HOOK_PATTERNS = ("identity_call", "contrarian", "open_loop", "results_first", "mistake_warning")
+# hooks_v3 (A2.1): die fünf Schlüssel bleiben für die Lernschleife (hook_pattern_stats), dazu die Typen der
+# DACH-Hook-Taxonomie. Überschneidungen zählen als dieselbe Familie (PATTERN_FAMILY), damit die
+# Vielfaltsregel (mindestens drei Familien) und die Statistik nicht doppelt zählen:
+#   contrarian ≈ widerspruch, mistake_warning ≈ teurer_fehler, results_first ≈ konkrete_zahl
+HOOK_PATTERNS_DACH = (
+    "teurer_fehler", "konkrete_zahl", "selbstversuch", "widerspruch", "interner_blick", "kategorie_vergleich",
+    "sachfrage", "vorher_nachher", "direkte_aufforderung",
+)  # fmt: skip
+HOOK_PATTERNS_V3 = HOOK_PATTERNS + HOOK_PATTERNS_DACH
+PATTERN_FAMILY: dict[str, str] = {
+    **{p: p for p in HOOK_PATTERNS_V3},
+    "widerspruch": "contrarian",
+    "teurer_fehler": "mistake_warning",
+    "konkrete_zahl": "results_first",
+}
+FUNNEL_STAGES = ("TOF", "MOF", "BOF")
+# Zusatzfelder je Variante ab hooks_v3; question_opened bleibt intern
+V3_VARIANT_FIELDS = ("payoff_ts", "question_opened", "first_frame_note")
+
+
+def known_hook_patterns() -> tuple[str, ...]:
+    """Gültige Muster: mit ``hook.sop_v3`` (Pin hooks 3) auch die DACH-Typen, sonst die fünf aus hooks_v2."""
+    return HOOK_PATTERNS_V3 if editorial.load().hook_sop_v3 else HOOK_PATTERNS
+
+
+def pattern_family(pattern: str) -> str:
+    """Familie eines Hook-Musters (``PATTERN_FAMILY``); unbekannte Muster sind ihre eigene Familie."""
+    return PATTERN_FAMILY.get(pattern, pattern)
 SPOKEN_MAX_WORDS = 12
 ONSCREEN_MAX_WORDS = 9
 VARIANT_COUNT = 5
@@ -157,6 +185,23 @@ HOOKS_SCHEMA: dict[str, Any] = {
     "required": ["variants"],
 }
 
+def hooks_schema(prompt_version: int) -> dict[str, Any]:
+    """Tool-Schema je hooks-Version: ab v3 die DACH-Muster und die Zusatzfelder (payoff_ts, question_opened,
+    first_frame_note); bis v2 ``HOOKS_SCHEMA`` unverändert."""
+    if prompt_version < 3:
+        return HOOKS_SCHEMA
+    item = HOOKS_SCHEMA["properties"]["variants"]["items"]
+    props = {
+        **item["properties"],
+        "pattern": {"type": "string", "enum": list(HOOK_PATTERNS_V3)},
+        "payoff_ts": {"type": "number", "minimum": 0},
+        "question_opened": {"type": "string"},
+        "first_frame_note": {"type": "string"},
+    }
+    variants = {**HOOKS_SCHEMA["properties"]["variants"], "items": {**item, "properties": props}}
+    return {**HOOKS_SCHEMA, "properties": {"variants": variants}}
+
+
 POST_CAPTION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {"text": {"type": "string"}, "cta": {"type": "string"}},
@@ -171,9 +216,13 @@ class HookVariant:
     onscreen: str
     lint_notes: list[str] = field(default_factory=list)
     claim_issues: list[str] = field(default_factory=list)
+    # Ab hooks_v3: payoff_ts, question_opened, first_frame_note (leer bis v2)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        out = asdict(self)
+        extra = out.pop("extra")
+        return {**out, **extra} if extra else out
 
 
 @dataclass
@@ -231,27 +280,32 @@ def _system_prompt() -> str:
 def generate_variants(llm, clip_text: str, brand: copy_de.BrandProfile) -> tuple[list[HookVariant], str]:
     """``hooks_v1`` aufrufen, jede Variante linten, Limits und Claims prüfen. Gibt (Varianten, prompt_version)."""
     pr = prompts.load_pinned("hooks")
-    user = pr.render(
-        address=brand.address.upper(),
-        country=brand.country,
-        platform=brand.platform,
-        protected_terms=brand.protected_terms,
-        clip_text=copy_de.prompt_clip_text(clip_text, pr.version),
-    )
-    out = llm.structured(_system_prompt(), user, HOOKS_SCHEMA, pr.tool or "write_hooks", pr.prompt_version, job_type="llm_copy")
+    inputs: dict[str, Any] = {
+        "address": brand.address.upper(),
+        "country": brand.country,
+        "platform": brand.platform,
+        "protected_terms": brand.protected_terms,
+        "clip_text": copy_de.prompt_clip_text(clip_text, pr.version),
+    }
+    if "funnel_stage" in pr.inputs:
+        inputs["funnel_stage"] = brand.funnel_stage if brand.funnel_stage in FUNNEL_STAGES else "TOF"
+    user = pr.render(**inputs)
+    out = llm.structured(_system_prompt(), user, hooks_schema(pr.version), pr.tool or "write_hooks", pr.prompt_version, job_type="llm_copy")
+    known = HOOK_PATTERNS_V3 if pr.version >= 3 else HOOK_PATTERNS
     variants: list[HookVariant] = []
     for raw in list(out.get("variants") or [])[:VARIANT_COUNT]:
         if not isinstance(raw, dict):
             continue
         spoken, notes_s = copy_de.lint(str(raw.get("spoken") or "").strip(), brand)
-        onscreen, notes_o = copy_de.lint(str(raw.get("onscreen") or "").strip(), brand)
+        onscreen, notes_o = copy_de.lint(str(raw.get("onscreen") or "").strip(), brand, onscreen=True, clip_text=clip_text)
         pattern = str(raw.get("pattern") or "")
         notes = [*notes_s, *notes_o, *limit_notes(spoken, onscreen)]
-        if pattern not in HOOK_PATTERNS:
+        if pattern not in known:
             notes.append(f"Unbekanntes Hook-Muster '{pattern}'")
         claims = fidelity.hook_claim_check(spoken, clip_text)
         claims += [c for c in fidelity.hook_claim_check(onscreen, clip_text) if c not in claims]
-        variants.append(HookVariant(pattern, spoken, onscreen, notes, claims))
+        extra = {k: raw[k] for k in V3_VARIANT_FIELDS if pr.version >= 3 and raw.get(k) is not None}
+        variants.append(HookVariant(pattern, spoken, onscreen, notes, claims, extra))
     if not variants:
         raise RuntimeError("Das Sprachmodell hat keine Hook-Varianten geliefert")
     return variants, pr.prompt_version
@@ -634,7 +688,7 @@ def variant_disqualifiers(v: HookVariant) -> list[str]:
         reasons.append("Meta-Rede an ein Modell im Hook")
     if not v.onscreen.strip():
         reasons.append("Leerer Text-Hook")
-    if v.pattern not in HOOK_PATTERNS:
+    if v.pattern not in known_hook_patterns():
         reasons.append(f"Unbekanntes Hook-Muster '{v.pattern}'")
     return reasons
 
@@ -658,7 +712,7 @@ def native_variant(
     wörtliche Einstieg. Gibt (Variante, Herkunft des Text-Hooks); ein leerer Text-Hook heißt kein Overlay."""
     spoken, _ = spoken_opening(clip_text, partial)
     raw, kind = native_onscreen(clip_text, uncertain, partial, context_after)
-    onscreen, notes = copy_de.lint(raw, brand) if raw else ("", [])
+    onscreen, notes = copy_de.lint(raw, brand, onscreen=True, clip_text=clip_text) if raw else ("", [])
     if kind != "first_sentence":
         notes.append(f"On-Screen-Hook: {OPENING_NOTES[kind]}")
     claims = fidelity.hook_claim_check_v2(onscreen, clip_text, uncertain) if onscreen else []
@@ -884,7 +938,7 @@ def _select_v2(
     Gibt (Wahl, spoken_hook, Zusatzhinweise, Zusatzbefunde, Merkmale für das Decision Log)."""
     partial = allow_partial_opening()
     for v in variants:
-        _, notes_o = copy_de.lint(v.onscreen, brand)
+        _, notes_o = copy_de.lint(v.onscreen, brand, onscreen=True, clip_text=clip_text)
         _, notes_s = copy_de.lint(v.spoken, brand)
         spoken_claims = fidelity.hook_claim_check_v2(v.spoken, clip_text, uncertain)
         v.claim_issues = fidelity.hook_claim_check_v2(v.onscreen, clip_text, uncertain)
@@ -896,7 +950,7 @@ def _select_v2(
             *limit_notes("", v.onscreen),
             *(f"Gesprochen (Hinweis): {n}" for n in [*notes_s, *limit_notes(v.spoken, ""), *spoken_claims]),
         ]
-        if v.pattern not in HOOK_PATTERNS:
+        if v.pattern not in known_hook_patterns():
             v.lint_notes.append(f"Unbekanntes Hook-Muster '{v.pattern}'")
     disqualified = {f"{i}:{v.pattern}": variant_disqualifiers(v) for i, v in enumerate(variants)}
     chosen = select_variant_v2(variants)
@@ -934,8 +988,15 @@ def _select_v2(
 
 
 __all__ = [
+    "FUNNEL_STAGES",
     "HOOKS_SCHEMA",
     "HOOK_PATTERNS",
+    "HOOK_PATTERNS_DACH",
+    "HOOK_PATTERNS_V3",
+    "PATTERN_FAMILY",
+    "hooks_schema",
+    "known_hook_patterns",
+    "pattern_family",
     "LT_LOCALES",
     "NATIVE_PATTERN",
     "ONSCREEN_MAX_WORDS",

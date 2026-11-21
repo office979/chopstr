@@ -74,6 +74,11 @@ V2_IMPLEMENTED_SWITCHES = frozenset({
 V2_RULE_SECTIONS = ("captions", "hook", "segmentation", "verb_bracket")
 # Prompt-Pins, die v2 gegenüber V1_PROMPT_PINS ändert (Prompt-Name zu Version).
 V2_PIN_CHANGES: dict[str, int] = {"hooks": 2}
+# Hooks nach den Agentur-SOPs (A2.1): nur mit dem Schalter implementation.hook.sop_v3 (Standard false).
+# Bewusst kein Eintrag in V2_SWITCHES: der Schalter ist gebaut, bleibt aber aus, bis die Copy-Eval ihn
+# freigibt; V2_SWITCHES verlangt „gebaut heißt an“. Ein fehlender Schalter gilt als false.
+SOP_V3_SWITCH = "hook.sop_v3"
+SOP_V3_PIN_CHANGES: dict[str, int] = {"hooks": 3}
 # F Forschungsbefund, H Übertragungshypothese, R Produktregel, G gelernte Entscheidung
 # (docs/RESEARCH-CLIPPING-KERN.md, Statusschreibweise).
 ORIGIN_VALUES = ("F", "H", "R", "G")
@@ -387,13 +392,25 @@ class Policy:
             return False
         return _switch_value(self.roh.get("implementation") or {}, "hook.native_spoken") is True
 
+    @property
+    def hook_sop_v3(self) -> bool:
+        """Hooks nach den Agentur-SOPs: Pin ``hooks`` 3 und die SOP-Regeln im Linter (``copy_de.lint_sop``).
+        Nur ab Fassung 2 und nur mit ``implementation.hook.sop_v3`` true; Rollback ist der Schalter allein."""
+        if self.version < 2:
+            return False
+        return _switch_value(self.roh.get("implementation") or {}, SOP_V3_SWITCH) is True
+
     # -- Prompt-Pins ---------------------------------------------------------------------------
     @property
     def prompt_pins(self) -> dict[str, int]:
-        """Prompt-Name zu Version. v1 aus ``V1_PROMPT_PINS``, ab v2 aus dem Abschnitt ``prompts``."""
+        """Prompt-Name zu Version. v1 aus ``V1_PROMPT_PINS``, ab v2 aus dem Abschnitt ``prompts``; mit
+        ``hook_sop_v3`` zusätzlich ``SOP_V3_PIN_CHANGES`` (hooks 3)."""
         if self.version == 1:
             return dict(V1_PROMPT_PINS)
-        return {str(name): int(version) for name, version in self.roh["prompts"].items()}
+        pins = {str(name): int(version) for name, version in self.roh["prompts"].items()}
+        if self.hook_sop_v3:
+            pins.update(SOP_V3_PIN_CHANGES)
+        return pins
 
     def ist_organisatorisch(self, text: str) -> bool:
         if not self.ausschluss.get("organisatorisches_gespraech"):

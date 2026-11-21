@@ -917,6 +917,10 @@ implementation:
     payoff_first: true        # AP5: Suche vom Payoff rückwärts zum Einstieg (gebaut, story_engine.run liest search)
   hook:
     native_spoken: true       # AP6a: gesprochener Einstieg als Originalstelle, Auswahl v2 (gebaut)
+    # A2.1/A2.2: Hooks nach den Agentur-SOPs. true pinnt hooks 3 (editorial.SOP_V3_PIN_CHANGES, der Pin
+    # oben bleibt 2) und schaltet die SOP-Regeln im Linter ein (copy_de.lint_sop). Gebaut, aber aus, bis
+    # die Copy-Eval (workers/eval) es freigibt. Rollback: nur diesen Schalter auf false setzen.
+    sop_v3: false
   trim:
     enabled: true             # AP7: Remove- und Keep-Logik (gebaut); wirksam erst mit der Regel trim.enabled, die bis zum Blindvergleich false bleibt
   cut:

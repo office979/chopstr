@@ -580,7 +580,7 @@ def caption_preset_for(destination: str, extra: dict, aspect: str | None = None)
         return str(extra["caption_preset"])
     if aspect == "9:16":
         return PORTRAIT_WORD_PRESET.get(destination, "reels_words")
-    return captions_de.PLATFORM_DEFAULT_PRESET.get(destination, "linkedin_static")
+    return captions_de.PLATFORM_DEFAULT_PRESET.get(destination, "tiktok_words")
 
 
 def _ensure_local_source(ctx: common.Context, src: dict) -> Path:

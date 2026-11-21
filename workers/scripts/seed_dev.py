@@ -5,7 +5,7 @@ Legt an, falls nicht vorhanden (idempotent, jeder Schritt meldet „angelegt“ 
 - Nutzer ``dev@chopstr.local`` mit Passwort ``chopstr-dev`` (Argon2id über ``argon2-cffi``)
 - Workspace „PLACEMedia“ (Slug ``placemedia``, Plan ``starter``, Tier ``standard``)
 - Mitgliedschaft ``owner``
-- Markenprofil „PLACEMedia“ (Anrede du, Land AT, Standardplattform LinkedIn)
+- Markenprofil „PLACEMedia“ (Anrede du, Land AT, Standardplattform TikTok)
 - Abo ``starter`` im Status ``trialing`` mit 14 Tagen Test
 - ``usage_periods`` für den aktuellen Kalendermonat
 
@@ -101,7 +101,7 @@ def seed(conn, now: datetime | None = None, password_hash: str | None = None) ->
         db.insert(
             conn, "brand_profiles", returning="id",
             workspace_id=workspace_id, name=BRAND_NAME, address="du", country="AT", asr_variant="de",
-            default_platform="linkedin", brand_vocab=["chopstr", "PLACEMedia"],
+            default_platform="tiktok", brand_vocab=["chopstr", "PLACEMedia"],
             ci=db.jsonb(DEFAULT_CI),
         )  # fmt: skip
         report["brand_profile"] = "angelegt"

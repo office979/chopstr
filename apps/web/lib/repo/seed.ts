@@ -73,7 +73,7 @@ export const seedBrandProfile: BrandProfile = {
   protected_terms: ["Jänner", "Marille", "heuer"],
   banned_phrases: ["Game Changer", "revolutionär"],
   tone_adjectives: ["ruhig", "konkret", "belegt"],
-  default_platform: "linkedin",
+  default_platform: "tiktok",
   /* Nicht gesetzt: das Format entscheidet über den Untertitel-Stil (Migration 0007) */
   caption_preset: null,
   ci: {
@@ -132,7 +132,7 @@ export const seedSources: Source[] = [
       audience: "Geschäftsführung im Mittelstand, HR-Leitung",
       wanted: "Zahlen zu Vakanzkosten, klare Aussagen zu Recruiting-Budget",
       exclude: "Smalltalk am Anfang, Werbeblock ab Minute 40",
-      platform: "linkedin",
+      platform: "tiktok",
     },
     status: "ready",
     status_message: null,
@@ -454,7 +454,7 @@ const SEED_CANDIDATES: SeedCandidateSpec[] = [
       audience_fit: [9, "Die meisten Geschäftsführer haben das halt nie ausgerechnet."],
     },
     rubric: { proposal_why: "Die Zahl steht am Anfang, der zweite Sprecher greift sie auf und benennt den Widerspruch zum Budget." },
-    why: "Kernaussage mit konkreter Zahl in 39 Sekunden vollständig, Einstieg direkt mit der Rechnung, keine spätere Relativierung gefunden, passt für LinkedIn.",
+    why: "Kernaussage mit konkreter Zahl in 39 Sekunden vollständig, Einstieg direkt mit der Rechnung, keine spätere Relativierung gefunden, passt für TikTok.",
     model_id: MODEL_CLAUDE,
     prompt_version: "score_clip_v1",
     minutesAgo: 6,

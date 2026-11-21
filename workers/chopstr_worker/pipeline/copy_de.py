@@ -62,7 +62,7 @@ class BrandProfile:
     banned_phrases: list[str] = field(default_factory=list)
     protected_terms: list[str] = field(default_factory=list)  # Austriazismen, die NIE ersetzt werden
     tone_adjectives: list[str] = field(default_factory=list)
-    platform: str = "linkedin"  # "tiktok" | "reels" | "shorts" | "linkedin"
+    platform: str = "tiktok"  # "tiktok" | "reels" | "shorts" | "linkedin"; Short-Form zuerst
     # Trichterstufe für hooks_v3 (TOF Reichweite, MOF Vertrauen, BOF Entscheidung); ohne Angabe TOF
     funnel_stage: str = "TOF"
 

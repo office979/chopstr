@@ -140,7 +140,7 @@ export async function saveBrandProfileAction(_prev: BrandFormState, formData: Fo
     country: pick(formData.get("country"), COUNTRY, "AT"),
     gender_mode: pick(formData.get("gender_mode"), GENDER, "neutral"),
     asr_variant: pick(formData.get("asr_variant"), ASR, "de"),
-    default_platform: pick(formData.get("default_platform"), PLATFORM, "linkedin"),
+    default_platform: pick(formData.get("default_platform"), PLATFORM, "tiktok"),
     caption_preset: optionalPick(formData.get("caption_preset"), PRESET),
     tone_adjectives: toneAdjectives.slice(0, 3),
     brand_vocab: tags(formData, "brand_vocab"),

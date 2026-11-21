@@ -220,7 +220,7 @@ PLATFORM_DEFAULT_PRESET = {"tiktok": "tiktok_words", "reels": "reels_words", "sh
 def preset_for(name_or_platform: str) -> CaptionPreset:
     if name_or_platform in PRESETS:
         return PRESETS[name_or_platform]
-    return PRESETS[PLATFORM_DEFAULT_PRESET.get(name_or_platform, "linkedin_static")]
+    return PRESETS[PLATFORM_DEFAULT_PRESET.get(name_or_platform, "tiktok_words")]
 
 
 def scaled_preset(preset: str | CaptionPreset, out_w: int, out_h: int) -> CaptionPreset:

@@ -849,7 +849,7 @@ def build_why(
     else:
         parts.append("keine spätere Relativierung gefunden")
 
-    label = PLATFORM_LABELS.get(str(platform or "linkedin").lower(), str(platform or "LinkedIn"))
+    label = PLATFORM_LABELS.get(str(platform or "tiktok").lower(), str(platform or "TikTok"))
     if scores["audience_fit"] >= 6:
         parts.append(f"passt für {label}")
     else:
@@ -1601,7 +1601,7 @@ def evaluate_span(
         rubric["learned_weights_reason"] = LEARNED_WEIGHTS_REASON
     gate_passed = all(bool(g["passed"]) for g in gates.values())
     # Die Begründung nennt die Plattform der Clips (``analyze.clip_platform``); ohne sie das Briefing.
-    platform = str(brief.get("clip_platform") or brief.get("platform") or "linkedin")
+    platform = str(brief.get("clip_platform") or brief.get("platform") or "tiktok")
     return CandidateResult(
         segments=segmente,
         start_s=round(sents[first].start, 3),

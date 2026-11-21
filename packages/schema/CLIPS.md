@@ -6,8 +6,9 @@ Vertragsversion: `clips_v1`, `render_plan_v1`.
 
 ## Ablauf
 
-1. **Web, Annehmen im Review**: Nutzer wählt Ziele (Standard: alle vier; LinkedIn immer mit dabei, wenn
-   Markenprofil `default_platform = linkedin`). Pro Ziel eine `clips`-Zeile:
+1. **Web, Annehmen im Review**: Nutzer wählt Ziele (Short-Form zuerst: Spaltenvorgabe `tiktok` seit Migration
+   0022; die Standardplattform des Markenprofils ist immer dabei, LinkedIn nur, wenn ausdrücklich gewählt). Pro Ziel
+   eine `clips`-Zeile:
    `candidate_id`, `source_id`, `platform`, `destination = platform`, `aspect` (tiktok/reels/shorts `9:16`,
    linkedin `4:5`), `composition = candidate.segments`, `title_card = rubric.suggested_title_card` (oder leer),
    `ad_label` (aus Briefing `is_ad`, Land: DE `Anzeige`, AT/CH `Werbung`), `status = 'draft'`, `created_by`.

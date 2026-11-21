@@ -57,7 +57,7 @@ from chopstr_worker.residency import Tenant
 RATING_SHEET = "blind_compare_raster_v2"
 DEFAULT_SEED = 1729
 DEFAULT_K = 5
-DEFAULT_BRIEF: dict[str, Any] = {"platform": "linkedin"}
+DEFAULT_BRIEF: dict[str, Any] = {"platform": "tiktok"}
 OVERRIDES_ENV = "CHOPSTR_BLIND_OVERRIDES"
 NOTE = "beobachtend, kein A/B-Test, kein Viralitätsmaß"
 PREFERENCES = ("A", "B", "gleich", "beide_unbrauchbar")
@@ -639,7 +639,7 @@ def run_variant(
     Ergebnis und ClipCandidate gehören über ``(first_sent, last_sent)`` zusammen; jeder ClipCandidate
     entsteht aus genau seinem Ergebnis."""
     calls: list[dict] = []
-    platform = str(brief.get("platform") or "linkedin")
+    platform = str(brief.get("platform") or "tiktok")
     settings = dataclasses.replace(config.settings(), languagetool_url="")
     with policy_variant(variant) as pol:
         llm = (llm_factory or _default_llm)(provider, settings, calls.append)

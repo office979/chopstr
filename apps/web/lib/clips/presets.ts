@@ -172,7 +172,7 @@ export function captionPresetFor(
 ): CaptionPreset {
   if (brand?.caption_preset && brand.default_platform === platform && brand.caption_preset in PRESETS) return brand.caption_preset;
   if (aspect === "9:16") return PORTRAIT_WORD_PRESET[platform] ?? "reels_words";
-  return PLATFORM_DEFAULT_PRESET[platform] ?? "linkedin_static";
+  return PLATFORM_DEFAULT_PRESET[platform] ?? "tiktok_words";
 }
 
 export const PLATFORM_ASPECT: Record<Platform, Aspect> = {
@@ -219,7 +219,7 @@ export const ASPECT_SIZE: Record<Aspect, { width: number; height: number }> = {
 export function presetFor(nameOrPlatform: CaptionPreset | Platform | string): CaptionPresetDef {
   if (nameOrPlatform in PRESETS) return PRESETS[nameOrPlatform as CaptionPreset];
   const byPlatform = PLATFORM_DEFAULT_PRESET[nameOrPlatform as Platform];
-  return PRESETS[byPlatform ?? "linkedin_static"];
+  return PRESETS[byPlatform ?? "tiktok_words"];
 }
 
 /* Zeichen pro Zeile aus Schriftgröße (18 bei 78 px auf 900 px Breite) */

@@ -144,7 +144,7 @@ export const SCHEMAS: Record<string, JsonSchema> = {
       country: { type: "string", enum: ["DE", "AT", "CH"], default: "AT" },
       gender_mode: { type: "string", enum: ["neutral", "paarform", "doppelpunkt", "stern", "keine"], default: "neutral" },
       asr_variant: { type: "string", enum: ["de", "de-CH"], default: "de" },
-      default_platform: { type: "string", enum: PLATFORMS, default: "linkedin" },
+      default_platform: { type: "string", enum: PLATFORMS, default: "tiktok" },
       /* Ohne Angabe (oder null) entscheidet das Format über den Untertitel-Stil (Migration 0007) */
       caption_preset: {
         type: "string",

@@ -28,7 +28,7 @@ export const POST = apiRoute("write", async (request: NextRequest, { auth }) => 
     country: body.country ?? "AT",
     gender_mode: body.gender_mode ?? "neutral",
     asr_variant: body.asr_variant ?? "de",
-    default_platform: body.default_platform ?? "linkedin",
+    default_platform: body.default_platform ?? "tiktok",
     /* Ohne Angabe bleibt es NULL: keine ausdrückliche Wahl, das Format entscheidet (Migration 0007) */
     caption_preset: body.caption_preset ?? null,
     tone_adjectives: tags(body.tone_adjectives).slice(0, 3),

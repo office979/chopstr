@@ -348,7 +348,7 @@ def propose(
         audience=brief.get("audience"),
         wanted=brief.get("wanted"),
         exclude=brief.get("exclude"),
-        platform=brief.get("platform", "linkedin"),
+        platform=brief.get("platform", "tiktok"),
         chapter_numbered=numbered(chapter),
     )
     out = llm.structured(system_prompt(), user, PROPOSE_SCHEMA, p.tool or "propose_moments", p.prompt_version, job_type="llm_propose")
@@ -472,7 +472,7 @@ def _propose_v2(
         audience=brief.get("audience"),
         wanted=brief.get("wanted"),
         exclude=brief.get("exclude"),
-        platform=brief.get("platform", "linkedin"),
+        platform=brief.get("platform", "tiktok"),
         policy=propose_policy_text(pol),
         episode_overview=mask_delimiters(json.dumps(overview, ensure_ascii=False, sort_keys=True)) if overview else None,
         seeds=mask_delimiters(seed_lines(chapter, seeds)),
@@ -710,7 +710,7 @@ def score(span_sents: list[Sentence], brief: dict[str, Any], llm: LLM) -> dict:
         candidate = _CLIP_DELIMITER.sub(lambda m: f"[{m.group(1)}clip]", candidate)
     user = p.render(
         audience=brief.get("audience"),
-        platform=brief.get("platform", "linkedin"),
+        platform=brief.get("platform", "tiktok"),
         candidate_numbered=candidate,
         policy=pol.als_prompt_text(),
     )
@@ -778,7 +778,7 @@ def compare(a_sents: list[Sentence], b_sents: list[Sentence], brief: dict[str, A
 
     user = p.render(
         audience=brief.get("audience"),
-        platform=brief.get("platform", "linkedin"),
+        platform=brief.get("platform", "tiktok"),
         policy=policy.als_prompt_text(),
         clip_a=block(a_sents),
         clip_b=block(b_sents),

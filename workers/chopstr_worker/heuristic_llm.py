@@ -758,7 +758,7 @@ def write_post_caption(user: str) -> dict:
     clip = clip_text_of(user)
     address = address_of(user)
     m = _PLATFORM.search(user.split("CLIP:", 1)[0])
-    platform = m.group(1).lower() if m else "linkedin"
+    platform = m.group(1).lower() if m else "tiktok"
     hook = (_HOOK_ONSCREEN.search(user.split("CLIP:", 1)[0]) or [None, ""])[1]
     hook = hook.strip() if isinstance(hook, str) else ""
     sents = [x for x in sentences_of(clip) if x != hook] or [clip or "-"]

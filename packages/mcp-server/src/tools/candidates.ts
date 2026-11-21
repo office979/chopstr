@@ -84,14 +84,14 @@ export function registerCandidateTools({ server, api }: ToolContext): void {
         "Nimmt einen Kandidaten an. chopstr legt je Zielplattform einen Clip an und startet den Render. Schreibende Aktion: nur mit confirm: true, sonst Vorschau. Vorher die Rubrik, Gates und Story-Graph-Hinweise prüfen (list_candidates).",
       inputSchema: {
         candidate_id: idSchema.describe("ID des Kandidaten"),
-        platforms: z.array(platformSchema).min(1).optional().describe("Zielplattformen, Standard alle vier; die Standardplattform des Markenprofils ist immer dabei"),
+        platforms: z.array(platformSchema).min(1).optional().describe("Zielplattformen, Standard TikTok, Reels und Shorts (LinkedIn nur ausdrücklich); die Standardplattform des Markenprofils ist immer dabei"),
         confirm: confirmSchema,
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async ({ candidate_id, platforms, confirm }) =>
       guarded(async () => {
-        const targets = platforms ?? ["tiktok", "reels", "shorts", "linkedin"];
+        const targets = platforms ?? ["tiktok", "reels", "shorts"];
         if (confirm !== true) {
           return previewResult("accept_candidate", `Kandidat ${candidate_id} annehmen und Clips für ${targets.join(", ")} anlegen und rendern.`, {
             candidate_id,

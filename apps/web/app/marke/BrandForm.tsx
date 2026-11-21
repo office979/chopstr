@@ -74,7 +74,7 @@ export function BrandForm({
   /* Die Beispielszene reagiert auf die Eingaben, deshalb liegen die dafür nötigen Werte im
    * Zustand und nicht nur im Formular. Alles andere bleibt bei defaultValue: es zeigt sich
    * ohnehin erst im fertigen Clip. */
-  const [plattform, setPlattform] = useState<Platform>(profile?.default_platform ?? "linkedin");
+  const [plattform, setPlattform] = useState<Platform>(profile?.default_platform ?? "tiktok");
   const [preset, setPreset] = useState<string>(profile?.caption_preset ?? "");
   const [highlight, setHighlight] = useState(style.highlight_color ?? "");
   const [bbName, setBbName] = useState(ci.lower_third?.name ?? "");
@@ -203,10 +203,10 @@ export function BrandForm({
                 value={plattform}
                 onChange={(e) => setPlattform(e.target.value as Platform)}
               >
-                <option value="linkedin">LinkedIn</option>
                 <option value="tiktok">TikTok</option>
                 <option value="reels">Instagram Reels</option>
                 <option value="shorts">YouTube Shorts</option>
+                <option value="linkedin">LinkedIn</option>
               </Select>
             </Field>
 
@@ -273,7 +273,7 @@ export function BrandForm({
             <p className="mb-2 text-sm font-medium text-text">So sieht ein Clip aus</p>
             <Beispielszene
               plattform={plattform}
-              preset={(preset || undefined) as CaptionPreset | undefined ?? "linkedin_static"}
+              preset={(preset || undefined) as CaptionPreset | undefined ?? "tiktok_words"}
               hookText={style.hook_overlay?.[plattform] ?? plattform !== "linkedin" ? "Der teuerste Fehler" : null}
               bauchbinde={lowerThird ? { name: bbName, role: bbRolle } : null}
               highlightColor={highlight || undefined}

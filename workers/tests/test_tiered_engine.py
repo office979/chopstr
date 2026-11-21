@@ -527,3 +527,21 @@ def test_segments_reach_clip_candidate_when_switched_on(monkeypatch):
     c = next(c for c in report.candidates if c.first_sent == 20)
     ms = c.rubric["tiered"]["multi_segment"]
     assert ms["applied"] is False and "umsortiert" in ms["note"] and len(c.segments) == 1
+
+
+def test_bare_rejection_without_texts_is_a_valid_answer():
+    """Review: eine Ablehnung nur mit keep und Grund darf nicht als Schemafehler in den lokalen Editor fallen."""
+    from chopstr_worker.providers_llm import LLM as RealLLM
+
+    assert tiered_engine.EDITOR_SCHEMA["required"] == ["keep"]
+    RealLLM._validate({"keep": False, "reject_reason": "needs_context"}, tiered_engine.EDITOR_SCHEMA)
+
+
+def test_heuristic_run_still_backfills(monkeypatch):
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    monkeypatch.setenv("LLM_PROVIDER", "local-heuristic")
+    config.reload()
+    llm = LLM(Tenant(id="ws", tier="standard"), s=config.settings())
+    words = make_words(long_script(3, sentences_per_chapter=12, sentence_s=6.0))
+    report = tiered_engine.run(words, BRIEF, {}, {"seeds": [30, 200]}, llm, policy=editorial.load(2))
+    assert report.search["tiered"]["backfill"]["stopped"] != "budget_exhausted"

@@ -158,7 +158,8 @@ EDITOR_SCHEMA: dict[str, Any] = {
         "sensitive_topic": {"type": "boolean"},
         "why": {"type": "string"},
     },
-    "required": ["keep", "start_word", "end_word", "hook", "title", "post_text", "scores"],
+    # Nur keep ist Pflicht: eine Ablehnung ohne Texte ist gültig; fehlende Felder bei keep true fängt apply_editor ab
+    "required": ["keep"],
 }
 
 
@@ -819,13 +820,13 @@ def run(
             ed2, entry = repair(c, bno, win, f"Gate: {finding}", prev, "gate")
             if ed2 is not None:
                 res2 = evaluate(ed2, c)
-                if isinstance(res2, story_engine.CandidateResult) and repair_finding(res2) is None:
+                if isinstance(res2, story_engine.CandidateResult) and res2.gate_passed:
                     res, ed = res2, ed2
                 else:
                     entry["result"] = "failed"
                     entry["detail"] = repair_finding(res2) if isinstance(res2, story_engine.CandidateResult) else str(_obj(res2).get("reason"))
         if ed.get("repaired"):
-            ok = isinstance(res, story_engine.CandidateResult) and repair_finding(res) is None
+            ok = isinstance(res, story_engine.CandidateResult) and res.gate_passed
             info["editor"]["repaired"] += int(ok)
             for e in info["editor"].get("repairs") or []:
                 if (e["first_sent"], e["last_sent"], e["result"]) == (c["first_sent"], c["last_sent"], "proposed"):
@@ -870,7 +871,7 @@ def run(
         # Vorschläge des Vorfilters nachschieben, solange Budget da ist (in Rangfolge, nicht nach Block).
         info["backfill"] = {"enabled": bool(cfg["backfill"]), "added": 0, "stopped": None}
         while cfg["backfill"] and rest and sum(1 for r in raw_cands if r.gate_passed) < n_target:
-            if state["editor_stop"] or (ledger is not None and ledger.exhausted()):
+            if (state["editor_stop"] and not heuristic) or (ledger is not None and ledger.exhausted()):
                 info["backfill"]["stopped"] = "budget_exhausted"
                 break
             if info["backfill"]["added"] >= int(cfg["max_backfill"]):

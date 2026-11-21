@@ -695,7 +695,7 @@ def scorecard(rdir: Path) -> dict[str, Any]:
     eur = float(costs.get("eur") or 0.0) + float(jc.get("eur") or 0.0)
     tokens = int(costs.get("tokens") or 0) + int(jc.get("tokens") or 0)
     # Abo-Läufe (claude-cli) kosten 0 €; das API-Äquivalent zeigt, was derselbe Lauf zum Listenpreis kosten würde
-    api_eq = float(costs.get("eur_api_equivalent", eur) or 0.0) + float(jc.get("eur_api_equivalent", jc.get("eur") or 0.0) or 0.0)
+    api_eq = float(costs.get("eur_api_equivalent", costs.get("eur")) or 0.0) + float(jc.get("eur_api_equivalent", jc.get("eur") or 0.0) or 0.0)
     notes = list(dict.fromkeys([*(costs.get("notes") or []), *(jc.get("notes") or [])]))
     return {
         "version": "train_scorecard_v1", "run_id": meta["run_id"], "job_id": meta["job_id"], "created_at": meta["created_at"],

@@ -434,3 +434,24 @@ def test_claude_cli_extra_args_from_env_setting():
     s = settings(claude_cli_args="--flag-a 'wert mit leerzeichen'")
     providers_llm.LLM(STD, provider="claude-cli", s=s, cli_runner=runner).structured("S", "U", SCHEMA, "answer", "p_v1")
     assert seen["argv"][-2:] == ["--flag-a", "wert mit leerzeichen"]
+
+
+def test_schema_retry_counted_once_and_failed_second_attempt_is_booked():
+    calls = []
+
+    def runner(argv, prompt):
+        calls.append(1)
+        inner = "kein JSON" if len(calls) == 1 else '{"ok": true}'
+        return json.dumps({"type": "result", "result": inner, "usage": {"input_tokens": 5, "output_tokens": 3}})
+
+    ledger = costlog.RunLedger(s=settings())
+    providers_llm.LLM(STD, provider="claude-cli", s=settings(), cost_sink=ledger, cli_runner=runner).structured("S", "U", SCHEMA, "answer", "p_v1")
+    assert ledger.summary()["schema_retries"] == 1 and len(ledger.entries) == 2
+
+    def never(argv, prompt):
+        return json.dumps({"type": "result", "result": "nie", "usage": {"input_tokens": 5, "output_tokens": 7}})
+
+    ledger = costlog.RunLedger(s=settings())
+    with pytest.raises(providers_llm.SchemaError):
+        providers_llm.LLM(STD, provider="claude-cli", s=settings(), cost_sink=ledger, cli_runner=never).structured("S", "U", SCHEMA, "answer", "p_v1")
+    assert len(ledger.entries) == 2 and ledger.summary()["tokens_out"] == 14

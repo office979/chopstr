@@ -140,7 +140,7 @@ def anthropic_params(
     }
 
 
-def parse_anthropic_message(msg: dict[str, Any], tool_name: str | None = None) -> tuple[dict, dict[str, int]]:
+def parse_anthropic_message(msg: dict[str, Any], tool_name: str | None = None, required: Sequence[str] = ()) -> tuple[dict, dict[str, int]]:
     """Tool-Eingabe und Tokens aus einer Messages-Antwort. ``in`` sind die nicht gecachten Eingabetokens."""
     blocks = msg.get("content") or []
     out = next(
@@ -153,7 +153,7 @@ def parse_anthropic_message(msg: dict[str, Any], tool_name: str | None = None) -
         # gleiche Parsing wie für die CLI: JSON aus dem Text, auch in einem Codeblock oder mit Vor- und Nachtext.
         text = "\n".join(str(b.get("text") or "") for b in blocks if b.get("type") == "text")
         try:
-            out = extract_json_object(text)
+            out = extract_json_object(text, required)
         except SchemaError:
             raise SchemaError(f"Kein Tool-Output vom Modell erhalten (stop_reason={msg.get('stop_reason')})", usage) from None
     return out, usage
@@ -426,7 +426,7 @@ class LLM:
                     out[n] = RuntimeError(f"Batch-Eintrag r{n} ohne Ergebnis: {(res or {}).get('error') or 'fehlt'}")
                     continue
                 try:
-                    obj, usage = parse_anthropic_message(res["message"], it["tool_name"])
+                    obj, usage = parse_anthropic_message(res["message"], it["tool_name"], it["schema"].get("required") or ())
                     self._validate(obj, it["schema"])
                 except SchemaError as exc:
                     out[n] = exc
@@ -487,9 +487,17 @@ class LLM:
         self._sink(model, prompt_version, job_type, stage, {**first.usage, "schema_retry": True})
         hint = CORRECTION_HINT.format(error=str(first)[:200], required=", ".join(schema.get("required") or []) or "-")
         log.warning("llm provider=%s model=%s prompt=%s unlesbare Antwort, ein Wiederholversuch: %s", self.provider, model, prompt_version, first)
-        out, usage = self._call(system, f"{user}\n\n{hint}", schema, tool_name, model, policy_block, cache_prefix)
-        self._validate(out, schema)
-        return out, {**usage, "schema_retry": True}
+        try:
+            out, usage = self._call(system, f"{user}\n\n{hint}", schema, tool_name, model, policy_block, cache_prefix)
+            try:
+                self._validate(out, schema)
+            except SchemaError as exc:
+                raise SchemaError(str(exc), usage) from None
+        except SchemaError as exc:
+            # Auch der zweite Versuch kostet Tokens: ins Kostenbuch, dann an den Aufrufer
+            self._sink(model, prompt_version, job_type, stage, {**exc.usage, "schema_retry": True})
+            raise
+        return out, usage
 
     def _call(self, system, user, schema, tool_name, model, policy_block, cache_prefix):
         if self.provider == ANTHROPIC_PROVIDER:
@@ -565,7 +573,7 @@ class LLM:
         """Messages API mit erzwungenem Tool und Cache-Marken; der Host läuft durch den Residency-Guard."""
         body = anthropic_params(system, user, schema, tool_name, model, self.max_tokens, self.temperature, policy_block, cache_prefix)
         data = anthropic_request(self.s, "POST", "/v1/messages", body, transport=self._transport)
-        return parse_anthropic_message(data, tool_name)
+        return parse_anthropic_message(data, tool_name, schema.get("required") or ())
 
     def _claude_cli(self, system, user, schema, tool_name, model):
         """Nur Entwicklung: Prompt an ``claude -p``, Antwort als JSON. Kosten 0 € (``dev_subscription``)."""

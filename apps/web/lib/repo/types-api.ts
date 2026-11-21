@@ -196,6 +196,13 @@ export interface WindowFeedback {
   fetched_at: string;
 }
 
+/* Letzte Messung mit Zahlen und letzter Versuch (auch fehlgeschlagen) je Publikation, für „Gepostet“ */
+export interface SnapshotState {
+  publication_id: string;
+  latest: MetricSnapshot | null;
+  last: MetricSnapshot | null;
+}
+
 /* Publikation aus einem eingefügten Link (status manual, tracking link) */
 export interface LinkPublicationCreateInput {
   clip_id: string;

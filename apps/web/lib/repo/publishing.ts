@@ -92,6 +92,9 @@ export function toPublication(r: Row): Publication {
     created_by: (r.created_by as string | null) ?? null,
     created_at: iso(r.created_at) ?? "",
     tracking: (r.tracking as Publication["tracking"]) ?? "oauth",
+    tracking_until: iso(r.tracking_until),
+    next_snapshot_at: iso(r.next_snapshot_at),
+    link_check: json<Record<string, unknown> | null>(r.link_check, null),
   };
 }
 

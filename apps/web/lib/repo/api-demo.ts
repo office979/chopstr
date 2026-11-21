@@ -286,6 +286,15 @@ export const apiDemoRepo: ApiRepo = {
     return { ...p };
   },
 
+  async listSnapshotStates(publicationIds) {
+    const rows = await this.listMetricSnapshots(publicationIds);
+    return publicationIds.map((id) => {
+      const own = rows.filter((s) => s.publication_id === id).sort((a, b) => a.fetched_at.localeCompare(b.fetched_at));
+      const ok = own.filter((s) => !s.error && (s.views != null || s.likes != null || s.comments != null));
+      return { publication_id: id, latest: ok.at(-1) ?? null, last: own.at(-1) ?? null };
+    });
+  },
+
   async latestMetricSnapshot(publicationId) {
     const rows = await this.listMetricSnapshots([publicationId]);
     const withNumbers = rows.filter((s) => !s.error && (s.views != null || s.likes != null || s.comments != null));

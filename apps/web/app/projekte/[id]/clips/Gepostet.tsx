@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
-import { formatDate } from "@/lib/format";
 import { PLATFORM_LABELS } from "@/lib/clips/labels";
+import { publicationRow, type RowFeedback, type RowPublication, type RowSnapshot } from "@/lib/publishing/publication-row";
 import type { Platform } from "@/lib/repo/types";
 
 /* Was aus einem geposteten Clip geworden ist, und wie die Zahlen hereinkommen.
@@ -19,30 +19,22 @@ import type { Platform } from "@/lib/repo/types";
  * Hier ist der fehlende Teil: eintragen, dass gepostet wurde, und danach die Zahlen nachtragen.
  * Von Hand, weil chopstr nicht selbst postet - das ist eine bewusste Entscheidung des Produkts
  * und keine Lücke.
+ *
+ * Je Publikation eine Zeile (lib/publishing/publication-row.ts): Plattform mit Link zum Beitrag, die
+ * letzte Zahl mit Zeitpunkt rechts und der Status in Klartext, ob und bis wann gemessen wird. Nach drei
+ * Zeilen klappt die Liste zu.
  */
 
-interface Publikation {
-  id: string;
-  platform: string;
-  status: string;
-  external_url: string | null;
-  published_at: string | null;
-  created_at: string;
+type Publikation = RowPublication;
+type Rueckmeldung = RowFeedback & { follows_per_1k: number | null };
+interface Messstand {
+  publication_id: string;
+  latest: RowSnapshot | null;
+  last: RowSnapshot | null;
 }
 
-/* Eingetragene Links speichern die Plattform des Links (youtube, x …), nicht das Schnittformat */
-const LINK_PLATTFORMEN: Record<string, string> = { youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram", x: "X", linkedin: "LinkedIn" };
-
-function plattformName(p: string): string {
-  return PLATFORM_LABELS[p as Platform] ?? LINK_PLATTFORMEN[p] ?? p;
-}
-
-interface Rueckmeldung {
-  publication_id: string | null;
-  views: number | null;
-  follows: number | null;
-  follows_per_1k: number | null;
-}
+/* So viele Zeilen sind sofort sichtbar, der Rest hinter „Alle anzeigen“ */
+const SICHTBAR = 3;
 
 interface Verbindung {
   id: string;
@@ -74,6 +66,11 @@ export function Gepostet({
 }) {
   const [publikationen, setPublikationen] = useState<Publikation[]>([]);
   const [zahlen, setZahlen] = useState<Rueckmeldung[]>([]);
+  const [messstaende, setMessstaende] = useState<Messstand[]>([]);
+  const [alle, setAlle] = useState(false);
+  const [stoppt, setStoppt] = useState<string | null>(null);
+  /* Zeitpunkt des letzten Ladens: danach richtet sich, ob eine Messdauer schon vorbei ist */
+  const [jetzt, setJetzt] = useState(0);
   const [verbindungen, setVerbindungen] = useState<Verbindung[]>([]);
   const [geladen, setGeladen] = useState(false);
   const [offen, setOffen] = useState(false);
@@ -91,10 +88,12 @@ export function Gepostet({
   const laden = useCallback(async () => {
     try {
       const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/publish`);
-      const d = (await res.json()) as { publications?: Publikation[]; feedback?: Rueckmeldung[]; connections?: Verbindung[] };
+      const d = (await res.json()) as { publications?: Publikation[]; feedback?: Rueckmeldung[]; snapshots?: Messstand[]; connections?: Verbindung[] };
       if (res.ok) {
         setPublikationen(d.publications ?? []);
         setZahlen(d.feedback ?? []);
+        setMessstaende(d.snapshots ?? []);
+        setJetzt(Date.now());
         setVerbindungen(d.connections ?? []);
       }
     } catch {
@@ -140,7 +139,7 @@ export function Gepostet({
       if (!res.ok) throw new Error(d.error ?? "Das hat nicht geklappt");
       setOffen(false);
       setLink("");
-      await laden();
+      void laden();
     } catch (err) {
       setFehler(err instanceof Error ? err.message : "Das hat nicht geklappt");
     } finally {
@@ -160,11 +159,16 @@ export function Gepostet({
         body: JSON.stringify({ url: verfolgLink.trim() }),
       });
       const d = (await res.json()) as { error?: string; summary?: string[]; check?: { notes?: string[] } };
-      setLinkHinweise(d.check?.notes ?? []);
-      if (!res.ok) throw new Error(d.error ?? "Das hat nicht geklappt");
+      const notes = d.check?.notes ?? [];
+      if (!res.ok) {
+        setLinkHinweise(notes.filter((n) => n !== d.error));
+        throw new Error(d.error ?? "Das hat nicht geklappt");
+      }
+      setLinkHinweise(notes);
       setErgebnis(d.summary ?? []);
       setVerfolgLink("");
-      await laden();
+      /* Liste im Hintergrund neu laden: das Ergebnis steht schon, der Knopf soll nicht weiter „Wird geprüft“ zeigen */
+      void laden();
     } catch (err) {
       setFehler(err instanceof Error ? err.message : "Das hat nicht geklappt");
     } finally {
@@ -186,7 +190,7 @@ export function Gepostet({
       if (!res.ok) throw new Error(d.error ?? "Das hat nicht geklappt");
       setZahlenFuer(null);
       setEingabe({});
-      await laden();
+      void laden();
     } catch (err) {
       setFehler(err instanceof Error ? err.message : "Das hat nicht geklappt");
     } finally {
@@ -194,69 +198,114 @@ export function Gepostet({
     }
   };
 
+  const nichtMehrMessen = async (id: string) => {
+    setStoppt(id);
+    try {
+      const res = await fetch(`/api/publishing/publications/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tracking: "off" }),
+      });
+      if (res.ok) await laden();
+    } finally {
+      setStoppt(null);
+    }
+  };
+
   if (!geladen) return null;
 
+  const zeilen = publikationen.map((p) =>
+    publicationRow(
+      p,
+      messstaende.find((m) => m.publication_id === p.id),
+      zahlen.find((f) => f.publication_id === p.id),
+      jetzt,
+    ),
+  );
+  const sichtbar = alle ? zeilen : zeilen.slice(0, SICHTBAR);
+
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-      {publikationen.length === 0 ? (
-        canPublish && (
-          <button
-            type="button"
-            onClick={() => setOffen(true)}
-            className="text-xs text-text-2 underline underline-offset-4 hover:text-text"
-          >
-            Als gepostet eintragen
-          </button>
-        )
-      ) : (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-          {publikationen.map((p) => {
-            const z = zahlen.find((f) => f.publication_id === p.id);
+    <div className="flex w-full flex-col gap-2">
+      {zeilen.length > 0 && (
+        <ul className="flex flex-col divide-y divide-line text-sm">
+          {sichtbar.map((z) => {
+            const p = publikationen.find((x) => x.id === z.id) as Publikation;
             return (
-              <span key={p.id} className="flex items-center gap-2">
-                <span className="text-text-2">
-                  Gepostet auf {plattformName(p.platform)}
-                  {p.published_at ? ` am ${formatDate(p.published_at)}` : ""}
-                </span>
-                {z && z.views != null ? (
-                  <span className="text-text">
-                    {z.views.toLocaleString("de-AT")} Aufrufe
-                    {z.follows != null ? `, ${z.follows.toLocaleString("de-AT")} neue Folgende` : ""}
-                  </span>
-                ) : (
-                  canPublish && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setZahlenFuer(p);
-                        setEingabe({});
-                      }}
-                      className="text-text-2 underline underline-offset-4 hover:text-text"
-                    >
-                      Zahlen eintragen
-                    </button>
-                  )
+              <li key={z.id} className="flex items-start justify-between gap-3 py-2">
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  {z.url ? (
+                    <a href={z.url} target="_blank" rel="noopener noreferrer" className="truncate text-text underline-offset-4 hover:underline">
+                      {z.platform}
+                    </a>
+                  ) : (
+                    <span className="text-text">{z.platform}</span>
+                  )}
+                  {z.status && <span className={z.tone === "attention" ? "text-xs text-attention" : "text-xs text-text-2"}>{z.status}</span>}
+                  {canPublish && (z.canEnterNumbers || z.canStop) && (
+                    <span className="flex flex-wrap gap-x-3 text-xs">
+                      {z.canEnterNumbers && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setZahlenFuer(p);
+                            setEingabe({});
+                          }}
+                          className="text-text-2 underline underline-offset-4 hover:text-text"
+                        >
+                          Zahlen eintragen
+                        </button>
+                      )}
+                      {z.canStop && (
+                        <button
+                          type="button"
+                          onClick={() => void nichtMehrMessen(z.id)}
+                          disabled={stoppt === z.id}
+                          className="text-text-2 underline underline-offset-4 hover:text-text disabled:opacity-60"
+                        >
+                          {stoppt === z.id ? "Wird beendet" : "Nicht mehr messen"}
+                        </button>
+                      )}
+                    </span>
+                  )}
+                </div>
+                {z.number && (
+                  <div className="flex shrink-0 flex-col items-end text-right">
+                    <span className="tabular-nums text-text">{z.number}</span>
+                    {z.numberAt && <span className="text-xs text-text-2">{z.numberAt}</span>}
+                  </div>
                 )}
-              </span>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
 
-      {canPublish && (
-        <button
-          type="button"
-          onClick={() => {
-            setLinkOffen(true);
-            setErgebnis(null);
-            setLinkHinweise([]);
-            setFehler(null);
-          }}
-          className="text-xs text-text-2 underline underline-offset-4 hover:text-text"
-        >
-          Link verfolgen
-        </button>
-      )}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+        {zeilen.length > SICHTBAR && (
+          <button type="button" onClick={() => setAlle((a) => !a)} className="text-text-2 underline underline-offset-4 hover:text-text">
+            {alle ? "Weniger anzeigen" : `Alle anzeigen (${zeilen.length})`}
+          </button>
+        )}
+        {zeilen.length === 0 && canPublish && (
+          <button type="button" onClick={() => setOffen(true)} className="text-text-2 underline underline-offset-4 hover:text-text">
+            Als gepostet eintragen
+          </button>
+        )}
+        {canPublish && (
+          <button
+            type="button"
+            onClick={() => {
+              setLinkOffen(true);
+              setErgebnis(null);
+              setLinkHinweise([]);
+              setFehler(null);
+            }}
+            className="text-text-2 underline underline-offset-4 hover:text-text"
+          >
+            Link verfolgen
+          </button>
+        )}
+      </div>
 
       <Modal
         open={linkOffen}
@@ -267,7 +316,7 @@ export function Gepostet({
         <div className="flex flex-col gap-4">
           <label className="flex flex-col gap-1.5">
             <span className="text-sm text-text">Link einfügen</span>
-            <span className="text-xs text-text-3">YouTube, TikTok, Instagram, X oder LinkedIn</span>
+            <span className="text-sm text-text-2">YouTube, TikTok, Instagram, X oder LinkedIn</span>
             <input
               type="url"
               value={verfolgLink}
@@ -284,7 +333,7 @@ export function Gepostet({
             </ul>
           )}
           {linkHinweise.length > 0 && (
-            <ul className="flex flex-col gap-1 text-xs text-text-3">
+            <ul className="flex flex-col gap-1 text-sm text-text-2">
               {linkHinweise.map((h) => (
                 <li key={h}>{h}</li>
               ))}
@@ -292,12 +341,18 @@ export function Gepostet({
           )}
           {fehler && <p className="text-sm text-attention">{fehler}</p>}
           <div className="flex flex-wrap justify-end gap-2">
-            <Button variant="ghost" onClick={() => setLinkOffen(false)} disabled={busy}>
-              {ergebnis ? "Schließen" : "Abbrechen"}
-            </Button>
-            <Button onClick={() => void linkVerfolgen()} disabled={busy || !verfolgLink.trim()}>
-              {busy ? "Wird geprüft" : "Link prüfen und verfolgen"}
-            </Button>
+            {ergebnis ? (
+              <Button onClick={() => setLinkOffen(false)}>Fertig</Button>
+            ) : (
+              <>
+                <Button variant="ghost" onClick={() => setLinkOffen(false)} disabled={busy}>
+                  Abbrechen
+                </Button>
+                <Button onClick={() => void linkVerfolgen()} disabled={busy || !verfolgLink.trim()}>
+                  {busy ? "Wird geprüft" : "Link prüfen und verfolgen"}
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </Modal>
@@ -311,7 +366,7 @@ export function Gepostet({
         <div className="flex flex-col gap-4">
           <label className="flex flex-col gap-1.5">
             <span className="text-sm text-text">Link zum Beitrag</span>
-            <span className="text-xs text-text-3">Freiwillig. Hilft, ihn später wiederzufinden.</span>
+            <span className="text-sm text-text-2">Freiwillig. Mit Link prüft chopstr den Beitrag und holt die Zahlen, wo das geht.</span>
             <input
               type="url"
               value={link}

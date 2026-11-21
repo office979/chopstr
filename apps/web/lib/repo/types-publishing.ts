@@ -97,6 +97,9 @@ export interface Publication {
   created_at: string;
   /* Migration 0019: woher die Messwerte kommen; fehlt die Spalte, gilt oauth */
   tracking?: "oauth" | "link" | "off";
+  tracking_until?: string | null;
+  next_snapshot_at?: string | null;
+  link_check?: Record<string, unknown> | null;
 }
 
 export interface PublicationInput {

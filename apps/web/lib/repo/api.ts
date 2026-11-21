@@ -9,6 +9,7 @@ import type {
   ApiKeyLookup,
   LinkPublicationCreateInput,
   LinkPublicationCreateResult,
+  SnapshotState,
   MetricSnapshot,
   OutboxEvent,
   PlatformConnectionSummary,
@@ -64,6 +65,8 @@ export interface ApiRepo {
   listMetricSnapshots(publicationIds: string[]): Promise<MetricSnapshot[]>;
   /* Jüngste Messung mit Zahlen (ohne Fehler), eine Zeile; null ohne Messung oder ohne Migration 0019 */
   latestMetricSnapshot(publicationId: string): Promise<MetricSnapshot | null>;
+  /* Je Publikation die letzte Messung mit Zahlen und der letzte Versuch, je eine Zeile (distinct on) */
+  listSnapshotStates(publicationIds: string[]): Promise<SnapshotState[]>;
   listWindowFeedback(publicationIds: string[]): Promise<WindowFeedback[]>;
   setPublicationWorkflow(id: string, workflowId: string | null): Promise<void>;
   /* Upload per API: Quelle war `uploading`, tusd-Hook ergänzt die Datei */
@@ -528,6 +531,31 @@ export const apiPostgresRepo: ApiRepo = {
       });
     } catch (error) {
       if (isMissingSchema(error)) return null;
+      throw error;
+    }
+  },
+
+  async listSnapshotStates(publicationIds) {
+    if (!publicationIds.length) return [];
+    const session = await currentSession();
+    try {
+      return await withContext(session, async (tx) => {
+        const [latest, last] = await Promise.all([
+          tx`select distinct on (publication_id) * from metric_snapshots
+             where workspace_id = ${session.workspaceId} and publication_id in ${tx(publicationIds)} and error is null
+               and (views is not null or likes is not null or comments is not null)
+             order by publication_id, fetched_at desc`,
+          tx`select distinct on (publication_id) * from metric_snapshots
+             where workspace_id = ${session.workspaceId} and publication_id in ${tx(publicationIds)}
+             order by publication_id, fetched_at desc`,
+        ]);
+        const byId = (rows: readonly unknown[]) => new Map(rows.map((r) => [(r as Row).publication_id as string, toSnapshot(r as Row)]));
+        const l = byId(latest);
+        const a = byId(last);
+        return publicationIds.map((id) => ({ publication_id: id, latest: l.get(id) ?? null, last: a.get(id) ?? null }));
+      });
+    } catch (error) {
+      if (isMissingSchema(error)) return [];
       throw error;
     }
   },

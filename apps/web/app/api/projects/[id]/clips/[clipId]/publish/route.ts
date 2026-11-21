@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { getRepo } from "@/lib/repo";
 import { getPublishingRepo } from "@/lib/repo/publishing";
+import { getApiRepo } from "@/lib/repo/api";
 import { requirePublishingApi } from "@/lib/publishing/auth";
 import { loadClipContext } from "@/lib/publishing/clip-context";
 import { clipFeatures, recordDecision } from "@/lib/decision-log";
@@ -14,7 +15,8 @@ export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string; clipId: string }> };
 
-/* GET: Publikationen und Feedback des Clips, Gates, passende Verbindungen */
+/* GET: Publikationen und Feedback des Clips, je Publikation die letzte Messung und der letzte Versuch
+ * (snapshots, für die Zeilen in Gepostet), Gates, passende Verbindungen */
 export async function GET(_request: NextRequest, { params }: Params) {
   const auth = await requirePublishingApi("publishing.publish");
   if (auth instanceof Response) return auth;
@@ -23,7 +25,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
   if (!ctx) return Response.json({ error: "Clip nicht gefunden" }, { status: 404 });
   const pub = getPublishingRepo();
   const [publications, feedback, connections] = await Promise.all([pub.listPublicationsForClips([clipId]), pub.listFeedbackForClips([clipId]), pub.listConnections()]);
-  return Response.json({ publications, feedback, gates: ctx.gates, connections: connections.filter((c) => c.status === "connected"), extras: ctx.extras });
+  const snapshots = await getApiRepo().listSnapshotStates(publications.map((p) => p.id));
+  return Response.json({ publications, feedback, snapshots, gates: ctx.gates, connections: connections.filter((c) => c.status === "connected"), extras: ctx.extras });
 }
 
 interface Body {

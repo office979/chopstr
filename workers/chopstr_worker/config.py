@@ -128,6 +128,29 @@ class Settings:
     llm_eur_per_1m_output: float = 15.0
     gladia_eur_per_hour: float = 0.60
 
+    # Mehrstufige Engine und Trainingsschleife (T2). Anthropic und Google AI Studio verarbeiten nicht in der
+    # EU: nur mit ``allow_non_eu_providers`` (CHOPSTR_ALLOW_NON_EU_PROVIDERS=1, Standard aus).
+    allow_non_eu_providers: bool = False
+    anthropic_api_key: str = ""
+    anthropic_base_url: str = "https://api.anthropic.com"
+    model_prefilter: str = ""
+    model_editor: str = ""
+    model_judge: str = ""
+    model_judge_escalate: str = ""
+    claude_cli_bin: str = "claude"
+    mm_provider: str = "none"
+    model_mm: str = ""
+    gemini_api_key: str = ""
+    gemini_base_url: str = "https://generativelanguage.googleapis.com"
+    google_application_credentials: str = ""
+    vertex_project: str = ""
+    vertex_location: str = ""
+    # Preistabelle je Modell (JSON, EUR je 1 Mio. Token), Batch-Rabatt, Budget je Lauf (0 = ohne Grenze)
+    price_table_json: str = ""
+    batch_discount: float = 0.5
+    run_budget_eur: float = 0.0
+    run_budget_tokens: int = 0
+
     @property
     def is_local_storage(self) -> bool:
         return not self.s3_endpoint
@@ -198,6 +221,25 @@ def load_settings() -> Settings:
         llm_eur_per_1m_input=_env_float("LLM_EUR_PER_1M_INPUT", 3.0),
         llm_eur_per_1m_output=_env_float("LLM_EUR_PER_1M_OUTPUT", 15.0),
         gladia_eur_per_hour=_env_float("GLADIA_EUR_PER_HOUR", 0.60),
+        allow_non_eu_providers=_env_bool("CHOPSTR_ALLOW_NON_EU_PROVIDERS", False),
+        anthropic_api_key=_env("ANTHROPIC_API_KEY"),
+        anthropic_base_url=_env("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
+        model_prefilter=_env("CHOPSTR_MODEL_PREFILTER"),
+        model_editor=_env("CHOPSTR_MODEL_EDITOR"),
+        model_judge=_env("CHOPSTR_MODEL_JUDGE"),
+        model_judge_escalate=_env("CHOPSTR_MODEL_JUDGE_ESCALATE"),
+        claude_cli_bin=_env("CHOPSTR_CLAUDE_CLI", "claude"),
+        mm_provider=_env("CHOPSTR_MM_PROVIDER", "none"),
+        model_mm=_env("CHOPSTR_MODEL_MM"),
+        gemini_api_key=_env("GEMINI_API_KEY"),
+        gemini_base_url=_env("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com"),
+        google_application_credentials=_env("GOOGLE_APPLICATION_CREDENTIALS"),
+        vertex_project=_env("VERTEX_PROJECT"),
+        vertex_location=_env("VERTEX_LOCATION"),
+        price_table_json=_env("CHOPSTR_PRICE_TABLE"),
+        batch_discount=_env_float("CHOPSTR_BATCH_DISCOUNT", 0.5),
+        run_budget_eur=_env_float("CHOPSTR_RUN_BUDGET_EUR", 0.0),
+        run_budget_tokens=_env_int("CHOPSTR_RUN_BUDGET_TOKENS", 0),
     )
 
 

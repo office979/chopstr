@@ -9,6 +9,12 @@ Zwei Ebenen:
    Temporal, Bedrock-EU, Mistral, Selfhost, Gladia) oder ``EGRESS_ALLOWLIST`` stammt.
    ``guarded_client()`` liefert einen ``httpx.Client`` mit Request-Hook, der jede Anfrage
    an einen nicht erlaubten Host abbricht, bevor sie das Netz erreicht.
+
+Nicht-EU-Anbieter (T2): die Anthropic-API (Provider ``anthropic``, Host ``api.anthropic.com``), die
+Claude-CLI (``claude-cli``, nur Entwicklung) und Google AI Studio (``generativelanguage.googleapis.com``)
+verarbeiten nicht in der EU. Sie sind nur erlaubt, wenn ``CHOPSTR_ALLOW_NON_EU_PROVIDERS=1`` gesetzt ist
+(Standard aus), und für Sovereign-Workspaces nie. Vertex AI in einer EU-Region (``europe-west*``) und
+Bedrock EU gelten als EU.
 """
 
 from __future__ import annotations
@@ -23,12 +29,20 @@ from . import config
 # ``local-heuristic`` ist der Heuristik-Provider ohne Netz (Entwicklung, Demo); er verlässt die Maschine nie.
 EU_OK = {"bedrock-eu", "mistral-eu", "selfhost-eu", "gladia-eu", "local-heuristic"}
 NON_US_CHAIN = {"mistral-eu", "selfhost-eu", "gladia-eu", "local-heuristic"}  # für Sovereign-Tenants
+# Nur mit ausdrücklichem Opt-in (CHOPSTR_ALLOW_NON_EU_PROVIDERS=1), nie für Sovereign-Tenants.
+NON_EU_OPT_IN = {"anthropic", "claude-cli"}
+# Hosts der Nicht-EU-Anbieter: gesperrt (Deny-Liste), außer mit dem Opt-in.
+NON_EU_OPT_IN_HOSTS = {"api.anthropic.com", "generativelanguage.googleapis.com"}
 
 # Immer erlaubt: lokale Entwicklung
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal"}
 
 # Muster für EU-Regionen von AWS Bedrock (Runtime-Endpunkte)
 _BEDROCK_EU = re.compile(r"^bedrock(-runtime)?\.eu-[a-z]+-\d+\.amazonaws\.com$")
+# Vertex AI in einer EU-Region (regionaler Endpunkt, z. B. europe-west4-aiplatform.googleapis.com)
+_VERTEX_EU = re.compile(r"^europe-(west|north|central|southwest)\d+-aiplatform\.googleapis\.com$")
+# Token-Austausch für Vertex (Dienstkonto): überträgt keine Inhalte, nur erlaubt, wenn VERTEX_PROJECT gesetzt ist.
+GOOGLE_TOKEN_HOST = "oauth2.googleapis.com"
 
 # Bekannte Nicht-EU-Endpunkte: immer gesperrt, auch wenn sie versehentlich in der Konfiguration stehen
 DENY_PATTERNS = (
@@ -53,8 +67,19 @@ class Tenant:
     allow_us_subprocessors: bool = False
 
 
-def assert_allowed(provider: str, tenant: Tenant) -> None:
-    """Provider-Prüfung: EU-Verarbeitung immer, Sovereign zusätzlich ohne US-Anbieter."""
+def assert_allowed(provider: str, tenant: Tenant, s: config.Settings | None = None) -> None:
+    """Provider-Prüfung: EU-Verarbeitung immer, Sovereign zusätzlich ohne US-Anbieter.
+
+    ``anthropic`` und ``claude-cli`` nur mit ``CHOPSTR_ALLOW_NON_EU_PROVIDERS=1`` und nie für Sovereign."""
+    if provider in NON_EU_OPT_IN:
+        s = s or config.settings()
+        if tenant.tier == config.TIER_SOVEREIGN:
+            raise ResidencyError(f"Anbieter {provider} ist für Sovereign-Workspace {tenant.id} nicht erlaubt")
+        if not s.allow_non_eu_providers:
+            raise ResidencyError(
+                f"Anbieter {provider} verarbeitet nicht in der EU; nur mit CHOPSTR_ALLOW_NON_EU_PROVIDERS=1 erlaubt"
+            )
+        return
     if provider not in EU_OK:
         raise ResidencyError(f"Anbieter {provider} verarbeitet nicht in der EU")
     if tenant.tier == config.TIER_SOVEREIGN and provider not in NON_US_CHAIN:
@@ -105,9 +130,34 @@ def host_denied(host: str) -> bool:
     return any(p.search(host) for p in DENY_PATTERNS)
 
 
+def opt_in_host(host: str, s: config.Settings | None = None) -> bool:
+    """Nicht-EU-Host, der nur mit ``CHOPSTR_ALLOW_NON_EU_PROVIDERS=1`` erreichbar ist."""
+    s = s or config.settings()
+    if not s.allow_non_eu_providers:
+        return False
+    hosts = set(NON_EU_OPT_IN_HOSTS)
+    for value in (s.anthropic_base_url, s.gemini_base_url):
+        h = _host_of(value)
+        if h:
+            hosts.add(h)
+    return host in hosts
+
+
+def eu_cloud_host(host: str, s: config.Settings | None = None) -> bool:
+    """Vertex AI in einer EU-Region; dazu der Token-Host, wenn Vertex konfiguriert ist."""
+    if _VERTEX_EU.match(host):
+        return True
+    s = s or config.settings()
+    return host == GOOGLE_TOKEN_HOST and bool(s.vertex_project)
+
+
 def host_allowed(host: str, s: config.Settings | None = None) -> bool:
     host = (host or "").lower().rstrip(".")
-    if not host or host_denied(host):
+    if not host:
+        return False
+    if eu_cloud_host(host, s) or opt_in_host(host, s):
+        return True
+    if host_denied(host):
         return False
     if host in allowed_hosts(s):
         return True
@@ -119,8 +169,11 @@ def assert_eu_host(url: str, s: config.Settings | None = None) -> str:
     host = _host_of(url)
     if not host:
         raise ResidencyError(f"Ziel-URL ohne gültigen Host: {url!r}")
-    if host_denied(host):
-        raise ResidencyError(f"Ausgehender Aufruf an {host} ist gesperrt (bekannter Nicht-EU-Endpunkt)")
+    if host_denied(host) and not (eu_cloud_host(host, s) or opt_in_host(host, s)):
+        raise ResidencyError(
+            f"Ausgehender Aufruf an {host} ist gesperrt (bekannter Nicht-EU-Endpunkt; Anthropic und Google AI Studio "
+            "nur mit CHOPSTR_ALLOW_NON_EU_PROVIDERS=1)"
+        )
     if not host_allowed(host, s):
         raise ResidencyError(
             f"Ausgehender Aufruf an {host} ist nicht erlaubt (nicht auf der EU-Allowlist). "
@@ -226,6 +279,8 @@ def guarded_async_client(s: config.Settings | None = None, **kwargs):
 __all__ = [
     "DENY_PATTERNS",
     "EU_OK",
+    "NON_EU_OPT_IN",
+    "NON_EU_OPT_IN_HOSTS",
     "NON_US_CHAIN",
     "ResidencyError",
     "Tenant",
@@ -233,10 +288,12 @@ __all__ = [
     "assert_allowed",
     "assert_eu_host",
     "assert_webhook_host",
+    "eu_cloud_host",
     "guarded_async_client",
     "guarded_client",
     "host_allowed",
     "host_denied",
     "is_private_host",
+    "opt_in_host",
     "webhook_client",
 ]

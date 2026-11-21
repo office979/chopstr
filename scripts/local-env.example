@@ -25,3 +25,30 @@ SCRAPECREATORS_API_KEY=
 # Gilt für den Worker, nicht für die Web-App: workers/scripts/local_env.sh setzt METRICS_POLLING=1,
 # damit der lokale Worker verfolgte Links misst. Hier nur zur Übersicht, leer lassen.
 METRICS_POLLING=
+# Mehrstufige Engine und Trainingsschleife (gilt für den Worker, docs/TRAINING-WORKFLOW.md).
+# Anthropic und Google AI Studio sind keine EU-Anbieter: nur mit CHOPSTR_ALLOW_NON_EU_PROVIDERS=1.
+CHOPSTR_ALLOW_NON_EU_PROVIDERS=
+# Schlüssel der Anthropic-API, nur serverseitig
+ANTHROPIC_API_KEY=
+# Modell je Stufe, leer = Standard (Haiku für Vorfilter und Richter, Sonnet für Editor und Eskalation)
+CHOPSTR_MODEL_PREFILTER=
+CHOPSTR_MODEL_EDITOR=
+CHOPSTR_MODEL_JUDGE=
+CHOPSTR_MODEL_JUDGE_ESCALATE=
+# Pfad zur Claude-CLI für LLM_PROVIDER=claude-cli (nur Entwicklung), leer = claude
+CHOPSTR_CLAUDE_CLI=
+# Multimodaler Scan: gemini, mock oder none
+CHOPSTR_MM_PROVIDER=
+CHOPSTR_MODEL_MM=
+# Google AI Studio oder Vertex AI (EU-Region)
+GEMINI_API_KEY=
+GOOGLE_APPLICATION_CREDENTIALS=
+VERTEX_PROJECT=
+VERTEX_LOCATION=
+# Engine: leer = bisheriger Pfad, tiered = mehrstufig
+CHOPSTR_ENGINE=
+# Preistabelle (JSON, EUR je 1 Mio. Token), Batch-Anteil, Budget je Lauf
+CHOPSTR_PRICE_TABLE=
+CHOPSTR_BATCH_DISCOUNT=
+CHOPSTR_RUN_BUDGET_EUR=
+CHOPSTR_RUN_BUDGET_TOKENS=

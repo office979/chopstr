@@ -249,3 +249,47 @@ def test_pseudo_sentences_never_become_word_indices():
     pseudo = [ln for ln in text.splitlines() if "[SCHREI]" in ln]
     assert pseudo and not re.search(r"\d+:", pseudo[0].split(")", 1)[-1])
     assert mm_scan.strip_pseudo(pseudo[0]) == ""
+
+
+# -- T2c: Diagnose, Reparatur, Ausbeute, Mehrsegment ---------------------------------------------------------
+def _edit_answer(sents, a, b, **over):
+    sw, ew = sents[a].word_range[0], sents[b].word_range[1]
+    out = {
+        "keep": True, "start_word": sw, "end_word": ew, "hook": {"start_word": sw, "end_word": sents[a].word_range[1], "text": "Hook"},
+        "title": "Titel", "onscreen_text": "", "post_text": {p: "Post." for p in ("tiktok", "reels", "shorts")},
+        "scores": {"hook": 7, "payoff": 7, "specificity": 7, "tension": 6, "audience_fit": 7}, "evidence": {},
+        "needs_earlier_context": False, "ends_before_answer": False, "unresolved_references": [], "is_humor": False,
+        "sensitive_topic": False, "why": "passt",
+    }  # fmt: skip
+    out.update(over)
+    return out
+
+
+def test_editor_rejection_is_explained_in_report():
+    sents = segment.sentences_from_words(demo_words())
+
+    def reject(a, b, words):
+        return _edit_answer(sents, a, b, keep=False, reject_reason="no_payoff", why="Keine Auflösung im Fenster.",
+                            scores={"hook": 3, "payoff": 1, "specificity": 4, "tension": 2, "audience_fit": 5})  # fmt: skip
+
+    report = tiered_engine.run(demo_words(), BRIEF, {}, None, FakeTiers(spans=[(0, 3)], edit=reject))
+    d = next(d for d in report.discarded if d["reason"] == "editor_rejected")
+    assert d["reject_code"] == "keep_false" and d["reason_detail"]
+    assert d["scores"]["payoff"] == 1 and d["suggestion"]["title"] == "Titel"
+    assert d["source_in"] == round(sents[0].start, 2) and d["word_range"][0] == sents[0].word_range[0]
+    code, detail = tiered_engine.editor_reject_detail({"keep": True, "start_word": 9999, "end_word": 10000}, sents, 0, 3)
+    assert code == "word_out_of_window" and "9999" in detail
+
+
+def test_gate_rejection_carries_span_and_failed_gates():
+    sents = segment.sentences_from_words(demo_words())
+
+    def needs_ctx(a, b, words):
+        return _edit_answer(sents, a, b, needs_earlier_context=True, unresolved_references=["das da"])
+
+    fake = FakeTiers(spans=[(0, 3)], edit=needs_ctx)
+    report = tiered_engine.run(demo_words(), BRIEF, {}, None, fake, policy=editorial.load(2))
+    gate = [d for d in report.discarded if d.get("failed_gates")]
+    assert gate, report.discarded
+    assert "standalone" in gate[0]["failed_gates"] and "Vorwissen" in gate[0]["reason_detail"]
+    assert {"source_in", "source_out", "word_range", "scores"} <= set(gate[0])

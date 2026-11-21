@@ -329,6 +329,64 @@ def apply_editor(out: Mapping[str, Any], sents: Sequence[Sentence], win_first: i
     }  # fmt: skip
 
 
+def editor_reject_detail(out: Any, sents: Sequence[Sentence], win_first: int, win_last: int) -> tuple[str, str]:
+    """Warum ``apply_editor`` verworfen hat: Code und Klartext für den Bericht (``discarded[].reason_detail``)."""
+    if not isinstance(out, Mapping):
+        return "not_an_object", "Antwort ist kein Objekt"
+    if not out.get("keep", True):
+        why = mm_scan.strip_pseudo(str(out.get("reject_reason") or out.get("why") or "")).strip()
+        return "keep_false", why[:240] or "keep false ohne Begründung"
+    lo, hi = sents[win_first].word_range[0], sents[win_last].word_range[1]
+    try:
+        sw, ew = int(out["start_word"]), int(out["end_word"])
+    except (KeyError, TypeError, ValueError):
+        return "missing_words", "start_word oder end_word fehlt oder ist keine Zahl"
+    if not (lo <= sw <= ew <= hi):
+        return "word_out_of_window", f"Wortnummern {sw} bis {ew} außerhalb des Fensters {lo} bis {hi}"
+    return "no_sentence", f"Wortnummern {sw} bis {ew} gehören zu keinem Satz"
+
+
+def editor_suggestion(out: Any) -> dict[str, Any]:
+    """Was der Editor vorgeschlagen hat, auch wenn er ablehnt: Grenzen, Titel, Flags (Diagnose, kein Schnitt)."""
+    o = _obj(out)
+    flags = {k: o.get(k) for k in ("needs_earlier_context", "ends_before_answer", "unresolved_references") if k in o}
+    return {
+        "start_word": o.get("start_word"), "end_word": o.get("end_word"),
+        "title": mm_scan.strip_pseudo(str(o.get("title") or ""))[:120],
+        "hook_text": mm_scan.strip_pseudo(str(_obj(o.get("hook")).get("text") or ""))[:120], **flags,
+    }  # fmt: skip
+
+
+def span_info(sents: Sequence[Sentence], first: int, last: int) -> dict[str, Any]:
+    """Spanne eines Satzbereichs in Sekunden und Wortnummern (für Ablehnungen im Bericht)."""
+    if not (0 <= first <= last < len(sents)):
+        return {}
+    return {
+        "source_in": round(sents[first].start, 2), "source_out": round(sents[last].end, 2),
+        "word_range": [sents[first].word_range[0], sents[last].word_range[1]],
+    }  # fmt: skip
+
+
+def _enrich_discarded(report: story_engine.DetectReport, sents: Sequence[Sentence], results: Sequence[Any]) -> None:
+    """Jede Ablehnung bekommt ihre Spanne; Gate-Ablehnungen dazu die gerissenen Tore und die Bewertung."""
+    by_span = {(r.first_sent, r.last_sent): r for r in results}
+    for d in report.discarded:
+        try:
+            first, last = int(d["first_sent"]), int(d["last_sent"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        for k, v in span_info(sents, first, last).items():
+            d.setdefault(k, v)
+        res = by_span.get((first, last))
+        if res is None or d.get("stage") == "editor":
+            continue
+        failed = [name for name, g in (res.gates or {}).items() if isinstance(g, dict) and not g.get("passed")]
+        if failed:
+            d.setdefault("failed_gates", failed)
+            d.setdefault("reason_detail", "; ".join(str(res.gates[n].get("detail") or "") for n in failed))
+        d.setdefault("scores", {k: (v or {}).get("value") if isinstance(v, dict) else v for k, v in (res.rubric.get("scores") or {}).items()})
+
+
 def _local_editor(c: Mapping[str, Any], sents: Sequence[Sentence]) -> dict:
     """Ohne Editor (Heuristik oder Budget): Grenzen des Vorfilters, Hook = erster Satz, Titel aus dem Anfang."""
     s0 = sents[c["first_sent"]]
@@ -542,7 +600,13 @@ def run(
                     ed = apply_editor(out, sents, win_first, win_last)
                     if ed is None:
                         info["editor"]["rejected"] += 1
-                        report.discarded.append({"reason": "editor_rejected", "stage": "editor", "first_sent": c["first_sent"], "last_sent": c["last_sent"]})
+                        code, detail = editor_reject_detail(out, sents, win_first, win_last)
+                        report.discarded.append({
+                            "reason": "editor_rejected", "stage": "editor", "first_sent": c["first_sent"], "last_sent": c["last_sent"],
+                            "reject_code": code, "reason_detail": detail,
+                            "scores": {k: _score(v) for k, v in _obj(_obj(out).get("scores")).items() if k in story_engine.SCORE_KEYS},
+                            "suggestion": editor_suggestion(out), "prefilter": {k: c.get(k) for k in ("type", "why", "score", "rank_score")},
+                        })  # fmt: skip
                         continue
                 except BudgetExceeded as exc:
                     editor_stop = True
@@ -550,7 +614,10 @@ def run(
                 except ResidencyError:
                     raise
                 except (SchemaError, RuntimeError, ValueError, TypeError, KeyError) as exc:
-                    info["editor"].setdefault("errors", []).append({"first_sent": c["first_sent"], "error": exc.__class__.__name__, "detail": str(exc)[:160]})
+                    info["editor"].setdefault("errors", []).append({
+                        "first_sent": c["first_sent"], "last_sent": c["last_sent"], "error": exc.__class__.__name__, "detail": str(exc)[:160],
+                        **span_info(sents, c["first_sent"], c["last_sent"]),
+                    })  # fmt: skip
             if ed is None:
                 ed = _local_editor(c, sents)
                 info["editor"]["local"] += 1
@@ -592,6 +659,7 @@ def run(
         )
     report.verworfen = [c for c in raw_cands if all(c is not k for k in report.candidates)] + gate_rejected
     report.discarded.extend(dropped)
+    _enrich_discarded(report, sents, [*raw_cands, *gate_rejected])
     if story_engine.gates_wired(pol) is not None:
         report.gate_rejections = story_engine.gate_rejection_rates([*raw_cands, *gate_rejected])
     if critic_on:

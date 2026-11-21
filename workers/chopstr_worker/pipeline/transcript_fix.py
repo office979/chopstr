@@ -23,6 +23,7 @@ from typing import Any
 
 from .. import db
 from . import lexicon as lex
+from .de_common import COMMON_DE
 
 log = logging.getLogger("chopstr.pipeline.transcript_fix")
 
@@ -32,6 +33,10 @@ KINDS = ("name", "zahl", "fachwort", "grammatik", "sonstiges")
 AUTO_APPLY_MIN_CONFIDENCE = 0.9
 MAX_CHANGE_RATIO = 0.6
 FUZZY_MIN_TERM_LEN = 6
+# Abstand 2 nur zu längeren Begriffen: bei kurzen trifft er zu viele echte Wörter (Review R1-09)
+FUZZY_D2_MIN_TERM_LEN = 9
+# Unter dieser ASR-Sicherheit darf auch ein kleingeschriebenes Wort ein Name sein
+FUZZY_LOW_PROB = 0.6
 CONFIDENCE_CONFUSION = 0.95
 CONFIDENCE_FUZZY = {1: 0.75, 2: 0.6}
 HINT_NO_PROMPT = "Transkriptkorrektur übersprungen: der Prompt transcript_fix_v1 für Sprachmodelle fehlt noch, nur der Heuristik-Provider ist angebunden"
@@ -91,16 +96,38 @@ def _with_trailing(raw: str, new: str) -> str:
     return new + (trailing[0] if trailing and not new.endswith(trailing[0]) else "")
 
 
+def _may_be_name(raw: str, prob: Any) -> bool:
+    """Großgeschrieben oder unsicher erkannt: nur dann kommt ein Wort als Fehlhörer eines Begriffs in Frage."""
+    core = re.sub(r"^\W+", "", raw)
+    if core[:1].isupper():
+        return True
+    try:
+        return prob is not None and float(prob) < FUZZY_LOW_PROB
+    except (TypeError, ValueError):
+        return False
+
+
+def _whole_word(raw: str) -> bool:
+    """Wortgrenze: das Token ist ein ganzes Wort und nicht Teil einer Bindestrich- oder Apostroph-Verbindung
+    mit dem Nachbarn (``Make-`` vor ``up``, ``'s`` am Ende)."""
+    core = re.sub(r"[.,!?;:…]+$", "", raw)
+    return bool(core) and not core.endswith(("-", "'", "’")) and not core.startswith(("-", "'", "’"))
+
+
 def heuristic_edits(words: list[dict], lexicon: lex.Lexicon) -> list[dict]:
-    """Deterministische Vorschläge: zuerst die Verwechslungsliste (exakt), dann unscharfe Lexikon-Treffer
-    (Editierdistanz 1 oder 2, gleicher Anfangsbuchstabe, Begriff ab 6 Zeichen). Geschützte Begriffe und
-    Wörter, die schon im Lexikon stehen, bleiben unberührt."""
+    """Deterministische Vorschläge: zuerst die Verwechslungsliste (exakt, ganzes Wort), dann unscharfe
+    Lexikon-Treffer (Editierdistanz 1, bei Begriffen ab ``FUZZY_D2_MIN_TERM_LEN`` Zeichen auch 2, gleicher
+    Anfangsbuchstabe, Begriff ab 6 Zeichen). Beides nur für großgeschriebene oder unsicher erkannte Wörter
+    (``FUZZY_LOW_PROB``), unscharf nie für Wörter aus dem Grundwortschatz (``de_common.COMMON_DE``).
+    Geschützte Begriffe und Wörter, die schon im Lexikon stehen, bleiben unberührt."""
     terms = [t for t in lexicon.terms if len(lex.token_key(t)) >= FUZZY_MIN_TERM_LEN and not lexicon.is_protected(t)]
     edits: list[dict] = []
     for i, w in enumerate(words):
         raw = str(w.get("text") or "")
         key = lex.token_key(raw)
         if not key or lexicon.has_term(raw) or lexicon.is_protected(raw):
+            continue
+        if not _whole_word(raw) or not _may_be_name(raw, w.get("prob")):
             continue
         hit = lexicon.confusions.get(key)
         if hit is not None:
@@ -110,15 +137,16 @@ def heuristic_edits(words: list[dict], lexicon: lex.Lexicon) -> list[dict]:
                 "confidence": CONFIDENCE_CONFUSION, "origin": "confusion",
             })  # fmt: skip
             continue
-        if len(key) < FUZZY_MIN_TERM_LEN - 2:
+        if len(key) < FUZZY_MIN_TERM_LEN - 2 or key in COMMON_DE:
             continue
         best: tuple[int, str] | None = None
         for t in terms:
             tk = lex.token_key(t)
             if tk[:1] != key[:1]:
                 continue
-            d = levenshtein(key, tk, 2)
-            if 0 < d <= 2 and (best is None or d < best[0]):
+            max_d = 2 if len(tk) >= FUZZY_D2_MIN_TERM_LEN else 1
+            d = levenshtein(key, tk, max_d)
+            if 0 < d <= max_d and (best is None or d < best[0]):
                 best = (d, t)
         if best is not None:
             d, t = best

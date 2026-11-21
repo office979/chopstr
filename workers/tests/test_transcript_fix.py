@@ -76,6 +76,38 @@ def test_heuristic_leaves_correct_protected_and_short_words():
     assert tf.heuristic_edits(words, LEXICON) == []  # „Jausi“ läge nahe an „Jause“, aber geschützte Begriffe sind kein Ziel
 
 
+def test_heuristic_skips_common_words_and_confident_lowercase_words():
+    """Review R1-09: „wieder“ → „Wieser“, „meinte“ → „Meindl“, „Leiter“ → „Leitner“ waren Fehlvorschläge."""
+    lx = lex.Lexicon(terms=["Wieser", "Meindl", "Leitner", "Kitzbühel"])
+    sure = {str(i): {"prob": 0.95} for i in range(6)}
+    words = _words("wieder", "meinte", "Leiter", "Wieder", "meindel", "Meindel", **sure)
+    edits = tf.heuristic_edits(words, lx)
+    # nur der großgeschriebene Fehlhörer, der kein Grundwort ist
+    assert [(e["word_index"], e["new_text"]) for e in edits] == [(5, "Meindl")]
+    # kleingeschrieben, aber unsicher erkannt: darf ein Name sein
+    unsure = _words("meindel", **{"0": {"prob": 0.3}})
+    assert [e["new_text"] for e in tf.heuristic_edits(unsure, lx)] == ["Meindl"]
+
+
+def test_heuristic_uses_distance_two_only_for_long_terms():
+    lx = lex.Lexicon(terms=["Leitner", "Kitzbühel"])
+    # „Leutnar“ ist 2 von „Leitner“ (7 Zeichen) entfernt: zu kurz für Abstand 2
+    assert tf.heuristic_edits(_words("Leutnar"), lx) == []
+    # „Kitzbüchl“ ist 2 von „Kitzbühel“ (9 Zeichen) entfernt: lang genug
+    edits = tf.heuristic_edits(_words("Kitzbüchl"), lx)
+    assert [(e["new_text"], e["confidence"]) for e in edits] == [("Kitzbühel", tf.CONFIDENCE_FUZZY[2])]
+
+
+def test_confusions_need_a_whole_word_and_a_name_like_token():
+    lx = lex.Lexicon(terms=["Rimowa"], confusions={"remover": "Rimowa"})
+    sure = {str(i): {"prob": 0.95} for i in range(3)}
+    assert [e["new_text"] for e in tf.heuristic_edits(_words("Remover", **sure), lx)] == ["Rimowa"]
+    # kleingeschrieben und sicher erkannt: kein Name, keine Ersetzung
+    assert tf.heuristic_edits(_words("remover", **sure), lx) == []
+    # Teil einer Bindestrich-Verbindung über zwei Tokens: keine Wortgrenze
+    assert tf.heuristic_edits(_words("Remover-", "Set", **sure), lx) == []
+
+
 def test_heuristic_provider_answers_transcript_fix_offline():
     words = _words("Der", "Remover-Koffer", "<script>")
     out = _heuristic().structured(tf.SYSTEM, tf.build_user(words, LEXICON), tf.SCHEMA, tf.TOOL_NAME, tf.PROMPT_VERSION, job_type="transcript_fix")

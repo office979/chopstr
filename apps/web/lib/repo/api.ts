@@ -8,6 +8,7 @@ import type {
   ApiKeyCreateInput,
   ApiKeyLookup,
   LinkPublicationCreateInput,
+  MetricSnapshot,
   OutboxEvent,
   PlatformConnectionSummary,
   Publication,
@@ -16,6 +17,7 @@ import type {
   WebhookDelivery,
   WebhookEndpoint,
   WebhookEndpointCreateInput,
+  WindowFeedback,
 } from "@/lib/repo/types-api";
 
 /* Repository für Phase 5a: API-Schlüssel, Webhooks, Zustellungen, Outbox, Publikationen (nur Anlage und
@@ -52,6 +54,10 @@ export interface ApiRepo {
   createPublication(input: PublicationCreateInput): Promise<Publication>;
   createLinkPublication(input: LinkPublicationCreateInput): Promise<Publication>;
   getPublication(id: string): Promise<Publication | null>;
+  /* Lese-API Performance (Migration 0019): Publikationen eines Clips, Messreihe, feste Fenster */
+  listPublicationsForClip(clipId: string): Promise<Publication[]>;
+  listMetricSnapshots(publicationIds: string[]): Promise<MetricSnapshot[]>;
+  listWindowFeedback(publicationIds: string[]): Promise<WindowFeedback[]>;
   setPublicationWorkflow(id: string, workflowId: string | null): Promise<void>;
   /* Upload per API: Quelle war `uploading`, tusd-Hook ergänzt die Datei */
   completeUploadingSource(id: string, patch: UploadCompletionPatch): Promise<boolean>;
@@ -180,6 +186,55 @@ function toConnection(r: Row): PlatformConnectionSummary {
     capabilities: jsonValue<Record<string, unknown>>(r.capabilities, {}),
   };
 }
+
+function toSnapshot(r: Row): MetricSnapshot {
+  return {
+    id: r.id as string,
+    publication_id: r.publication_id as string,
+    fetched_at: isoOrNull(r.fetched_at) ?? "",
+    age_s: num(r.age_s),
+    source: r.source as MetricSnapshot["source"],
+    views: num(r.views),
+    engaged_views: num(r.engaged_views),
+    likes: num(r.likes),
+    comments: num(r.comments),
+    shares: num(r.shares),
+    saves: num(r.saves),
+    follows: num(r.follows),
+    reach: num(r.reach),
+    avg_watch_time_s: num(r.avg_watch_time_s),
+    skip_rate: num(r.skip_rate),
+    retention_curve: jsonValue<unknown>(r.retention_curve, null),
+    error: (r.error as string | null) ?? null,
+  };
+}
+
+function toWindowFeedback(r: Row): WindowFeedback {
+  return {
+    publication_id: (r.publication_id as string | null) ?? null,
+    metric_window: r.metric_window as WindowFeedback["metric_window"],
+    views: num(r.views),
+    likes: num(r.likes),
+    comments: num(r.comments),
+    shares: num(r.shares),
+    saves: num(r.saves),
+    follows: num(r.follows),
+    follows_per_1k: num(r.follows_per_1k),
+    saves_per_1k: num(r.saves_per_1k),
+    outlier_score: num(r.outlier_score),
+    reward: num(r.reward),
+    fetched_at: isoOrNull(r.fetched_at) ?? "",
+  };
+}
+
+/* Postgres-Fehler 42P01 (Tabelle fehlt) und 42703 (Spalte fehlt): Migration 0019 noch nicht angewendet */
+function isMissingSchema(error: unknown): boolean {
+  const code = (error as { code?: string } | null)?.code;
+  return code === "42P01" || code === "42703";
+}
+
+/* Obergrenze je Abfrage: eine Publikation mit 30 Tagen Messung hat rund 60 Zeilen */
+const SNAPSHOT_QUERY_LIMIT = 5000;
 
 const KEY_SELECT = `
   select k.*, coalesce(u.display_name, u.email) as created_by_label
@@ -399,6 +454,47 @@ export const apiPostgresRepo: ApiRepo = {
     return withContext(session, async (tx) => {
       const row = await publicationByClipAccess(tx, session.workspaceId, id);
       return row ? toPublication(row) : null;
+    });
+  },
+
+  async listPublicationsForClip(clipId) {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`
+        select p.* from publications p
+        join clips c on c.id = p.clip_id join sources s on s.id = c.source_id
+        where p.clip_id = ${clipId} and coalesce(p.workspace_id, s.workspace_id) = ${session.workspaceId}
+        order by p.created_at asc`;
+      return rows.map((r) => toPublication(r as Row));
+    });
+  },
+
+  async listMetricSnapshots(publicationIds) {
+    if (!publicationIds.length) return [];
+    const session = await currentSession();
+    try {
+      return await withContext(session, async (tx) => {
+        const rows = await tx`
+          select * from metric_snapshots
+          where workspace_id = ${session.workspaceId} and publication_id in ${tx(publicationIds)}
+          order by fetched_at desc limit ${SNAPSHOT_QUERY_LIMIT}`;
+        return rows.map((r) => toSnapshot(r as Row)).reverse();
+      });
+    } catch (error) {
+      if (isMissingSchema(error)) return [];
+      throw error;
+    }
+  },
+
+  async listWindowFeedback(publicationIds) {
+    if (!publicationIds.length) return [];
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`
+        select * from performance_feedback
+        where workspace_id = ${session.workspaceId} and publication_id in ${tx(publicationIds)}
+        order by fetched_at asc`;
+      return rows.map((r) => toWindowFeedback(r as Row));
     });
   },
 

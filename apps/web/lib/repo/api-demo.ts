@@ -278,6 +278,22 @@ export const apiDemoRepo: ApiRepo = {
     return state().publications.find((p) => p.id === id && p.workspace_id === session.workspaceId) ?? null;
   },
 
+  async listPublicationsForClip(clipId) {
+    const session = await currentSession();
+    return state()
+      .publications.filter((p) => p.clip_id === clipId && p.workspace_id === session.workspaceId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  },
+
+  async listMetricSnapshots() {
+    /* Demo: der Worker misst nicht, also gibt es keine Messreihe */
+    return [];
+  },
+
+  async listWindowFeedback() {
+    return [];
+  },
+
   async setPublicationWorkflow(id, workflowId) {
     const p = state().publications.find((x) => x.id === id);
     if (p) p.temporal_workflow_id = workflowId;

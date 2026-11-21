@@ -158,6 +158,44 @@ export interface Publication {
   link_check?: Record<string, unknown> | null;
 }
 
+/* Eine Messung der Zeitreihe (metric_snapshots, Migration 0019) */
+export interface MetricSnapshot {
+  id: string;
+  publication_id: string;
+  fetched_at: string;
+  age_s: number | null;
+  source: "oauth" | "public_api" | "scraper" | "manual";
+  views: number | null;
+  engaged_views: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  follows: number | null;
+  reach: number | null;
+  avg_watch_time_s: number | null;
+  skip_rate: number | null;
+  retention_curve: unknown;
+  error: string | null;
+}
+
+/* Festes Fenster aus performance_feedback, wie es die Lese-API ausgibt */
+export interface WindowFeedback {
+  publication_id: string | null;
+  metric_window: "6h" | "48h" | "7d" | "manual";
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  follows: number | null;
+  follows_per_1k: number | null;
+  saves_per_1k: number | null;
+  outlier_score: number | null;
+  reward: number | null;
+  fetched_at: string;
+}
+
 /* Publikation aus einem eingefügten Link (status manual, tracking link) */
 export interface LinkPublicationCreateInput {
   clip_id: string;

@@ -165,8 +165,9 @@ export function serializeWebhook(e: WebhookEndpoint) {
   return { id: e.id, url: e.url, events: e.events, active: e.active, created_at: e.created_at, updated_at: e.updated_at };
 }
 
-export function serializePublication(p: Publication) {
+export function serializePublication(p: Publication, extra?: { metrics_latest?: unknown }) {
   return {
+    ...(extra && "metrics_latest" in extra ? { metrics_latest: extra.metrics_latest ?? null } : {}),
     id: p.id,
     clip_id: p.clip_id,
     connection_id: p.connection_id,

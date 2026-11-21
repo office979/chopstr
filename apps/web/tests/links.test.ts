@@ -159,3 +159,19 @@ describe("resolvePostUrl", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
+
+describe("Runde 2 (R1-19)", () => {
+  it("bildet fxtwitter, vxtwitter und fixupx auf x.com ab", () => {
+    for (const host of ["fxtwitter.com", "vxtwitter.com", "fixupx.com", "www.fixvx.com"]) {
+      const r = ok(parsePostUrl(`https://${host}/jack/status/1234567890123456789?s=20`));
+      expect(r).toMatchObject({ platform: "x", externalId: "1234567890123456789", normalizedUrl: "https://x.com/jack/status/1234567890123456789" });
+    }
+  });
+  it("nimmt X-IDs ab einer Ziffer", () => {
+    expect(ok(parsePostUrl("https://x.com/jack/status/20")).externalId).toBe("20");
+    expect(parsePostUrl("https://x.com/jack/status/12345678901234567890123456")).toMatchObject({ error: "keine_id" });
+  });
+  it("lehnt LinkedIn-Beiträge ohne Aktivitäts-ID ab, statt den Slug zu speichern", () => {
+    expect(parsePostUrl("https://www.linkedin.com/posts/placemedia_ein-schoener-beitrag")).toMatchObject({ error: "keine_id" });
+  });
+});

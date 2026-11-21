@@ -3,7 +3,7 @@
  * pro Stunde abgefragt (Abrechnung je gelesenem Beitrag). */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearPublicMetricsCache, configuredReaderPlatforms, publicReaderConfigured, readPublicMetrics, X_CACHE_TTL_MS } from "@/lib/publishing/public-metrics";
+import { clearPublicMetricsCache, configuredReaderPlatforms, publicMetricsCacheSize, publicReaderConfigured, readPublicMetrics, X_CACHE_MAX, X_CACHE_TTL_MS } from "@/lib/publishing/public-metrics";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -123,6 +123,28 @@ describe("readPublicMetrics ohne öffentliche Schnittstelle", () => {
     const r = await readPublicMetrics(platform, "abc", { env: {}, fetchImpl: fetchImpl as unknown as typeof fetch });
     expect(r).toMatchObject({ ok: false, error: "nicht_verbunden" });
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("X-Cache (R1-20)", () => {
+  it("hält höchstens X_CACHE_MAX IDs und wirft die am längsten ungelesene zuerst hinaus", async () => {
+    clearPublicMetricsCache();
+    const fetchImpl = vi.fn(async (url: string) => {
+      const id = url.split("/").pop()!.split("?")[0];
+      return new Response(JSON.stringify({ data: { id, author_id: "1", public_metrics: { like_count: 1 } } }), { status: 200 });
+    });
+    const opts = { env: { X_BEARER_TOKEN: "t", X_DAILY_READ_CAP: "100000" }, fetchImpl: fetchImpl as unknown as typeof fetch, now: () => 1_000 };
+    for (let i = 1; i <= X_CACHE_MAX; i++) await readPublicMetrics("x", String(i), opts);
+    expect(publicMetricsCacheSize()).toBe(X_CACHE_MAX);
+    const hit = await readPublicMetrics("x", "1", opts);
+    expect(hit.ok && hit.cached).toBe(true); // Treffer: 1 rückt ans Ende, 2 ist jetzt die älteste
+    await readPublicMetrics("x", String(X_CACHE_MAX + 1), opts);
+    expect(publicMetricsCacheSize()).toBe(X_CACHE_MAX);
+    const calls = fetchImpl.mock.calls.length;
+    const one = await readPublicMetrics("x", "1", opts);
+    expect(one.ok && one.cached).toBe(true); // zuletzt gelesen, also noch da
+    await readPublicMetrics("x", "2", opts); // war die älteste, ist herausgefallen
+    expect(fetchImpl.mock.calls.length).toBe(calls + 1);
   });
 });
 

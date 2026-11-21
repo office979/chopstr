@@ -42,7 +42,9 @@ function fail(error: LinkErrorCode): LinkError {
 const YT_ID = /^[A-Za-z0-9_-]{11}$/;
 const TIKTOK_ID = /^\d{8,25}$/;
 const IG_CODE = /^[A-Za-z0-9_-]{5,40}$/;
-const X_ID = /^\d{5,25}$/;
+const X_ID = /^\d{1,25}$/;
+/* Einbett-Spiegel, die Clipper oft teilen; sie zeigen denselben Beitrag wie x.com */
+const X_HOSTS = new Set(["x.com", "twitter.com", "fxtwitter.com", "vxtwitter.com", "fixupx.com", "fixvx.com"]);
 const X_USER = /^[A-Za-z0-9_]{1,15}$/;
 
 function hostOf(url: URL): string {
@@ -144,10 +146,11 @@ function parseX(url: URL): ParseResult {
 function parseLinkedin(url: URL): ParseResult {
   const segs = segments(url);
   if (segs[0] === "posts" && segs[1]) {
-    /* linkedin.com/posts/<slug>-activity-<id>-<suffix> */
+    /* linkedin.com/posts/<slug>-activity-<id>-<suffix>; ohne activity-ID kein eindeutiger Beitrag (ein Slug
+     * allein ist keine ID und würde Dubletten und Messung an einen beliebigen Text hängen) */
     const m = /activity[-:](\d{10,25})/.exec(segs[1]);
-    const id = m ? `urn:li:activity:${m[1]}` : segs[1];
-    return { platform: "linkedin", externalId: id, normalizedUrl: `https://www.linkedin.com/posts/${segs[1]}/`, kind: "post" };
+    if (!m) return fail("keine_id");
+    return { platform: "linkedin", externalId: `urn:li:activity:${m[1]}`, normalizedUrl: `https://www.linkedin.com/posts/${segs[1]}/`, kind: "post" };
   }
   if (segs[0] === "feed" && segs[1] === "update" && segs[2]) {
     const urn = decodeURIComponent(segs[2]);
@@ -167,7 +170,7 @@ export function parsePostUrl(raw: string | null | undefined): ParseResult {
   if (host === "youtube.com" || host === "youtu.be" || host === "music.youtube.com") return parseYoutube(url, host);
   if (host === "tiktok.com" || host === "vm.tiktok.com" || host === "vt.tiktok.com") return parseTiktok(url, host);
   if (host === "instagram.com") return parseInstagram(url);
-  if (host === "x.com" || host === "twitter.com") return parseX(url);
+  if (X_HOSTS.has(host)) return parseX(url);
   if (host === "linkedin.com") return parseLinkedin(url);
   return fail("unbekannte_plattform");
 }

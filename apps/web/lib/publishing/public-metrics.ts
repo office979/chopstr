@@ -192,7 +192,33 @@ interface XTweetResponse {
 /* X rechnet je gelesenem Beitrag ab: Cache je ID (nur erfolgreiche Antworten). Etwas kürzer als eine Stunde,
  * damit die stündliche Messung des Workers nie die Zahlen der vorigen Stunde bekommt. */
 export const X_CACHE_TTL_MS = 55 * 60 * 1000;
+/* Höchstens so viele IDs im Cache; die am längsten nicht gelesene fällt zuerst heraus (LRU über die
+ * Einfügereihenfolge der Map: ein Treffer wird ans Ende gesetzt) */
+export const X_CACHE_MAX = 5000;
 const xCache = new Map<string, { at: number; result: PublicMetricsOk }>();
+
+function cacheGet(id: string): { at: number; result: PublicMetricsOk } | undefined {
+  const hit = xCache.get(id);
+  if (hit) {
+    xCache.delete(id);
+    xCache.set(id, hit);
+  }
+  return hit;
+}
+
+function cacheSet(id: string, entry: { at: number; result: PublicMetricsOk }): void {
+  xCache.delete(id);
+  xCache.set(id, entry);
+  while (xCache.size > X_CACHE_MAX) {
+    const oldest = xCache.keys().next().value;
+    if (oldest === undefined) break;
+    xCache.delete(oldest);
+  }
+}
+
+export function publicMetricsCacheSize(): number {
+  return xCache.size;
+}
 
 /* Tagesdeckel für bezahlte X-Abrufe: X_DAILY_READ_CAP (leer oder ungültig: 500) echte Abrufe je UTC-Tag,
  * Cache-Treffer zählen nicht. Gezählt wird im Speicher dieses Prozesses; das reicht für den lokalen Betrieb
@@ -225,7 +251,7 @@ export function clearPublicMetricsCache(): void {
 async function readX(externalId: string, opts: Required<PublicMetricsOptions>): Promise<PublicMetricsResult> {
   const token = opts.env.X_BEARER_TOKEN?.trim();
   if (!token) return fail("x", "nicht_konfiguriert", notConfiguredMessage("x"));
-  const hit = xCache.get(externalId);
+  const hit = cacheGet(externalId);
   if (hit && opts.now() - hit.at < X_CACHE_TTL_MS) return { ...hit.result, cached: true };
   if (!takeXRead(opts.now(), xDailyReadCap(opts.env))) {
     return fail("x", "fehler", "Für heute sind keine Abrufe bei X mehr frei, morgen geht es weiter.", "X_DAILY_READ_CAP erreicht");
@@ -277,7 +303,7 @@ async function readX(externalId: string, opts: Required<PublicMetricsOptions>): 
     author_label: author?.username ? `@${author.username}` : null,
     raw: data,
   };
-  xCache.set(externalId, { at: opts.now(), result });
+  cacheSet(externalId, { at: opts.now(), result });
   return result;
 }
 

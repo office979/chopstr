@@ -1,9 +1,13 @@
+import type { NextRequest } from "next/server";
 import { getApiRepo } from "@/lib/repo/api";
 import { apiRoute } from "@/lib/api/handler";
-import { apiJson } from "@/lib/api/errors";
+import { ApiError, apiJson } from "@/lib/api/errors";
 import { loadPublication } from "@/lib/api/lookup";
+import { readJsonBody } from "@/lib/api/validate";
+import { requestSchema, resolveRef } from "@/lib/api/openapi";
 import { serializePublication } from "@/lib/api/serializers";
 import { latestSnapshot } from "@/lib/publishing/performance";
+import { stopTracking } from "@/lib/publishing/tracking-server";
 
 export const dynamic = "force-dynamic";
 
@@ -16,4 +20,12 @@ export const GET = apiRoute<{ id: string }>("publish", async (_request, { params
   const last = await getApiRepo().latestMetricSnapshot(publication.id);
   const metricsLatest = last ? latestSnapshot([last]) : null;
   return apiJson({ publication: serializePublication(publication, { metrics_latest: metricsLatest }) });
+});
+
+/* Messung eines verfolgten Links beenden: { "tracking": "off" }. Löscht nichts; zweimal ist harmlos. */
+export const PATCH = apiRoute<{ id: string }>("publish", async (request: NextRequest, { params, auth }) => {
+  await readJsonBody<{ tracking: "off" }>(request, requestSchema("PublicationPatch"), resolveRef);
+  const result = await stopTracking({ publicationId: params.id, via: "api", apiKeyId: auth.key.id });
+  if (!result.ok) throw new ApiError(result.status, result.code, result.message);
+  return apiJson({ publication: serializePublication(result.publication), changed: result.changed });
 });

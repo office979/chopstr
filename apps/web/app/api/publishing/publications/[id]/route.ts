@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { getRepo } from "@/lib/repo";
 import { getPublishingRepo } from "@/lib/repo/publishing";
 import { requirePublishingApi } from "@/lib/publishing/auth";
+import { stopTracking } from "@/lib/publishing/tracking-server";
 import { signalPublish } from "@/lib/temporal";
 
 export const dynamic = "force-dynamic";
@@ -12,23 +13,33 @@ interface Body {
   action?: unknown;
   scheduled_for?: unknown;
   external_url?: unknown;
+  tracking?: unknown;
 }
 
 /* PATCH: { action: "cancel" } (Signal cancel, Status failed mit Hinweis), { action: "reschedule", scheduled_for }
- * (Signal reschedule), { action: "manual_url", external_url } (manuelle Publikation: Post-URL eintragen) */
+ * (Signal reschedule), { action: "manual_url", external_url } (manuelle Publikation: Post-URL eintragen),
+ * { tracking: "off" } („Nicht mehr messen“, wie PATCH /api/v1/publications/{id}; löscht nichts) */
 export async function PATCH(request: NextRequest, { params }: Params) {
   const auth = await requirePublishingApi("publishing.publish");
   if (auth instanceof Response) return auth;
   const { id } = await params;
-  const pub = getPublishingRepo();
-  const publication = await pub.getPublication(id);
-  if (!publication) return Response.json({ error: "Publikation nicht gefunden" }, { status: 404 });
   let body: Body;
   try {
     body = (await request.json()) as Body;
   } catch {
     return Response.json({ error: "Ungültiger JSON-Body" }, { status: 400 });
   }
+
+  if (body.tracking !== undefined) {
+    if (body.tracking !== "off") return Response.json({ error: "Nur das Abschalten der Messung ist möglich." }, { status: 400 });
+    const result = await stopTracking({ publicationId: id, via: "ui" });
+    if (!result.ok) return Response.json({ error: result.message, code: result.code }, { status: result.status });
+    return Response.json({ ok: true, publication: result.publication, changed: result.changed });
+  }
+
+  const pub = getPublishingRepo();
+  const publication = await pub.getPublication(id);
+  if (!publication) return Response.json({ error: "Publikation nicht gefunden" }, { status: 404 });
   const repo = getRepo();
 
   if (body.action === "cancel") {

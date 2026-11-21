@@ -277,6 +277,15 @@ export const apiDemoRepo: ApiRepo = {
     return { created: true, publication };
   },
 
+  async stopLinkTracking(id) {
+    const session = await currentSession();
+    const p = state().publications.find((x) => x.id === id && x.workspace_id === session.workspaceId && x.tracking === "link");
+    if (!p) return null;
+    p.tracking = "off";
+    p.next_snapshot_at = null;
+    return { ...p };
+  },
+
   async latestMetricSnapshot(publicationId) {
     const rows = await this.listMetricSnapshots([publicationId]);
     const withNumbers = rows.filter((s) => !s.error && (s.views != null || s.likes != null || s.comments != null));

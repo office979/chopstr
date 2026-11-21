@@ -118,6 +118,14 @@ export const SCHEMAS: Record<string, JsonSchema> = {
     },
     additionalProperties: false,
   },
+  PublicationPatch: {
+    type: "object",
+    required: ["tracking"],
+    properties: {
+      tracking: { type: "string", enum: ["off"], description: "off beendet die Messung eines verfolgten Links (tracking link). Nichts wird gelöscht." },
+    },
+    additionalProperties: false,
+  },
   LinkRegister: {
     type: "object",
     required: ["url"],
@@ -505,7 +513,7 @@ export interface QueryParam {
 }
 
 export interface EndpointDef {
-  method: "get" | "post" | "delete";
+  method: "get" | "post" | "patch" | "delete";
   path: string;
   operationId: string;
   summary: string;
@@ -557,6 +565,7 @@ export const ENDPOINTS: EndpointDef[] = [
   { method: "get", path: "/clips/{id}/performance", operationId: "getClipPerformance", summary: "Performance eines Clips", description: "Alle Publikationen des Clips mit ihren neuesten Zahlen und Fenstern, dazu das Hook-Muster der aktuellen Hook-Version.", scope: "read", tag: "Publishing", params: [idParam("id", "Clip-ID")], responses: { "200": { description: "Performance je Publikation", schema: ref("ClipPerformance") }, "404": ERR("Nicht gefunden") } },
   { method: "get", path: "/publications/{id}", operationId: "getPublication", summary: "Publikation anzeigen", description: "Mit metrics_latest (letzte Messung mit Zahlen). Scope publish ist der bestehende Vertrag dieser Route; die Messwerte allein gibt es mit Scope read unter /publications/{id}/metrics.", scope: "publish", tag: "Publishing", params: [idParam("id", "Publikations-ID")], responses: { "200": { description: "Publikation", schema: single("publication", "Publication") }, "404": ERR("Nicht gefunden") } },
   { method: "get", path: "/brand-profiles", operationId: "listBrandProfiles", summary: "Markenprofile auflisten", scope: "read", tag: "Markenprofile", responses: { "200": { description: "Liste", schema: list("brand_profiles", "BrandProfile") } } },
+  { method: "patch", path: "/publications/{id}", operationId: "updatePublication", summary: "Messung eines Links beenden", description: "{ tracking: off } beendet die Messung eines verfolgten Links: tracking off, kein Messtermin mehr. Nichts wird gelöscht, Messreihe und Fenster bleiben lesbar. Ein zweiter Aufruf ändert nichts (changed false). Nur für tracking link, sonst 409.", scope: "publish", tag: "Publishing", params: [idParam("id", "Publikations-ID")], requestBody: "PublicationPatch", responses: { "200": { description: "Messung beendet", schema: single("publication", "Publication", { changed: { type: "boolean" } }) }, "400": ERR("Body ungültig"), "404": ERR("Nicht gefunden"), "409": ERR("Keine verfolgte Link-Publikation") } },
   { method: "post", path: "/brand-profiles", operationId: "createBrandProfile", summary: "Markenprofil anlegen", scope: "write", tag: "Markenprofile", requestBody: "CreateBrandProfile", responses: { "201": { description: "Angelegt", schema: single("brand_profile", "BrandProfile") } } },
   { method: "get", path: "/webhooks", operationId: "listWebhooks", summary: "Webhook-Endpunkte auflisten", scope: "admin", tag: "Webhooks", responses: { "200": { description: "Liste", schema: list("webhooks", "Webhook") } } },
   { method: "post", path: "/webhooks", operationId: "createWebhook", summary: "Webhook-Endpunkt anlegen", description: "Das Secret (HMAC-SHA256, Header X-Chopstr-Signature: t=…,v1=…) erscheint nur in dieser Antwort.", scope: "admin", tag: "Webhooks", requestBody: "CreateWebhook", responses: { "201": { description: "Angelegt", schema: single("webhook", "Webhook", { secret: { type: "string" } }) }, "400": ERR("URL nicht erlaubt") } },

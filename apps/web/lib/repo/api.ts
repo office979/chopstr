@@ -57,6 +57,8 @@ export interface ApiRepo {
   /* Eindeutiger Index aus 0021: bei einer Dublette kein Fehler, sondern die ID der vorhandenen Zeile */
   createLinkPublication(input: LinkPublicationCreateInput): Promise<LinkPublicationCreateResult>;
   getPublication(id: string): Promise<Publication | null>;
+  /* „Nicht mehr messen“: tracking link → off, kein Termin mehr. null, wenn nichts geändert wurde */
+  stopLinkTracking(id: string): Promise<Publication | null>;
   /* Lese-API Performance (Migration 0019): Publikationen eines Clips, Messreihe, feste Fenster */
   listPublicationsForClip(clipId: string): Promise<Publication[]>;
   listMetricSnapshots(publicationIds: string[]): Promise<MetricSnapshot[]>;
@@ -468,6 +470,19 @@ export const apiPostgresRepo: ApiRepo = {
     return withContext(session, async (tx) => {
       const row = await publicationByClipAccess(tx, session.workspaceId, id);
       return row ? toPublication(row) : null;
+    });
+  },
+
+  async stopLinkTracking(id) {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`
+        update publications p set tracking = 'off', next_snapshot_at = null
+        where p.id = ${id} and p.tracking = 'link'
+          and exists (select 1 from clips c join sources s on s.id = c.source_id
+                      where c.id = p.clip_id and coalesce(p.workspace_id, s.workspace_id) = ${session.workspaceId})
+        returning p.*`;
+      return rows.length ? toPublication(rows[0] as Row) : null;
     });
   },
 

@@ -637,10 +637,21 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
                 st.progress(done / max(total, 1), f"Kapitel {done} von {total} bewertet, {n} Kandidaten")
 
             if tiered:
+                # Kostenbuch mit Budget je Lauf (CHOPSTR_RUN_BUDGET_EUR, CHOPSTR_RUN_BUDGET_TOKENS; 0 heißt ohne
+                # Grenze): sieht jeden Aufruf zusätzlich zum bisherigen Sink, Ergebnis steht im Bericht.
+                ledger = costlog.RunLedger(s=s)
+                book = llm.cost_sink
+
+                def _both(u: dict) -> None:
+                    book(u)
+                    ledger(u)
+
+                llm.cost_sink = _both
                 report = tiered_engine.run(
                     words, brief, brand, heat, llm, weights=weights, on_progress=_progress, silence=pausen,
-                    duration_s=float(src.get("duration_s") or 0.0) or None,
+                    duration_s=float(src.get("duration_s") or 0.0) or None, ledger=ledger,
                 )  # fmt: skip
+                report.search.setdefault("tiered", {})["costs"] = ledger.summary(float(src.get("duration_s") or 0.0) or None)
             else:
                 report = story_engine.run(
                     words, brief, brand, heat, llm, weights=weights, on_progress=_progress, silence=pausen

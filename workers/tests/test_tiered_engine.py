@@ -213,6 +213,9 @@ def test_detect_activity_switches_to_tiered_by_env(fake_db, fake_context, monkey
     fin = fake_db.events_for("detect_candidates")[-1]["payload"]
     assert fin["prompt_versions"][:3] == ["tiered_engine_v1", "prefilter_v1", "editor_v1"]
     assert fin["key"] != classic["key"] and fin["cached"] is False
+    report = story_engine.DetectReport.from_json(fake_context.store.get_json("derived", fin["key"]))
+    costs = report.search["tiered"]["costs"]
+    assert costs["eur"] == 0.0 and costs["budget_eur"] is None and costs["source_hours"] == pytest.approx(80 / 3600, abs=1e-3)
 
 
 def test_pseudo_sentences_never_become_word_indices():

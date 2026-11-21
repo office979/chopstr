@@ -138,3 +138,8 @@ export function publicationRow(p: RowPublication, snaps: { latest: RowSnapshot |
     canEnterNumbers: number == null && (p.status === "manual" || p.status === "published") && !(tracking === "link" && p.next_snapshot_at),
   };
 }
+
+/* Neueste zuerst, damit ein gerade eingetragener Link sichtbar ist und nicht hinter „Alle anzeigen“ landet */
+export function newestFirst<T extends Pick<RowPublication, "created_at">>(pubs: readonly T[]): T[] {
+  return [...pubs].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+}

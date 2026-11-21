@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { PLATFORM_LABELS } from "@/lib/clips/labels";
-import { publicationRow, type RowFeedback, type RowPublication, type RowSnapshot } from "@/lib/publishing/publication-row";
+import { newestFirst, publicationRow, type RowFeedback, type RowPublication, type RowSnapshot } from "@/lib/publishing/publication-row";
 import type { Platform } from "@/lib/repo/types";
 
 /* Was aus einem geposteten Clip geworden ist, und wie die Zahlen hereinkommen.
@@ -214,7 +214,7 @@ export function Gepostet({
 
   if (!geladen) return null;
 
-  const zeilen = publikationen.map((p) =>
+  const zeilen = newestFirst(publikationen).map((p) =>
     publicationRow(
       p,
       messstaende.find((m) => m.publication_id === p.id),

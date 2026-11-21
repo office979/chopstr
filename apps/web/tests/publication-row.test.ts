@@ -2,7 +2,7 @@
  * Oberfläche: deutsch, ohne Gedankenstrich, ohne Variablennamen. */
 
 import { describe, expect, it } from "vitest";
-import { publicationRow, shortStamp, type RowPublication } from "@/lib/publishing/publication-row";
+import { newestFirst, publicationRow, shortStamp, type RowPublication } from "@/lib/publishing/publication-row";
 
 const NOW = Date.parse("2026-11-21T15:00:00Z");
 
@@ -62,5 +62,16 @@ describe("publicationRow", () => {
 
   it("formatiert Zeitpunkte als Tag, Monat und Uhrzeit", () => {
     expect(shortStamp("2026-07-01T06:05:00Z")).toBe("01.07. 08:05");
+  });
+});
+
+describe("Reihenfolge", () => {
+  it("zeigt den zuletzt eingetragenen Beitrag zuerst", () => {
+    const alt = pub({ id: "alt", created_at: "2026-11-20T10:00:00Z" });
+    const neu = pub({ id: "neu", created_at: "2026-11-21T12:00:00Z" });
+    const mitte = pub({ id: "mitte", created_at: "2026-11-21T09:00:00Z" });
+    const liste = [alt, neu, mitte];
+    expect(newestFirst(liste).map((p) => p.id)).toEqual(["neu", "mitte", "alt"]);
+    expect(liste.map((p) => p.id)).toEqual(["alt", "neu", "mitte"]);
   });
 });

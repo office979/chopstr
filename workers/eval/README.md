@@ -16,6 +16,7 @@ Werkzeuge, alle ohne GPU lauffähig:
 | `repro_eval.py` | Kommt bei gleichem Video dieselbe Top-5? | `python -m eval.repro_eval lauf1.json lauf2.json ... [--art gespeichert] --json r.json` |
 | `cost_eval.py` | Was kostet eine Quellstunde, wie lange dauert sie? | `python -m eval.cost_eval --export kosten.json --json k.json` oder `--database-url ... --quelle <uuid>` |
 | `sinnfehler.py` | Wie viele Clips haben einen bestätigten kritischen Sinnfehler, mit welcher Unsicherheit? | `python -m eval.sinnfehler --bogen-aus clips.json --out bogen.json`, dann `--auswerten bogen.json --json f.json` |
+| `train.py` | Trifft die mehrstufige Engine die Gold-Clips, wie gut sind Hook, Kontext und Copy, was kostet eine Quellstunde? (Gold-Set, Jobs, Lauf ohne Datenbank, Vergleich, Scorecard, Export, Lernschleife; `docs/TRAINING-WORKFLOW.md`) | `python -m eval.train gold validate --gold eval/gold/dach_v1.json`, `job create`, `run --job`, `compare --run`, `scorecard --run`, `export --format ranking` |
 | `baseline.py` | Ist eine Änderung schlechter als die Baseline, über der Toleranz? | `python -m eval.baseline --vergleich h.json s.json ... --aenderung kurzname` |
 
 Alle laufen aus `workers/` mit dem Interpreter der venv (`.venv/bin/python -m eval.wer_eval ...`).

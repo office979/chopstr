@@ -904,6 +904,7 @@ prompts:
   mm_scan: 1                  # T2: multimodaler Szenen-Scan je Fenster (Stufe 0), wirksam nur mit einem MM-Provider
   prefilter: 1                # T2: Vorfilter (Stufe B, Haiku) über Transkriptblöcke, wirksam nur mit der mehrstufigen Engine
   editor: 1                   # T2: Editor (Stufe C, Sonnet): Grenzen, Hook, Copy je Plattform, wirksam nur mit der mehrstufigen Engine
+  judge_clip: 1               # T2: Richter der Trainings-Eval (Haiku, Eskalation Sonnet), nur in workers/eval/train.py
 
 # ------------------------------------------------------------------------------------------------
 # Schalter der Arbeitspakete (neu in Fassung 2)

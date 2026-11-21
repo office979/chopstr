@@ -40,7 +40,13 @@ LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal
 # Muster für EU-Regionen von AWS Bedrock (Runtime-Endpunkte)
 _BEDROCK_EU = re.compile(r"^bedrock(-runtime)?\.eu-[a-z]+-\d+\.amazonaws\.com$")
 # Vertex AI in einer EU-Region (regionaler Endpunkt, z. B. europe-west4-aiplatform.googleapis.com)
-_VERTEX_EU = re.compile(r"^europe-(west|north|central|southwest)\d+-aiplatform\.googleapis\.com$")
+# Nur Regionen mit Standort in der EU. Bewusst nicht: europe-west2 (London), europe-west6 (Zürich), die
+# Namen beginnen mit europe-, liegen aber außerhalb der EU.
+VERTEX_EU_REGIONS = frozenset({
+    "europe-west1", "europe-west3", "europe-west4", "europe-west8", "europe-west9", "europe-west10", "europe-west12",
+    "europe-north1", "europe-north2", "europe-central2", "europe-southwest1",
+})  # fmt: skip
+_VERTEX_EU = re.compile(r"^(" + "|".join(sorted(re.escape(r) for r in VERTEX_EU_REGIONS)) + r")-aiplatform\.googleapis\.com$")
 # Token-Austausch für Vertex (Dienstkonto): überträgt keine Inhalte, nur erlaubt, wenn VERTEX_PROJECT gesetzt ist.
 GOOGLE_TOKEN_HOST = "oauth2.googleapis.com"
 
@@ -70,7 +76,8 @@ class Tenant:
 def assert_allowed(provider: str, tenant: Tenant, s: config.Settings | None = None) -> None:
     """Provider-Prüfung: EU-Verarbeitung immer, Sovereign zusätzlich ohne US-Anbieter.
 
-    ``anthropic`` und ``claude-cli`` nur mit ``CHOPSTR_ALLOW_NON_EU_PROVIDERS=1`` und nie für Sovereign."""
+    ``anthropic`` und ``claude-cli`` nur mit ``CHOPSTR_ALLOW_NON_EU_PROVIDERS=1``, nur für Workspaces mit Zustimmung
+    zu US-Unterauftragnehmern (``allow_us_subprocessors``) und nie für Sovereign."""
     if provider in NON_EU_OPT_IN:
         s = s or config.settings()
         if tenant.tier == config.TIER_SOVEREIGN:
@@ -78,6 +85,10 @@ def assert_allowed(provider: str, tenant: Tenant, s: config.Settings | None = No
         if not s.allow_non_eu_providers:
             raise ResidencyError(
                 f"Anbieter {provider} verarbeitet nicht in der EU; nur mit CHOPSTR_ALLOW_NON_EU_PROVIDERS=1 erlaubt"
+            )
+        if not tenant.allow_us_subprocessors:
+            raise ResidencyError(
+                f"Anbieter {provider} ist ein US-Unterauftragnehmer; Workspace {tenant.id} hat dem nicht zugestimmt"
             )
         return
     if provider not in EU_OK:

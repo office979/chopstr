@@ -14,7 +14,8 @@ from chopstr_worker.residency import ResidencyError, Tenant
 from chopstr_worker.result_cache import ResultCache
 
 SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}
-STD = Tenant(id="ws", tier="standard")
+STD = Tenant(id="ws", tier="standard", allow_us_subprocessors=True)
+NO_CONSENT = Tenant(id="ws-eu", tier="standard")
 SOV = Tenant(id="ws-sov", tier="sovereign")
 
 
@@ -41,6 +42,39 @@ def test_anthropic_provider_needs_opt_in_and_never_sovereign():
         residency.assert_allowed("anthropic", SOV, settings())
     with pytest.raises(ResidencyError):
         residency.assert_allowed("claude-cli", STD, config.Settings())
+    # Opt-in allein reicht nicht: der Workspace muss US-Unterauftragnehmern zugestimmt haben
+    with pytest.raises(ResidencyError, match="nicht zugestimmt"):
+        residency.assert_allowed("anthropic", NO_CONSENT, settings())
+
+
+def test_vertex_only_regions_inside_the_eu():
+    off = config.Settings()
+    for region in ("europe-west2", "europe-west6"):  # London, Zürich
+        with pytest.raises(ResidencyError):
+            residency.assert_eu_host(f"https://{region}-aiplatform.googleapis.com/v1/x", off)
+        with pytest.raises(ResidencyError):
+            providers_mm.select_mm(s=config.Settings(mm_provider="gemini", vertex_project="p", vertex_location=region))
+    residency.assert_eu_host("https://europe-west3-aiplatform.googleapis.com/v1/x", off)
+    with pytest.raises(ResidencyError, match="nicht zugestimmt"):
+        providers_mm.select_mm(NO_CONSENT, s=settings(mm_provider="gemini", gemini_api_key="k"))
+    assert providers_mm.select_mm(NO_CONSENT, s=config.Settings(mm_provider="gemini", vertex_project="p", vertex_location="europe-west4")).mode == "vertex"
+
+
+def test_claude_cli_runs_without_api_key_in_env(monkeypatch):
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen["env"] = kw["env"]
+
+        class P:
+            returncode, stdout, stderr = 0, "{}", ""
+
+        return P()
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "nicht-echt")
+    monkeypatch.setattr(providers_llm.subprocess, "run", fake_run)
+    providers_llm.run_cli(["claude"], "p")
+    assert "ANTHROPIC_API_KEY" not in seen["env"]
 
 
 def test_hosts_non_eu_only_with_opt_in_vertex_eu_always():

@@ -25,6 +25,7 @@ Schalter: ``implementation.mm_scan`` der Policy v2 (``enabled``, ``provider``, `
 from __future__ import annotations
 
 import logging
+import math
 import re
 import shutil
 import subprocess
@@ -56,7 +57,7 @@ PSEUDO_LABELS = {
 }
 _PSEUDO = re.compile(
     r"\[(?:" + "|".join(re.escape(v[1:-1]) for v in PSEUDO_LABELS.values()) + r")\b[^\]]*\]"
-    r"(?:\s*\(\d{1,2}:\d{2}(?::\d{2})?(?:,\s*\w+)?\))?\s*"
+    r"(?:[ \t]*\(\d{1,2}:\d{2}(?::\d{2})?(?:,\s*\w+)?\))?[ \t]*"
 )
 # Lachen, wie es ASR-Systeme ins Transkript schreiben
 _ASR_LAUGH = re.compile(r"^[\[(*]?(lacht|lachen|gelächter|haha+|hihi+)[\])*]?[.,!?]*$", re.IGNORECASE)
@@ -137,6 +138,8 @@ def normalize(raw: Any, t0: float, t1: float, source: str) -> list[dict[str, Any
             a, b = float(e["t_start"]), float(e.get("t_end", e["t_start"]))
             inten = float(e.get("intensity", 0.5))
         except (KeyError, TypeError, ValueError):
+            continue
+        if not all(math.isfinite(x) for x in (a, b, inten)):
             continue
         a, b = t0 + max(0.0, a), t0 + max(0.0, b)
         if a >= t1 or a < t0:
@@ -354,7 +357,8 @@ def interleave(sents: Sequence[Any], events: Sequence[Mapping[str, Any]], number
 
 def strip_pseudo(text: str) -> str:
     """Entfernt Pseudo-Marken (``[LACHT]`` usw.) aus Text für Captions, Titel und Post-Text."""
-    return re.sub(r"\s{2,}", " ", _PSEUDO.sub("", str(text or ""))).strip()
+    # Nur Leerzeichen zusammenziehen, Zeilenumbrüche im Post-Text bleiben
+    return re.sub(r"[ \t]{2,}", " ", _PSEUDO.sub("", str(text or ""))).strip()
 
 
 __all__ = [

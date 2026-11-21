@@ -170,8 +170,13 @@ def extract_json_object(text: str) -> dict:
 
 def run_cli(argv: Sequence[str], prompt: str, timeout_s: float = CLI_TIMEOUT_S) -> str:
     """Startet die Claude-CLI mit dem Prompt auf stdin (kein Längenlimit der Kommandozeile)."""
+    # Ohne API-Key in der Umgebung: die CLI läuft über das Abo; mit Key würde sie still über die API abrechnen,
+    # und das Kostenbuch zeigte trotzdem 0 € (dev_subscription).
+    import os
+
+    env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
     try:
-        proc = subprocess.run(list(argv), input=prompt, capture_output=True, text=True, timeout=timeout_s, check=False)
+        proc = subprocess.run(list(argv), input=prompt, capture_output=True, text=True, timeout=timeout_s, check=False, env=env)
     except FileNotFoundError as exc:
         raise RuntimeError(f"Claude-CLI nicht gefunden ({argv[0]}); CHOPSTR_CLAUDE_CLI setzen oder installieren") from exc
     if proc.returncode != 0:
@@ -272,7 +277,8 @@ class LLM:
             hit = self.redis.get(key)
             if hit:
                 return json.loads(hit)
-        rkey = self._result_key(stage, model, prompt_version, payload)
+        # Ergebnis-Cache immer mit allen fünf Teilen, damit Einzel- und Batch-Aufrufe dieselben Keys treffen
+        rkey = self._result_key(stage, model, prompt_version, [system, policy_block, cache_prefix, user, schema])
         if rkey is not None:
             hit = self.result_cache.get(rkey)
             if isinstance(hit, dict):

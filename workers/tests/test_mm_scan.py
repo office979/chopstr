@@ -48,6 +48,7 @@ def test_normalize_makes_absolute_and_drops_garbage():
         {"t_start": 1, "t_end": 2, "type": "explosion", "intensity": 0.5},
         {"t_start": 700, "t_end": 701, "type": "shout", "intensity": 0.5},
         {"t_start": "x", "type": "shout"},
+        {"t_start": "nan", "t_end": 2, "type": "shout", "intensity": 0.5},
     ]}  # fmt: skip
     out = mm_scan.normalize(raw, 600, 1200, "gemini")
     assert out == [{"t_start": 605.0, "t_end": 607.0, "type": "laughter", "intensity": 1.0, "note": "", "source": "gemini"}]
@@ -167,6 +168,7 @@ def test_interleave_puts_pseudo_sentences_without_numbers():
 def test_strip_pseudo_removes_markers_from_copy():
     assert mm_scan.strip_pseudo("Er fällt [LACHT] hin [SCHREI (00:03, stark)] wirklich") == "Er fällt hin wirklich"
     assert mm_scan.strip_pseudo("Normale [Klammer] bleibt") == "Normale [Klammer] bleibt"
+    assert mm_scan.strip_pseudo("Zeile eins [LACHT]\n\nZeile zwei") == "Zeile eins \n\nZeile zwei"
 
 
 # -- Einspeisung in die Heatmap-Activity ---------------------------------------------------------------------

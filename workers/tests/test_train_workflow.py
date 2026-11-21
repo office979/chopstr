@@ -79,7 +79,7 @@ def test_gold_cli_validate_and_stats(capsys):
 def test_job_file_has_only_metadata_and_cache_refs(env):
     job = json.loads(_job(env).read_text(encoding="utf-8"))
     assert job["version"] == "train_job_v1" and job["source"]["kind"] == "file"
-    assert job["source"]["path"] == "quelle.mp4"  # außerhalb des Repos nur der Dateiname
+    assert job["source"]["path"] is None and job["source"]["suffix"] == ".mp4"  # außerhalb des Repos kein Name
     assert str(env["tmp"]) not in json.dumps(job)  # kein absoluter Pfad in der Job-Datei
     assert job["transcript"] == "cache:transcript.json" and job["gold"] == ["synth-fehler-preis", "synth-andersrum"]
     assert job["gold_file"] == "workers/eval/gold/fixtures/synthetic_v1.json"
@@ -165,7 +165,9 @@ def test_feed_writes_store_and_refuses_main_db(env, capsys):
     fed = json.loads(store.read_text().splitlines()[-1])
     assert fed["rows"] >= 1 and fed["hook_patterns"]["mistake_with_consequence"]["chosen"] == 1
     assert fed["weights_reliable"] is False  # zu wenige Zeilen für belastbare Gewichte
-    for url in ("postgres://u@127.0.0.1:5499/test", "postgres://u@localhost:6543/chopstr", "postgresql://u@db/chopstr?x=1"):
+    for url in ("postgres://u@127.0.0.1:5499/test", "postgres://u@localhost:6543/chopstr", "postgresql://u@db/chopstr?x=1",
+                "postgresql://h:5432/x?dbname=chopstr", "postgresql://chopstr@localhost", "postgresql://u@h/x?port=5499",
+                "postgresql://u@h/x?service=main"):
         with pytest.raises(SystemExit, match="verweigert"):
             train.main(["feed", "--run", str(rdir), "--db", url, "--brand-profile", "b"])
     with pytest.raises(SystemExit):

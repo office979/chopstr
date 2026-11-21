@@ -143,6 +143,30 @@ def test_editor_word_outside_window_is_rejected():
     assert any(d["reason"] == "editor_rejected" for d in report.discarded)
 
 
+def test_malformed_model_answers_fall_back_instead_of_aborting():
+    def garbage(a, b, words):
+        sents = segment.sentences_from_words(demo_words())
+        return {"keep": True, "start_word": sents[a].word_range[0], "end_word": sents[b].word_range[1], "hook": "kein Objekt",
+                "title": "T", "post_text": "auch kein Objekt", "scores": {"hook": "8/10", "payoff": float("nan")}}  # fmt: skip
+
+    report = tiered_engine.run(demo_words(), BRIEF, {}, None, FakeTiers(spans=[(0, 3)], edit=garbage))
+    c = next(c for c in report.candidates if (c.first_sent, c.last_sent) == (0, 3))
+    assert c.rubric["tiered"]["editor"]["scores"]["hook"] == 0 and c.rubric["tiered"]["editor"]["post_text"]["tiktok"] == ""
+
+    class Broken(FakeTiers):
+        def with_tier(self, tier):
+            return Broken(self.spans, tier, self.log, self.edit)
+
+        def structured(self, *a, **k):
+            if a[3] in ("prefilter_moments", "edit_clip"):
+                raise RuntimeError("429 zu viele Anfragen")
+            return super().structured(*a, **k)
+
+    report = tiered_engine.run(demo_words(), BRIEF, {}, {"seeds": [3]}, Broken(spans=[(0, 3)]))
+    info = report.search["tiered"]
+    assert info["prefilter"]["errors"] and info["prefilter"]["errors"][0]["error"] == "RuntimeError"
+
+
 def test_apply_editor_marks_cut_inside_sentence_and_snaps():
     sents = segment.sentences_from_words(demo_words())
     a0 = sents[0].word_range[0]

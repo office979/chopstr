@@ -119,6 +119,12 @@ ersten Durchgänge über die Batch-API (halber Preis, Ergebnis bis zu 24 h spät
 | Budget | `CHOPSTR_RUN_BUDGET_EUR`, `CHOPSTR_RUN_BUDGET_TOKENS` oder `--budget-eur`, `--budget-tokens` | 0 heißt ohne Grenze |
 | Preise | `CHOPSTR_PRICE_TABLE`, `CHOPSTR_BATCH_DISCOUNT` | Standardpreise sind Platzhalter, vor dem Betrieb prüfen |
 
+Anthropic und AI Studio brauchen zusätzlich die Zustimmung des Workspaces zu US-Unterauftragnehmern
+(`workspaces.allow_us_subprocessors`); der interne Eval-Mandant von `eval.train` hat sie. Vertex gilt nur in Regionen
+mit Standort in der EU (`residency.VERTEX_EU_REGIONS`, etwa `europe-west3`, `europe-west4`); `europe-west2` (London)
+und `europe-west6` (Zürich) sind gesperrt. Die Claude-CLI startet ohne `ANTHROPIC_API_KEY` in der Umgebung, damit
+sie wirklich über das Abo läuft.
+
 Keys nur in der Umgebung des Prozesses, nie in Code, Job-Dateien oder Logs. `CHOPSTR_ALLOW_NON_EU_PROVIDERS` ist
 standardmäßig aus; ohne sie sperrt der Residency-Guard `api.anthropic.com` und `generativelanguage.googleapis.com`
 schon vor dem Verbindungsaufbau.

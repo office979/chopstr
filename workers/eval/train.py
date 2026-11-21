@@ -58,7 +58,9 @@ GOLD_DIR = WORKERS / "eval" / "gold"
 HISTORY = WORKERS / "eval" / "results" / "training" / "history.jsonl"
 JOB_VERSION = "train_job_v1"
 RUN_VERSION = "train_run_v1"
-TENANT = Tenant(id="eval-training", tier=config.TIER_STANDARD)
+# Interner Eval-Mandant: eigenes Material und öffentliche Clips, Zustimmung zu US-Unterauftragnehmern gilt hier;
+# der Opt-in CHOPSTR_ALLOW_NON_EU_PROVIDERS bleibt trotzdem Pflicht.
+TENANT = Tenant(id="eval-training", tier=config.TIER_STANDARD, allow_us_subprocessors=True)
 # Hauptdatenbank des lokalen Stacks: ``feed`` schreibt dort nie hin
 FORBIDDEN_DB_PORT = 5499
 FORBIDDEN_DB_NAME = "chopstr"
@@ -93,12 +95,12 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def _rel(path: Path) -> str:
-    """Pfad relativ zum Repo, wenn er darin liegt; sonst nur der Dateiname (absolute Pfade bleiben lokal)."""
+def _rel(path: Path) -> str | None:
+    """Pfad relativ zum Repo, wenn er darin liegt; sonst ``None`` (Pfad und Dateiname bleiben lokal im Cache)."""
     try:
         return str(Path(path).resolve().relative_to(REPO))
     except ValueError:
-        return Path(path).name
+        return None
 
 
 def _is_url(ref: str) -> bool:
@@ -170,7 +172,8 @@ def cmd_job_create(args: argparse.Namespace) -> int:
         if not path.is_file():
             raise SystemExit(f"Quelle {ref} nicht gefunden")
         sha = sha256_file(path)
-        source = {"kind": "file", "path": _rel(path), "sha256": sha, "cache_ref": sha[:16], "size_bytes": path.stat().st_size}
+        source = {"kind": "file", "path": _rel(path), "suffix": path.suffix.lower(), "sha256": sha, "cache_ref": sha[:16],
+                  "size_bytes": path.stat().st_size}
         # Der absolute Pfad bleibt lokal im Cache, nie in der Job-Datei (das Repo ist öffentlich)
         _write_json(root / sha[:16] / "source.json", {"path": str(path.resolve()), "sha256": sha})
     job_id = args.name or f"job-{datetime.now(UTC).strftime('%Y%m%d')}-{source['cache_ref'][:8]}"
@@ -205,7 +208,8 @@ def resolve_media(job: dict, root: Path) -> Path | None:
     if src["kind"] == "file":
         meta = cdir / "source.json"
         cands = [Path(_read_json(meta)["path"])] if meta.is_file() else []
-        cands.append(REPO / src.get("path", ""))
+        if src.get("path"):
+            cands.append(REPO / src["path"])
         for c in cands:
             if c.is_file():
                 return c
@@ -769,14 +773,35 @@ def cmd_export(args: argparse.Namespace) -> int:
 
 # -- feed ---------------------------------------------------------------------------------------------------------
 def assert_db_allowed(url: str) -> None:
-    """Hart: nie die Hauptdatenbank (Port 5499 oder Datenbankname ``chopstr``)."""
+    """Hart: nie die Hauptdatenbank (Port 5499 oder Datenbankname ``chopstr``).
+
+    Geprüft wird, was libpq tatsächlich nehmen würde: Pfad, Query-Parameter ``dbname``/``port``, ohne Pfad der
+    Benutzername, ohne Port ``PGPORT``, ohne Name ``PGDATABASE``; ``service=`` ist nicht prüfbar und verboten.
+    ``cmd_feed`` prüft nach dem Verbinden zusätzlich ``current_database()`` und ``inet_server_port()``."""
+    from urllib.parse import parse_qs
+
     parts = urlsplit(url)
     if parts.scheme not in ("postgres", "postgresql"):
         raise SystemExit("--db braucht eine postgres://-URL")
-    port = parts.port
-    name = unquote(parts.path.lstrip("/")).split("?", 1)[0]
-    if port == FORBIDDEN_DB_PORT or name == FORBIDDEN_DB_NAME or (port is None and str(FORBIDDEN_DB_PORT) in url):
+    query = {k.lower(): v[-1] for k, v in parse_qs(parts.query).items()}
+    if "service" in query or "host" in query:
+        raise SystemExit("feed verweigert: service= und host= in der URL sind nicht prüfbar")
+    try:
+        port = int(query.get("port") or parts.port or os.environ.get("PGPORT") or 5432)
+    except ValueError:
+        raise SystemExit("feed verweigert: Port nicht lesbar") from None
+    name = query.get("dbname") or unquote(parts.path.lstrip("/")) or os.environ.get("PGDATABASE") or unquote(parts.username or "")
+    if port == FORBIDDEN_DB_PORT or name == FORBIDDEN_DB_NAME:
         raise SystemExit("feed verweigert: Port 5499 bzw. Datenbank 'chopstr' ist die Hauptdatenbank")
+
+
+def assert_connection_allowed(conn: Any) -> None:
+    """Nach dem Verbinden: die Datenbank selbst fragen, bevor etwas geschrieben wird."""
+    from chopstr_worker import db
+
+    row = db.fetch_one(conn, "select current_database(), inet_server_port()")
+    if row and (str(row[0]) == FORBIDDEN_DB_NAME or (row[1] is not None and int(row[1]) == FORBIDDEN_DB_PORT)):
+        raise SystemExit("feed verweigert: verbunden mit der Hauptdatenbank (chopstr bzw. Port 5499)")
 
 
 def feed_summary(rows: list[dict], gold: list[dict]) -> dict[str, Any]:
@@ -818,6 +843,7 @@ def cmd_feed(args: argparse.Namespace) -> int:
         from chopstr_worker import db, learning
 
         with db.connect(args.db) as conn:
+            assert_connection_allowed(conn)
             for pattern, st in summary["hook_patterns"].items():
                 learning.update_hook_stats(conn, args.brand_profile, pattern, shown=st["shown"], chosen=st["chosen"])
             conn.commit()

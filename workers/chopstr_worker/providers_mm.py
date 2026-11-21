@@ -149,8 +149,10 @@ class GeminiMM(MMProvider):
         self.mode = "vertex" if self.s.vertex_project else "aistudio"
         if self.mode == "vertex":
             loc = self.s.vertex_location or ""
-            if not loc.startswith("europe-"):
-                raise ResidencyError(f"VERTEX_LOCATION {loc!r} ist keine EU-Region (europe-west* o. ä. setzen)")
+            if loc not in residency.VERTEX_EU_REGIONS:
+                raise ResidencyError(
+                    f"VERTEX_LOCATION {loc!r} ist keine EU-Region (erlaubt: {', '.join(sorted(residency.VERTEX_EU_REGIONS))})"
+                )
         else:
             if not self.s.allow_non_eu_providers:
                 raise ResidencyError(
@@ -301,6 +303,9 @@ def select_mm(
     if name == "gemini":
         if tenant is not None and tenant.tier == config.TIER_SOVEREIGN:
             raise ResidencyError(f"MM-Provider gemini ist für Sovereign-Workspace {tenant.id} nicht erlaubt")
+        if tenant is not None and not s.vertex_project and not tenant.allow_us_subprocessors:
+            # AI Studio ist ein US-Unterauftragnehmer; Vertex AI in einer EU-Region braucht keine Zustimmung
+            raise ResidencyError(f"Google AI Studio: Workspace {tenant.id} hat US-Unterauftragnehmern nicht zugestimmt")
         return GeminiMM(s, cost_sink=cost_sink, **kw)
     if name == "mock":
         return MockMM(events=kw.get("events"), s=s, cost_sink=cost_sink)

@@ -39,6 +39,8 @@ from typing import Any
 
 from .. import editorial, prompts
 from ..costlog import BudgetExceeded
+from ..providers_llm import SchemaError
+from ..residency import ResidencyError
 from . import mm_scan, payoff_search, signals, story_engine, story_score
 from .segment import Sentence, chapterize, numbered, sentences_from_annotated, sentences_from_words
 
@@ -266,13 +268,26 @@ def _sentence_of_word(sents: Sequence[Sentence], w: int) -> int | None:
     return None
 
 
+def _obj(v: Any) -> dict:
+    return v if isinstance(v, dict) else {}
+
+
+def _score(v: Any) -> int:
+    """Wert 0 bis 10; Unlesbares (z. B. „8/10“ aus der CLI ohne Schema-Zwang) zählt 0."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return 0
+    return int(max(0, min(10, round(f)))) if math.isfinite(f) else 0
+
+
 def apply_editor(out: Mapping[str, Any], sents: Sequence[Sentence], win_first: int, win_last: int) -> dict | None:
     """Antwort des Editors prüfen und in einen Vorschlag für ``evaluate_span`` übersetzen; ``None`` heißt verwerfen.
 
     Wortnummern müssen im Kandidatenfenster liegen (echte Wörter, nie Pseudo-Sätze). Die Spanne wird auf
     Satzgrenzen gelegt, weil die Gates an Satzgrenzen prüfen; ein Schnitt mitten im Satz steht in
     ``cut_inside_sentence``."""
-    if not out.get("keep", True):
+    if not isinstance(out, Mapping) or not out.get("keep", True):
         return None
     lo, hi = sents[win_first].word_range[0], sents[win_last].word_range[1]
     try:
@@ -289,22 +304,22 @@ def apply_editor(out: Mapping[str, Any], sents: Sequence[Sentence], win_first: i
         inside.append("start")
     if ew != sents[last].word_range[1]:
         inside.append("end")
-    hook = dict(out.get("hook") or {})
+    hook = _obj(out.get("hook"))
     try:
         hs, he = int(hook.get("start_word", sw)), int(hook.get("end_word", sw))
     except (TypeError, ValueError):
         hs, he = sw, sw
     if not (sw <= hs <= he <= ew):
         hs, he = sents[first].word_range[0], sents[first].word_range[1]
-    post = {p: mm_scan.strip_pseudo(str((out.get("post_text") or {}).get(p) or "")) for p in PLATFORMS}
+    post = {p: mm_scan.strip_pseudo(str(_obj(out.get("post_text")).get(p) or "")) for p in PLATFORMS}
     return {
         "first_sent": first, "last_sent": last, "start_word": sw, "end_word": ew, "cut_inside_sentence": inside,
         "hook": {"start_word": hs, "end_word": he, "text": mm_scan.strip_pseudo(str(hook.get("text") or ""))},
         "title": mm_scan.strip_pseudo(str(out.get("title") or "")),
         "onscreen_text": mm_scan.strip_pseudo(str(out.get("onscreen_text") or "")),
         "post_text": post,
-        "scores": {k: int(max(0, min(10, int((out.get("scores") or {}).get(k, 0) or 0)))) for k in story_engine.SCORE_KEYS},
-        "evidence": {k: str((out.get("evidence") or {}).get(k) or "") for k in story_engine.SCORE_KEYS},
+        "scores": {k: _score(_obj(out.get("scores")).get(k)) for k in story_engine.SCORE_KEYS},
+        "evidence": {k: mm_scan.strip_pseudo(str(_obj(out.get("evidence")).get(k) or "")) for k in story_engine.SCORE_KEYS},
         "flags": {
             "needs_earlier_context": bool(out.get("needs_earlier_context")), "ends_before_answer": bool(out.get("ends_before_answer")),
             "unresolved_references": [str(x) for x in (out.get("unresolved_references") or [])][:10],
@@ -477,6 +492,12 @@ def run(
                 budget_stop = True
                 info["skipped"].append({"stage": "prefilter", "from_block": n, "reason": "budget_exhausted", "detail": exc.detail})
                 got = _local_prefilter(block, sents, words, heat, pol, cfg)
+            except ResidencyError:
+                raise
+            except (SchemaError, RuntimeError, ValueError, TypeError, KeyError) as exc:
+                # Kaputte Antwort oder Fehler des Anbieters: dieser Block läuft lokal, der Lauf geht weiter
+                info["prefilter"].setdefault("errors", []).append({"block": n, "error": exc.__class__.__name__, "detail": str(exc)[:160]})
+                got = _local_prefilter(block, sents, words, heat, pol, cfg)
         for c in got:
             block_of.setdefault((c["first_sent"], c["last_sent"]), n)
         found.extend(got)
@@ -526,6 +547,10 @@ def run(
                 except BudgetExceeded as exc:
                     editor_stop = True
                     info["skipped"].append({"stage": "editor", "reason": "budget_exhausted", "detail": exc.detail})
+                except ResidencyError:
+                    raise
+                except (SchemaError, RuntimeError, ValueError, TypeError, KeyError) as exc:
+                    info["editor"].setdefault("errors", []).append({"first_sent": c["first_sent"], "error": exc.__class__.__name__, "detail": str(exc)[:160]})
             if ed is None:
                 ed = _local_editor(c, sents)
                 info["editor"]["local"] += 1

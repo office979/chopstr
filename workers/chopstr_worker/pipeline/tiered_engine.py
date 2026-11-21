@@ -70,6 +70,10 @@ DEFAULTS: dict[str, Any] = {
     "max_backfill": 20,
     # Modellstufe für Neubewertung (score_clip nach einer Heilung), Bestätigung und Kritiker: Standard judge (Haiku)
     "score_tier": "judge",
+    # Vorbereitung Mehrsegment-Clips (Gold-Set: 2 bis 6 Quellstellen): der Editor darf ``segments`` liefern; nur mit
+    # true ersetzen sie die Segmente des Kandidaten (``ClipCandidate.segments``), sonst stehen sie nur in der Rubrik.
+    "multi_segment": False,
+    "max_segments": 6,
 }
 # Ablehnung durch den Editor nur mit einem dieser Gründe (editor_v2); ohne gültigen Grund gilt die Ablehnung nicht.
 REJECT_REASONS: dict[str, str] = {
@@ -84,6 +88,12 @@ REJECT_REASONS: dict[str, str] = {
     "unintelligible": "Transkript an der Stelle unverständlich",
 }
 CONTEXT_REJECT_REASONS = frozenset({"needs_context"})
+SEGMENTS_RULE_ON = (
+    "du darfst den Clip aus bis zu {n} Stellen des Kandidaten verdichten: segments ist dann eine Liste von "
+    "{{start_word, end_word}} in der Reihenfolge des Transkripts, jede Stelle ein ganzer Satz oder mehrere, ohne Überlappung; "
+    "dazwischen fällt Überflüssiges weg. Eine Umstellung (Cold Open) braucht eine ausdrückliche Freigabe und wird derzeit nicht "
+    "geschnitten. start_word und end_word bleiben die Gesamtspanne. Ohne Bedarf segments weglassen."
+)
 SEGMENTS_RULE_OFF = "ein zusammenhängender Ausschnitt von start_word bis end_word, ohne Umstellung und ohne Cold Open aus mehreren Stellen."
 PREFILTER_TYPES = ("hot_take", "story", "punchline", "reaction", "conflict", "insight", "number", "emotional", "other")
 PLATFORMS = ("tiktok", "reels", "shorts")
@@ -132,6 +142,11 @@ EDITOR_SCHEMA: dict[str, Any] = {
         },
         "evidence": {"type": "object", "properties": {k: {"type": "string"} for k in story_engine.SCORE_KEYS}},
         "reject_reason": {"type": "string", "enum": list(REJECT_REASONS)},
+        "segments": {
+            "type": "array",
+            "items": {"type": "object", "properties": {"start_word": {"type": "integer"}, "end_word": {"type": "integer"}},
+                      "required": ["start_word", "end_word"]},
+        },
         "needs_earlier_context": {"type": "boolean"},
         "ends_before_answer": {"type": "boolean"},
         "unresolved_references": {"type": "array", "items": {"type": "string"}},
@@ -150,9 +165,9 @@ def engine_settings(policy: editorial.Policy | None) -> dict[str, Any]:
     raw = (policy.roh.get("implementation") or {}).get(SWITCH) if policy is not None and policy.version >= 2 else None
     if isinstance(raw, dict):
         cfg.update({k: raw[k] for k in DEFAULTS if k in raw})
-    for k in ("tiered", "repair", "backfill"):
+    for k in ("tiered", "repair", "backfill", "multi_segment"):
         cfg[k] = cfg[k] is True
-    for k in ("min_candidates", "max_candidates", "editor_context_sents", "min_target_clips", "max_backfill"):
+    for k in ("min_candidates", "max_candidates", "editor_context_sents", "min_target_clips", "max_backfill", "max_segments"):
         cfg[k] = int(cfg[k])
     for k in ("candidates_per_source_hour", "editor_oversample", "prefilter_block_s", "prefilter_overlap_s", "min_len_s", "max_len_s",
               "repair_context_s", "editor_per_source_hour", "target_clips_per_source_hour"):  # fmt: skip
@@ -379,7 +394,43 @@ def apply_editor(out: Mapping[str, Any], sents: Sequence[Sentence], win_first: i
         },
         "why": mm_scan.strip_pseudo(str(out.get("why") or ""))[:240],
         **({"unjustified_reject": True} if unjustified else {}),
+        **({"segments": segs} if (segs := editor_segments(out, lo, hi)) else {}),
     }  # fmt: skip
+
+
+def editor_segments(out: Mapping[str, Any], lo: int, hi: int, max_n: int = 6) -> list[list[int]]:
+    """Optionale ``segments`` des Editors als Wortspannen ``[start, end]`` in Abspielreihenfolge. Gültig nur, wenn es
+    mindestens zwei sind, alle im Fenster ``lo`` bis ``hi`` liegen, keine sich überlappen und höchstens ``max_n``;
+    sonst leer (der Kandidat bleibt eine zusammenhängende Spanne)."""
+    raw = out.get("segments") if isinstance(out, Mapping) else None
+    if not isinstance(raw, list) or len(raw) < 2 or len(raw) > max_n:
+        return []
+    segs: list[list[int]] = []
+    for s in raw:
+        try:
+            a, b = int(_obj(s)["start_word"]), int(_obj(s)["end_word"])
+        except (KeyError, TypeError, ValueError):
+            return []
+        if not (lo <= a <= b <= hi):
+            return []
+        segs.append([a, b])
+    ordered = sorted(segs)
+    if any(ordered[i][1] >= ordered[i + 1][0] for i in range(len(ordered) - 1)):
+        return []
+    return segs
+
+
+def apply_segments(res: story_engine.CandidateResult, words: Sequence[Mapping[str, Any]], segs: Sequence[Sequence[int]]) -> str | None:
+    """Setzt die Segmente des Editors als Komposition des Kandidaten (Quellzeiten der Wörter, Rolle ``body``). Rückgabe:
+    ``None`` bei Erfolg, sonst der Grund, warum der Kandidat bei seiner zusammenhängenden Spanne bleibt."""
+    from . import compose
+
+    comp = [{"start": round(float(words[a]["start"]), 3), "end": round(float(words[b]["end"]), 3), "role": "body"} for a, b in segs]
+    problems = compose.Composition.from_json(comp).validate(list(words))
+    if problems:
+        return "; ".join(problems)[:240]
+    res.segments = comp
+    return None
 
 
 def format_note(brief: Mapping[str, Any]) -> str:
@@ -657,7 +708,8 @@ def run(
     common = {
         "audience": brief.get("audience"), "platforms": "TikTok, Reels, Shorts", "address": brand.get("address") or "du",
         "country": brand.get("country") or "AT", "min_len_s": int(cfg["min_len_s"]), "max_len_s": int(cfg["max_len_s"]),
-        "format_note": format_note(brief), "reject_reasons": ", ".join(REJECT_REASONS), "segments_rule": SEGMENTS_RULE_OFF,
+        "format_note": format_note(brief), "reject_reasons": ", ".join(REJECT_REASONS),
+        "segments_rule": SEGMENTS_RULE_ON.format(n=int(cfg["max_segments"])) if cfg["multi_segment"] else SEGMENTS_RULE_OFF,
     }  # fmt: skip
 
     def ask(prompt: prompts.Prompt, stage: str, bno: int, user: str, c: Mapping[str, Any]) -> tuple[bool, Any]:
@@ -687,6 +739,8 @@ def run(
         ed = apply_editor(out, sents, wf, wl)
         if ed is not None and ed.get("unjustified_reject"):
             info["editor"]["unjustified_rejects"] += 1
+        if ed is not None and len(ed.get("segments") or []) > int(cfg["max_segments"]):
+            ed.pop("segments")
         return ed
 
     def repair(c: Mapping[str, Any], bno: int, win: tuple[int, int], finding: str, previous: Mapping[str, Any], trigger: str) -> tuple[dict | None, dict]:
@@ -780,10 +834,20 @@ def run(
             report.discarded.append({"reason": "same_result", "stage": "gates", "first_sent": key[0], "last_sent": key[1]})
             return
         seen.add(key)
+        seg_note = None
+        if ed.get("segments"):
+            if not cfg["multi_segment"]:
+                seg_note = "multi_segment aus"
+            elif (res.first_sent, res.last_sent) != (ed["first_sent"], ed["last_sent"]):
+                seg_note = "Spanne nach Heilung geändert, Segmente des Editors passen nicht mehr"
+            else:
+                seg_note = apply_segments(res, words, ed["segments"])
         res.rubric["tiered"] = {
             "prefilter": {k: c.get(k) for k in ("first_sent", "last_sent", "type", "why", "score", "rank_score", "source")},
             "editor": {k: ed.get(k) for k in ("start_word", "end_word", "cut_inside_sentence", "hook", "title", "onscreen_text",
-                                              "post_text", "scores", "local", "repaired")},
+                                              "post_text", "scores", "local", "repaired", "segments")},
+            "multi_segment": {"enabled": bool(cfg["multi_segment"]), "proposed": len(ed.get("segments") or []),
+                              "applied": bool(ed.get("segments")) and seg_note is None, "note": seg_note},
             "events": [e for e in evs if sents[res.first_sent].start <= float(e["t_start"]) <= sents[res.last_sent].end + 3.0][:20],
         }  # fmt: skip
         decision = res.rubric.get("quality_gate_decision") or {}

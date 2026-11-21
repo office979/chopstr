@@ -1193,6 +1193,8 @@ implementation:
     backfill: true                   # unter dem Ziel die nächstbesten Vorfilter-Kandidaten nachschieben, solange Budget da ist
     max_backfill: 20                 # höchstens so viele nachgeschobene Kandidaten je Lauf
     score_tier: judge                # T2c: Stufe für Neubewertung und Kritiker (judge = Haiku); editor wäre Sonnet
+    multi_segment: false             # T2c Vorbereitung: Editor-Segmente (2 bis 6 Stellen) als ClipCandidate.segments; aus
+    max_segments: 6
 
 # ------------------------------------------------------------------------------------------------
 # Herkunft je Regel (neu in Fassung 2)

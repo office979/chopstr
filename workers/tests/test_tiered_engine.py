@@ -463,3 +463,67 @@ def test_rescoring_runs_on_score_tier_with_candidate_window_only(monkeypatch):
     report = tiered_engine.run(words, BRIEF, {}, None, fake, policy=editorial.load(2))
     assert {c["tier"] for c in fake.calls("score_clip")} == {"editor"}
     assert report.search["tiered"]["models"]["score_tier"] == "editor"
+
+
+def test_editor_segments_parsing_rules():
+    sents = segment.sentences_from_words(demo_words())
+    lo, hi = sents[0].word_range[0], sents[5].word_range[1]
+    a, b = sents[0].word_range, sents[3].word_range
+    ok = {"segments": [{"start_word": b[0], "end_word": b[1]}, {"start_word": a[0], "end_word": a[1]}]}
+    assert tiered_engine.editor_segments(ok, lo, hi) == [[b[0], b[1]], [a[0], a[1]]]  # Cold Open: Reihenfolge bleibt
+    assert tiered_engine.editor_segments({"segments": ok["segments"][:1]}, lo, hi) == []  # ein Segment heißt Spanne
+    overlap = {"segments": [{"start_word": a[0], "end_word": b[0]}, {"start_word": b[0], "end_word": b[1]}]}
+    assert tiered_engine.editor_segments(overlap, lo, hi) == []
+    outside = {"segments": [{"start_word": a[0], "end_word": a[1]}, {"start_word": hi + 1, "end_word": hi + 3}]}
+    assert tiered_engine.editor_segments(outside, lo, hi) == []
+    assert tiered_engine.editor_segments({"segments": [{"start_word": "x"}, {}]}, lo, hi) == []
+
+
+def _segment_edit(sents, reorder=False):
+    def edit(a, b, words):
+        segs = [{"start_word": sents[a].word_range[0], "end_word": sents[a].word_range[1]},
+                {"start_word": sents[a + 2].word_range[0], "end_word": sents[a + 3].word_range[1]}]  # fmt: skip
+        return _edit_answer(sents, a, b, segments=segs[::-1] if reorder else segs)
+
+    return edit
+
+
+def test_segments_are_off_by_default_and_only_noted(monkeypatch):
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    words, sents = _thirty_sentences()
+    assert tiered_engine.engine_settings(editorial.load(2))["multi_segment"] is False
+    fake = FakeTiers(spans=[(20, 23)], edit=_segment_edit(sents))
+    report = tiered_engine.run(words, BRIEF, {}, None, fake, policy=editorial.load(2))
+    assert "zusammenhängender Ausschnitt" in fake.calls("edit_clip")[0]["user"]
+    c = next(c for c in report.candidates if c.first_sent == 20)
+    ms = c.rubric["tiered"]["multi_segment"]
+    assert ms == {"enabled": False, "proposed": 2, "applied": False, "note": "multi_segment aus"}
+    assert len(c.segments) == 1
+    assert len(report.clip_candidates[report.candidates.index(c)]["segments"]) == 1
+
+
+def test_segments_reach_clip_candidate_when_switched_on(monkeypatch):
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    words, sents = _thirty_sentences()
+    cfg = {**tiered_engine.engine_settings(editorial.load(2)), "multi_segment": True}
+    monkeypatch.setattr(tiered_engine, "engine_settings", lambda pol: cfg)
+    fake = FakeTiers(spans=[(20, 23)], edit=_segment_edit(sents))
+    report = tiered_engine.run(words, BRIEF, {}, None, fake, policy=editorial.load(2))
+    assert "bis zu 6 Stellen" in fake.calls("edit_clip")[0]["user"]
+    c = next(c for c in report.candidates if c.first_sent == 20)
+    assert c.rubric["tiered"]["multi_segment"]["applied"] is True
+    assert [round(s["start"], 2) for s in c.segments] == [round(sents[20].start, 2), round(sents[22].start, 2)]
+    cc = report.clip_candidates[report.candidates.index(c)]
+    assert len(cc["segments"]) == 2
+    assert cc["segments"][0]["source_in"] == pytest.approx(sents[20].start, abs=0.01)
+    assert cc["segments"][1]["source_in"] == pytest.approx(sents[22].start, abs=0.01)
+    assert cc["segments"][0]["output_in"] == pytest.approx(0.0)
+    # Satz 21 fällt weg: die Ausgabe ist kürzer als die Quellspanne
+    assert cc["segments"][1]["output_out"] < sents[23].end - sents[20].start
+
+    # Umstellung (Cold Open) bleibt gesperrt (Vertrauensregel E6 in compose): Spanne bleibt, Grund in der Rubrik
+    fake = FakeTiers(spans=[(20, 23)], edit=_segment_edit(sents, reorder=True))
+    report = tiered_engine.run(words, BRIEF, {}, None, fake, policy=editorial.load(2))
+    c = next(c for c in report.candidates if c.first_sent == 20)
+    ms = c.rubric["tiered"]["multi_segment"]
+    assert ms["applied"] is False and "umsortiert" in ms["note"] and len(c.segments) == 1

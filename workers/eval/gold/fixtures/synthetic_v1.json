@@ -1,0 +1,100 @@
+{
+  "version": "gold_clip_v1",
+  "note": "Synthetisch, nur für Tests. Die Quelle ist das Demo-Transkript aus workers/tests/transcript_fixtures.py (DEMO_SCRIPT); alle URLs zeigen auf example.org und existieren nicht.",
+  "clips": [
+    {
+      "id": "synth-fehler-preis",
+      "tier": "podcast",
+      "creator": "Synthetischer Podcast",
+      "clip": {
+        "url": "https://example.org/clips/synth-fehler-preis",
+        "platform": "tiktok",
+        "published_at": "2026-11-01",
+        "duration_s": 23.4,
+        "title": "Der teuerste Fehler",
+        "caption": "40 Prozent Marge weg. Warum?",
+        "hashtags": ["gründen", "preise"],
+        "metrics": {"views": 120000, "likes": 8000, "comments": 300, "shares": 900, "saves": 1200, "measured_at": "2026-11-10"}
+      },
+      "source": {
+        "url": "https://example.org/folgen/synth-demo",
+        "title": "Synthetische Demo-Folge",
+        "duration_s": 95.0,
+        "start_s": 0.0,
+        "end_s": 23.4,
+        "alignment": "manual",
+        "confidence": 1.0
+      },
+      "breakdown": {
+        "hook_type": "mistake_with_consequence",
+        "hook_text_first_3s": "Ehrlich gesagt war das der teuerste Fehler",
+        "onscreen_text": "40 Prozent Marge weg",
+        "cut_in": {"kind": "sentence_start", "note": "direkt mit dem Geständnis"},
+        "cut_out": {"kind": "sentence_end", "note": "nach der Zahl"},
+        "length_s": 23.4,
+        "context_setup": "Gründer erzählt von seinem Preismodell",
+        "payoff": "Preise um 30 Prozent gesenkt",
+        "payoff_type": "consequence",
+        "structure": "hook_build_payoff",
+        "edits": {"cold_open": false, "jump_cuts": true, "reordered": false},
+        "captions_style": "wortweise, groß",
+        "copy_pattern": "Zahl im Titel",
+        "language_notes": null
+      },
+      "provenance": {"collected_by": "test", "collected_at": "2026-11-21", "method": "synthetic"},
+      "rights": "metadata_only"
+    },
+    {
+      "id": "synth-andersrum",
+      "tier": "podcast",
+      "creator": "Synthetischer Podcast",
+      "clip": {
+        "url": "https://example.org/clips/synth-andersrum",
+        "platform": "reels",
+        "published_at": null,
+        "duration_s": 8.8,
+        "title": null,
+        "caption": null,
+        "hashtags": null,
+        "metrics": {"views": 30000, "likes": null, "comments": null, "shares": null, "saves": null, "measured_at": null}
+      },
+      "source": {
+        "url": "https://example.org/folgen/synth-demo",
+        "title": "Synthetische Demo-Folge",
+        "duration_s": 95.0,
+        "start_s": 24.2,
+        "end_s": 33.0,
+        "alignment": "transcript_match",
+        "confidence": 0.8
+      },
+      "breakdown": {
+        "hook_type": "result_with_open_cause",
+        "hook_text_first_3s": "Das hat alles verändert",
+        "onscreen_text": null,
+        "cut_in": {"kind": "sentence_start", "note": null},
+        "cut_out": {"kind": "punchline", "note": null},
+        "length_s": 8.8,
+        "context_setup": null,
+        "payoff": "Heute machen wir es genau andersrum",
+        "payoff_type": "resolution",
+        "structure": "payoff_first",
+        "edits": null,
+        "captions_style": null,
+        "copy_pattern": null,
+        "language_notes": null
+      },
+      "provenance": {"collected_by": "test", "collected_at": "2026-11-21", "method": "synthetic"},
+      "rights": "metadata_only"
+    },
+    {
+      "id": "synth-ohne-fundstelle",
+      "tier": "own",
+      "creator": "Eigene Produktion",
+      "clip": {"url": "https://example.org/clips/synth-ohne-fundstelle", "platform": "shorts"},
+      "source": {"url": "https://example.org/folgen/andere-folge", "start_s": null, "end_s": null, "alignment": "unknown", "confidence": null},
+      "breakdown": {},
+      "provenance": {"collected_by": "test", "collected_at": "2026-11-21", "method": "synthetic"},
+      "rights": "metadata_only"
+    }
+  ]
+}

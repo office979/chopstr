@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chopstr.local/schemas/gold_clip_v1.json",
+  "title": "gold_clip_v1",
+  "description": "Ein Gold-Clip: veröffentlichter Short (Metadaten und URL, nie Medien) mit Fundstelle in der Langform und redaktioneller Zerlegung. Unbekannte Felder sind null; validate.py meldet die Vollständigkeit.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "tier", "creator", "clip", "source", "breakdown", "provenance", "rights"],
+  "$defs": {
+    "nstr": {"type": ["string", "null"]},
+    "nnum": {"type": ["number", "null"], "minimum": 0},
+    "nint": {"type": ["integer", "null"], "minimum": 0},
+    "nbool": {"type": ["boolean", "null"]},
+    "url": {"type": ["string", "null"], "pattern": "^https?://"},
+    "cut": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"type": ["string", "null"], "enum": ["sentence_start", "mid_sentence", "question", "cold_open", "reaction", "sentence_end", "punchline", "after_laugh", "cliffhanger", "hard_cut", "other", null]},
+        "note": {"$ref": "#/$defs/nstr"}
+      }
+    }
+  },
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{2,80}$"},
+    "tier": {"type": "string", "enum": ["format", "podcast", "streamer", "own"]},
+    "creator": {"type": "string", "minLength": 1},
+    "clip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "platform"],
+      "properties": {
+        "url": {"type": "string", "pattern": "^https?://"},
+        "platform": {"type": "string", "enum": ["tiktok", "reels", "shorts", "youtube", "instagram", "linkedin", "x", "other"]},
+        "published_at": {"$ref": "#/$defs/nstr"},
+        "duration_s": {"$ref": "#/$defs/nnum"},
+        "title": {"$ref": "#/$defs/nstr"},
+        "caption": {"$ref": "#/$defs/nstr"},
+        "hashtags": {"type": ["array", "null"], "items": {"type": "string"}},
+        "metrics": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "views": {"$ref": "#/$defs/nint"},
+            "likes": {"$ref": "#/$defs/nint"},
+            "comments": {"$ref": "#/$defs/nint"},
+            "shares": {"$ref": "#/$defs/nint"},
+            "saves": {"$ref": "#/$defs/nint"},
+            "measured_at": {"$ref": "#/$defs/nstr"}
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url"],
+      "properties": {
+        "url": {"$ref": "#/$defs/url"},
+        "title": {"$ref": "#/$defs/nstr"},
+        "duration_s": {"$ref": "#/$defs/nnum"},
+        "start_s": {"$ref": "#/$defs/nnum"},
+        "end_s": {"$ref": "#/$defs/nnum"},
+        "alignment": {"type": ["string", "null"], "enum": ["manual", "transcript_match", "description", "unknown", null]},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+      }
+    },
+    "breakdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hook_type": {"$ref": "#/$defs/nstr"},
+        "hook_text_first_3s": {"$ref": "#/$defs/nstr"},
+        "onscreen_text": {"$ref": "#/$defs/nstr"},
+        "cut_in": {"$ref": "#/$defs/cut"},
+        "cut_out": {"$ref": "#/$defs/cut"},
+        "length_s": {"$ref": "#/$defs/nnum"},
+        "context_setup": {"$ref": "#/$defs/nstr"},
+        "payoff": {"$ref": "#/$defs/nstr"},
+        "payoff_type": {"$ref": "#/$defs/nstr"},
+        "structure": {"$ref": "#/$defs/nstr"},
+        "edits": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "cold_open": {"$ref": "#/$defs/nbool"},
+            "jump_cuts": {"$ref": "#/$defs/nbool"},
+            "reordered": {"$ref": "#/$defs/nbool"}
+          }
+        },
+        "captions_style": {"$ref": "#/$defs/nstr"},
+        "copy_pattern": {"$ref": "#/$defs/nstr"},
+        "language_notes": {"$ref": "#/$defs/nstr"}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["collected_by", "collected_at", "method"],
+      "properties": {
+        "collected_by": {"type": "string"},
+        "collected_at": {"type": "string"},
+        "method": {"type": "string"}
+      }
+    },
+    "rights": {"const": "metadata_only"}
+  }
+}

@@ -367,7 +367,15 @@ export const SCHEMAS: Record<string, JsonSchema> = {
       avg_watch_time_s: { type: ["number", "null"] },
       skip_rate: { type: ["number", "null"] },
       engagement_rate: { type: ["number", "null"] },
-      error: { type: ["string", "null"] },
+      error: {
+        type: ["object", "null"],
+        description: "Fehlgeschlagene Messung: nur Code und feste deutsche Meldung, nie der interne Fehlertext",
+        properties: {
+          code: { type: "string", enum: ["nicht_konfiguriert", "nicht_verbunden", "keine_verbindung", "nicht_gefunden", "plattform_fehler", "abgeschaltet", "ungueltig", "messdienst_nicht_erreichbar", "messdienst_fehler", "konfiguration", "fehler"] },
+          message: { type: "string" },
+        },
+        required: ["code", "message"],
+      },
     },
   },
   MetricWindowRow: {

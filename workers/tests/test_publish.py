@@ -293,21 +293,65 @@ def test_snapshot_bridges_to_window_once(fake_db, fake_context, tracked, web):
     assert len(fake_db.metric_snapshots) == 2
 
 
-def test_snapshot_records_errors_and_keeps_schedule(fake_db, fake_context, tracked, web):
-    web.snapshot_response = {"metrics": {k: None for k in ("views", "likes")}, "source": "public_api", "raw": None, "error": "YouTube ist nicht konfiguriert: YOUTUBE_API_KEY fehlt."}
+def test_snapshot_keeps_schedule_on_platform_errors(fake_db, fake_context, tracked, web):
+    web.snapshot_response = {
+        "metrics": {k: None for k in ("views", "likes")}, "source": "public_api", "raw": None,
+        "error": "YouTube hat gerade nicht richtig geantwortet. YouTube antwortete mit 500", "error_code": "plattform_fehler",
+    }  # fmt: skip
     out = publish.run_snapshot(fake_context, tracked["pub"])
-    assert out["status"] == "error" and "nicht konfiguriert" in out["error"]
+    assert out["status"] == "error" and out["error_code"] == "plattform_fehler"
     snap = fake_db.metric_snapshots[-1]
-    assert snap["views"] is None and "YOUTUBE_API_KEY" in snap["error"]
+    assert snap["views"] is None and snap["error"].startswith("plattform_fehler: YouTube hat gerade")
     assert fake_db.publications[tracked["pub"]]["next_snapshot_at"] is not None
+
+
+def test_snapshot_stops_schedule_on_config_errors(fake_db, fake_context, tracked, web):
+    web.snapshot_response = {
+        "metrics": {}, "source": "public_api", "raw": None,
+        "error": "Zahlen für YouTube sind noch nicht eingerichtet.", "error_code": "nicht_konfiguriert",
+    }  # fmt: skip
+    out = publish.run_snapshot(fake_context, tracked["pub"])
+    p = fake_db.publications[tracked["pub"]]
+    assert out["error_code"] == "nicht_konfiguriert" and out["stopped"] is None
+    assert p["next_snapshot_at"] is None  # kein Takt ohne Schlüssel; die Web-App plant später nach
+    assert "stopped" not in (p.get("link_check") or {})
+    assert fake_db.metric_snapshots[-1]["error"] == "nicht_konfiguriert: Zahlen für YouTube sind noch nicht eingerichtet."
+
+
+def test_snapshot_names_wrong_secret_as_config_error(fake_db, fake_context, tracked, web):
+    web.status_code = 401
+    out = publish.run_snapshot(fake_context, tracked["pub"])
+    assert out["error_code"] == "konfiguration"
+    assert fake_db.metric_snapshots[-1]["error"].startswith("konfiguration: InternalApiError")
+    assert fake_db.publications[tracked["pub"]]["next_snapshot_at"] is None
 
 
 def test_snapshot_never_raises_when_web_is_down(fake_db, fake_context, tracked, web):
     web.status_code = 500
     out = publish.run_snapshot(fake_context, tracked["pub"])
-    assert out["status"] == "error" and "Web-App nicht erreichbar" in out["error"]
-    assert "Web-App nicht erreichbar" in fake_db.metric_snapshots[-1]["error"]
-    assert fake_db.publications[tracked["pub"]]["next_snapshot_at"] is not None
+    assert out["status"] == "error" and out["error_code"] == "messdienst_fehler"
+    assert fake_db.metric_snapshots[-1]["error"].startswith("messdienst_fehler: ")
+    assert fake_db.publications[tracked["pub"]]["next_snapshot_at"] is not None  # vorübergehend: Takt bleibt
+
+
+def test_snapshot_stops_after_three_not_found_in_a_row(fake_db, fake_context, tracked, web):
+    gone = {"metrics": {}, "source": "public_api", "raw": None, "error": "YouTube kennt dieses Video nicht oder es ist nicht öffentlich.", "error_code": "nicht_gefunden"}
+    ok = dict(web.snapshot_response)
+    p = fake_db.publications[tracked["pub"]]
+    web.snapshot_response = gone
+    publish.run_snapshot(fake_context, tracked["pub"])
+    publish.run_snapshot(fake_context, tracked["pub"])
+    assert p["next_snapshot_at"] is not None and p["link_check"]["not_found_streak"] == 2
+    # Eine erfolgreiche Messung setzt die Zählung zurück
+    web.snapshot_response = ok
+    publish.run_snapshot(fake_context, tracked["pub"])
+    assert p["link_check"]["not_found_streak"] == 0
+    web.snapshot_response = gone
+    for _ in range(2):
+        assert publish.run_snapshot(fake_context, tracked["pub"])["stopped"] is None
+    out = publish.run_snapshot(fake_context, tracked["pub"])
+    assert out["stopped"]["reason"] == "nicht_gefunden" and out["stopped"]["attempts"] == 3
+    assert p["next_snapshot_at"] is None and p["link_check"]["stopped"]["reason"] == "nicht_gefunden"
 
 
 def test_snapshot_ends_after_tracking_until(fake_db, fake_context, tracked, web):
@@ -333,7 +377,8 @@ def test_snapshot_status_rules(fake_db, fake_context, tracked, web):
 def test_internal_api_snapshot_shape(web):
     data = internal_api.snapshot("p1", "48h")
     assert web.calls[-1][1] == {"publication_id": "p1", "mode": "snapshot", "window": "48h"}
-    assert set(data) == {"metrics", "source", "raw", "error"} and set(data["metrics"]) == set(internal_api.SNAPSHOT_KEYS)
+    assert set(data) == {"metrics", "source", "raw", "error", "error_code"} and set(data["metrics"]) == set(internal_api.SNAPSHOT_KEYS)
+    assert data["error_code"] is None
     web.snapshot_response = {**web.snapshot_response, "source": "irgendwas"}
     assert internal_api.snapshot("p1", "1h")["source"] == "oauth"  # unbekannte Quelle fällt auf oauth zurück
     assert web.calls[-1][1]["window"] == "7d"

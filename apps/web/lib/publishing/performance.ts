@@ -1,4 +1,5 @@
 import type { MetricSnapshot, WindowFeedback } from "@/lib/repo/types-api";
+import { SNAPSHOT_ERROR_CODES, type SnapshotErrorCode } from "./snapshot";
 
 /* Lese-API für Performance (GET /api/v1/publications/{id}/metrics und /clips/{id}/performance). Rein:
  * Messreihe und Fenster kommen aus dem Repository, hier werden sie geordnet und um abgeleitete Werte ergänzt. */
@@ -18,7 +19,36 @@ export interface SnapshotOut {
   avg_watch_time_s: number | null;
   skip_rate: number | null;
   engagement_rate: number | null;
-  error: string | null;
+  /* Nie der interne Fehlertext: nur Code und eine feste deutsche Meldung (publicSnapshotError) */
+  error: SnapshotError | null;
+}
+
+export interface SnapshotError {
+  code: SnapshotErrorCode | "fehler";
+  message: string;
+}
+
+const SNAPSHOT_ERROR_MESSAGES: Record<SnapshotError["code"], string> = {
+  nicht_konfiguriert: "Zahlen für diese Plattform sind noch nicht eingerichtet.",
+  nicht_verbunden: "Diese Plattform gibt Zahlen nur über ein verbundenes Konto heraus.",
+  keine_verbindung: "Die Verbindung zur Plattform fehlt oder ist abgelaufen.",
+  nicht_gefunden: "Der Beitrag wurde nicht gefunden oder ist nicht öffentlich.",
+  plattform_fehler: "Die Plattform hat nicht richtig geantwortet.",
+  abgeschaltet: "Die Messung ist abgeschaltet.",
+  ungueltig: "Die Publikation hat keine gültige Beitrags-ID.",
+  messdienst_nicht_erreichbar: "Der Messdienst war nicht erreichbar.",
+  messdienst_fehler: "Der Messdienst hat nicht richtig geantwortet.",
+  konfiguration: "Der Messdienst ist nicht vollständig eingerichtet.",
+  fehler: "Die Messung ist fehlgeschlagen.",
+};
+
+/* metric_snapshots.error ist "<code>: <interner Text>" (Worker, run_snapshot). Ältere Zeilen ohne Code
+ * und unbekannte Codes werden zu "fehler". */
+export function publicSnapshotError(raw: string | null): SnapshotError | null {
+  if (!raw) return null;
+  const head = /^([a-z_]+):/.exec(raw)?.[1];
+  const code = head && (SNAPSHOT_ERROR_CODES as readonly string[]).includes(head) ? (head as SnapshotErrorCode) : "fehler";
+  return { code, message: SNAPSHOT_ERROR_MESSAGES[code] };
 }
 
 /* (likes + comments + shares + saves) / views; fehlende Anteile zählen als 0, ohne Aufrufe kein Wert */
@@ -46,7 +76,7 @@ export function serializeSnapshot(s: MetricSnapshot): SnapshotOut {
     avg_watch_time_s: s.avg_watch_time_s,
     skip_rate: s.skip_rate,
     engagement_rate: engagementRate(s),
-    error: s.error,
+    error: publicSnapshotError(s.error),
   };
 }
 

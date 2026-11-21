@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -242,6 +243,7 @@ def polling(monkeypatch, fake_context):
     from chopstr_worker import config
 
     monkeypatch.setenv("METRICS_POLLING", "1")
+    monkeypatch.setenv("INTERNAL_API_SECRET", "s3cret")
     fake_context.settings = config.reload()
     yield
     monkeypatch.delenv("METRICS_POLLING", raising=False)
@@ -340,3 +342,17 @@ def test_metrics_polling_survives_failing_replan(fake_db, worker, calls, monkeyp
     with caplog.at_level("WARNING", logger="chopstr.local_worker"):
         assert worker.run_once()["metrics"] == 1
     assert seen == [due] and "replan failed" in caplog.text
+
+
+def test_metrics_polling_skips_without_internal_secret(fake_db, worker, calls, monkeypatch, polling, fake_context, caplog):
+    seen = []
+    monkeypatch.setattr(local_worker.publish, "run_snapshot", lambda ctx, pid: seen.append(pid) or {"status": "ok"})
+    pid = _tracked(fake_db)
+    before = fake_db.publications[pid]["next_snapshot_at"]
+    fake_context.settings = dataclasses.replace(fake_context.settings, internal_api_secret="")
+    with caplog.at_level("WARNING", logger="chopstr.local_worker"):
+        assert worker.run_once()["metrics"] == 0
+        worker.run_once()
+    assert seen == [] and ("replan",) not in calls
+    assert fake_db.publications[pid]["next_snapshot_at"] == before  # Termin bleibt unberührt
+    assert caplog.text.count("INTERNAL_API_SECRET ist nicht gesetzt") == 1

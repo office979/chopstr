@@ -50,6 +50,7 @@ describe("takeSnapshot", () => {
       deps({ readPublic: async () => ({ ok: false, platform: "youtube", error: "nicht_konfiguriert", message: "YouTube ist nicht konfiguriert: YOUTUBE_API_KEY fehlt." }) }),
     );
     expect(r.error).toContain("nicht konfiguriert");
+    expect(r.error_code).toBe("nicht_konfiguriert");
     expect(r.metrics.views).toBeNull();
   });
 
@@ -64,18 +65,21 @@ describe("takeSnapshot", () => {
       }),
     );
     expect(r.error).toBe("Token abgelaufen");
+    expect(r.error_code).toBe("plattform_fehler");
   });
 
   it("misst nicht bei tracking off", async () => {
     const d = deps();
     const r = await takeSnapshot({ platform: "youtube", external_id: "v", connection_id: "c", tracking: "off" }, "7d", d);
     expect(r.error).toContain("abgeschaltet");
+    expect(r.error_code).toBe("abgeschaltet");
     expect(d.viaConnection).not.toHaveBeenCalled();
   });
 
   it("verlangt eine externe ID für Links", async () => {
     const r = await takeSnapshot({ platform: "youtube", external_id: null, connection_id: null, tracking: "link" }, "7d", deps());
     expect(r.error).toContain("externe ID");
+    expect(r.error_code).toBe("ungueltig");
   });
 });
 

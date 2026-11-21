@@ -321,10 +321,17 @@ WINDOW_AGES = (("6h", 6 * HOUR_S), ("48h", 48 * HOUR_S), ("7d", 7 * 24 * HOUR_S)
 WINDOW_MAX_FACTOR = 2.0
 SNAPSHOT_METRICS = ("views", "engaged_views", "likes", "comments", "shares", "saves", "follows", "reach", "avg_watch_time_s", "skip_rate")
 SNAPSHOT_STATUSES = {"oauth": ("published",), "link": ("published", "manual")}
+# Fehlerarten (lib/publishing/snapshot.ts SNAPSHOT_ERROR_CODES). metric_snapshots.error ist "<code>: <Text>";
+# die öffentliche API zeigt davon nur den Code und eine feste Meldung.
+# Ohne Einrichtung (Schlüssel, Verbindung, Secret) hilft Warten nicht: dann kein weiterer Termin. Links mit
+# öffentlichem Leser plant die Web-App nach, sobald er eingerichtet ist (mode replan, local_worker).
+CONFIG_ERROR_CODES = frozenset({"nicht_konfiguriert", "nicht_verbunden", "keine_verbindung", "ungueltig", "abgeschaltet", "konfiguration"})
+# Nach so vielen „nicht gefunden“ in Folge ist der Beitrag weg: die Messreihe endet (link_check.stopped)
+NOT_FOUND_LIMIT = 3
 
 SQL_SNAPSHOT_PUBLICATION = (
     "select p.id, coalesce(p.workspace_id, s.workspace_id), p.clip_id, p.connection_id, p.platform, p.status, "
-    "p.published_at, p.created_at, p.tracking, p.tracking_until, p.metrics, s.brand_profile_id "
+    "p.published_at, p.created_at, p.tracking, p.tracking_until, p.metrics, s.brand_profile_id, p.link_check "
     "from publications p join clips c on c.id = p.clip_id join sources s on s.id = c.source_id where p.id = %s"
 )
 
@@ -379,9 +386,10 @@ def load_snapshot_publication(ctx: common.Context, publication_id: str) -> dict[
         return None
     keys = [
         "id", "workspace_id", "clip_id", "connection_id", "platform", "status", "published_at", "created_at",
-        "tracking", "tracking_until", "metrics", "brand_profile_id",
+        "tracking", "tracking_until", "metrics", "brand_profile_id", "link_check",
     ]  # fmt: skip
     out = dict(zip(keys, row))
+    out["link_check"] = dict(_json(out.get("link_check"), {}) or {})
     for k in ("id", "workspace_id", "clip_id", "connection_id", "brand_profile_id"):
         out[k] = str(out[k]) if out.get(k) else None
     out["metrics"] = dict(_json(out.get("metrics"), {}) or {})
@@ -393,12 +401,24 @@ def _written_windows(ctx: common.Context, publication_id: str) -> set[str]:
     return {w for w, _a in WINDOW_AGES if db.fetch_one(ctx.conn, SQL_FEEDBACK_ID, (publication_id, w)) is not None}
 
 
+def _exception_code(exc: Exception) -> str:
+    """Fehlerart, wenn schon der Aufruf der Web-App scheitert."""
+    if isinstance(exc, internal_api.InternalApiError):
+        return "konfiguration" if exc.status_code in (401, 403) else "messdienst_fehler"
+    if isinstance(exc, RuntimeError) and ("INTERNAL_API_SECRET" in str(exc) or "APP_INTERNAL_URL" in str(exc)):
+        return "konfiguration"
+    return "messdienst_nicht_erreichbar"
+
+
 def run_snapshot(ctx: common.Context, publication_id: str, http=None) -> dict[str, Any]:
     """Eine Messung: ``/api/internal/metrics`` im Modus snapshot, Zeile in ``metric_snapshots``, nächster Termin.
 
-    Wirft nie wegen der Plattform oder der Web-App: Fehler stehen in ``metric_snapshots.error`` und der
-    Zeitplan läuft weiter. Erreicht die Messung zum ersten Mal 6h, 48h oder 7d (siehe ``due_window``),
-    schreibt sie zusätzlich das feste Fenster in ``performance_feedback`` mit Reward."""
+    Wirft nie wegen der Plattform oder der Web-App: Fehler stehen mit Fehlerart in ``metric_snapshots.error``.
+    Vorübergehende Fehler (Plattform, Web-App weg) behalten den Zeitplan. Fehlende Einrichtung
+    (``CONFIG_ERROR_CODES``) beendet ihn, bis die Web-App den Link nachplant; ``NOT_FOUND_LIMIT`` mal
+    „nicht gefunden“ in Folge beendet ihn endgültig (``link_check.stopped``). Erreicht die Messung zum ersten
+    Mal 6h, 48h oder 7d (siehe ``due_window``), schreibt sie zusätzlich das feste Fenster in
+    ``performance_feedback`` mit Reward."""
     pub = load_snapshot_publication(ctx, publication_id)
     if pub is None:
         return {"publication_id": publication_id, "status": "missing"}
@@ -411,13 +431,17 @@ def run_snapshot(ctx: common.Context, publication_id: str, http=None) -> dict[st
     published_at = _as_dt(pub.get("published_at")) or _as_dt(pub.get("created_at")) or now
     age_s = max(0, int((now - published_at).total_seconds()))
     error: str | None = None
+    code: str | None = None
     try:
         result = internal_api.snapshot(publication_id, window_hint(age_s), ctx.settings, http)
-    except Exception as exc:  # Web-App weg oder kaputte Antwort: als Fehlerzeile festhalten, Zeitplan weiter
+    except Exception as exc:  # Web-App weg, Secret falsch oder kaputte Antwort: als Fehlerzeile festhalten
         result = {"metrics": {}, "source": "oauth" if pub["tracking"] == "oauth" else "public_api", "raw": None, "error": None}
-        error = f"Web-App nicht erreichbar: {exc.__class__.__name__}: {str(exc)[:200]}"
+        code = _exception_code(exc)
+        error = f"{exc.__class__.__name__}: {str(exc)[:200]}"
     metrics = result.get("metrics") or {}
-    error = error or result.get("error")
+    if error is None and result.get("error"):
+        error = str(result["error"])
+        code = str(result.get("error_code") or "messdienst_fehler")
     has_numbers = any(metrics.get(k) is not None for k in SNAPSHOT_METRICS)
 
     values: dict[str, Any] = {k: metrics.get(k) for k in SNAPSHOT_METRICS}
@@ -427,7 +451,7 @@ def run_snapshot(ctx: common.Context, publication_id: str, http=None) -> dict[st
         source=result.get("source") or "oauth", **values,
         retention_curve=db.jsonb(metrics.get("retention_curve")) if metrics.get("retention_curve") is not None else None,
         raw=db.jsonb(result.get("raw")) if result.get("raw") is not None else None,
-        error=(str(error)[:500] if error else None),
+        error=(f"{code}: {error}"[:500] if error else None),
     )  # fmt: skip
 
     window = None
@@ -440,10 +464,23 @@ def run_snapshot(ctx: common.Context, publication_id: str, http=None) -> dict[st
 
     tracking_until = _as_dt(pub.get("tracking_until"))
     nxt = next_snapshot_at(published_at, now, tracking_until)
-    _set(ctx, publication_id, next_snapshot_at=nxt, metrics_fetched_at=now)
+    link_check = dict(pub["link_check"])
+    streak = int(link_check.get("not_found_streak") or 0) + 1 if code == "nicht_gefunden" else 0
+    link_check["not_found_streak"] = streak
+    stopped = None
+    if streak >= NOT_FOUND_LIMIT:
+        stopped = {"reason": "nicht_gefunden", "at": now.isoformat(), "attempts": streak}
+        link_check["stopped"] = stopped
+        nxt = None
+    elif code in CONFIG_ERROR_CODES:
+        nxt = None
+    updates: dict[str, Any] = {"next_snapshot_at": nxt, "metrics_fetched_at": now}
+    if pub["tracking"] == "link" and link_check != {"not_found_streak": 0, **pub["link_check"]}:
+        updates["link_check"] = db.jsonb(link_check)
+    _set(ctx, publication_id, **updates)
     log.info(
-        "snapshot publication=%s age_s=%s source=%s views=%s window=%s error=%s",
-        publication_id, age_s, result.get("source"), metrics.get("views"), window, bool(error),
+        "snapshot publication=%s age_s=%s source=%s views=%s window=%s error=%s stopped=%s",
+        publication_id, age_s, result.get("source"), metrics.get("views"), window, code, bool(stopped),
     )  # fmt: skip
     return {
         "publication_id": publication_id,
@@ -452,6 +489,8 @@ def run_snapshot(ctx: common.Context, publication_id: str, http=None) -> dict[st
         "window": window,
         "reward": reward,
         "error": error,
+        "error_code": code,
+        "stopped": stopped,
         "next_snapshot_at": nxt.isoformat() if nxt else None,
     }
 

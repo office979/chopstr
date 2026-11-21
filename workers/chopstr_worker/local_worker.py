@@ -75,6 +75,7 @@ SQL_DUE_SNAPSHOTS = (
     "order by next_snapshot_at asc limit %s"
 )
 HINT_METRICS_SCHEMA = "Messreihen übersprungen: Spalte publications.next_snapshot_at fehlt (Migration 0019 anwenden)"
+HINT_METRICS_SECRET = "Messreihen übersprungen: INTERNAL_API_SECRET ist nicht gesetzt (scripts/local_env.sh liest ihn aus apps/web/.env.local)"
 
 
 def _now() -> datetime:
@@ -110,6 +111,7 @@ class LocalWorker:
         self._last_outbox: float | None = None
         self._app_hint_logged = False
         self._metrics_schema_hint_logged = False
+        self._metrics_secret_hint_logged = False
         self._last_replan: float | None = None
 
     # -- Steuerung ------------------------------------------------------------------------------
@@ -327,6 +329,12 @@ class LocalWorker:
         Fehlt Migration 0019 noch, scheitert schon die Abfrage; das wird einmal gemeldet und der Durchlauf
         geht weiter, statt dass der ganze Worker an einer fehlenden Spalte hängen bleibt."""
         if not ctx.settings.metrics_polling:
+            return 0
+        if not ctx.settings.internal_api_secret:
+            # Konfigurationsfehler: nichts messen und keinen Termin anfassen, statt Fehlerzeilen zu schreiben
+            if not self._metrics_secret_hint_logged:
+                log.warning(HINT_METRICS_SECRET)
+                self._metrics_secret_hint_logged = True
             return 0
         try:
             rows = db.fetch_all(ctx.conn, SQL_DUE_SNAPSHOTS, (_now(), self.limit))

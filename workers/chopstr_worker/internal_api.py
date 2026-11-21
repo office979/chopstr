@@ -22,7 +22,12 @@ METRIC_KEYS = ("views", "likes", "comments", "shares", "saves", "follows", "avg_
 
 
 class InternalApiError(RuntimeError):
-    """Die Web-App hat nicht mit 2xx oder nicht mit JSON geantwortet."""
+    """Die Web-App hat nicht mit 2xx oder nicht mit JSON geantwortet. ``status_code`` ist der HTTP-Status
+    (``None`` bei 2xx ohne brauchbares JSON)."""
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def base_url(s: config.Settings | None = None) -> str:
@@ -60,7 +65,7 @@ def post(path: str, body: dict[str, Any], s: config.Settings | None = None, http
             detail = str((r.json().get("error") or {}).get("message") or r.json().get("error") or "")
         except Exception:
             detail = r.text[:200]
-        raise InternalApiError(f"{path} antwortete mit {r.status_code}: {detail}".rstrip(": "))
+        raise InternalApiError(f"{path} antwortete mit {r.status_code}: {detail}".rstrip(": "), r.status_code)
     try:
         data = r.json()
     except Exception as exc:
@@ -106,11 +111,14 @@ def snapshot(publication_id: str, window: str = "7d", s: config.Settings | None 
     if not isinstance(raw, dict):
         raise InternalApiError("/api/internal/metrics lieferte kein metrics-Objekt")
     source = str(data.get("source") or "oauth")
+    error = data.get("error") or None
+    code = data.get("error_code") or ("messdienst_fehler" if error else None)
     return {
         "metrics": {k: raw.get(k) for k in SNAPSHOT_KEYS},
         "source": source if source in SNAPSHOT_SOURCES else "oauth",
         "raw": data.get("raw"),
-        "error": data.get("error") or None,
+        "error": error,
+        "error_code": str(code) if code else None,
     }
 
 

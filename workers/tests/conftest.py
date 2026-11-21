@@ -706,7 +706,7 @@ class FakeDB:
             return FakeCursor([(
                 p["id"], p.get("workspace_id") or src["workspace_id"], p["clip_id"], p.get("connection_id"), p["platform"], p["status"],
                 p.get("published_at"), p.get("created_at"), p.get("tracking", "oauth"), p.get("tracking_until"), p.get("metrics"),
-                src.get("brand_profile_id"),
+                src.get("brand_profile_id"), p.get("link_check"),
             )])  # fmt: skip
         if q.startswith("insert into metric_snapshots"):
             row = self._insert_row(sql, params)

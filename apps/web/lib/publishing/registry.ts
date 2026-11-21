@@ -11,7 +11,7 @@ import { youtubeProvider } from "./providers/youtube";
 import { linkedinProvider } from "./providers/linkedin";
 import { ProviderError, type Provider, type PublishResult } from "./providers/types";
 import { emptyPublicMetrics, readPublicMetrics, type PublicMetricSet, type PublicMetricSource } from "./public-metrics";
-import { takeSnapshot } from "./snapshot";
+import { takeSnapshot, type SnapshotErrorCode } from "./snapshot";
 
 /* Provider-Registry (PHASE5.md 5b und „Interne Schnittstelle“). `publish(publicationId)` und `metrics(publicationId, window)`
  * werden von /api/internal/publish und /api/internal/metrics (Welle 5a) dynamisch importiert: der Worker besitzt
@@ -109,12 +109,13 @@ export interface InternalSnapshotResult {
   source: PublicMetricSource;
   raw: unknown;
   error: string | null;
+  error_code: SnapshotErrorCode | null;
 }
 
 /* Von /api/internal/metrics mit mode "snapshot": eine Messung für metric_snapshots (lib/publishing/snapshot.ts) */
 export async function snapshot(publicationId: string, window: MetricWindow): Promise<InternalSnapshotResult> {
   const ctx = await loadPublicationInternal(publicationId);
-  if (!ctx) return { publication_id: publicationId, metrics: emptyPublicMetrics(), source: "oauth", raw: null, error: "Publikation nicht gefunden." };
+  if (!ctx) return { publication_id: publicationId, metrics: emptyPublicMetrics(), source: "oauth", raw: null, error: "Publikation nicht gefunden.", error_code: "ungueltig" };
   const { publication, connection } = ctx;
   const result = await takeSnapshot(publication, window, {
     readPublic: (platform, externalId) => readPublicMetrics(platform, externalId),

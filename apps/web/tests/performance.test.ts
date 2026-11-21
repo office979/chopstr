@@ -9,6 +9,7 @@ import {
   engagementRate,
   latestSnapshot,
   parseSeriesQuery,
+  publicSnapshotError,
   serializeSnapshot,
 } from "@/lib/publishing/performance";
 import { ENDPOINTS } from "@/lib/api/openapi";
@@ -170,5 +171,19 @@ describe("OpenAPI", () => {
     for (const path of ["/publications/{id}/metrics", "/clips/{id}/performance"]) {
       expect(ENDPOINTS.find((e) => e.path === path && e.method === "get")?.scope).toBe("read");
     }
+  });
+});
+
+describe("publicSnapshotError", () => {
+  it("zeigt nur Code und feste Meldung, nie den internen Text", () => {
+    const e = publicSnapshotError("plattform_fehler: YouTube hat gerade nicht richtig geantwortet. YouTube antwortete mit 403: quotaExceeded");
+    expect(e).toEqual({ code: "plattform_fehler", message: "Die Plattform hat nicht richtig geantwortet." });
+    expect(JSON.stringify(serializeSnapshot(snap({ error: "konfiguration: RuntimeError: INTERNAL_API_SECRET ist nicht gesetzt" })).error)).not.toContain("INTERNAL_API_SECRET");
+  });
+
+  it("macht aus alten Zeilen ohne Code und aus unbekannten Codes einen allgemeinen Fehler", () => {
+    expect(publicSnapshotError("Web-App nicht erreichbar: RuntimeError: INTERNAL_API_SECRET ist nicht gesetzt")).toEqual({ code: "fehler", message: "Die Messung ist fehlgeschlagen." });
+    expect(publicSnapshotError("quatsch: x")?.code).toBe("fehler");
+    expect(publicSnapshotError(null)).toBeNull();
   });
 });

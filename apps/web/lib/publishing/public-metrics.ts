@@ -47,7 +47,10 @@ export interface PublicMetricsFail {
   ok: false;
   platform: LinkPlatform;
   error: PublicMetricsErrorCode;
+  /* Kurz und deutsch, darf in Oberfläche und öffentliche API */
   message: string;
+  /* Technische Einzelheiten (HTTP-Status, gekürzte Antwort ohne Schlüssel); nur für interne Wege und Logs */
+  detail?: string;
 }
 
 export type PublicMetricsResult = PublicMetricsOk | PublicMetricsFail;
@@ -95,8 +98,13 @@ export function notConfiguredMessage(platform: LinkPlatform): string {
   return `Zahlen für ${PLATFORM_LABEL[platform]} sind noch nicht eingerichtet.`;
 }
 
-function fail(platform: LinkPlatform, error: PublicMetricsErrorCode, message: string): PublicMetricsFail {
-  return { ok: false, platform, error, message };
+function fail(platform: LinkPlatform, error: PublicMetricsErrorCode, message: string, detail?: string): PublicMetricsFail {
+  return detail ? { ok: false, platform, error, message, detail } : { ok: false, platform, error, message };
+}
+
+/* Störung beim Lesen: die Einzelheiten stehen in detail, die Meldung bleibt allgemein */
+function failed(platform: LinkPlatform, detail: string): PublicMetricsFail {
+  return fail(platform, "fehler", `${PLATFORM_LABEL[platform]} hat gerade nicht richtig geantwortet.`, detail);
 }
 
 function count(v: unknown): number | null {
@@ -143,15 +151,15 @@ async function readYoutube(externalId: string, opts: Required<PublicMetricsOptio
   try {
     res = await getWithTimeout(opts.fetchImpl, `${YOUTUBE_VIDEOS_URL}?${q.toString()}`, {}, opts.timeoutMs);
   } catch (error) {
-    return fail("youtube", "fehler", `YouTube nicht erreichbar: ${error instanceof Error ? error.message : String(error)}`);
+    return failed("youtube", `YouTube nicht erreichbar: ${error instanceof Error ? error.message : String(error)}`);
   }
   const text = await res.text();
-  if (!res.ok) return fail("youtube", "fehler", safeStatus("YouTube", res.status, text));
+  if (!res.ok) return failed("youtube", safeStatus("YouTube", res.status, text));
   let data: YoutubeVideosResponse;
   try {
     data = (text ? JSON.parse(text) : {}) as YoutubeVideosResponse;
   } catch {
-    return fail("youtube", "fehler", "YouTube lieferte kein JSON.");
+    return failed("youtube", "YouTube lieferte kein JSON.");
   }
   const item = data.items?.[0];
   if (!item) return fail("youtube", "nicht_gefunden", "YouTube kennt dieses Video nicht oder es ist nicht öffentlich.");
@@ -205,16 +213,16 @@ async function readX(externalId: string, opts: Required<PublicMetricsOptions>): 
   try {
     res = await getWithTimeout(opts.fetchImpl, `${X_TWEETS_URL}/${encodeURIComponent(externalId)}?${q.toString()}`, { Authorization: `Bearer ${token}` }, opts.timeoutMs);
   } catch (error) {
-    return fail("x", "fehler", `X nicht erreichbar: ${error instanceof Error ? error.message : String(error)}`);
+    return failed("x", `X nicht erreichbar: ${error instanceof Error ? error.message : String(error)}`);
   }
   const text = await res.text();
   if (res.status === 404) return fail("x", "nicht_gefunden", "X kennt diesen Beitrag nicht oder er ist nicht öffentlich.");
-  if (!res.ok) return fail("x", "fehler", safeStatus("X", res.status, text));
+  if (!res.ok) return failed("x", safeStatus("X", res.status, text));
   let data: XTweetResponse;
   try {
     data = (text ? JSON.parse(text) : {}) as XTweetResponse;
   } catch {
-    return fail("x", "fehler", "X lieferte kein JSON.");
+    return failed("x", "X lieferte kein JSON.");
   }
   if (!data.data) return fail("x", "nicht_gefunden", "X kennt diesen Beitrag nicht oder er ist nicht öffentlich.");
   const pm = data.data.public_metrics ?? {};
@@ -258,7 +266,7 @@ export async function readPublicMetrics(platform: LinkPlatform, externalId: stri
     if (platform === "youtube") return await readYoutube(externalId, opts);
     if (platform === "x") return await readX(externalId, opts);
   } catch (error) {
-    return fail(platform, "fehler", `${PLATFORM_LABEL[platform]}: ${error instanceof Error ? error.message : String(error)}`);
+    return failed(platform, `${PLATFORM_LABEL[platform]}: ${error instanceof Error ? error.message : String(error)}`);
   }
   return fail(platform, "nicht_verbunden", `${PLATFORM_LABEL[platform]} gibt Messwerte nur über ein verbundenes Konto heraus.`);
 }

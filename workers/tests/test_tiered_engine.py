@@ -378,3 +378,56 @@ def test_repair_off_under_policy_v1_defaults():
     assert not [c for c in fake.calls("edit_clip") if "Befund der Prüfung" in c["user"]]
     assert tiered_engine.engine_settings(editorial.load(2))["repair"] is True
     assert tiered_engine.engine_settings(editorial.load(1))["repair"] is False
+
+
+def _thirty_sentences():
+    words = make_words(long_script(1, sentences_per_chapter=30, sentence_s=6.0))
+    return words, segment.sentences_from_words(words)
+
+
+def test_targets_scale_with_length_under_policy_v2():
+    cfg = tiered_engine.engine_settings(editorial.load(2))
+    assert tiered_engine.target_clips(15 * 60, cfg) == 4  # Ziel 16 je Stunde: 4 Clips bei 15 min
+    assert tiered_engine.target_clips(60, cfg) == 2  # Mindestziel
+    assert tiered_engine.editor_count(3600, 12, cfg) == 18
+    assert tiered_engine.editor_count(985, 5, cfg) == 8
+    old = tiered_engine.engine_settings(editorial.load(1))
+    assert tiered_engine.target_clips(15 * 60, old) == 0 and old["backfill"] is False
+
+
+def test_backfill_pushes_next_prefilter_candidates_until_target(monkeypatch):
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    words, sents = _thirty_sentences()
+    spans = [(i, i + 2) for i in range(0, 30, 3)]
+
+    def edit(a, b, w):
+        if a < 15:
+            return _edit_answer(sents, a, b, keep=False, reject_reason="no_payoff", why="flach")
+        return _edit_answer(sents, a, b)
+
+    fake = FakeTiers(spans=spans, edit=edit)
+    report = tiered_engine.run(words, BRIEF, {}, None, fake, policy=editorial.load(2))
+    info = report.search["tiered"]
+    assert info["editor_k"] == 5 and info["target_clips"] == 2
+    assert info["backfill"]["added"] == 2 and info["editor"]["calls"] == 7
+    # Beide nachgeschobenen kamen über die Tore; die Fixture wiederholt ihren Wortlaut, deshalb fällt 18 als redundant
+    evaluated = {c.first_sent for c in report.candidates} | {d["first_sent"] for d in report.discarded if d["reason"] == "redundant"}
+    assert evaluated == {15, 18} and [c.first_sent for c in report.candidates] == [15]
+    ranked_out = sorted(d["first_sent"] for d in report.discarded if d["reason"] == "prefilter_rank")
+    assert ranked_out == [21]  # Vorfilter liefert höchstens acht je Block, 15 und 18 wurden nachgeschoben
+
+
+def test_backfill_stops_when_budget_is_exhausted(monkeypatch):
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    words, sents = _thirty_sentences()
+    ledger = costlog.RunLedger(budget_tokens=10, s=config.Settings())
+
+    def edit(a, b, w):
+        ledger({"stage": "editor", "model": "m", "in": 50})  # erster Aufruf erschöpft das Budget
+        return _edit_answer(sents, a, b, keep=False, reject_reason="no_payoff")
+
+    fake = FakeTiers(spans=[(i, i + 2) for i in range(0, 30, 3)], edit=edit)
+    report = tiered_engine.run(words, BRIEF, {}, None, fake, ledger=ledger, policy=editorial.load(2))
+    info = report.search["tiered"]
+    assert info["editor"]["calls"] == 1 and info["backfill"]["added"] == 0
+    assert info["backfill"]["stopped"] == "budget_exhausted"

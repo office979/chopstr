@@ -62,6 +62,12 @@ DEFAULTS: dict[str, Any] = {
     "editor_context_sents": 4,
     "repair": False,
     "repair_context_s": 60.0,
+    # Ausbeute (T2c); 0 bzw. false heißt wie vor T2c. Die Policy v2 setzt die Werte.
+    "editor_per_source_hour": 0.0,
+    "target_clips_per_source_hour": 0.0,
+    "min_target_clips": 0,
+    "backfill": False,
+    "max_backfill": 20,
 }
 # Ablehnung durch den Editor nur mit einem dieser Gründe (editor_v2); ohne gültigen Grund gilt die Ablehnung nicht.
 REJECT_REASONS: dict[str, str] = {
@@ -142,13 +148,15 @@ def engine_settings(policy: editorial.Policy | None) -> dict[str, Any]:
     raw = (policy.roh.get("implementation") or {}).get(SWITCH) if policy is not None and policy.version >= 2 else None
     if isinstance(raw, dict):
         cfg.update({k: raw[k] for k in DEFAULTS if k in raw})
-    for k in ("tiered", "repair"):
+    for k in ("tiered", "repair", "backfill"):
         cfg[k] = cfg[k] is True
-    for k in ("min_candidates", "max_candidates", "editor_context_sents"):
+    for k in ("min_candidates", "max_candidates", "editor_context_sents", "min_target_clips", "max_backfill"):
         cfg[k] = int(cfg[k])
     for k in ("candidates_per_source_hour", "editor_oversample", "prefilter_block_s", "prefilter_overlap_s", "min_len_s", "max_len_s",
-              "repair_context_s"):  # fmt: skip
+              "repair_context_s", "editor_per_source_hour", "target_clips_per_source_hour"):  # fmt: skip
         cfg[k] = float(cfg[k])
+    if min(cfg["editor_per_source_hour"], cfg["target_clips_per_source_hour"], cfg["min_target_clips"], cfg["max_backfill"]) < 0:
+        raise editorial.PolicyError("implementation.engine: Ausbeute-Werte dürfen nicht negativ sein")
     if not 0 < cfg["min_len_s"] < cfg["max_len_s"]:
         raise editorial.PolicyError("implementation.engine: 0 < min_len_s < max_len_s")
     if cfg["min_candidates"] < 1 or cfg["max_candidates"] < cfg["min_candidates"]:
@@ -170,6 +178,21 @@ def output_count(duration_s: float, cfg: Mapping[str, Any]) -> int:
     """Ausgabemenge nach Länge: Kandidaten je Quellstunde mal Stunden, begrenzt auf ``min``/``max``."""
     n = math.ceil(float(cfg["candidates_per_source_hour"]) * max(0.0, float(duration_s)) / 3600.0)
     return int(min(int(cfg["max_candidates"]), max(int(cfg["min_candidates"]), n)))
+
+
+def target_clips(duration_s: float, cfg: Mapping[str, Any]) -> int:
+    """Mindestausbeute: Ziel an Clips über den Toren (``target_clips_per_source_hour``, mindestens ``min_target_clips``,
+    höchstens ``max_candidates``). 0, wenn nicht gesetzt."""
+    n = math.ceil(float(cfg["target_clips_per_source_hour"]) * max(0.0, float(duration_s)) / 3600.0)
+    n = max(int(cfg["min_target_clips"]), n) if (cfg["target_clips_per_source_hour"] or cfg["min_target_clips"]) else 0
+    return int(min(int(cfg["max_candidates"]), n))
+
+
+def editor_count(duration_s: float, n_out: int, cfg: Mapping[str, Any]) -> int:
+    """Wie viele Kandidaten der Editor sieht: Ausgabe mal ``editor_oversample``, mindestens
+    ``editor_per_source_hour`` je Quellstunde (Nachschieben kommt danach dazu)."""
+    by_hour = math.ceil(float(cfg["editor_per_source_hour"]) * max(0.0, float(duration_s)) / 3600.0)
+    return max(n_out, math.ceil(n_out * float(cfg["editor_oversample"])), by_hour)
 
 
 def prompt_versions(policy: editorial.Policy | None = None) -> list[str]:
@@ -544,8 +567,9 @@ def run(
         heat = mm_scan.apply_to_heat(heat, evs, min_int)
     seeds = story_engine.seeds_from_heat(heat)
     dur = float(duration_s or (sents[-1].end if sents else 0.0))
-    n_out = output_count(dur, cfg)
-    n_editor = max(n_out, math.ceil(n_out * float(cfg["editor_oversample"])))
+    n_target = target_clips(dur, cfg)
+    n_out = max(output_count(dur, cfg), n_target)
+    n_editor = editor_count(dur, n_out, cfg)
     ppol = _prompt_policy(pol)
     pre_llm, ed_llm, judge_llm = _tier(llm, "prefilter"), _tier(llm, "editor"), _tier(llm, "judge")
     report = story_engine.DetectReport(
@@ -554,7 +578,7 @@ def run(
     )  # fmt: skip
     report.nlp_status = story_engine.nlp_status_for(pol)
     info: dict[str, Any] = {
-        "version": ENGINE_VERSION, "output_count": n_out, "editor_k": n_editor, "duration_s": round(dur, 2),
+        "version": ENGINE_VERSION, "output_count": n_out, "editor_k": n_editor, "target_clips": n_target, "duration_s": round(dur, 2),
         "min_len_s": cfg["min_len_s"], "max_len_s": cfg["max_len_s"], "events": len(evs), "seeds": len(seeds),
         "blocks": 0, "prefilter": {"calls": 0, "candidates": 0, "local": heuristic}, "editor": {"calls": 0, "local": 0, "rejected": 0},
         "skipped": [], "models": {
@@ -614,9 +638,6 @@ def run(
     report.proposals = info["prefilter"]["candidates"] = len(found)
     ranked = _rank_prefilter(found, sents, seeds, evs)
     top, rest = ranked[:n_editor], ranked[n_editor:]
-    for c in rest:
-        report.discarded.append({"reason": "prefilter_rank", "stage": "prefilter", "first_sent": c["first_sent"], "last_sent": c["last_sent"],
-                                 "rank_score": c["rank_score"]})  # fmt: skip
 
     # Stufe C: Editor nur für die Top-K, gruppiert nach Block (gemeinsamer Cache-Präfix)
     ed_prompt = prompts.load_pinned("editor", ppol)
@@ -772,6 +793,21 @@ def run(
     with story_engine.tiered_limits(cfg["min_len_s"], cfg["max_len_s"], n_out):
         for c in top:
             handle(c)
+        # Ausbeute: liegen nach dem Editor weniger Kandidaten über den Toren als das Ziel, die nächstbesten
+        # Vorschläge des Vorfilters nachschieben, solange Budget da ist (in Rangfolge, nicht nach Block).
+        info["backfill"] = {"enabled": bool(cfg["backfill"]), "added": 0, "stopped": None}
+        while cfg["backfill"] and rest and sum(1 for r in raw_cands if r.gate_passed) < n_target:
+            if state["editor_stop"] or (ledger is not None and ledger.exhausted()):
+                info["backfill"]["stopped"] = "budget_exhausted"
+                break
+            if info["backfill"]["added"] >= int(cfg["max_backfill"]):
+                info["backfill"]["stopped"] = "max_backfill"
+                break
+            info["backfill"]["added"] += 1
+            handle(rest.pop(0))
+        for c in rest:
+            report.discarded.append({"reason": "prefilter_rank", "stage": "prefilter", "first_sent": c["first_sent"],
+                                     "last_sent": c["last_sent"], "rank_score": c["rank_score"]})  # fmt: skip
         critic_on = pol is not None and editorial.critic_enabled(pol)
         report.candidates, dropped, reserve = story_engine.select_with_reserve(
             raw_cands, n_out, pol=pol, heuristic=heuristic, reserve_size=story_engine.RESERVE_SIZE if critic_on else 0

@@ -1187,6 +1187,11 @@ implementation:
     editor_context_sents: 4          # Sätze Kontext vor und nach dem Kandidaten im Editor-Prompt
     repair: true                     # T2c: ein Reparaturversuch bei Befund zu Kontext oder Einstieg (Gate oder Editor)
     repair_context_s: 60             # so viele Sekunden vor dem Start sieht der Reparaturversuch zusätzlich
+    editor_per_source_hour: 12       # T2c: mindestens so viele Kandidaten je Quellstunde gehen an den Editor
+    target_clips_per_source_hour: 16 # T2c: Ziel an Clips über den Toren (16/h heißt 4 Clips bei 15 min)
+    min_target_clips: 2              # Ziel mindestens so viele Clips, auch bei kurzen Quellen
+    backfill: true                   # unter dem Ziel die nächstbesten Vorfilter-Kandidaten nachschieben, solange Budget da ist
+    max_backfill: 20                 # höchstens so viele nachgeschobene Kandidaten je Lauf
 
 # ------------------------------------------------------------------------------------------------
 # Herkunft je Regel (neu in Fassung 2)

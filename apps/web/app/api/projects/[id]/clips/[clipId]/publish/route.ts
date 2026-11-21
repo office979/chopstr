@@ -8,6 +8,7 @@ import { startPublishWorkflow } from "@/lib/temporal";
 import type { PublicationInput } from "@/lib/repo/types-publishing";
 import { connectionPlatformFor } from "@/lib/publishing/platforms";
 import { gateReasons } from "@/lib/publishing/gates";
+import { registerLinkForClip } from "@/lib/publishing/link-check-server";
 
 export const dynamic = "force-dynamic";
 
@@ -79,7 +80,27 @@ export async function POST(request: NextRequest, { params }: Params) {
     scheduledFor = new Date(t).toISOString();
   }
   const manual = connection.platform === "manual";
-  const externalUrl = manual && typeof body.external_url === "string" && /^https:\/\//.test(body.external_url.trim()) ? body.external_url.trim().slice(0, 500) : null;
+  const linkInput = manual && typeof body.external_url === "string" ? body.external_url.trim() : "";
+
+  /* Ein Weg für denselben Beitrag (Review R1-05): steht beim Eintragen ein Link dabei, läuft dieselbe Logik
+   * wie bei „Link verfolgen“ (Linktest, external_id, Dublettenprüfung auch gegen OAuth-Publikationen,
+   * Messtermin, falls messbar). Ohne Link bleibt es ein Eintrag ohne Messung. */
+  if (linkInput) {
+    const result = await registerLinkForClip({ clip: ctx.clip, url: linkInput.slice(0, 2000), via: "ui" });
+    if (!result.ok) return Response.json({ error: result.message, code: result.code, check: result.check }, { status: result.status });
+    await recordDecision({
+      decision_type: "publish",
+      actor_type: "user",
+      brand_profile_id: ctx.source.brand_profile_id,
+      source_id: ctx.source.id,
+      candidate_id: ctx.clip.candidate_id,
+      clip_id: clipId,
+      features: { ...clipFeatures(ctx.clip, ctx.hook), connection_platform: connection.platform, scheduled: false, manual: true, tracking: "link" },
+      alternatives: [],
+      chosen: { publication_id: result.publication.id, connection_id: null, scheduled_for: null, caption_chars: caption.length, title: title || null },
+    });
+    return Response.json({ ok: true, publication: result.publication, started: false, check: result.check, summary: result.summary, message: "Eingetragen. " + result.summary.at(-1) + "." });
+  }
 
   const input: PublicationInput = {
     clip_id: clipId,
@@ -89,8 +110,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     scheduled_for: manual ? null : (scheduledFor ?? new Date().toISOString()),
     caption: caption || null,
     title: title || null,
-    external_url: externalUrl,
-    published_at: manual && externalUrl ? new Date().toISOString() : null,
+    external_url: null,
+    published_at: null,
   };
   const publication = await pub.createPublication(input);
 

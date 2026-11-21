@@ -45,6 +45,18 @@ export HF_TOKEN="${HF_TOKEN:-}"                              # leer: Sprechertre
 
 # -- Web-App (Publishing über /api/internal/*) --------------------------------------------------
 export APP_INTERNAL_URL="${APP_INTERNAL_URL:-http://localhost:3000}"
+# Ohne gesetzten Wert gilt der Schlüssel der Web-App aus apps/web/.env.local (nur diese eine Zeile,
+# der Wert wird nie ausgegeben). Sonst kann der Worker /api/internal/* nicht aufrufen.
+if [ -z "${INTERNAL_API_SECRET:-}" ] && [ -f "$CHOPSTR_WORKERS_DIR/../apps/web/.env.local" ]; then
+  _chopstr_secret="$(sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}INTERNAL_API_SECRET=//p' "$CHOPSTR_WORKERS_DIR/../apps/web/.env.local" | tail -n 1)"
+  _chopstr_secret="${_chopstr_secret%$'\r'}"
+  case "$_chopstr_secret" in
+    \"*\") _chopstr_secret="${_chopstr_secret#\"}"; _chopstr_secret="${_chopstr_secret%\"}" ;;
+    \'*\') _chopstr_secret="${_chopstr_secret#\'}"; _chopstr_secret="${_chopstr_secret%\'}" ;;
+  esac
+  INTERNAL_API_SECRET="$_chopstr_secret"
+  unset _chopstr_secret
+fi
 export INTERNAL_API_SECRET="${INTERNAL_API_SECRET:-}"
 # Messreihen für verfolgte Links (Migration 0019): der lokale Worker fragt fällige Publikationen ab.
 # 0 schaltet das ab. Ohne Migration 0019 meldet der Worker das einmal und macht weiter.

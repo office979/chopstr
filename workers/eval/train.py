@@ -137,6 +137,7 @@ def cmd_gold(args: argparse.Namespace) -> int:
         rep = gold_validate.validate_set(clips)
         out = {k: rep[k] for k in ("version", "clips", "valid", "ready_for_compare", "completeness_mean")}
         out["problems"] = [{"id": r["id"], "errors": r["errors"]} for r in rep["results"] if r["errors"]]
+        out["warnings"] = [{"id": r["id"], "warnings": r["warnings"]} for r in rep["results"] if r["warnings"]]
         out["incomplete"] = [{"id": r["id"], "completeness": r["completeness"], "missing_core": r["missing_core"]}
                              for r in rep["results"] if r["missing_core"]]  # fmt: skip
         print(json.dumps(out, ensure_ascii=False, indent=2))

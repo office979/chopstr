@@ -61,6 +61,12 @@
         "duration_s": {"$ref": "#/$defs/nnum"},
         "start_s": {"$ref": "#/$defs/nnum"},
         "end_s": {"$ref": "#/$defs/nnum"},
+        "segments": {
+          "description": "Quellstellen [start_s, end_s] in Clip-Reihenfolge, wenn der Clip aus mehreren Stellen verdichtet ist",
+          "type": ["array", "null"],
+          "minItems": 1,
+          "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 0}}
+        },
         "alignment": {"type": ["string", "null"], "enum": ["manual", "transcript_match", "description", "unknown", null]},
         "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
       }
@@ -85,7 +91,9 @@
           "properties": {
             "cold_open": {"$ref": "#/$defs/nbool"},
             "jump_cuts": {"$ref": "#/$defs/nbool"},
-            "reordered": {"$ref": "#/$defs/nbool"}
+            "reordered": {"$ref": "#/$defs/nbool"},
+            "n_source_segments": {"$ref": "#/$defs/nint"},
+            "compression": {"description": "Quellspanne geteilt durch Cliplänge", "$ref": "#/$defs/nnum"}
           }
         },
         "captions_style": {"$ref": "#/$defs/nstr"},

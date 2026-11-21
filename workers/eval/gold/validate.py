@@ -7,6 +7,9 @@ Schema ist hier nachgebaut) und Fachregeln:
 - ``rights`` ist immer ``metadata_only``: keine Medien im Repo, nur Metadaten und URLs.
 - Keine lokalen Pfade und keine Mediendateien als URL (``.mp4``, ``.mov``, ``.mp3`` ...).
 - ``source.start_s < source.end_s`` und, wenn bekannt, ``end_s <= source.duration_s``.
+- ``source.segments`` (optional): Quellstellen ``[start_s, end_s]`` in Clip-Reihenfolge, je Stelle Start vor Ende und
+  Zahlen ab 0; ``breakdown.edits.n_source_segments`` passt, wenn beide bekannt, zur Zahl der Stellen. Stellen außerhalb
+  von ``start_s`` bis ``end_s`` sind ein Hinweis (``warnings``), kein Fehler.
 - ``id`` eindeutig im Set.
 
 Felder dürfen ``null`` sein. Die Vollständigkeit (Anteil gefüllter Blätter, fehlende Kernfelder) ist eine Kennzahl,
@@ -56,7 +59,7 @@ def _types_of(value: Any) -> set[str]:
 
 def check_schema(value: Any, schema: dict, root: dict, path: str = "") -> list[str]:
     """Teilmenge von JSON Schema: $ref, type, enum, const, pattern, minLength, minimum, maximum, required,
-    properties, additionalProperties: false, items."""
+    properties, additionalProperties: false, items, minItems, maxItems."""
     if "$ref" in schema:
         ref = schema["$ref"]
         target: Any = root
@@ -97,6 +100,11 @@ def check_schema(value: Any, schema: dict, root: dict, path: str = "") -> list[s
         for k, sub in props.items():
             if k in value:
                 errs.extend(check_schema(value[k], sub, root, f"{path}.{k}" if path else k))
+    if isinstance(value, list):
+        if len(value) < int(schema.get("minItems", 0)):
+            errs.append(f"{where}: weniger als {schema['minItems']} Einträge")
+        if "maxItems" in schema and len(value) > int(schema["maxItems"]):
+            errs.append(f"{where}: mehr als {schema['maxItems']} Einträge")
     if isinstance(value, list) and "items" in schema:
         for i, item in enumerate(value):
             errs.extend(check_schema(item, schema["items"], root, f"{where}[{i}]"))
@@ -148,21 +156,49 @@ def domain_errors(rec: dict) -> list[str]:
         errs.append("source: start_s muss vor end_s liegen")
     if isinstance(b, (int, float)) and isinstance(d, (int, float)) and b > d + 1.0:
         errs.append("source: end_s liegt hinter duration_s")
+    segs = segments(rec)
+    for i, (s0, s1) in enumerate(segs):
+        if not s0 < s1:
+            errs.append(f"source.segments[{i}]: Start muss vor Ende liegen")
+        if isinstance(d, (int, float)) and s1 > d + 1.0:
+            errs.append(f"source.segments[{i}]: Ende liegt hinter duration_s")
+    n = _get(rec, "breakdown.edits.n_source_segments")
+    if segs and isinstance(n, int) and not isinstance(n, bool) and n != len(segs):
+        errs.append(f"breakdown.edits.n_source_segments: {n} statt {len(segs)} Stellen in source.segments")
     return errs
 
 
+def segments(rec: Any) -> list[tuple[float, float]]:
+    """Gültig geformte Quellstellen aus ``source.segments`` (sonst leer); Formfehler meldet das Schema."""
+    raw = _get(rec, "source.segments") if isinstance(rec, dict) else None
+    if not isinstance(raw, list):
+        return []
+    return [(float(x[0]), float(x[1])) for x in raw
+            if isinstance(x, list) and len(x) == 2 and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in x)]  # fmt: skip
+
+
+def domain_warnings(rec: dict) -> list[str]:
+    """Auffälligkeiten ohne Formfehler, z. B. eine Quellstelle außerhalb der angegebenen Spanne."""
+    a, b = _get(rec, "source.start_s"), _get(rec, "source.end_s")
+    if not (isinstance(a, (int, float)) and isinstance(b, (int, float))):
+        return []
+    return [f"source.segments[{i}]: {s0}-{s1} liegt außerhalb von start_s bis end_s ({a}-{b})"
+            for i, (s0, s1) in enumerate(segments(rec)) if s0 < a - 1.0 or s1 > b + 1.0]  # fmt: skip
+
+
 def validate_record(rec: Any, schema: dict | None = None) -> dict[str, Any]:
-    """``{id, errors, completeness, missing_core, ready_for_compare}`` für einen Datensatz."""
+    """``{id, errors, warnings, completeness, missing_core, ready_for_compare}`` für einen Datensatz."""
     schema = schema or load_schema()
     if not isinstance(rec, dict):
-        return {"id": None, "errors": ["Datensatz ist kein Objekt"], "completeness": 0.0, "missing_core": list(CORE_FIELDS), "ready_for_compare": False}
+        return {"id": None, "errors": ["Datensatz ist kein Objekt"], "warnings": [], "completeness": 0.0, "missing_core": list(CORE_FIELDS),
+                "ready_for_compare": False}  # fmt: skip
     errors = check_schema(rec, schema, schema) + domain_errors(rec)
     leaves = _leaves(rec, schema, schema)
     filled = sum(1 for _p, v in leaves if _filled(v))
     missing_core = [f for f in CORE_FIELDS if not _filled(_get(rec, f))]
     ready = not errors and all(_filled(_get(rec, f)) for f in ("source.url", "source.start_s", "source.end_s"))
     return {
-        "id": rec.get("id"), "errors": errors, "completeness": round(filled / max(1, len(leaves)), 3),
+        "id": rec.get("id"), "errors": errors, "warnings": domain_warnings(rec), "completeness": round(filled / max(1, len(leaves)), 3),
         "missing_core": missing_core, "ready_for_compare": ready,
     }  # fmt: skip
 
@@ -205,6 +241,8 @@ def stats(clips: list[dict]) -> dict[str, Any]:
 
     lengths = sorted(float(v) for c in clips if isinstance(c, dict) for v in [_get(c, "breakdown.length_s") or _get(c, "clip.duration_s")] if isinstance(v, (int, float)))
     views = sorted(int(v) for c in clips if isinstance(c, dict) for v in [_get(c, "clip.metrics.views")] if isinstance(v, int))
+    segs = [len(segments(c)) for c in clips if segments(c)]
+    comp = sorted(float(v) for c in clips if isinstance(c, dict) for v in [_get(c, "breakdown.edits.compression")] if isinstance(v, (int, float)))
 
     def median(xs: list) -> float | None:
         if not xs:
@@ -218,7 +256,8 @@ def stats(clips: list[dict]) -> dict[str, Any]:
         "alignment": count("source.alignment"), "sources": len({_get(c, "source.url") for c in clips if isinstance(c, dict)}),
         "length_s": {"median": median(lengths), "min": lengths[0] if lengths else None, "max": lengths[-1] if lengths else None},
         "views": {"median": median(views), "known": len(views)},
+        "segments": {"known": len(segs), "multi": sum(1 for n in segs if n > 1), "compression_median": median(comp)},
     }  # fmt: skip
 
 
-__all__ = ["CORE_FIELDS", "VERSION", "check_schema", "load_schema", "load_set", "stats", "validate_record", "validate_set"]
+__all__ = ["CORE_FIELDS", "VERSION", "check_schema", "load_schema", "load_set", "segments", "stats", "validate_record", "validate_set"]

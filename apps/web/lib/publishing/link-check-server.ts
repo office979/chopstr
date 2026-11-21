@@ -2,7 +2,7 @@ import "server-only";
 import { getRepo } from "@/lib/repo";
 import { getApiRepo } from "@/lib/repo/api";
 import type { Publication } from "@/lib/repo/types-api";
-import { clipFormatHint, DEFAULT_TRACK_DAYS, linkCheckSummary, planLinkPublication, probeUrl, runLinkCheck, type LinkCheckDeps, type LinkCheckResult } from "./link-check";
+import { clipFormatHint, DEFAULT_TRACK_DAYS, DUPLICATE_MESSAGE, linkCheckSummary, planLinkPublication, probeUrl, publicationPlatformsFor, runLinkCheck, type LinkCheckDeps, type LinkCheckResult } from "./link-check";
 import { resolvePostUrl } from "./links";
 import { readPublicMetrics } from "./public-metrics";
 
@@ -21,8 +21,10 @@ export function linkCheckDeps(): LinkCheckDeps {
         external_account_id: c.external_account_id ?? null,
         status: c.status,
       })),
+    /* Lesend und über alle Plattformwerte, also auch OAuth-Publikationen mit derselben ID; gegen
+     * gleichzeitige Anfragen sichert erst der eindeutige Index beim Einfügen ab */
     findDuplicate: async (platform, externalId) => {
-      const p = await repo.findPublicationByExternal(platform, externalId);
+      const p = await repo.findPublicationByExternal(publicationPlatformsFor(platform), externalId);
       return p ? { id: p.id } : null;
     },
     probe: (url) => probeUrl(url),
@@ -51,7 +53,7 @@ export async function registerLinkForClip(input: {
   const outcome = planLinkPublication(check, { now: Date.now(), trackDays });
   if (!outcome.ok) return { ...outcome, check };
   const { plan } = outcome;
-  const publication = await getApiRepo().createLinkPublication({
+  const created = await getApiRepo().createLinkPublication({
     clip_id: input.clip.id,
     connection_id: plan.connection_id,
     platform: plan.platform,
@@ -62,6 +64,13 @@ export async function registerLinkForClip(input: {
     next_snapshot_at: plan.next_snapshot_at,
     link_check: { ...plan.link_check, measurable: plan.measurable },
   });
+  if (!created.created) {
+    /* Gleichzeitige Anfrage war schneller: gleiche Antwort wie bei der lesenden Prüfung */
+    check.checks.duplicate_publication_id = created.existing_id;
+    if (!check.hinweise.includes(DUPLICATE_MESSAGE)) check.hinweise.push(DUPLICATE_MESSAGE);
+    return { ok: false, status: 409, code: "link_duplicate", message: DUPLICATE_MESSAGE, check, ...(created.existing_id ? { duplicate_publication_id: created.existing_id } : {}) };
+  }
+  const { publication } = created;
   await getRepo().audit({
     action: "publication.link_registered",
     entity: "publications",

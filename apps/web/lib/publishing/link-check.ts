@@ -51,6 +51,8 @@ export interface LinkCheckResult {
   hinweise: string[];
 }
 
+export const DUPLICATE_MESSAGE = "Dieser Beitrag ist schon eingetragen.";
+
 const PLATFORM_LABEL: Record<LinkPlatform, string> = { youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram", x: "X", linkedin: "LinkedIn" };
 
 function emptyChecks(): LinkChecks {
@@ -79,7 +81,7 @@ export async function runLinkCheck(url: string, deps: LinkCheckDeps): Promise<Li
   ]);
 
   checks.duplicate_publication_id = duplicate?.id ?? null;
-  if (duplicate) hinweise.push("Dieser Beitrag wird schon verfolgt.");
+  if (duplicate) hinweise.push(DUPLICATE_MESSAGE);
 
   let metrics: LinkCheckMetrics | null = null;
   let publishedAt: string | null = null;
@@ -158,7 +160,7 @@ export function planLinkPublication(result: LinkCheckResult, opts: { now: number
     return { ok: false, status: 400, code: "link_unresolved", message: "Der Kurzlink ließ sich nicht auflösen. Bitte den vollständigen Link einfügen." };
   }
   if (result.checks.duplicate_publication_id) {
-    return { ok: false, status: 409, code: "link_duplicate", message: "Dieser Beitrag wird schon verfolgt.", duplicate_publication_id: result.checks.duplicate_publication_id };
+    return { ok: false, status: 409, code: "link_duplicate", message: DUPLICATE_MESSAGE, duplicate_publication_id: result.checks.duplicate_publication_id };
   }
   const days = Math.min(MAX_TRACK_DAYS, Math.max(1, Math.round(opts.trackDays ?? DEFAULT_TRACK_DAYS)));
   const platformTime = result.published_at ? Date.parse(result.published_at) : NaN;
@@ -190,12 +192,29 @@ export function linkCheckSummary(result: LinkCheckResult, plan?: Pick<LinkPublic
   if (!result.checks.parsed || !result.platform) return result.hinweise.slice(0, 1);
   const out = [`Link erkannt: ${PLATFORM_LABEL[result.platform]}`];
   out.push(result.checks.owned_by_connection ? "Verbundenes Konto erkannt" : "Kein verbundenes Konto");
-  if (result.checks.duplicate_publication_id) out.push("Dieser Beitrag wird schon verfolgt");
+  if (result.checks.duplicate_publication_id) out.push(DUPLICATE_MESSAGE.slice(0, -1));
   else if (plan && !plan.measurable) out.push(`${PLATFORM_LABEL[result.platform]} gibt ohne verbundenes Konto keine Zahlen heraus, gemessen wird nicht`);
   else if (plan && plan.remaining_days < plan.tracking_days) {
     out.push(plan.remaining_days > 0 ? `Wird noch ${plan.remaining_days} Tage lang gemessen` : `Wird einmal gemessen, der Beitrag ist älter als ${plan.tracking_days} Tage`);
   } else out.push(`Wird ${plan?.tracking_days ?? DEFAULT_TRACK_DAYS} Tage lang gemessen`);
   return out;
+}
+
+/* publications.platform mischt zwei Wertebereiche, bewusst nicht vereinheitlicht (bestehende Daten):
+ *   - Schnittformat des Clips (clips.platform: tiktok, reels, shorts, linkedin) bei Publikationen über
+ *     „Als gepostet eintragen“ ohne Link und bei OAuth-Publikationen (publish/route.ts setzt ctx.clip.platform);
+ *   - Link-Plattform (youtube, tiktok, instagram, x, linkedin) bei Publikationen aus einem Link (tracking link).
+ * Für die Dublettenprüfung zählen deshalb alle Werte, unter denen derselbe Beitrag stehen kann. */
+const PUBLICATION_PLATFORM_ALIASES: Record<LinkPlatform, readonly string[]> = {
+  youtube: ["youtube", "shorts"],
+  instagram: ["instagram", "reels"],
+  tiktok: ["tiktok"],
+  linkedin: ["linkedin"],
+  x: ["x"],
+};
+
+export function publicationPlatformsFor(platform: LinkPlatform): string[] {
+  return [...PUBLICATION_PLATFORM_ALIASES[platform]];
 }
 
 /* Clip-Plattform (Schnittformat) ↔ Link-Plattform. X hat kein eigenes Format, jedes passt. */

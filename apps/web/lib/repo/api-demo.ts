@@ -212,9 +212,9 @@ export const apiDemoRepo: ApiRepo = {
     return [{ id: "77777777-7777-4777-8777-777777777701", workspace_id: session.workspaceId, brand_profile_id: null, platform: "manual", account_label: "Manuell (Demo)", external_account_id: null, status: "connected", capabilities: { publish: false } }];
   },
 
-  async findPublicationByExternal(platform, externalId) {
+  async findPublicationByExternal(platforms, externalId) {
     const session = await currentSession();
-    return state().publications.find((p) => p.workspace_id === session.workspaceId && p.platform === platform && p.external_id === externalId) ?? null;
+    return state().publications.find((p) => p.workspace_id === session.workspaceId && platforms.includes(p.platform) && p.external_id === externalId) ?? null;
   },
 
   async createPublication(input) {
@@ -245,6 +245,10 @@ export const apiDemoRepo: ApiRepo = {
 
   async createLinkPublication(input) {
     const session = await currentSession();
+    const existing = state().publications.find(
+      (p) => p.workspace_id === session.workspaceId && p.tracking === "link" && p.platform === input.platform && p.external_id === input.external_id,
+    );
+    if (existing) return { created: false, existing_id: existing.id };
     const publication: Publication = {
       id: uuid(),
       workspace_id: session.workspaceId,
@@ -270,7 +274,7 @@ export const apiDemoRepo: ApiRepo = {
       link_check: input.link_check,
     };
     state().publications.unshift(publication);
-    return publication;
+    return { created: true, publication };
   },
 
   async getPublication(id) {

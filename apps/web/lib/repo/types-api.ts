@@ -209,6 +209,10 @@ export interface LinkPublicationCreateInput {
   link_check: Record<string, unknown>;
 }
 
+/* Ergebnis von createLinkPublication: neu angelegt oder schon vorhanden (eindeutiger Index aus 0021).
+ * existing_id ist nur dann null, wenn die vorhandene Zeile zwischen Konflikt und Lesen verschwunden ist. */
+export type LinkPublicationCreateResult = { created: true; publication: Publication } | { created: false; existing_id: string | null };
+
 export interface PublicationCreateInput {
   clip_id: string;
   connection_id: string;

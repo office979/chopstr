@@ -68,7 +68,7 @@ describe("runLinkCheck", () => {
   it("meldet Dubletten mit der vorhandenen Publikation", async () => {
     const r = await runLinkCheck("https://youtu.be/dQw4w9WgXcQ", deps({ findDuplicate: async () => ({ id: "pub-9" }) }));
     expect(r.checks.duplicate_publication_id).toBe("pub-9");
-    expect(r.hinweise).toContain("Dieser Beitrag wird schon verfolgt.");
+    expect(r.hinweise).toContain("Dieser Beitrag ist schon eingetragen.");
   });
 
   it("gibt ohne Schlüssel den Hinweis weiter und prüft die Erreichbarkeit per Aufruf", async () => {

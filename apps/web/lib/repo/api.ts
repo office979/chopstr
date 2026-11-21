@@ -8,6 +8,7 @@ import type {
   ApiKeyCreateInput,
   ApiKeyLookup,
   LinkPublicationCreateInput,
+  LinkPublicationCreateResult,
   MetricSnapshot,
   OutboxEvent,
   PlatformConnectionSummary,
@@ -49,10 +50,12 @@ export interface ApiRepo {
   /* Publishing (Sitzung) */
   getPlatformConnection(id: string): Promise<PlatformConnectionSummary | null>;
   listPlatformConnections(): Promise<PlatformConnectionSummary[]>;
-  /* Linktest: gibt es diesen Beitrag im Workspace schon als Publikation? */
-  findPublicationByExternal(platform: string, externalId: string): Promise<Publication | null>;
+  /* Linktest: gibt es diesen Beitrag im Workspace schon als Publikation (irgendeiner der Plattformwerte,
+   * siehe publicationPlatformsFor in lib/publishing/link-check.ts)? */
+  findPublicationByExternal(platforms: string[], externalId: string): Promise<Publication | null>;
   createPublication(input: PublicationCreateInput): Promise<Publication>;
-  createLinkPublication(input: LinkPublicationCreateInput): Promise<Publication>;
+  /* Eindeutiger Index aus 0021: bei einer Dublette kein Fehler, sondern die ID der vorhandenen Zeile */
+  createLinkPublication(input: LinkPublicationCreateInput): Promise<LinkPublicationCreateResult>;
   getPublication(id: string): Promise<Publication | null>;
   /* Lese-API Performance (Migration 0019): Publikationen eines Clips, Messreihe, feste Fenster */
   listPublicationsForClip(clipId: string): Promise<Publication[]>;
@@ -413,13 +416,14 @@ export const apiPostgresRepo: ApiRepo = {
     });
   },
 
-  async findPublicationByExternal(platform, externalId) {
+  async findPublicationByExternal(platforms, externalId) {
+    if (!platforms.length) return null;
     const session = await currentSession();
     return withContext(session, async (tx) => {
       const rows = await tx`
         select p.* from publications p
         join clips c on c.id = p.clip_id join sources s on s.id = c.source_id
-        where p.platform = ${platform} and p.external_id = ${externalId} and coalesce(p.workspace_id, s.workspace_id) = ${session.workspaceId}
+        where p.platform in ${tx(platforms)} and p.external_id = ${externalId} and coalesce(p.workspace_id, s.workspace_id) = ${session.workspaceId}
         order by p.created_at asc limit 1`;
       return rows.length ? toPublication(rows[0] as Row) : null;
     });
@@ -439,13 +443,21 @@ export const apiPostgresRepo: ApiRepo = {
   async createLinkPublication(input) {
     const session = await currentSession();
     return withContext(session, async (tx) => {
+      /* workspace_id kommt immer aus der Sitzung (nie NULL, CHECK publications_link_workspace_check);
+       * der Konflikt-Zielindex ist publications_link_unique_idx aus 0021 */
       const rows = await tx`
         insert into publications (workspace_id, clip_id, connection_id, platform, status, external_id, external_url, published_at,
                                   tracking, tracking_until, next_snapshot_at, link_check, created_by)
         values (${session.workspaceId}, ${input.clip_id}, ${input.connection_id}, ${input.platform}, 'manual', ${input.external_id}, ${input.external_url},
                 ${input.published_at}, 'link', ${input.tracking_until}, ${input.next_snapshot_at}, ${tx.json(input.link_check as never)}, ${session.userId})
+        on conflict (workspace_id, platform, external_id) where tracking = 'link' and external_id is not null do nothing
         returning *`;
-      return toPublication(rows[0] as Row);
+      if (rows.length) return { created: true as const, publication: toPublication(rows[0] as Row) };
+      const existing = await tx`
+        select id from publications
+        where workspace_id = ${session.workspaceId} and platform = ${input.platform} and external_id = ${input.external_id} and tracking = 'link'
+        limit 1`;
+      return { created: false as const, existing_id: (existing[0]?.id as string | undefined) ?? null };
     });
   },
 

@@ -91,6 +91,19 @@ SOP_UNIT_WORDS = frozenset({
 EMOJI_RE = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
 # Strich mit Leerzeichen davor und danach; zwischen Ziffern ist es ein Bereich („5 - 10 Euro“) und bleibt
 SPACED_DASH_RE = re.compile(r"(?<!\d)\s+[–-]\s+|\s+[–-]\s+(?!\d)")
+# Gedanken- oder Halbgeviertstrich ohne Leerzeichen zwischen Buchstaben („Fehler—und Lehre“); ein Bindestrich
+# ohne Leerzeichen ist ein Kompositum und bleibt, zwischen Ziffern ist es ein Bereich
+UNSPACED_DASH_RE = re.compile(r"(?<=[^\W\d_])[—–](?=[^\W\d_])")
+# Vor „und“ und „oder“ wird aus dem Strich ein Leerzeichen, kein Komma („Der Fehler und was wir lernten“).
+# Vor „aber“ und „sondern“ bleibt es beim Komma, das verlangt die Regel für entgegenstellende Konjunktionen.
+DASH_BEFORE_CONJ_RE = re.compile(r"(?:\s+[—–-]\s+|\s*[—–]\s*)(?=(?:und|oder)\b)", re.IGNORECASE)
+# Rückbezüge aus mehreren Wörtern ohne Kopula („Genau das“, „Das hier“, „So ist es“)
+SOP_BACKREF_PHRASES = (
+    ("genau", "das"), ("genau", "so"), ("genau", "deshalb"), ("genau", "darum"), ("das", "hier"), ("so", "ist", "es"),
+    ("das", "ist", "es"), ("und", "genau", "das"),
+)  # fmt: skip
+# Zahlenbereich: „5 - 10 Euro“, „5–10 Euro“, „5 bis 10 Euro“ ist eine Einheit, der Bezug steht nach der zweiten Zahl
+RANGE_JOINERS = frozenset({"-", "–", "—", "bis"})
 
 
 def _wrap(text: str, width: int) -> list[str]:
@@ -119,8 +132,13 @@ def lint_sop(text: str, clip_text: str | None = None) -> tuple[str, list[str]]:
     if EMOJI_RE.search(out):
         out = " ".join(EMOJI_RE.sub("", out).split())
         notes.append("Emoji entfernt")
-    if SPACED_DASH_RE.search(out):
+    dashed = SPACED_DASH_RE.search(out) or UNSPACED_DASH_RE.search(out)
+    if dashed:
+        # Bereiche zwischen Ziffern bleiben (beide Muster lassen sie aus), vor „und“ oder „aber“ nur ein Leerzeichen
+        out = DASH_BEFORE_CONJ_RE.sub(lambda m: " " if not re.search(r"\d\s*$", out[: m.start()]) else m.group(0), out)
+        out = UNSPACED_DASH_RE.sub(", ", out)
         out = SPACED_DASH_RE.sub(", ", out)
+        out = re.sub(r" {2,}", " ", out)
         notes.append("Gedankenstrich ersetzt")
     if out.endswith(".") and not out.endswith("..."):
         out = out[:-1].rstrip()
@@ -137,9 +155,11 @@ def lint_sop(text: str, clip_text: str | None = None) -> tuple[str, list[str]]:
 
     words = re.findall(r"[\wÄÖÜäöüß%€.]+", out)
     low = [w.lower().strip(".") for w in words]
+    starts_backref = any(tuple(low[: len(ph)]) == ph for ph in SOP_BACKREF_PHRASES)
     if low and (
         (len(low) == 1 and low[0] in SOP_DEMONSTRATIVES)
         or (low[0] in SOP_DEMONSTRATIVES and len(low) <= 4 and len(low) > 1 and low[1] in SOP_COPULAS)
+        or (starts_backref and len(low) <= 4)
     ):
         notes.append(f"Rückbezug ohne Nomen: '{out}' versteht man ohne Clip nicht")
 
@@ -147,7 +167,11 @@ def lint_sop(text: str, clip_text: str | None = None) -> tuple[str, list[str]]:
         if mention.unit is not None:
             continue
         at = out.find(mention.raw)
-        after = out[at + len(mention.raw) :].split()[:2] if at >= 0 else []
+        rest = out[at + len(mention.raw) :] if at >= 0 else ""
+        after = rest.split()[:2]
+        # Erste Zahl eines Bereichs: der Bezug gehört zur zweiten Zahl, die wird für sich geprüft
+        if re.match(r"\s*(?:[-–—]|bis\b)\s*\d", rest):
+            continue
         has_ref = any(w[:1].isupper() or w.lower().strip(".,!?") in SOP_UNIT_WORDS or w[:1] in "%€" for w in after)
         if not has_ref:
             notes.append(f"Zahl ohne Bezug: '{mention.raw}'")

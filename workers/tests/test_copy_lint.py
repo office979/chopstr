@@ -172,6 +172,33 @@ def test_sop_fixes_dashes_and_emojis():
     assert copy_de.lint_sop("5 – 10 Euro mehr")[0] == "5 – 10 Euro mehr"
 
 
+def test_sop_dash_before_conjunction_becomes_a_space_and_unspaced_dashes_count():
+    """Review R1-18: kein Komma vor „und“, und ein Strich ohne Leerzeichen geht nicht mehr durch."""
+    assert copy_de.lint_sop("Der Fehler – und was wir lernten")[0] == "Der Fehler und was wir lernten"
+    # vor „aber“ verlangt die Regel ein Komma (entgegenstellende Konjunktion)
+    assert copy_de.lint_sop("Teuer - aber es lohnt sich")[0] == "Teuer, aber es lohnt sich"
+    assert copy_de.lint_sop("Kein Rabatt – sondern Service")[0] == "Kein Rabatt, sondern Service"
+    out, notes = copy_de.lint_sop("Fehler—und Lehre")
+    assert out == "Fehler und Lehre" and "Gedankenstrich ersetzt" in notes
+    assert copy_de.lint_sop("Preise rauf—Kunden weg")[0] == "Preise rauf, Kunden weg"
+    # Bindestrich-Komposita und Bereiche bleiben
+    assert copy_de.lint_sop("Frage-und-Antwort-Spiel")[0] == "Frage-und-Antwort-Spiel"
+    assert copy_de.lint_sop("5–10 Euro mehr")[0] == "5–10 Euro mehr"
+
+
+def test_sop_counts_a_range_as_one_number():
+    for text in ("5 - 10 Euro mehr", "5–10 Euro mehr", "5 bis 10 Euro mehr"):
+        notes = copy_de.lint_sop(text)[1]
+        assert not any(n.startswith("Zahl ohne Bezug") for n in notes), (text, notes)
+    assert "Zahl ohne Bezug: '10'" in copy_de.lint_sop("Von 5 bis 10 steigt es")[1]
+
+
+def test_sop_flags_multiword_back_references():
+    for text in ("Genau das", "Genau das passiert", "Das hier", "So ist es", "Und genau das"):
+        assert any(n.startswith("Rückbezug ohne Nomen") for n in copy_de.lint_sop(text)[1]), text
+    assert not any(n.startswith("Rückbezug") for n in copy_de.lint_sop("Genau das kostet dich im Vertrieb Kunden")[1])
+
+
 def test_lint_applies_sop_only_to_onscreen_and_only_with_switch():
     p = copy_de.BrandProfile()
     text = "Warum du zu billig verkaufst."

@@ -207,6 +207,16 @@ export const apiDemoRepo: ApiRepo = {
     return { id, workspace_id: session.workspaceId, brand_profile_id: null, platform: "manual", account_label: "Manuell (Demo)", status: "connected", capabilities: { publish: false } };
   },
 
+  async listPlatformConnections() {
+    const session = await currentSession();
+    return [{ id: "77777777-7777-4777-8777-777777777701", workspace_id: session.workspaceId, brand_profile_id: null, platform: "manual", account_label: "Manuell (Demo)", external_account_id: null, status: "connected", capabilities: { publish: false } }];
+  },
+
+  async findPublicationByExternal(platform, externalId) {
+    const session = await currentSession();
+    return state().publications.find((p) => p.workspace_id === session.workspaceId && p.platform === platform && p.external_id === externalId) ?? null;
+  },
+
   async createPublication(input) {
     const session = await currentSession();
     const publication: Publication = {

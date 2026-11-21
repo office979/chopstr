@@ -109,6 +109,15 @@ export const SCHEMAS: Record<string, JsonSchema> = {
     },
     additionalProperties: false,
   },
+  LinkTest: {
+    type: "object",
+    required: ["url"],
+    properties: {
+      url: { type: "string", minLength: 1, maxLength: 2000, description: "Link zum Beitrag (YouTube, TikTok, Instagram, X, LinkedIn)" },
+      clip_id: { type: ["string", "null"], format: "uuid", description: "Optional: Clip, zu dem der Link gehört (prüft das Format)" },
+    },
+    additionalProperties: false,
+  },
   CreateBrandProfile: {
     type: "object",
     required: ["name"],
@@ -290,6 +299,43 @@ export const SCHEMAS: Record<string, JsonSchema> = {
       metrics: { type: ["object", "null"], additionalProperties: true },
     },
   },
+  LinkTestResult: {
+    type: "object",
+    properties: {
+      platform: { type: ["string", "null"], enum: ["youtube", "tiktok", "instagram", "x", "linkedin", null] },
+      external_id: { type: ["string", "null"] },
+      normalized_url: { type: ["string", "null"] },
+      kind: { type: ["string", "null"], enum: ["short", "video", "reel", "post", "status", "short_link", null] },
+      checks: {
+        type: "object",
+        properties: {
+          parsed: { type: "boolean" },
+          reachable: { type: "boolean" },
+          owned_by_connection: { type: "boolean" },
+          duplicate_publication_id: { type: ["string", "null"] },
+          age_s: { type: ["integer", "null"], description: "Sekunden seit der Veröffentlichung laut Plattform" },
+          metrics_available: { type: "boolean" },
+        },
+      },
+      metrics: {
+        type: ["object", "null"],
+        properties: {
+          views: { type: ["integer", "null"] },
+          likes: { type: ["integer", "null"] },
+          comments: { type: ["integer", "null"] },
+          shares: { type: ["integer", "null"] },
+          saves: { type: ["integer", "null"] },
+          reach: { type: ["integer", "null"] },
+          source: { type: "string", enum: ["public_api", "scraper", "oauth"] },
+        },
+      },
+      published_at: { type: ["string", "null"] },
+      author: { type: ["object", "null"], properties: { id: { type: ["string", "null"] }, label: { type: ["string", "null"] } } },
+      connection_id: { type: ["string", "null"] },
+      clip_id: { type: ["string", "null"] },
+      hinweise: { type: "array", items: { type: "string" }, description: "Kurze deutsche Hinweise zum Ergebnis" },
+    },
+  },
   BrandProfile: { type: "object", additionalProperties: true, description: "Markenprofil (brand_profiles)" },
   Webhook: {
     type: "object",
@@ -382,6 +428,7 @@ export const ENDPOINTS: EndpointDef[] = [
   { method: "post", path: "/clips/{id}/hooks", operationId: "saveHook", summary: "Manuelle Hook-Version speichern", description: "Linter und Claim-Check laufen serverseitig; Antwort enthält lint_notes und claim_issues sowie needs_render.", scope: "write", tag: "Clips", params: [idParam("id", "Clip-ID")], requestBody: "SaveHook", responses: { "200": { description: "Gespeichert", schema: { type: "object", properties: { ok: { type: "boolean" }, hook: ref("Hook"), needs_render: { type: "boolean" } } } } } },
   { method: "post", path: "/clips/{id}/guest-approval", operationId: "requestGuestApproval", summary: "Gast-Freigabe anfordern", description: "Link 14 Tage gültig; mit guest_email wird eine E-Mail versendet. Plan-Gate features.guest_approval.", scope: "write", tag: "Clips", params: [idParam("id", "Clip-ID")], requestBody: "GuestApprovalRequest", responses: { "201": { description: "Angefordert", schema: { type: "object", required: ["approval", "link"], properties: { approval: ref("GuestApproval"), link: { type: "string" } } } }, "403": ERR("Plan enthält keine Gast-Freigaben") } },
   { method: "post", path: "/clips/{id}/publish", operationId: "publishClip", summary: "Clip veröffentlichen oder planen", description: "Gates: Clip rendered, Kandidat accepted, Gast-Freigabe approved falls verlangt, AVV angenommen, Plan features.publishing (sonst 402). Legt eine Publikation an und startet PublishWorkflow publish-<id>; ohne Temporal bleibt sie scheduled.", scope: "publish", tag: "Publishing", params: [idParam("id", "Clip-ID")], requestBody: "Publish", responses: { "201": { description: "Publikation angelegt", schema: single("publication", "Publication", { workflow_started: { type: "boolean" }, hint: { type: ["string", "null"] } }) }, "402": ERR("Plan ohne Publishing"), "409": ERR("Gate nicht erfüllt") } },
+  { method: "post", path: "/links/test", operationId: "testLink", summary: "Link prüfen", description: "Zerlegt einen Beitragslink, liest öffentliche Messwerte (YouTube mit YOUTUBE_API_KEY, X mit X_BEARER_TOKEN), prüft Besitz über die Verbindungen des Workspace, Dubletten und Alter. Schreibt nichts. Fehlen Schlüssel, stehen Hinweise statt Zahlen in der Antwort.", scope: "read", tag: "Publishing", requestBody: "LinkTest", responses: { "200": { description: "Ergebnis des Linktests", schema: ref("LinkTestResult") }, "404": ERR("Clip nicht gefunden") } },
   { method: "get", path: "/publications/{id}", operationId: "getPublication", summary: "Publikation anzeigen", scope: "publish", tag: "Publishing", params: [idParam("id", "Publikations-ID")], responses: { "200": { description: "Publikation", schema: single("publication", "Publication") }, "404": ERR("Nicht gefunden") } },
   { method: "get", path: "/brand-profiles", operationId: "listBrandProfiles", summary: "Markenprofile auflisten", scope: "read", tag: "Markenprofile", responses: { "200": { description: "Liste", schema: list("brand_profiles", "BrandProfile") } } },
   { method: "post", path: "/brand-profiles", operationId: "createBrandProfile", summary: "Markenprofil anlegen", scope: "write", tag: "Markenprofile", requestBody: "CreateBrandProfile", responses: { "201": { description: "Angelegt", schema: single("brand_profile", "BrandProfile") } } },

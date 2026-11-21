@@ -169,6 +169,8 @@ export interface PlatformConnectionSummary {
   brand_profile_id: string | null;
   platform: "tiktok" | "instagram" | "youtube" | "linkedin" | "manual";
   account_label: string;
+  /* Kanal- oder Konto-ID auf der Plattform; der Linktest prüft damit, ob ein Beitrag diesem Konto gehört */
+  external_account_id?: string | null;
   status: "connected" | "expired" | "revoked";
   capabilities: Record<string, unknown>;
 }

@@ -45,6 +45,9 @@ export interface ApiRepo {
   createWebhookDelivery(input: { endpoint_id: string; outbox_id: number | null; event: string; payload: Record<string, unknown> }): Promise<WebhookDelivery>;
   /* Publishing (Sitzung) */
   getPlatformConnection(id: string): Promise<PlatformConnectionSummary | null>;
+  listPlatformConnections(): Promise<PlatformConnectionSummary[]>;
+  /* Linktest: gibt es diesen Beitrag im Workspace schon als Publikation? */
+  findPublicationByExternal(platform: string, externalId: string): Promise<Publication | null>;
   createPublication(input: PublicationCreateInput): Promise<Publication>;
   getPublication(id: string): Promise<Publication | null>;
   setPublicationWorkflow(id: string, workflowId: string | null): Promise<void>;
@@ -166,6 +169,7 @@ function toConnection(r: Row): PlatformConnectionSummary {
     brand_profile_id: (r.brand_profile_id as string | null) ?? null,
     platform: r.platform as PlatformConnectionSummary["platform"],
     account_label: r.account_label as string,
+    external_account_id: (r.external_account_id as string | null) ?? null,
     status: r.status as PlatformConnectionSummary["status"],
     capabilities: jsonValue<Record<string, unknown>>(r.capabilities, {}),
   };
@@ -337,6 +341,26 @@ export const apiPostgresRepo: ApiRepo = {
     return withContext(session, async (tx) => {
       const rows = await tx`select * from platform_connections where id = ${id} and workspace_id = ${session.workspaceId}`;
       return rows.length ? toConnection(rows[0] as Row) : null;
+    });
+  },
+
+  async listPlatformConnections() {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`select * from platform_connections where workspace_id = ${session.workspaceId} order by created_at asc`;
+      return rows.map((r) => toConnection(r as Row));
+    });
+  },
+
+  async findPublicationByExternal(platform, externalId) {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`
+        select p.* from publications p
+        join clips c on c.id = p.clip_id join sources s on s.id = c.source_id
+        where p.platform = ${platform} and p.external_id = ${externalId} and coalesce(p.workspace_id, s.workspace_id) = ${session.workspaceId}
+        order by p.created_at asc limit 1`;
+      return rows.length ? toPublication(rows[0] as Row) : null;
     });
   },
 

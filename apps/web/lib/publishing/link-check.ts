@@ -132,14 +132,24 @@ export interface LinkPublicationPlan {
   published_at: string;
   tracking_until: string;
   tracking_days: number;
-  next_snapshot_at: string;
+  /* Gerundete Tage, die ab jetzt noch gemessen werden (0: Beitrag älter als die Messdauer, eine Messung) */
+  remaining_days: number;
+  /* Lässt sich überhaupt messen? Öffentlicher Leser (YouTube, X) oder eigene Verbindung */
+  measurable: boolean;
+  /* null, wenn nichts zu messen ist: dann fragt der Worker gar nicht erst */
+  next_snapshot_at: string | null;
   link_check: { checks: LinkChecks; hinweise: string[]; metrics: LinkCheckMetrics | null; author: LinkCheckResult["author"]; checked_at: string };
 }
 
 export type LinkPlanOutcome = { ok: true; plan: LinkPublicationPlan } | { ok: false; status: 400 | 409; code: string; message: string; duplicate_publication_id?: string };
 
+/* Plattformen mit öffentlichem Leser (lib/publishing/public-metrics.ts) */
+const PUBLIC_READER_PLATFORMS: readonly LinkPlatform[] = ["youtube", "x"];
+
 /* Aus dem Linktest wird eine Publikation zum Verfolgen: veröffentlicht laut Plattform (sonst jetzt), gemessen
- * bis published_at + trackDays, erste Messung sofort. Dubletten werden abgelehnt (409). */
+ * bis published_at + trackDays, erste Messung sofort. Ohne öffentlichen Leser und ohne eigene Verbindung
+ * (TikTok, Instagram, LinkedIn fremder Konten) gibt es nichts zu messen: dann kein Termin, statt 30 Tage lang
+ * Fehlerzeilen zu schreiben. Dubletten werden abgelehnt (409). */
 export function planLinkPublication(result: LinkCheckResult, opts: { now: number; trackDays?: number }): LinkPlanOutcome {
   if (!result.checks.parsed || !result.platform || !result.external_id || !result.normalized_url) {
     return { ok: false, status: 400, code: "link_invalid", message: result.hinweise[0] ?? "Der Link ist ungültig." };
@@ -154,6 +164,8 @@ export function planLinkPublication(result: LinkCheckResult, opts: { now: number
   const platformTime = result.published_at ? Date.parse(result.published_at) : NaN;
   /* Ein Zeitpunkt aus der Zukunft wäre ein Uhrenfehler; dann gilt jetzt */
   const publishedAt = Number.isFinite(platformTime) && platformTime <= opts.now ? platformTime : opts.now;
+  const until = publishedAt + days * 86_400_000;
+  const measurable = PUBLIC_READER_PLATFORMS.includes(result.platform) || result.connection_id != null;
   return {
     ok: true,
     plan: {
@@ -162,21 +174,27 @@ export function planLinkPublication(result: LinkCheckResult, opts: { now: number
       external_url: result.normalized_url,
       connection_id: result.connection_id,
       published_at: new Date(publishedAt).toISOString(),
-      tracking_until: new Date(publishedAt + days * 86_400_000).toISOString(),
+      tracking_until: new Date(until).toISOString(),
       tracking_days: days,
-      next_snapshot_at: new Date(opts.now).toISOString(),
+      remaining_days: Math.max(0, Math.round((until - opts.now) / 86_400_000)),
+      measurable,
+      next_snapshot_at: measurable ? new Date(opts.now).toISOString() : null,
       link_check: { checks: result.checks, hinweise: result.hinweise, metrics: result.metrics, author: result.author, checked_at: new Date(opts.now).toISOString() },
     },
   };
 }
 
-/* Kurze Sätze für die Oberfläche: was der Linktest ergeben hat */
-export function linkCheckSummary(result: LinkCheckResult, trackDays: number = DEFAULT_TRACK_DAYS): string[] {
+/* Kurze Sätze für die Oberfläche: was der Linktest ergeben hat. Mit plan sagt der letzte Satz, wie lange
+ * wirklich gemessen wird; ohne plan gilt die Standarddauer. */
+export function linkCheckSummary(result: LinkCheckResult, plan?: Pick<LinkPublicationPlan, "tracking_days" | "remaining_days" | "measurable">): string[] {
   if (!result.checks.parsed || !result.platform) return result.hinweise.slice(0, 1);
   const out = [`Link erkannt: ${PLATFORM_LABEL[result.platform]}`];
   out.push(result.checks.owned_by_connection ? "Verbundenes Konto erkannt" : "Kein verbundenes Konto");
   if (result.checks.duplicate_publication_id) out.push("Dieser Beitrag wird schon verfolgt");
-  else out.push(`Wird ${trackDays} Tage lang gemessen`);
+  else if (plan && !plan.measurable) out.push(`${PLATFORM_LABEL[result.platform]} gibt ohne verbundenes Konto keine Zahlen heraus, gemessen wird nicht`);
+  else if (plan && plan.remaining_days < plan.tracking_days) {
+    out.push(plan.remaining_days > 0 ? `Wird noch ${plan.remaining_days} Tage lang gemessen` : `Wird einmal gemessen, der Beitrag ist älter als ${plan.tracking_days} Tage`);
+  } else out.push(`Wird ${plan?.tracking_days ?? DEFAULT_TRACK_DAYS} Tage lang gemessen`);
   return out;
 }
 

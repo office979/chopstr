@@ -162,8 +162,9 @@ interface XTweetResponse {
   errors?: { title?: string; detail?: string; type?: string }[];
 }
 
-/* X rechnet je gelesenem Beitrag ab: eine Stunde Cache je ID (nur erfolgreiche Antworten) */
-export const X_CACHE_TTL_MS = 60 * 60 * 1000;
+/* X rechnet je gelesenem Beitrag ab: Cache je ID (nur erfolgreiche Antworten). Etwas kürzer als eine Stunde,
+ * damit die stündliche Messung des Workers nie die Zahlen der vorigen Stunde bekommt. */
+export const X_CACHE_TTL_MS = 55 * 60 * 1000;
 const xCache = new Map<string, { at: number; result: PublicMetricsOk }>();
 
 export function clearPublicMetricsCache(): void {

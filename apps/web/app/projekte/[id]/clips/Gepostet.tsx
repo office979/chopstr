@@ -306,7 +306,7 @@ export function Gepostet({
         open={offen}
         onClose={() => !busy && setOffen(false)}
         title="Als gepostet eintragen"
-        description={`Du hast den Clip selbst auf ${PLATFORM_LABELS[plattform]} gepostet. Trag das hier ein, dann kannst du später die Zahlen dazuschreiben - und chopstr kann daraus lernen, was bei dir ankommt.`}
+        description={`Du hast den Clip selbst auf ${PLATFORM_LABELS[plattform]} gepostet. Trag das hier ein, dann kannst du später die Zahlen dazuschreiben. So kann chopstr daraus lernen, was bei dir ankommt.`}
       >
         <div className="flex flex-col gap-4">
           <label className="flex flex-col gap-1.5">
@@ -336,7 +336,7 @@ export function Gepostet({
         open={zahlenFuer != null}
         onClose={() => !busy && setZahlenFuer(null)}
         title="Zahlen eintragen"
-        description="Schreib ab, was die Plattform dir zeigt. Du musst nicht alles ausfüllen - Aufrufe und neue Folgende reichen für den Wochenbericht."
+        description="Schreib ab, was die Plattform dir zeigt. Du musst nicht alles ausfüllen. Aufrufe und neue Folgende reichen für den Wochenbericht."
       >
         <div className="flex flex-col gap-4">
           <div className="grid gap-3 sm:grid-cols-2">

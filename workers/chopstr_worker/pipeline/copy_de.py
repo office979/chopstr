@@ -89,7 +89,8 @@ SOP_UNIT_WORDS = frozenset({
 })  # fmt: skip
 # Emojis und Bildzeichen (grobe Blöcke, genügt für Hooks): Symbole, Piktogramme, Dingbats, Variationswähler
 EMOJI_RE = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍]")
-SPACED_DASH_RE = re.compile(r"\s+[–-]\s+")
+# Strich mit Leerzeichen davor und danach; zwischen Ziffern ist es ein Bereich („5 - 10 Euro“) und bleibt
+SPACED_DASH_RE = re.compile(r"(?<!\d)\s+[–-]\s+|\s+[–-]\s+(?!\d)")
 
 
 def _wrap(text: str, width: int) -> list[str]:

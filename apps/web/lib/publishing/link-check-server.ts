@@ -51,7 +51,17 @@ export async function registerLinkForClip(input: {
   const outcome = planLinkPublication(check, { now: Date.now(), trackDays });
   if (!outcome.ok) return { ...outcome, check };
   const { plan } = outcome;
-  const publication = await getApiRepo().createLinkPublication({ clip_id: input.clip.id, ...plan, link_check: { ...plan.link_check } });
+  const publication = await getApiRepo().createLinkPublication({
+    clip_id: input.clip.id,
+    connection_id: plan.connection_id,
+    platform: plan.platform,
+    external_id: plan.external_id,
+    external_url: plan.external_url,
+    published_at: plan.published_at,
+    tracking_until: plan.tracking_until,
+    next_snapshot_at: plan.next_snapshot_at,
+    link_check: { ...plan.link_check, measurable: plan.measurable },
+  });
   await getRepo().audit({
     action: "publication.link_registered",
     entity: "publications",
@@ -67,5 +77,5 @@ export async function registerLinkForClip(input: {
       ...(input.apiKeyId ? { api_key_id: input.apiKeyId } : {}),
     },
   });
-  return { ok: true, publication, check, zusammenfassung: linkCheckSummary(check, plan.tracking_days) };
+  return { ok: true, publication, check, zusammenfassung: linkCheckSummary(check, plan) };
 }

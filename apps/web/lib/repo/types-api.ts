@@ -205,7 +205,7 @@ export interface LinkPublicationCreateInput {
   external_url: string;
   published_at: string;
   tracking_until: string;
-  next_snapshot_at: string;
+  next_snapshot_at: string | null;
   link_check: Record<string, unknown>;
 }
 

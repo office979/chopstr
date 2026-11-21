@@ -210,6 +210,35 @@ describe("planLinkPublication", () => {
   });
 });
 
+describe("planLinkPublication Messbarkeit und Restdauer", () => {
+  it("plant ohne öffentlichen Leser und ohne Verbindung keine Messung", async () => {
+    const check = await runLinkCheck(
+      "https://www.tiktok.com/@placemedia/video/7301234567890123456",
+      deps({ readPublic: async () => ({ ok: false, platform: "tiktok", error: "nicht_verbunden", message: "TikTok nur mit Verbindung." }) }),
+    );
+    const out = planLinkPublication(check, { now: NOW });
+    expect(out.ok && out.plan).toMatchObject({ measurable: false, next_snapshot_at: null });
+    if (out.ok) expect(linkCheckSummary(check, out.plan).at(-1)).toBe("TikTok gibt ohne verbundenes Konto keine Zahlen heraus, gemessen wird nicht");
+  });
+
+  it("sagt bei alten Beiträgen, wie lange wirklich noch gemessen wird", async () => {
+    const old = await runLinkCheck("https://youtu.be/dQw4w9WgXcQ", deps({ readPublic: async () => youtubeOk({ published_at: "2026-10-01T12:00:00Z" }) }));
+    const out = planLinkPublication(old, { now: NOW });
+    expect(out.ok && out.plan.remaining_days).toBe(0);
+    if (out.ok) expect(linkCheckSummary(old, out.plan).at(-1)).toBe("Wird einmal gemessen, der Beitrag ist älter als 30 Tage");
+    const mid = await runLinkCheck("https://youtu.be/dQw4w9WgXcQ", deps({ readPublic: async () => youtubeOk({ published_at: "2026-11-11T12:00:00Z" }) }));
+    const outMid = planLinkPublication(mid, { now: NOW });
+    if (outMid.ok) expect(linkCheckSummary(mid, outMid.plan).at(-1)).toBe("Wird noch 20 Tage lang gemessen");
+  });
+
+  it("misst frische Beiträge die volle Dauer", async () => {
+    const check = await runLinkCheck("https://youtu.be/dQw4w9WgXcQ", deps());
+    const out = planLinkPublication(check, { now: NOW });
+    if (out.ok) expect(linkCheckSummary(check, out.plan).at(-1)).toBe("Wird 30 Tage lang gemessen");
+    expect(out.ok && out.plan.measurable).toBe(true);
+  });
+});
+
 describe("linkCheckSummary", () => {
   it("fasst das Ergebnis in Sätzen ohne Gedankenstrich zusammen", async () => {
     const lines = linkCheckSummary(await runLinkCheck("https://youtu.be/dQw4w9WgXcQ", deps()));

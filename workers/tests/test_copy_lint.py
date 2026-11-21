@@ -168,6 +168,8 @@ def test_sop_fixes_dashes_and_emojis():
     assert "Emoji entfernt" in notes and "Gedankenstrich ersetzt" in notes
     assert copy_de.lint_sop("Preise rauf - Kunden weg")[0] == "Preise rauf, Kunden weg"
     assert copy_de.lint_sop("E-Mail-Marketing wirkt")[0] == "E-Mail-Marketing wirkt"  # Bindestrich bleibt
+    assert copy_de.lint_sop("5 - 10 Euro mehr")[0] == "5 - 10 Euro mehr"  # Zahlenbereich bleibt
+    assert copy_de.lint_sop("5 – 10 Euro mehr")[0] == "5 – 10 Euro mehr"
 
 
 def test_lint_applies_sop_only_to_onscreen_and_only_with_switch():

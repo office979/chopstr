@@ -19,9 +19,11 @@ dem Vertrag ``packages/schema/CANDIDATES.md`` (``candidates_v1``).
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
@@ -880,14 +882,36 @@ def _duration(sents: list[Sentence], first: int, last: int) -> float:
     return sents[last].end - sents[first].start
 
 
+# Mehrstufige Engine (T2, ``pipeline/tiered_engine.py``): Short-Form-Längen und Ausgabemenge nach Quellstunde gelten
+# nur für die Dauer eines tiered-Laufs (``tiered_limits``). Ohne gesetzten Wert gilt die Richtlinie wie bisher.
+_LENGTH_OVERRIDE: contextvars.ContextVar[tuple[float, float] | None] = contextvars.ContextVar("length_override", default=None)
+_OUTPUT_LIMIT_OVERRIDE: contextvars.ContextVar[int | None] = contextvars.ContextVar("output_limit_override", default=None)
+
+
+@contextlib.contextmanager
+def tiered_limits(min_len_s: float, max_len_s: float, output_limit: int) -> Iterator[None]:
+    """Längengrenzen und Ausgabeobergrenze für die Dauer eines Laufs der mehrstufigen Engine."""
+    t1 = _LENGTH_OVERRIDE.set((float(min_len_s), float(max_len_s)))
+    t2 = _OUTPUT_LIMIT_OVERRIDE.set(int(output_limit))
+    try:
+        yield
+    finally:
+        _LENGTH_OVERRIDE.reset(t1)
+        _OUTPUT_LIMIT_OVERRIDE.reset(t2)
+
+
 def _length_reason(dur: float, mit_zugabe: bool = False) -> str | None:
     """Verwerfungsgrund wegen der Laenge, oder None.
 
     Massgeblich ist die Richtlinie. ``mit_zugabe`` gilt nur fuer einen Clip, der nach hinten
-    verlaengert wurde, um sein Ende zu heilen; ohne diesen Grund endet es bei ``hart_max_s``."""
+    verlaengert wurde, um sein Ende zu heilen; ohne diesen Grund endet es bei ``hart_max_s``.
+    In einem Lauf der mehrstufigen Engine gelten deren Short-Form-Grenzen (``tiered_limits``)."""
     try:
         pol = editorial.load()
         unten, oben = pol.hart_min_s, pol.hart_max_s + (pol.kontext_zugabe_s if mit_zugabe else 0.0)
+        override = _LENGTH_OVERRIDE.get()
+        if override is not None:
+            unten, oben = override[0], override[1] + (pol.kontext_zugabe_s if mit_zugabe else 0.0)
     except Exception:  # ohne Richtlinie lieber weiter arbeiten als gar nicht
         unten, oben = MIN_LEN_S, MAX_LEN_S
     if dur < unten:
@@ -1734,7 +1758,8 @@ def select_with_reserve(
     output = editorial.output_settings(active) if active is not None else None
     lemmas: dict[int, set[str]] = {}
     if output is not None:
-        limit = min(limit, output["max_candidates"])
+        cap = _OUTPUT_LIMIT_OVERRIDE.get()
+        limit = min(limit, cap if cap is not None else output["max_candidates"])
         lemmas = {id(c): content_lemmas(c) for c in cands}
         _distinctiveness(cands, lemmas)
     ordered = sorted(cands, key=_rank_key, reverse=True)

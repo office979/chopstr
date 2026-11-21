@@ -1033,6 +1033,9 @@ V2_PIN_CHANGES.update({"score_clip": 3})
 # ``implementation.mm_scan`` trägt Einstellungen statt eines einzelnen Wahrheitswerts und steht deshalb nicht in
 # V2_SWITCHES; ``mm_scan.settings_from_policy`` liest und prüft ihn.
 V2_PIN_CHANGES.update({"mm_scan": 1})
+# T2: Vorfilter und Editor der mehrstufigen Engine (``pipeline.tiered_engine``), nur Fassung 2. Auch
+# ``implementation.engine`` trägt Einstellungen; ``tiered_engine.engine_settings`` liest und prüft sie.
+V2_PIN_CHANGES.update({"prefilter": 1, "editor": 1})
 KEY_STATUSES = ("implemented", "partial", "not_implemented")
 
 

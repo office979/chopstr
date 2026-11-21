@@ -29,7 +29,7 @@ from typing import Any
 from temporalio import activity
 
 from .. import costlog, db, decision_log, editorial, events, outbox, providers_mm, result_cache, storage, usage
-from ..pipeline import mm_scan, release_gate, segment, signals, story_engine
+from ..pipeline import mm_scan, release_gate, segment, signals, story_engine, tiered_engine
 from ..pipeline import silence as silence_mod
 from ..providers_llm import LLM
 from ..residency import Tenant
@@ -612,7 +612,12 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
         # Aendert sie nichts, bleibt der Key unveraendert: sonst braeche jeder bestehende
         # Zwischenspeicher und loeste einen neuen LLM-Lauf samt Kosten aus, ohne Wirkung.
         pausen = load_or_scan_silence(ctx, source_id, src)
+        # T2: mehrstufige Engine nur mit CHOPSTR_ENGINE=tiered oder implementation.engine.tiered; sonst der bisherige
+        # Pfad. Engine und ihre Prompts stehen dann vorn im Idempotenz-Key.
+        tiered = tiered_engine.engine_mode(editorial.load()) == "tiered"
         versions = list(story_engine.prompt_versions())
+        if tiered:
+            versions = [tiered_engine.ENGINE_VERSION, *tiered_engine.prompt_versions(), *versions]
         if segment.silence_changes_boundaries(words, pausen):
             versions.append(f"{silence_mod.SCAN_VERSION}:{len(pausen)}")
             log.info("silence source=%s veraendert die Satzgrenzen, Kandidaten werden neu gesucht", source_id)
@@ -631,9 +636,15 @@ def run_detect_candidates(ctx: common.Context, source_id: str) -> list[str]:
                 common.heartbeat("chapter", done, total)
                 st.progress(done / max(total, 1), f"Kapitel {done} von {total} bewertet, {n} Kandidaten")
 
-            report = story_engine.run(
-                words, brief, brand, heat, llm, weights=weights, on_progress=_progress, silence=pausen
-            )
+            if tiered:
+                report = tiered_engine.run(
+                    words, brief, brand, heat, llm, weights=weights, on_progress=_progress, silence=pausen,
+                    duration_s=float(src.get("duration_s") or 0.0) or None,
+                )  # fmt: skip
+            else:
+                report = story_engine.run(
+                    words, brief, brand, heat, llm, weights=weights, on_progress=_progress, silence=pausen
+                )
             ctx.store.put_json("derived", key, report.to_json())
 
         ids = _write_rows(ctx, source_id, report.candidates)

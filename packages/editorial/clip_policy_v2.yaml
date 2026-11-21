@@ -902,6 +902,8 @@ prompts:
   compare_clips: 1            # Lane P2: Paarvergleich (Hypothese), wirksam nur mit Regel und Schalter ranking.pairwise
   counter_reader: 1           # Lane P3: Gegenleser, sieht nur Clip und Hook; wirksam nur mit context.counter_reader.model und roles.critic
   mm_scan: 1                  # T2: multimodaler Szenen-Scan je Fenster (Stufe 0), wirksam nur mit einem MM-Provider
+  prefilter: 1                # T2: Vorfilter (Stufe B, Haiku) über Transkriptblöcke, wirksam nur mit der mehrstufigen Engine
+  editor: 1                   # T2: Editor (Stufe C, Sonnet): Grenzen, Hook, Copy je Plattform, wirksam nur mit der mehrstufigen Engine
 
 # ------------------------------------------------------------------------------------------------
 # Schalter der Arbeitspakete (neu in Fassung 2)
@@ -1166,7 +1168,21 @@ implementation:
     height: 360
     window_s: 600
     overlap_s: 20
-    min_intensity: 0.3        # schwächere Ereignisse werden weder Seed noch Pseudo-Satz--------------------------------------------------------------------------------------------
+    min_intensity: 0.3        # schwächere Ereignisse werden weder Seed noch Pseudo-Satz
+  # T2: mehrstufige Engine (pipeline/tiered_engine.py): Vorfilter (Haiku) über Blöcke, Editor (Sonnet) nur für
+  # die besten Kandidaten, danach die bestehenden Gates und der Kritiker. Aus, bis die Trainings-Eval sie
+  # freigibt; CHOPSTR_ENGINE=tiered schaltet sie je Prozess ein, CHOPSTR_ENGINE=classic erzwingt den alten Pfad.
+  engine:
+    tiered: false
+    candidates_per_source_hour: 12   # Ausgabemenge nach Länge statt fest 10
+    min_candidates: 3
+    max_candidates: 40
+    editor_oversample: 1.5           # so viel mehr Kandidaten gehen in den Editor, als am Ende ausgegeben werden
+    prefilter_block_s: 480           # Länge eines Transkriptblocks für den Vorfilter
+    prefilter_overlap_s: 30
+    min_len_s: 8                     # Mindestlänge für Short-Form
+    max_len_s: 75
+    editor_context_sents: 4          # Sätze Kontext vor und nach dem Kandidaten im Editor-Prompt--------------------------------------------------------------------------------------------
 # Herkunft je Regel (neu in Fassung 2)
 # ------------------------------------------------------------------------------------------------
 # Schlüssel ist der Punktpfad der Regel (editorial.rule_paths): Blattwerte wie laenge.ziel_s,

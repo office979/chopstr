@@ -427,11 +427,54 @@ def iou(a0: float, a1: float, b0: float, b1: float) -> float:
     return inter / union if union > 0 else 0.0
 
 
+def gold_span(gold: dict) -> tuple[float, float]:
+    """Gesamtspanne der Fundstelle: ``source.start_s`` bis ``end_s``, sonst erste bis letzte Quellstelle."""
+    src = gold.get("source") or {}
+    if src.get("start_s") is not None and src.get("end_s") is not None:
+        return float(src["start_s"]), float(src["end_s"])
+    segs = gold_validate.segments(gold)
+    return min(a for a, _b in segs), max(b for _a, b in segs)
+
+
+def gold_segments(gold: dict) -> list[tuple[float, float]]:
+    """Vereinigung der Quellstellen (sortiert, überlappende zusammengelegt); ohne ``segments`` die Gesamtspanne."""
+    segs = sorted(gold_validate.segments(gold)) or [gold_span(gold)]
+    merged = [segs[0]]
+    for a, b in segs[1:]:
+        if a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    return merged
+
+
+def is_multi_segment(gold: dict) -> bool:
+    return len(gold_validate.segments(gold)) > 1
+
+
+def hit_detail(pred: dict, gold: dict, iou_min: float, center_s: float) -> dict[str, Any]:
+    """Treffer gegen die Gesamtspanne (IoU oder Mitte ± ``center_s``) oder gegen die Vereinigung der Quellstellen
+    (IoU). ``coverage`` ist der Anteil der Quellstellen-Sekunden, die der Vorschlag enthält: ein zusammenhängender
+    Schnitt kann einen verdichteten Gold-Clip nur über die Spanne treffen, nie in der Länge."""
+    p0, p1 = float(pred["start_s"]), float(pred["end_s"])
+    g0, g1 = gold_span(gold)
+    o = iou(p0, p1, g0, g1)
+    mid = abs((p0 + p1) / 2.0 - (g0 + g1) / 2.0)
+    span_hit = o >= iou_min or mid <= center_s
+    segs = gold_segments(gold)
+    seg_len = sum(b - a for a, b in segs)
+    inter = sum(max(0.0, min(p1, b) - max(p0, a)) for a, b in segs)
+    union = (p1 - p0) + seg_len - inter
+    o_seg = inter / union if union > 0 else 0.0
+    seg_hit = o_seg >= iou_min
+    basis = "span" if span_hit else ("segments" if seg_hit else None)
+    return {"hit": span_hit or seg_hit, "iou": round(o, 4), "iou_segments": round(o_seg, 4),
+            "coverage": round(inter / seg_len, 4) if seg_len > 0 else None, "basis": basis, "multi_segment": is_multi_segment(gold)}  # fmt: skip
+
+
 def is_hit(pred: dict, gold: dict, iou_min: float, center_s: float) -> tuple[bool, float]:
-    g0, g1 = float(gold["source"]["start_s"]), float(gold["source"]["end_s"])
-    o = iou(float(pred["start_s"]), float(pred["end_s"]), g0, g1)
-    mid = abs((float(pred["start_s"]) + float(pred["end_s"])) / 2.0 - (g0 + g1) / 2.0)
-    return (o >= iou_min or mid <= center_s), round(o, 4)
+    d = hit_detail(pred, gold, iou_min, center_s)
+    return d["hit"], d["iou"]
 
 
 def gold_for_run(meta: dict, gold: list[dict]) -> list[dict]:
@@ -448,21 +491,24 @@ def gold_for_run(meta: dict, gold: list[dict]) -> list[dict]:
 
 
 def match(clips: list[dict], gold: list[dict], iou_min: float = 0.5, center_s: float = 10.0) -> dict[str, Any]:
-    """Gieriges Paaren nach IoU (jeder Gold-Clip und jeder Vorschlag höchstens einmal)."""
-    pairs = []
+    """Gieriges Paaren nach IoU der Gesamtspanne, dann der Quellstellen (jeder Gold-Clip und jeder Vorschlag
+    höchstens einmal). ``details`` trägt je Paar Grundlage des Treffers und Abdeckung der Quellstellen."""
+    pairs, details = [], {}
     for i, p in enumerate(clips):
         for j, g in enumerate(gold):
-            hit, o = is_hit(p, g, iou_min, center_s)
-            if hit:
-                pairs.append((o, -abs((p["start_s"] + p["end_s"]) / 2 - (g["source"]["start_s"] + g["source"]["end_s"]) / 2), i, j))
+            d = hit_detail(p, g, iou_min, center_s)
+            if d["hit"]:
+                details[(i, j)] = d
+                g0, g1 = gold_span(g)
+                pairs.append((d["iou"], d["iou_segments"], -abs((p["start_s"] + p["end_s"]) / 2 - (g0 + g1) / 2), i, j))
     used_p, used_g, matched = set(), set(), []
-    for o, _neg_mid, i, j in sorted(pairs, reverse=True):
+    for o, _o_seg, _neg_mid, i, j in sorted(pairs, reverse=True):
         if i in used_p or j in used_g:
             continue
         used_p.add(i)
         used_g.add(j)
         matched.append((i, j, o))
-    return {"pairs": matched, "pred_hit": used_p, "gold_hit": used_g}
+    return {"pairs": matched, "pred_hit": used_p, "gold_hit": used_g, "details": {(i, j): details[(i, j)] for i, j, _o in matched}}
 
 
 def ranking_metrics(clips: list[dict], gold: list[dict], m: dict, ks: tuple[int, ...] = (3, 5, 10)) -> dict[str, Any]:
@@ -476,9 +522,10 @@ def ranking_metrics(clips: list[dict], gold: list[dict], m: dict, ks: tuple[int,
         # Ohne Gold zur Quelle ist Precision nicht messbar, nicht 0
         out[f"precision@{key}"] = round(hit_p / len(top), 4) if top and gold else None
         out[f"recall@{key}"] = round(hit_g / len(gold), 4) if gold else None
-    errs_s = [float(clips[i]["start_s"]) - float(gold[j]["source"]["start_s"]) for i, j, _o in m["pairs"]]
-    errs_e = [float(clips[i]["end_s"]) - float(gold[j]["source"]["end_s"]) for i, j, _o in m["pairs"]]
-    lens = [float(clips[i]["duration_s"]) - (float(gold[j]["source"]["end_s"]) - float(gold[j]["source"]["start_s"])) for i, j, _o in m["pairs"]]
+    spans = {j: gold_span(g) for j, g in enumerate(gold)}
+    errs_s = [float(clips[i]["start_s"]) - spans[j][0] for i, j, _o in m["pairs"]]
+    errs_e = [float(clips[i]["end_s"]) - spans[j][1] for i, j, _o in m["pairs"]]
+    lens = [float(clips[i]["duration_s"]) - (spans[j][1] - spans[j][0]) for i, j, _o in m["pairs"]]
 
     def agg(xs: list[float]) -> dict | None:
         if not xs:
@@ -489,6 +536,14 @@ def ranking_metrics(clips: list[dict], gold: list[dict], m: dict, ks: tuple[int,
     out["boundary_end"] = agg(errs_e)
     out["length_delta"] = agg(lens)
     out["iou_mean"] = round(sum(o for _i, _j, o in m["pairs"]) / len(m["pairs"]), 4) if m["pairs"] else None
+    # Verdichtete Gold-Clips (mehrere Quellstellen): unsere Engine schneidet bisher nur zusammenhängende Spannen
+    multi = [j for j, g in enumerate(gold) if is_multi_segment(g)]
+    out["multi_segment_gold"] = round(len(multi) / len(gold), 4) if gold else None
+    det = m.get("details") or {}
+    cov = [det[(i, j)]["coverage"] for i, j, _o in m["pairs"] if j in multi and det.get((i, j), {}).get("coverage") is not None]
+    out["multi_segment_hits"] = sum(1 for _i, j, _o in m["pairs"] if j in multi)
+    out["segment_coverage_mean"] = round(sum(cov) / len(cov), 4) if cov else None
+    out["hits_by_segments_only"] = sum(1 for d in det.values() if d["basis"] == "segments")
     return out
 
 
@@ -516,6 +571,10 @@ def judge_rubric(gold: dict | None) -> str:
         f"Struktur: {b.get('structure') or '-'}; On-Screen-Text: {b.get('onscreen_text') or '-'}; Copy-Muster: {b.get('copy_pattern') or '-'}",
         f"Titel der Referenz: {(gold.get('clip') or {}).get('title') or '-'}",
     ]
+    if is_multi_segment(gold):
+        comp = (b.get("edits") or {}).get("compression")
+        parts.append(f"Schnitt: aus {len(gold_validate.segments(gold))} Quellstellen verdichtet"
+                     + (f" (Kompression {comp})" if comp is not None else ""))  # fmt: skip
     return "Referenz (veröffentlichter Clip derselben Stelle):\n- " + "\n- ".join(parts)
 
 
@@ -618,7 +677,8 @@ def cmd_compare(args: argparse.Namespace) -> int:
         "version": "train_compare_v1", "run_id": meta["run_id"], "created_at": _now(),
         "params": {"iou": args.iou, "center_s": args.center_s, "batch": bool(args.batch), "judge": not args.no_judge},
         "gold_ids": [g["id"] for g in gold], "metrics": metrics,
-        "pairs": [{"clip": i, "gold_id": gold[j]["id"], "iou": o} for i, j, o in m["pairs"]],
+        "pairs": [{"clip": i, "gold_id": gold[j]["id"], "iou": o, **{k: m["details"][(i, j)][k] for k in ("iou_segments", "coverage", "basis", "multi_segment")}}
+                  for i, j, o in m["pairs"]],  # fmt: skip
         "judges": judges, "judge_costs": ledger.summary(),
     }  # fmt: skip
     _write_json(rdir / "compare.json", out)
@@ -664,7 +724,8 @@ def scorecard_md(sc: dict[str, Any]) -> str:
         "| Kennzahl | Wert |", "|---|---|",
     ]  # fmt: skip
     for key in ("gold_n", "pred_n", "hits", "recall@3", "recall@5", "recall@10", "precision@3", "precision@5", "precision@10",
-                "iou_mean", "boundary_start", "boundary_end", "length_delta", *[f"judge_{k}" for k in JUDGE_KEYS], "judge_escalated"):  # fmt: skip
+                "iou_mean", "boundary_start", "boundary_end", "length_delta", "multi_segment_gold", "multi_segment_hits",
+                "segment_coverage_mean", *[f"judge_{k}" for k in JUDGE_KEYS], "judge_escalated"):  # fmt: skip
         if key in m:
             lines.append(f"| {key} | {f(m[key])} |")
     lines += [

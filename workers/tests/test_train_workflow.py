@@ -112,6 +112,8 @@ def test_compare_hits_recall_boundaries_and_judge_escalation(env, capsys):
     # Die Gates heilen den kurzen Kandidaten nach vorn (Kontext), daher ein Startfehler bei einem der beiden Treffer
     assert m["recall@3"] == 1.0 and m["boundary_start"]["n"] == 2 and m["iou_mean"] > 0.5
     assert {p["gold_id"] for p in cmp_["pairs"]} == {"synth-fehler-preis", "synth-andersrum"}
+    assert all(p["basis"] in ("span", "segments") and p["multi_segment"] is False for p in cmp_["pairs"])
+    assert m["multi_segment_gold"] == 0.0  # synthetische Fixture hat keine verdichteten Gold-Clips
     # Haiku 6 ist strittig, der zweite Durchgang weicht ab, also Eskalation an Sonnet mit 8
     j = cmp_["judges"][0]
     assert j["passes"] == ["judge", "judge_second", "judge_escalate"] and j["escalated"] is True and j["final"]["hook"] == 8
@@ -185,3 +187,53 @@ def test_match_and_metrics_units():
     assert met["boundary_start"]["median_s"] == -2.0 and met["length_delta"]["median_s"] == 0.0
     # Mitte ± 10 s zählt auch bei kleiner Überlappung
     assert train.is_hit({"start_s": 0.0, "end_s": 60.0}, {"source": {"start_s": 25.0, "end_s": 40.0}}, 0.5, 10.0)[0] is True
+    assert met["multi_segment_gold"] == 0.0 and met["segment_coverage_mean"] is None and met["hits_by_segments_only"] == 0
+
+
+def _seg_gold(gid: str, start: float, end: float, segs: list | None) -> dict:
+    return {"id": gid, "source": {"start_s": start, "end_s": end, "segments": segs}}
+
+
+def test_multi_segment_gold_span_and_union():
+    # Verdichteter Gold-Clip: drei Quellstellen (5 + 2 + 20 s) über 193 s Spanne, wie yt_83tlc0q-ls8 im DACH-Set
+    g = _seg_gold("g", 1264.8, 1458.4, [[1264.8, 1270.3], [1282.2, 1284.3], [1438.1, 1457.7]])
+    assert train.gold_span(g) == (1264.8, 1458.4)
+    assert train.gold_segments(g) == [(1264.8, 1270.3), (1282.2, 1284.3), (1438.1, 1457.7)]
+    # Zusammenhängender Schnitt über die ganze Spanne: Treffer über die Spanne, alle Quellstellen enthalten,
+    # gegen die Vereinigung aber nur kleine IoU (genau der Abstand zur verdichteten Referenz)
+    d = train.hit_detail({"start_s": 1260.0, "end_s": 1460.0}, g, 0.5, 10.0)
+    assert d["hit"] and d["basis"] == "span" and d["coverage"] == 1.0 and d["iou_segments"] < 0.2 and d["multi_segment"]
+    # Nur der Payoff-Teil (letzte Stelle): Spanne verfehlt, Treffer über die Vereinigung (IoU 19,6 / 27,6)
+    d2 = train.hit_detail({"start_s": 1438.0, "end_s": 1458.0}, g, 0.5, 10.0)
+    assert d2["basis"] == "segments" and d2["hit"] and d2["coverage"] == pytest.approx(19.6 / 27.2, abs=1e-3)
+    d3 = train.hit_detail({"start_s": 1000.0, "end_s": 1030.0}, g, 0.5, 10.0)
+    assert d3["hit"] is False and d3["basis"] is None and d3["coverage"] == 0.0
+
+
+def test_gold_segments_merges_and_falls_back():
+    assert train.gold_segments(_seg_gold("a", 0.0, 30.0, None)) == [(0.0, 30.0)]
+    # Clip-Reihenfolge darf von der Quellreihenfolge abweichen (umgestellt), überlappende Stellen werden vereinigt
+    assert train.gold_segments(_seg_gold("b", 0.0, 30.0, [[20.0, 30.0], [0.0, 5.0], [4.0, 8.0]])) == [(0.0, 8.0), (20.0, 30.0)]
+    # Ohne start_s/end_s: Gesamtspanne aus den Quellstellen
+    assert train.gold_span({"id": "c", "source": {"start_s": None, "end_s": None, "segments": [[50.0, 55.0], [10.0, 12.0]]}}) == (10.0, 55.0)
+
+
+def test_multi_segment_metrics():
+    gold = [
+        _seg_gold("multi", 100.0, 200.0, [[100.0, 110.0], [190.0, 200.0]]),
+        _seg_gold("single", 400.0, 430.0, [[400.0, 430.0]]),
+        _seg_gold("plain", 600.0, 620.0, None),
+        _seg_gold("multi2", 900.0, 1000.0, [[900.0, 905.0], [995.0, 1000.0]]),
+    ]
+    clips = [
+        {"rank": 1, "start_s": 100.0, "end_s": 200.0, "duration_s": 100.0},  # ganze Spanne von "multi"
+        {"rank": 2, "start_s": 401.0, "end_s": 430.0, "duration_s": 29.0},
+    ]
+    m = train.match(clips, gold, 0.5, 10.0)
+    met = train.ranking_metrics(clips, gold, m)
+    assert met["multi_segment_gold"] == 0.5  # 2 von 4 Gold-Clips aus mehreren Stellen
+    assert met["multi_segment_hits"] == 1 and met["segment_coverage_mean"] == 1.0
+    assert met["boundary_start"]["median_s"] == 0.5 and met["recall@3"] == 0.5
+    assert m["details"][(0, 0)]["iou_segments"] == pytest.approx(0.2) and m["details"][(0, 0)]["basis"] == "span"
+    assert "aus 2 Quellstellen verdichtet" in train.judge_rubric({**gold[0], "breakdown": {"edits": {"compression": 5.0}}})
+    assert "verdichtet" not in train.judge_rubric({**gold[1], "breakdown": {}})

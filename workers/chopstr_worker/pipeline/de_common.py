@@ -9,7 +9,7 @@ Fehlvorschlag auffällt.
 
 from __future__ import annotations
 
-COMMON_DE: frozenset[str] = frozenset("""
+_WORDS = """
 aber abend abends acht alle allein allem allen aller alles also alter anders andere anderen anderer anfang
 arbeit arbeiten arbeitet auch auto autos baum beide beiden beim bein bereits beruf besser beste besten bild
 bilder bitte bleiben bleibt blick boden brauche brauchen braucht bringen bringt buch bücher dabei dachte
@@ -40,6 +40,7 @@ wann warum was weil weiter weiß weit welche welchem welchen welcher welt wenig 
 wieder wiederum wiese wieso will wird wirklich wissen woche wochen wohl wollen wollte wort worte wurde
 wurden zahl zahlen zehn zeigen zeigt zeit zeiten ziel ziemlich zimmer zuerst zukunft zurück zusammen zwar
 zwei zweite zwischen
-""".split())
+"""
+COMMON_DE: frozenset[str] = frozenset(_WORDS.split())
 
 __all__ = ["COMMON_DE"]

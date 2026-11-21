@@ -241,6 +241,76 @@ def test_claude_cli_parses_json_and_costs_nothing():
     assert ledger.entries[0]["billing"] == "dev_subscription" and ledger.entries[0]["eur"] == 0.0
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '```json\n{"ok": true}\n```',
+        "```JSON\n{\"ok\": true}",  # Codeblock ohne schließende Zäune (abgeschnittene Antwort)
+        'Ich prüfe {die Spanne} kurz. {"ok": true, "x": {"y": 1}} Fertig {sonst nichts}.',
+        '{"beispiel": 1} und die Antwort: {"ok": false}',
+    ],
+)
+def test_extract_json_object_is_robust(raw):
+    out = providers_llm.extract_json_object(raw, required=["ok"])
+    assert "ok" in out
+
+
+def test_parse_cli_output_envelopes():
+    usage = {"input_tokens": 3, "output_tokens": 2, "cache_creation_input_tokens": 40}
+    as_list = json.dumps([{"type": "system"}, {"type": "result", "is_error": False, "result": 'Ok: {"ok": true}', "usage": usage}])
+    out, u = providers_llm.parse_cli_output(as_list, ["ok"])
+    assert out == {"ok": True} and u["cache_write"] == 40
+    out, _ = providers_llm.parse_cli_output(json.dumps({"type": "result", "result": {"ok": True}}), ["ok"])
+    assert out == {"ok": True}
+    out, _ = providers_llm.parse_cli_output(json.dumps({"type": "result", "result": "x", "structured_output": {"ok": True}}), ["ok"])
+    assert out == {"ok": True}
+    out, _ = providers_llm.parse_cli_output('kein JSON, aber {"ok": true}', ["ok"])
+    assert out == {"ok": True}
+    with pytest.raises(providers_llm.SchemaError) as exc:
+        providers_llm.parse_cli_output(json.dumps({"type": "result", "result": "nur Text", "usage": usage}))
+    assert exc.value.usage["out"] == 2
+
+
+def test_claude_cli_retries_once_with_correction_hint():
+    prompts_seen = []
+
+    def runner(argv, prompt):
+        prompts_seen.append(prompt)
+        inner = "Ich kann das so nicht beantworten." if len(prompts_seen) == 1 else '{"ok": true}'
+        return json.dumps({"type": "result", "result": inner, "usage": {"input_tokens": 10, "output_tokens": 4}})
+
+    ledger = costlog.RunLedger(s=settings())
+    llm = providers_llm.LLM(STD, provider="claude-cli", s=settings(), cost_sink=ledger, cli_runner=runner)
+    assert llm.structured("S", "U", SCHEMA, "answer", "p_v1", stage="editor") == {"ok": True}
+    assert len(prompts_seen) == 2 and "nicht verwendbar" in prompts_seen[1] and "ok" in prompts_seen[1]
+    assert len(ledger.entries) == 2 and ledger.entries[0]["out"] == 4  # gescheiterter Versuch zählt mit
+
+    calls = []
+
+    def always_bad(argv, prompt):
+        calls.append(1)
+        return json.dumps({"type": "result", "result": "nie JSON"})
+
+    llm = providers_llm.LLM(STD, provider="claude-cli", s=settings(), cli_runner=always_bad)
+    with pytest.raises(providers_llm.SchemaError):
+        llm.structured("S", "U", SCHEMA, "answer", "p_v1")
+    assert len(calls) == 2  # genau ein Wiederholversuch
+
+
+def test_anthropic_text_fallback_and_retry():
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        if len(bodies) == 1:
+            return httpx.Response(200, json={"content": [{"type": "text", "text": "Kurz gesagt"}], "stop_reason": "end_turn", "usage": {}})
+        return httpx.Response(200, json={"content": [{"type": "text", "text": 'Hier: ```json\n{"ok": true}\n```'}], "stop_reason": "end_turn", "usage": {}})
+
+    llm = providers_llm.LLM(STD, provider="anthropic", s=settings(), transport=httpx.MockTransport(handler))
+    assert llm.structured("S", "U", SCHEMA, "answer", "p_v1") == {"ok": True}
+    assert len(bodies) == 2 and "nicht verwendbar" in bodies[1]["messages"][0]["content"][-1]["text"]
+
+
 def test_claude_cli_never_in_production():
     with pytest.raises(ResidencyError):
         providers_llm.LLM(STD, provider="claude-cli", s=settings(app_env="production"), cli_runner=lambda a, p: "{}")

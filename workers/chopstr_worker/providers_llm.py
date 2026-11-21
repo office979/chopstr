@@ -65,7 +65,20 @@ CLI_TIMEOUT_S = 600
 
 
 class SchemaError(RuntimeError):
-    """Antwort entspricht nicht dem Tool-Schema (non-retryable)."""
+    """Antwort entspricht nicht dem Tool-Schema. ``usage`` trägt die Tokens des gescheiterten Aufrufs (fürs
+    Kostenbuch); ``structured`` versucht es bei CLI und Anthropic genau einmal mit Korrekturhinweis."""
+
+    def __init__(self, message: str, usage: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.usage = dict(usage or {})
+
+
+# Ein Wiederholversuch nach unlesbarer Antwort: CLI ohne Schema-Zwang und Anthropic ohne Tool-Block.
+SCHEMA_RETRY_PROVIDERS = frozenset({"anthropic", "claude-cli"})
+CORRECTION_HINT = (
+    "Deine letzte Antwort war nicht verwendbar ({error}). Antworte jetzt ausschließlich mit genau einem JSON-Objekt "
+    "nach dem Schema, ohne Text davor oder danach und ohne Codeblock. Alle Pflichtfelder müssen vorhanden sein: {required}."
+)
 
 
 def cache_key(provider: str, model: str, prompt_version: str, payload: Any) -> str:
@@ -134,10 +147,21 @@ def parse_anthropic_message(msg: dict[str, Any], tool_name: str | None = None) -
         (b.get("input") for b in blocks if b.get("type") == "tool_use" and (tool_name is None or b.get("name") == tool_name)),
         None,
     )
+    usage = _usage_from(msg.get("usage") or {})
     if out is None:
-        raise SchemaError(f"Kein Tool-Output vom Modell erhalten (stop_reason={msg.get('stop_reason')})")
-    u = msg.get("usage") or {}
-    return out, {
+        # Rückfall: kein Tool-Block (z. B. Text-Antwort bei max_tokens oder ohne Tool-Zwang). Dann gilt das
+        # gleiche Parsing wie für die CLI: JSON aus dem Text, auch in einem Codeblock oder mit Vor- und Nachtext.
+        text = "\n".join(str(b.get("text") or "") for b in blocks if b.get("type") == "text")
+        try:
+            out = extract_json_object(text)
+        except SchemaError:
+            raise SchemaError(f"Kein Tool-Output vom Modell erhalten (stop_reason={msg.get('stop_reason')})", usage) from None
+    return out, usage
+
+
+def _usage_from(u: dict[str, Any]) -> dict[str, int]:
+    """Tokens aus einem ``usage``-Block der Messages API bzw. der CLI-Hülle (gleiche Feldnamen)."""
+    return {
         "in": int(u.get("input_tokens", 0) or 0),
         "cached_in": int(u.get("cache_read_input_tokens", 0) or 0),
         "cache_write": int(u.get("cache_creation_input_tokens", 0) or 0),
@@ -145,27 +169,77 @@ def parse_anthropic_message(msg: dict[str, Any], tool_name: str | None = None) -
     }
 
 
-_JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+_JSON_FENCE = re.compile(r"```[ \t]*(?:json|JSON)?[ \t]*\n?(.*?)(?:```|\Z)", re.DOTALL)
 
 
-def extract_json_object(text: str) -> dict:
-    """Erstes JSON-Objekt aus einem Modelltext (auch in einem Codeblock oder mit Vor- und Nachtext)."""
+def _json_objects(text: str) -> list[dict]:
+    """Alle JSON-Objekte im Text, von links nach rechts (``raw_decode`` ab jeder ``{``; verschachtelte zählen
+    nicht doppelt). Klammern in Prosa davor oder danach stören so nicht mehr."""
+    dec = json.JSONDecoder()
+    found: list[dict] = []
+    i, n = 0, len(text)
+    while i < n:
+        a = text.find("{", i)
+        if a < 0:
+            break
+        try:
+            obj, end = dec.raw_decode(text, a)
+        except json.JSONDecodeError:
+            i = a + 1
+            continue
+        if isinstance(obj, dict):
+            found.append(obj)
+        i = end
+    return found
+
+
+def extract_json_object(text: Any, required: Sequence[str] = ()) -> dict:
+    """JSON-Objekt aus einem Modelltext: direkt, in einem Codeblock (auch ohne schließende Zäune) oder mit Vor- und
+    Nachtext. Mit ``required`` gewinnt das erste Objekt, das alle Pflichtfelder hat, sonst das größte."""
+    if isinstance(text, dict):
+        return text
     text = str(text or "").strip()
-    candidates = [m.group(1).strip() for m in _JSON_FENCE.finditer(text)] + [text]
-    for cand in candidates:
+    found: list[dict] = []
+    for cand in [m.group(1).strip() for m in _JSON_FENCE.finditer(text)] + [text]:
         try:
             obj = json.loads(cand)
         except json.JSONDecodeError:
-            a, b = cand.find("{"), cand.rfind("}")
-            if a < 0 or b <= a:
-                continue
-            try:
-                obj = json.loads(cand[a : b + 1])
-            except json.JSONDecodeError:
-                continue
+            found.extend(_json_objects(cand))
+            continue
         if isinstance(obj, dict):
-            return obj
-    raise SchemaError("Antwort enthält kein JSON-Objekt")
+            found.append(obj)
+    if not found:
+        raise SchemaError("Antwort enthält kein JSON-Objekt")
+    req = [k for k in required]
+    full = [o for o in found if all(k in o for k in req)]
+    if full:
+        return full[0]
+    return max(found, key=lambda o: len(json.dumps(o, ensure_ascii=False)))
+
+
+def parse_cli_output(raw: str, required: Sequence[str] = ()) -> tuple[dict, dict[str, int]]:
+    """Antwort von ``claude -p --output-format json``: Hülle als Objekt (``result``, ``usage``) oder als Liste von
+    Ereignissen (dann zählt das letzte ``type: result``). ``structured_output`` geht vor ``result``; ``result`` darf
+    Text mit JSON oder schon ein Objekt sein. Ohne lesbare Hülle wird der rohe Text nach JSON durchsucht."""
+    try:
+        outer: Any = json.loads(raw)
+    except json.JSONDecodeError:
+        return extract_json_object(raw, required), {}
+    if isinstance(outer, list):
+        results = [e for e in outer if isinstance(e, dict) and e.get("type") == "result"]
+        outer = results[-1] if results else next((e for e in reversed(outer) if isinstance(e, dict)), None)
+    if not isinstance(outer, dict):
+        raise SchemaError("Claude-CLI lieferte kein JSON-Objekt")
+    usage = _usage_from(outer.get("usage") or {})
+    if outer.get("is_error"):
+        raise RuntimeError(f"Claude-CLI meldet einen Fehler: {str(outer.get('result') or '')[:300]}")
+    if "result" not in outer and "structured_output" not in outer and "type" not in outer:
+        return outer, usage  # die Hülle ist schon die Antwort
+    body = outer.get("structured_output") if isinstance(outer.get("structured_output"), dict) else outer.get("result", "")
+    try:
+        return extract_json_object(body, required), usage
+    except SchemaError as exc:
+        raise SchemaError(str(exc), usage) from None
 
 
 def run_cli(argv: Sequence[str], prompt: str, timeout_s: float = CLI_TIMEOUT_S) -> str:
@@ -284,8 +358,7 @@ class LLM:
             if isinstance(hit, dict):
                 self._sink(model, prompt_version, job_type, stage, {"cached_result": True, "billing": self._billing()})
                 return hit
-        out, usage = self._call(system, user, schema, tool_name, model, policy_block, cache_prefix)
-        self._validate(out, schema)
+        out, usage = self._call_checked(system, user, schema, tool_name, model, policy_block, cache_prefix, prompt_version, job_type, stage)
         if self.redis is not None:
             self.redis.set(key, json.dumps(out, ensure_ascii=False), ex=CACHE_TTL_S)
         if rkey is not None:
@@ -396,6 +469,28 @@ class LLM:
             "job_type": job_type, "stage": stage or job_type, "tier": self.tier, "billing": self._billing(), **usage,
         })  # fmt: skip
 
+    def _call_checked(self, system, user, schema, tool_name, model, policy_block, cache_prefix, prompt_version, job_type, stage):
+        """Aufruf plus Schema-Prüfung. Bei ``claude-cli`` und ``anthropic`` gibt es nach einer unlesbaren Antwort
+        genau einen Wiederholversuch mit Korrekturhinweis; der gescheiterte Versuch steht mit seinen Tokens im
+        Kostenbuch (``schema_retry``). Scheitert auch der zweite, geht der ``SchemaError`` an den Aufrufer."""
+        try:
+            out, usage = self._call(system, user, schema, tool_name, model, policy_block, cache_prefix)
+            try:
+                self._validate(out, schema)
+            except SchemaError as exc:
+                raise SchemaError(str(exc), usage) from None
+            return out, usage
+        except SchemaError as exc:
+            if self.provider not in SCHEMA_RETRY_PROVIDERS:
+                raise
+            first = exc
+        self._sink(model, prompt_version, job_type, stage, {**first.usage, "schema_retry": True})
+        hint = CORRECTION_HINT.format(error=str(first)[:200], required=", ".join(schema.get("required") or []) or "-")
+        log.warning("llm provider=%s model=%s prompt=%s unlesbare Antwort, ein Wiederholversuch: %s", self.provider, model, prompt_version, first)
+        out, usage = self._call(system, f"{user}\n\n{hint}", schema, tool_name, model, policy_block, cache_prefix)
+        self._validate(out, schema)
+        return out, {**usage, "schema_retry": True}
+
     def _call(self, system, user, schema, tool_name, model, policy_block, cache_prefix):
         if self.provider == ANTHROPIC_PROVIDER:
             return self._anthropic(system, user, schema, tool_name, model, policy_block, cache_prefix)
@@ -483,22 +578,7 @@ class LLM:
         )
         argv = [self.s.claude_cli_bin or "claude", "-p", "--model", model, "--output-format", "json"]
         raw = (self._cli_runner or run_cli)(argv, prompt)
-        try:
-            outer = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise SchemaError(f"Claude-CLI lieferte kein JSON: {exc}") from exc
-        if not isinstance(outer, dict):
-            raise SchemaError("Claude-CLI lieferte kein JSON-Objekt")
-        if outer.get("is_error"):
-            raise RuntimeError(f"Claude-CLI meldet einen Fehler: {str(outer.get('result') or '')[:300]}")
-        out = extract_json_object(outer.get("result", ""))
-        u = outer.get("usage") or {}
-        return out, {
-            "in": int(u.get("input_tokens", 0) or 0),
-            "cached_in": int(u.get("cache_read_input_tokens", 0) or 0),
-            "cache_write": int(u.get("cache_creation_input_tokens", 0) or 0),
-            "out": int(u.get("output_tokens", 0) or 0),
-        }
+        return parse_cli_output(raw, schema.get("required") or ())
 
     def _heuristic(self, system, user, schema, tool_name, model):
         """Kein Netz, kein Residency-Hook nötig: die Antwort entsteht lokal aus dem gerenderten Prompt."""
@@ -614,6 +694,7 @@ __all__ = [
     "anthropic_params",
     "anthropic_request",
     "extract_json_object",
+    "parse_cli_output",
     "parse_anthropic_message",
     "run_cli",
     "tier_model",

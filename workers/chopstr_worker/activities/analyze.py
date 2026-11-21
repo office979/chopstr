@@ -28,8 +28,8 @@ from typing import Any
 
 from temporalio import activity
 
-from .. import costlog, db, decision_log, editorial, events, outbox, storage, usage
-from ..pipeline import release_gate, segment, signals, story_engine
+from .. import costlog, db, decision_log, editorial, events, outbox, providers_mm, result_cache, storage, usage
+from ..pipeline import mm_scan, release_gate, segment, signals, story_engine
 from ..pipeline import silence as silence_mod
 from ..providers_llm import LLM
 from ..residency import Tenant
@@ -111,8 +111,61 @@ def wellenform_key_for(audio_key: str) -> str:
     return storage.derived_key(audio_key, {"bin_s": signals.WELLENFORM_BIN_S}, SIGNALS_VERSION, "json", prefix="wellenform")
 
 
-def heatmap_key_for(audio_key: str, with_text: bool) -> str:
-    return storage.derived_key(audio_key, {"text": with_text}, SIGNALS_VERSION, "json", prefix="heatmap")
+def heatmap_key_for(audio_key: str, with_text: bool, mm: str | None = None) -> str:
+    """``mm`` (nur Fassung 2 mit ``implementation.mm_scan``): Provider und Scan-Version gehören in den Key, damit
+    eine Heatmap ohne Ereignisse nicht für einen Lauf mit Ereignissen gilt. Ohne ``mm`` bleibt der Key wie bisher."""
+    params: dict[str, Any] = {"text": with_text}
+    if mm:
+        params["mm"] = mm
+    return storage.derived_key(audio_key, params, SIGNALS_VERSION, "json", prefix="heatmap")
+
+
+def mm_scan_tag(s: Any = None) -> tuple[str | None, dict | None]:
+    """``(tag, cfg)`` für den Szenen-Scan unter der aktiven Fassung, ``(None, None)`` wenn er aus ist (Fassung 1)."""
+    try:
+        pol = editorial.load()
+    except editorial.PolicyError:
+        return None, None
+    cfg = mm_scan.settings_from_policy(pol)
+    if not cfg["enabled"]:
+        return None, None
+    provider = (getattr(s, "mm_provider", "") or "").strip().lower()
+    if not provider or provider == "none":
+        provider = str(cfg.get("provider") or "none")
+    cfg["provider"] = provider
+    return f"{mm_scan.SCAN_VERSION}:{provider}", cfg
+
+
+def _mm_enrich(ctx: common.Context, src: dict, source_id: str, words: list[dict], payload: dict, cfg: dict) -> dict:
+    """Ereignisse des Szenen-Scans in die Heatmap (Seeds, ``laughter_values``, ``events``).
+
+    Mit MM-Provider wird der Proxy heruntergerechnet und fensterweise geschickt; fehlt er oder schlägt etwas
+    fehl, gelten die lokalen Ereignisse. Ein Fehler hier kostet Ereignisse, nie die Heatmap."""
+    try:
+        provider = providers_mm.select_mm(
+            Tenant(id=src["workspace_id"], tier=src.get("tier") or "standard"), s=ctx.settings, provider=cfg["provider"],
+            cost_sink=costlog.make_sink(ctx.conn, src["workspace_id"], source_id=source_id),
+        )  # fmt: skip
+    except Exception as exc:  # noqa: BLE001 - Residency oder fehlender Key: lokal weiter, Grund im Log
+        log.warning("mm_scan Provider %s nicht nutzbar source=%s: %s", cfg["provider"], source_id, exc)
+        provider = providers_mm.NoneMM(ctx.settings)
+    video = None
+    if provider.available and src.get("proxy_key"):
+        try:
+            video = ctx.source_dir(source_id) / "proxy.mp4"
+            if not video.is_file():
+                ctx.store.download_to("derived", src["proxy_key"], video)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("mm_scan ohne Video source=%s: %s", source_id, exc.__class__.__name__)
+            video = None
+    res = mm_scan.scan(
+        words, payload, provider, cfg, video=video, duration_s=float(src.get("duration_s") or 0.0) or None,
+        work_dir=ctx.source_dir(source_id) / "mm", cache=result_cache.ResultCache(store=ctx.store), cache_scope=str(src.get("audio_key")),
+    )  # fmt: skip
+    out = mm_scan.apply_to_heat(payload, res["events"], float(cfg["min_intensity"]))
+    out["events"] = res["events"]
+    out["mm_scan"] = {k: res[k] for k in ("version", "source", "provider", "model", "windows", "skipped")}
+    return out
 
 
 def run_heatmap(ctx: common.Context, source_id: str) -> str:
@@ -127,7 +180,8 @@ def run_heatmap(ctx: common.Context, source_id: str) -> str:
             akey = asr_key_for(audio_key, src["asr_variant"], src["brand_vocab"], model_id, s)
             if ctx.store.exists("derived", akey):
                 words = ctx.store.get_json("derived", akey).get("words", [])
-        key = heatmap_key_for(audio_key, bool(words))
+        mm_tag, mm_cfg = mm_scan_tag(s)
+        key = heatmap_key_for(audio_key, bool(words), mm_tag)
         wkey = wellenform_key_for(audio_key)
         # Die Wellenform gehoert zur Zeitleiste und nicht zur Bewertung, haengt aber an derselben
         # Audiodatei. Sie hier mitzunehmen spart einen zweiten Download; fehlt sie, wird sie auch
@@ -151,6 +205,8 @@ def run_heatmap(ctx: common.Context, source_id: str) -> str:
         payload = signals.to_payload(heat, audio=audio)
         payload["source_id"] = source_id
         payload["text_included"] = bool(words)
+        if mm_cfg is not None:
+            payload = _mm_enrich(ctx, src, source_id, words, payload, mm_cfg)
         ctx.store.put_json("derived", key, payload)
         costlog.record(
             ctx.conn,
@@ -173,8 +229,11 @@ def _load_heat(ctx: common.Context, src: dict) -> dict | None:
     audio_key = src.get("audio_key")
     if not audio_key:
         return None
-    for with_text in (True, False):
-        key = heatmap_key_for(audio_key, with_text)
+    mm_tag, _cfg = mm_scan_tag(ctx.settings)
+    # Mit Szenen-Scan zuerst die Heatmap mit Ereignissen, sonst (älterer Lauf) die ohne
+    tags = (mm_tag, None) if mm_tag else (None,)
+    for tag, with_text in ((t, w) for t in tags for w in (True, False)):
+        key = heatmap_key_for(audio_key, with_text, tag)
         if ctx.store.exists("derived", key):
             return ctx.store.get_json("derived", key)
     return None

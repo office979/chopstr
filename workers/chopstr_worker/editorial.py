@@ -1029,6 +1029,10 @@ V2_IMPLEMENTED_SWITCHES = V2_IMPLEMENTED_SWITCHES | {OUTPUT_SWITCH}
 V2_RULE_SECTIONS = (*V2_RULE_SECTIONS, "output")
 # score_clip_v3: sieben Kriterien wie v2 plus Teilwerte nach Master-Prompt 19 (``story_score.editorial_subscores``).
 V2_PIN_CHANGES.update({"score_clip": 3})
+# T2: Prompt des multimodalen Szenen-Scans (``pipeline.mm_scan``), nur Fassung 2. Der Schalter
+# ``implementation.mm_scan`` trägt Einstellungen statt eines einzelnen Wahrheitswerts und steht deshalb nicht in
+# V2_SWITCHES; ``mm_scan.settings_from_policy`` liest und prüft ihn.
+V2_PIN_CHANGES.update({"mm_scan": 1})
 KEY_STATUSES = ("implemented", "partial", "not_implemented")
 
 

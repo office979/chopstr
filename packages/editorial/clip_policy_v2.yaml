@@ -901,6 +901,7 @@ prompts:
   critique_clip: 1            # AP6b: Kritiker, sucht gezielt Widerlegung, unklares Pronomen, entfernte Bedingung, falschen Übergang, fremde Position
   compare_clips: 1            # Lane P2: Paarvergleich (Hypothese), wirksam nur mit Regel und Schalter ranking.pairwise
   counter_reader: 1           # Lane P3: Gegenleser, sieht nur Clip und Hook; wirksam nur mit context.counter_reader.model und roles.critic
+  mm_scan: 1                  # T2: multimodaler Szenen-Scan je Fenster (Stufe 0), wirksam nur mit einem MM-Provider
 
 # ------------------------------------------------------------------------------------------------
 # Schalter der Arbeitspakete (neu in Fassung 2)
@@ -1155,8 +1156,17 @@ implementation:
     title_card: true          # Titelkarte als zweite Wahl (fidelity.title_card_settings)
   review:
     review_state: true        # Ergebnisklassen in rubric.review_state (release_gate.review_settings)
-
-# ------------------------------------------------------------------------------------------------
+  # T2: multimodaler Szenen-Scan als Stufe 0 (pipeline/mm_scan.py). Standard an mit Provider none, das heißt
+  # lokaler Fallback aus Pegelsprüngen, Sprecherwechseln und ASR-Lachmarkern. Mit CHOPSTR_MM_PROVIDER=gemini
+  # schickt der Lauf heruntergerechnete Fenster an Gemini. Rollback: enabled auf false.
+  mm_scan:
+    enabled: true
+    provider: none            # gemini | mock | none; CHOPSTR_MM_PROVIDER überschreibt
+    fps: 1
+    height: 360
+    window_s: 600
+    overlap_s: 20
+    min_intensity: 0.3        # schwächere Ereignisse werden weder Seed noch Pseudo-Satz--------------------------------------------------------------------------------------------
 # Herkunft je Regel (neu in Fassung 2)
 # ------------------------------------------------------------------------------------------------
 # Schlüssel ist der Punktpfad der Regel (editorial.rule_paths): Blattwerte wie laenge.ziel_s,

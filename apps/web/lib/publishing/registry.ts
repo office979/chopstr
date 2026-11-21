@@ -10,6 +10,8 @@ import { instagramProvider } from "./providers/instagram";
 import { youtubeProvider } from "./providers/youtube";
 import { linkedinProvider } from "./providers/linkedin";
 import { ProviderError, type Provider, type PublishResult } from "./providers/types";
+import { emptyPublicMetrics, readPublicMetrics, type PublicMetricSet, type PublicMetricSource } from "./public-metrics";
+import { takeSnapshot } from "./snapshot";
 
 /* Provider-Registry (PHASE5.md 5b und „Interne Schnittstelle“). `publish(publicationId)` und `metrics(publicationId, window)`
  * werden von /api/internal/publish und /api/internal/metrics (Welle 5a) dynamisch importiert: der Worker besitzt
@@ -99,6 +101,30 @@ export interface InternalMetricsResult {
   window: MetricWindow;
   metrics: MetricSet;
   error?: string;
+}
+
+export interface InternalSnapshotResult {
+  publication_id: string;
+  metrics: PublicMetricSet;
+  source: PublicMetricSource;
+  raw: unknown;
+  error: string | null;
+}
+
+/* Von /api/internal/metrics mit mode "snapshot": eine Messung für metric_snapshots (lib/publishing/snapshot.ts) */
+export async function snapshot(publicationId: string, window: MetricWindow): Promise<InternalSnapshotResult> {
+  const ctx = await loadPublicationInternal(publicationId);
+  if (!ctx) return { publication_id: publicationId, metrics: emptyPublicMetrics(), source: "oauth", raw: null, error: "Publikation nicht gefunden." };
+  const { publication, connection } = ctx;
+  const result = await takeSnapshot(publication, window, {
+    readPublic: (platform, externalId) => readPublicMetrics(platform, externalId),
+    viaConnection: async (w) => {
+      if (!connection || connection.platform === "manual" || connection.status !== "connected") return null;
+      const r = await metrics(publicationId, w);
+      return { metrics: r.metrics, error: r.error };
+    },
+  });
+  return { publication_id: publicationId, ...result };
 }
 
 /* Von /api/internal/metrics: `{ metrics: { views, likes, ... } }` mit null für nicht garantierte Felder (Capability Flags) */

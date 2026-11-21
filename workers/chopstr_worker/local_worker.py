@@ -12,7 +12,9 @@ Temporal-Worker aufruft, ohne Temporal, MinIO oder GPU:
   (c) ``deletion_jobs`` mit ``status = 'queued'``: ``delete_entity``
   (d) ``publications`` mit ``status = 'scheduled'`` und fälligem ``scheduled_for``: ``publish_clip``
       (nur wenn ``APP_INTERNAL_URL`` erreichbar ist, sonst Hinweis und überspringen)
-  (e) alle ``OUTBOX_EVERY_S`` Sekunden ``dispatch_outbox`` plus fällige ``deliver_webhook``
+  (e) ``publications`` mit fälligem ``next_snapshot_at`` (Link-Tracking, Migration 0019): ``run_snapshot``,
+      nur mit ``METRICS_POLLING=1`` (in ``scripts/local_env.sh`` voreingestellt) und erreichbarer Web-App
+  (f) alle ``OUTBOX_EVERY_S`` Sekunden ``dispatch_outbox`` plus fällige ``deliver_webhook``
 
 Fehler setzen den jeweiligen Status auf ``failed`` (mit deutscher Meldung) und die ID landet zusätzlich in
 einem Merker im Speicher, damit nichts endlos wiederholt wird. Logging nur mit IDs, Dauern und Zählern,
@@ -43,6 +45,7 @@ OUTBOX_EVERY_S = 60.0
 BATCH_LIMIT = 20
 APP_PROBE_TIMEOUT_S = 1.5
 HINT_APP_UNREACHABLE = "Web-App unter APP_INTERNAL_URL nicht erreichbar, Veröffentlichung wird übersprungen"
+HINT_APP_UNREACHABLE_METRICS = "Web-App unter APP_INTERNAL_URL nicht erreichbar, Messung wird übersprungen"
 
 # Reihenfolge der Quell-Pipeline, gleiche Funktionen wie im ClipProjectWorkflow (dort teils parallel)
 SOURCE_PIPELINE: tuple[tuple[str, Callable[[common.Context, str], Any]], ...] = (
@@ -65,6 +68,11 @@ SQL_DUE_PUBLICATIONS = (
     "select id from publications where status = 'scheduled' and scheduled_for is not null and scheduled_for <= %s "
     "order by scheduled_for asc limit %s"
 )
+SQL_DUE_SNAPSHOTS = (
+    "select id from publications where next_snapshot_at is not null and next_snapshot_at <= %s and tracking <> 'off' "
+    "order by next_snapshot_at asc limit %s"
+)
+HINT_METRICS_SCHEMA = "Messreihen übersprungen: Spalte publications.next_snapshot_at fehlt (Migration 0019 anwenden)"
 
 
 def _now() -> datetime:
@@ -99,6 +107,7 @@ class LocalWorker:
         self.processed: list[tuple[str, str, str]] = []  # (Art, ID, Ergebnis) für Tests und Logs
         self._last_outbox: float | None = None
         self._app_hint_logged = False
+        self._metrics_schema_hint_logged = False
 
     # -- Steuerung ------------------------------------------------------------------------------
     def request_stop(self, *_args: Any) -> None:
@@ -150,7 +159,7 @@ class LocalWorker:
     # -- Ein Durchlauf ---------------------------------------------------------------------------
     def run_once(self) -> dict[str, int]:
         """Alle Warteschlangen einmal abarbeiten. Ergebnis: Zähler je Warteschlange."""
-        counts = {"sources": 0, "clips": 0, "deletions": 0, "publications": 0, "webhooks": 0}
+        counts = {"sources": 0, "clips": 0, "deletions": 0, "publications": 0, "metrics": 0, "webhooks": 0}
         ctx = common.open_context()
         try:
             counts["sources"] = self.process_sources(ctx)
@@ -160,6 +169,8 @@ class LocalWorker:
                 counts["deletions"] = self.process_deletions(ctx)
             if not self.stop_requested:
                 counts["publications"] = self.process_publications(ctx)
+            if not self.stop_requested:
+                counts["metrics"] = self.process_metrics(ctx)
             if not self.stop_requested and self._outbox_due():
                 counts["webhooks"] = self.process_outbox(ctx)
         finally:
@@ -304,7 +315,46 @@ class LocalWorker:
             done += 1
         return done
 
-    # -- (e) Outbox und Webhooks -----------------------------------------------------------------
+    # -- (e) Messreihen --------------------------------------------------------------------------
+    def process_metrics(self, ctx: common.Context) -> int:
+        """Fällige Messungen (``next_snapshot_at <= jetzt``) über ``run_snapshot``. Hinter ``METRICS_POLLING``.
+
+        Fehlt Migration 0019 noch, scheitert schon die Abfrage; das wird einmal gemeldet und der Durchlauf
+        geht weiter, statt dass der ganze Worker an einer fehlenden Spalte hängen bleibt."""
+        if not ctx.settings.metrics_polling:
+            return 0
+        try:
+            rows = db.fetch_all(ctx.conn, SQL_DUE_SNAPSHOTS, (_now(), self.limit))
+        except Exception as exc:
+            if not self._metrics_schema_hint_logged:
+                log.warning("%s (%s)", HINT_METRICS_SCHEMA, exc.__class__.__name__)
+                self._metrics_schema_hint_logged = True
+            return 0
+        pending = [str(r[0]) for r in rows if not self._skip("snapshot", str(r[0]))]
+        if not pending:
+            return 0
+        if not app_reachable(ctx.settings):
+            if not self._app_hint_logged:
+                log.warning("%s (%s fällig)", HINT_APP_UNREACHABLE_METRICS, len(pending))
+                self._app_hint_logged = True
+            return 0
+        done = 0
+        for pub_id in pending:
+            if self.stop_requested:
+                break
+            try:
+                result = publish.run_snapshot(ctx, pub_id)
+            except Exception as exc:  # run_snapshot fängt Plattformfehler selbst; das hier ist die Datenbank
+                log.error("snapshot failed publication=%s error=%s", pub_id, exc.__class__.__name__)
+                self._note("snapshot", pub_id, "failed")
+            else:
+                # Auch eine leere oder fehlgeschlagene Messung ist erledigt: der Grund steht in metric_snapshots.error
+                log.info("snapshot done publication=%s status=%s window=%s", pub_id, result.get("status"), result.get("window"))
+                self._note("snapshot", pub_id, "ok")
+            done += 1
+        return done
+
+    # -- (f) Outbox und Webhooks -----------------------------------------------------------------
     def process_outbox(self, ctx: common.Context) -> int:
         try:
             webhooks.run_dispatch_outbox(ctx, self.limit)

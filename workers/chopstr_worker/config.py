@@ -116,6 +116,9 @@ class Settings:
     outbox_interval_s: int = 30
     weekly_report_cron: str = "0 7 * * 1"
     learning_cron: str = "0 4 * * *"
+    # Messreihen (Migration 0019): local_worker.process_metrics fragt fällige Publikationen ab.
+    # Aus, solange nicht gesetzt; scripts/local_env.sh schaltet es lokal ein.
+    metrics_polling: bool = False
 
     # Kostenmodell (EUR); alle Werte per ENV überschreibbar, siehe costlog.py
     gpu_eur_per_hour: float = 1.20
@@ -188,6 +191,7 @@ def load_settings() -> Settings:
         outbox_interval_s=_env_int("OUTBOX_INTERVAL_S", 30),
         weekly_report_cron=_env("WEEKLY_REPORT_CRON", "0 7 * * 1"),
         learning_cron=_env("LEARNING_CRON", "0 4 * * *"),
+        metrics_polling=_env_bool("METRICS_POLLING", False),
         gpu_eur_per_hour=_env_float("GPU_EUR_PER_HOUR", 1.20),
         cpu_eur_per_hour=_env_float("CPU_EUR_PER_HOUR", 0.05),
         storage_eur_per_gb_month=_env_float("STORAGE_EUR_PER_GB_MONTH", 0.02),

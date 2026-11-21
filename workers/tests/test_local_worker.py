@@ -70,7 +70,7 @@ def _seed(fake_db):
 def test_once_processes_queues_in_order(fake_db, worker, calls):
     ids = _seed(fake_db)
     counts = worker.run_once()
-    assert counts == {"sources": 2, "clips": 1, "deletions": 1, "publications": 1, "webhooks": 1}
+    assert counts == {"sources": 2, "clips": 1, "deletions": 1, "publications": 1, "metrics": 0, "webhooks": 1}
 
     steps = [name for name, _fn in local_worker.SOURCE_PIPELINE]
     source_calls = [c for c in calls if c[0] in steps]
@@ -98,7 +98,7 @@ def test_second_pass_does_nothing_and_outbox_waits(fake_db, worker, calls):
     for p in fake_db.publications.values():
         p["status"] = "published"
     counts = worker.run_once()
-    assert counts == {"sources": 0, "clips": 0, "deletions": 0, "publications": 0, "webhooks": 0}
+    assert counts == {"sources": 0, "clips": 0, "deletions": 0, "publications": 0, "metrics": 0, "webhooks": 0}
     assert len(calls) == before  # kein zweiter Outbox-Lauf innerhalb von 60 s
 
 
@@ -233,3 +233,76 @@ def test_once_runs_the_startup_check_too(monkeypatch, tmp_path):
         config.reload()
     assert str(excinfo.value).startswith("Der Worker startet nicht, weil gemeinsame Dateien fehlen")
     assert passes == []
+
+
+# -- Messreihen (Migration 0019) -----------------------------------------------------------------
+@pytest.fixture
+def polling(monkeypatch, fake_context):
+    from chopstr_worker import config
+
+    monkeypatch.setenv("METRICS_POLLING", "1")
+    fake_context.settings = config.reload()
+    yield
+    monkeypatch.delenv("METRICS_POLLING", raising=False)
+    config.reload()
+
+
+def _tracked(fake_db, **fields):
+    ws = fake_db.add_workspace()
+    sid = fake_db.add_source(ws, "uploads/x.mp4", status="ready")
+    segs = [{"start": 0.0, "end": 15.0, "role": "main"}]
+    cand = fake_db.add_candidate(sid, segs, human_verdict="accepted")
+    clip = fake_db.add_clip(sid, cand, "shorts", segs, status="rendered")
+    now = datetime.now(UTC)
+    base = {"status": "manual", "tracking": "link", "next_snapshot_at": now - timedelta(minutes=1), "external_id": "dQw4w9WgXcQ"}
+    base.update(fields)
+    return fake_db.add_publication(ws, clip, "youtube", **base)
+
+
+def test_metrics_polling_is_off_by_default(fake_db, worker, calls, monkeypatch):
+    seen = []
+    monkeypatch.setattr(local_worker.publish, "run_snapshot", lambda ctx, pid: seen.append(pid) or {"status": "ok"})
+    _tracked(fake_db)
+    assert worker.run_once()["metrics"] == 0
+    assert seen == []
+
+
+def test_metrics_polling_runs_due_snapshots_only(fake_db, worker, calls, monkeypatch, polling):
+    seen = []
+    monkeypatch.setattr(local_worker.publish, "run_snapshot", lambda ctx, pid: seen.append(pid) or {"status": "ok", "window": None})
+    due = _tracked(fake_db)
+    _tracked(fake_db, next_snapshot_at=datetime.now(UTC) + timedelta(hours=1))  # noch nicht fällig
+    _tracked(fake_db, next_snapshot_at=None)  # fertig gemessen
+    _tracked(fake_db, tracking="off")  # abgeschaltet
+    counts = worker.run_once()
+    assert counts["metrics"] == 1 and seen == [due]
+    assert ("snapshot", due, "ok") in worker.processed
+
+
+def test_metrics_polling_survives_missing_migration(fake_db, worker, calls, monkeypatch, polling, caplog):
+    fake_db.missing_columns = {"next_snapshot_at"}
+    _tracked(fake_db)
+    with caplog.at_level("WARNING", logger="chopstr.local_worker"):
+        counts = worker.run_once()
+        worker.run_once()
+    assert counts["metrics"] == 0 and counts["webhooks"] == 1  # der Rest des Durchlaufs läuft weiter
+    assert caplog.text.count("Migration 0019") == 1  # nur einmal gemeldet
+
+
+def test_metrics_polling_waits_for_the_web_app(fake_db, worker, calls, monkeypatch, polling):
+    seen = []
+    monkeypatch.setattr(local_worker.publish, "run_snapshot", lambda ctx, pid: seen.append(pid) or {"status": "ok"})
+    monkeypatch.setattr(local_worker, "app_reachable", lambda s=None, timeout=0: False)
+    _tracked(fake_db)
+    assert worker.run_once()["metrics"] == 0 and seen == []
+
+
+def test_metrics_polling_remembers_database_failures(fake_db, worker, calls, monkeypatch, polling):
+    def boom(ctx, pid):
+        raise RuntimeError("db weg")
+
+    monkeypatch.setattr(local_worker.publish, "run_snapshot", boom)
+    pid = _tracked(fake_db)
+    assert worker.run_once()["metrics"] == 1
+    assert ("snapshot", pid) in worker.failed
+    assert worker.run_once()["metrics"] == 0

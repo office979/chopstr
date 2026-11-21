@@ -20,3 +20,6 @@ X_BEARER_TOKEN=
 # Drittanbieter für TikTok und Instagram, noch nicht angebunden. US-Anbieter, im Sovereign-Tarif nicht zulässig.
 PUBLIC_METRICS_SCRAPER=
 SCRAPECREATORS_API_KEY=
+# Gilt für den Worker, nicht für die Web-App: workers/scripts/local_env.sh setzt METRICS_POLLING=1,
+# damit der lokale Worker verfolgte Links misst. Hier nur zur Übersicht, leer lassen.
+METRICS_POLLING=

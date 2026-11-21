@@ -95,6 +95,25 @@ def metrics(publication_id: str, window: str, s: config.Settings | None = None, 
     return {k: raw.get(k) for k in METRIC_KEYS}
 
 
+SNAPSHOT_KEYS = (*METRIC_KEYS, "engaged_views", "reach", "skip_rate")
+SNAPSHOT_SOURCES = ("oauth", "public_api", "scraper", "manual")
+
+
+def snapshot(publication_id: str, window: str = "7d", s: config.Settings | None = None, http=None) -> dict[str, Any]:
+    """Eine Messung für ``metric_snapshots``: ``{metrics, source, raw, error}``. ``window`` ist nur ein Hinweis."""
+    data = post("metrics", {"publication_id": publication_id, "mode": "snapshot", "window": window if window in METRIC_WINDOWS else "7d"}, s, http)
+    raw = data.get("metrics")
+    if not isinstance(raw, dict):
+        raise InternalApiError("/api/internal/metrics lieferte kein metrics-Objekt")
+    source = str(data.get("source") or "oauth")
+    return {
+        "metrics": {k: raw.get(k) for k in SNAPSHOT_KEYS},
+        "source": source if source in SNAPSHOT_SOURCES else "oauth",
+        "raw": data.get("raw"),
+        "error": data.get("error") or None,
+    }
+
+
 def mail(to: list[str], subject: str, text: str, html: str | None = None, s: config.Settings | None = None, http=None) -> bool:
     """Versand über die Web-App. Gibt ``ok`` zurück."""
     recipients = [t for t in (to or []) if t]
@@ -110,6 +129,7 @@ def mail(to: list[str], subject: str, text: str, html: str | None = None, s: con
 __all__ = [
     "METRIC_KEYS",
     "METRIC_WINDOWS",
+    "SNAPSHOT_KEYS",
     "TIMEOUT_S",
     "InternalApiError",
     "base_url",
@@ -118,4 +138,5 @@ __all__ = [
     "metrics",
     "post",
     "publish",
+    "snapshot",
 ]

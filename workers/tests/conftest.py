@@ -141,6 +141,7 @@ class FakeDB:
         self.publications: dict[str, dict] = {}
         self.platform_connections: dict[str, dict] = {}
         self.performance_feedback: list[dict] = []
+        self.metric_snapshots: list[dict] = []
         self.decision_log: list[dict] = []
         self.hook_pattern_stats: dict[tuple[str, str], dict] = {}
         self.weekly_reports: dict[str, dict] = {}
@@ -153,6 +154,8 @@ class FakeDB:
             "sovereign": {"code": "sovereign", "included_hours": 40, "overage_eur_per_hour": 6.0},
         }
         self.status_history: list[tuple[str, str]] = []
+        # Simuliert eine Datenbank ohne neuere Migration (z. B. {"next_snapshot_at"} vor 0019)
+        self.missing_columns: set[str] = set()
         self.statements: list[tuple[str, tuple]] = []
         self.closed = False
 
@@ -693,6 +696,22 @@ class FakeDB:
                 self._apply_update(sql, params, d)
             return FakeCursor([], rowcount=1)
         # Publishing
+        if q.startswith("select p.id, coalesce(p.workspace_id, s.workspace_id), p.clip_id, p.connection_id") and "p.tracking" in q:
+            # Messreihe (publish.SQL_SNAPSHOT_PUBLICATION, Migration 0019)
+            p = self.publications.get(params[0])
+            if p is None:
+                return FakeCursor([])
+            c = self.clips[p["clip_id"]]
+            src = self.sources[c["source_id"]]
+            return FakeCursor([(
+                p["id"], p.get("workspace_id") or src["workspace_id"], p["clip_id"], p.get("connection_id"), p["platform"], p["status"],
+                p.get("published_at"), p.get("created_at"), p.get("tracking", "oauth"), p.get("tracking_until"), p.get("metrics"),
+                src.get("brand_profile_id"),
+            )])  # fmt: skip
+        if q.startswith("insert into metric_snapshots"):
+            row = self._insert_row(sql, params)
+            self.metric_snapshots.append(row)
+            return FakeCursor([], rowcount=1)
         if q.startswith("select p.id, coalesce(p.workspace_id, s.workspace_id), p.clip_id, p.connection_id"):
             p = self.publications.get(params[0])
             if p is None:
@@ -868,6 +887,15 @@ class FakeDB:
         if q.startswith("select id from publications where status = 'scheduled'"):
             rows = [p for p in self.publications.values() if p["status"] == "scheduled" and p.get("scheduled_for") is not None and p["scheduled_for"] <= params[0]]
             rows.sort(key=lambda p: p["scheduled_for"])
+            return FakeCursor([(p["id"],) for p in rows[: int(params[1])]])
+        if q.startswith("select id from publications where next_snapshot_at is not null"):
+            if self.missing_columns and "next_snapshot_at" in self.missing_columns:
+                raise RuntimeError('column "next_snapshot_at" does not exist')
+            rows = [
+                p for p in self.publications.values()
+                if p.get("next_snapshot_at") is not None and p["next_snapshot_at"] <= params[0] and p.get("tracking", "oauth") != "off"
+            ]  # fmt: skip
+            rows.sort(key=lambda p: p["next_snapshot_at"])
             return FakeCursor([(p["id"],) for p in rows[: int(params[1])]])
         return None
 

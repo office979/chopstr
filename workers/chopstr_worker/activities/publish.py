@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import statistics
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from temporalio import activity
@@ -260,6 +260,17 @@ def run_fetch_metrics(ctx: common.Context, publication_id: str, window: str, htt
     if pub["status"] != "published":
         raise RuntimeError(f"Publikation {publication_id} ist nicht veröffentlicht (Status {pub['status']})")
     metrics = internal_api.metrics(publication_id, window, ctx.settings, http)
+    derived = write_window_feedback(ctx, pub, window, metrics)
+    log.info("metrics publication=%s window=%s views=%s reward=%s", publication_id, window, metrics.get("views"), derived["reward"])
+    return {"publication_id": publication_id, "window": window, **derived}
+
+
+def write_window_feedback(ctx: common.Context, pub: dict[str, Any], window: str, metrics: dict[str, Any]) -> dict[str, Any]:
+    """``performance_feedback`` für ein Fenster schreiben (Upsert) und ``publications.metrics`` ergänzen.
+
+    Gemeinsam für ``run_fetch_metrics`` (feste Fenster aus dem PublishWorkflow) und die Brücke aus der
+    Messreihe (``run_snapshot``). Gibt die abgeleiteten Kennzahlen samt ``feedback_id`` zurück."""
+    publication_id = pub["id"]
     derived = compute_reward(metrics, account_history(ctx, pub))
     now = _now()
     values = {
@@ -292,8 +303,162 @@ def run_fetch_metrics(ctx: common.Context, publication_id: str, window: str, htt
     merged = dict(pub.get("metrics") or {})
     merged[f"at_{window}"] = {**metrics, "follows_per_1k": derived["follows_per_1k"], "saves_per_1k": derived["saves_per_1k"], "reward": derived["reward"]}
     _set(ctx, publication_id, metrics=db.jsonb(merged), metrics_fetched_at=now)
-    log.info("metrics publication=%s window=%s views=%s reward=%s", publication_id, window, metrics.get("views"), derived["reward"])
-    return {"publication_id": publication_id, "window": window, "feedback_id": feedback_id, **derived}
+    pub["metrics"] = merged
+    return {"feedback_id": feedback_id, **derived}
+
+
+# -- Messreihe (Migration 0019) ------------------------------------------------------------------
+# Zeitplan der Messungen nach Alter der Publikation: stündlich bis 6 h, alle 6 h bis 48 h, danach täglich
+# bis tracking_until. Ohne tracking_until gilt published_at + DEFAULT_TRACK_DAYS.
+HOUR_S = 3600
+SNAPSHOT_SCHEDULE = ((6 * HOUR_S, 1 * HOUR_S), (48 * HOUR_S, 6 * HOUR_S), (None, 24 * HOUR_S))
+DEFAULT_TRACK_DAYS = 30
+# Brücke zu den festen Fenstern: Alter, ab dem eine Messung als Fenster zählt.
+WINDOW_AGES = (("6h", 6 * HOUR_S), ("48h", 48 * HOUR_S), ("7d", 7 * 24 * HOUR_S))
+# Eine Messung zählt nur für ein Fenster, solange sie jünger als das Doppelte des Fensters ist: wer einen Link
+# erst nach zehn Tagen einträgt, bekommt kein 6h- und kein 48h-Fenster mit Zehn-Tage-Zahlen (die würden den
+# Account-Median und damit den Reward verzerren). Der Zeitplan oben trifft jedes Fenster innerhalb dieser Spanne.
+WINDOW_MAX_FACTOR = 2.0
+SNAPSHOT_METRICS = ("views", "engaged_views", "likes", "comments", "shares", "saves", "follows", "reach", "avg_watch_time_s", "skip_rate")
+SNAPSHOT_STATUSES = {"oauth": ("published",), "link": ("published", "manual")}
+
+SQL_SNAPSHOT_PUBLICATION = (
+    "select p.id, coalesce(p.workspace_id, s.workspace_id), p.clip_id, p.connection_id, p.platform, p.status, "
+    "p.published_at, p.created_at, p.tracking, p.tracking_until, p.metrics, s.brand_profile_id "
+    "from publications p join clips c on c.id = p.clip_id join sources s on s.id = c.source_id where p.id = %s"
+)
+
+
+def _as_dt(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def next_snapshot_at(published_at: datetime, now: datetime, tracking_until: datetime | None) -> datetime | None:
+    """Nächste fällige Messung nach ``SNAPSHOT_SCHEDULE``; ``None``, wenn ``tracking_until`` erreicht ist.
+
+    Die letzte Messung fällt genau auf ``tracking_until``, damit das Ende der Messreihe nicht davon abhängt,
+    wie der Tagesrhythmus zufällig liegt."""
+    until = tracking_until or (published_at + timedelta(days=DEFAULT_TRACK_DAYS))
+    if now >= until:
+        return None
+    age_s = max(0.0, (now - published_at).total_seconds())
+    step = next(step for limit, step in SNAPSHOT_SCHEDULE if limit is None or age_s < limit)
+    return min(now + timedelta(seconds=step), until)
+
+
+def window_hint(age_s: float) -> str:
+    """Welches feste Fenster der Messung am nächsten liegt (Hinweis an Provider mit Zeitraum)."""
+    if age_s < 6 * HOUR_S:
+        return "6h"
+    if age_s < 48 * HOUR_S:
+        return "48h"
+    return "7d"
+
+
+def due_window(age_s: float | None, written: set[str]) -> str | None:
+    """Fenster, das diese Messung zum ersten Mal erreicht (und noch nicht geschrieben ist), sonst ``None``."""
+    if age_s is None:
+        return None
+    for window, limit in reversed(WINDOW_AGES):
+        if limit <= age_s < limit * WINDOW_MAX_FACTOR and window not in written:
+            return window
+    return None
+
+
+def load_snapshot_publication(ctx: common.Context, publication_id: str) -> dict[str, Any] | None:
+    row = db.fetch_one(ctx.conn, SQL_SNAPSHOT_PUBLICATION, (publication_id,))
+    if row is None:
+        return None
+    keys = [
+        "id", "workspace_id", "clip_id", "connection_id", "platform", "status", "published_at", "created_at",
+        "tracking", "tracking_until", "metrics", "brand_profile_id",
+    ]  # fmt: skip
+    out = dict(zip(keys, row))
+    for k in ("id", "workspace_id", "clip_id", "connection_id", "brand_profile_id"):
+        out[k] = str(out[k]) if out.get(k) else None
+    out["metrics"] = dict(_json(out.get("metrics"), {}) or {})
+    out["tracking"] = out.get("tracking") or "oauth"
+    return out
+
+
+def _written_windows(ctx: common.Context, publication_id: str) -> set[str]:
+    return {w for w, _a in WINDOW_AGES if db.fetch_one(ctx.conn, SQL_FEEDBACK_ID, (publication_id, w)) is not None}
+
+
+def run_snapshot(ctx: common.Context, publication_id: str, http=None) -> dict[str, Any]:
+    """Eine Messung: ``/api/internal/metrics`` im Modus snapshot, Zeile in ``metric_snapshots``, nächster Termin.
+
+    Wirft nie wegen der Plattform oder der Web-App: Fehler stehen in ``metric_snapshots.error`` und der
+    Zeitplan läuft weiter. Erreicht die Messung zum ersten Mal 6h, 48h oder 7d (siehe ``due_window``),
+    schreibt sie zusätzlich das feste Fenster in ``performance_feedback`` mit Reward."""
+    pub = load_snapshot_publication(ctx, publication_id)
+    if pub is None:
+        return {"publication_id": publication_id, "status": "missing"}
+    now = _now()
+    allowed = SNAPSHOT_STATUSES.get(pub["tracking"], ())
+    if pub["status"] not in allowed:
+        _set(ctx, publication_id, next_snapshot_at=None)
+        return {"publication_id": publication_id, "status": "skipped", "reason": f"Status {pub['status']} wird bei tracking {pub['tracking']} nicht gemessen"}
+
+    published_at = _as_dt(pub.get("published_at")) or _as_dt(pub.get("created_at")) or now
+    age_s = max(0, int((now - published_at).total_seconds()))
+    error: str | None = None
+    try:
+        result = internal_api.snapshot(publication_id, window_hint(age_s), ctx.settings, http)
+    except Exception as exc:  # Web-App weg oder kaputte Antwort: als Fehlerzeile festhalten, Zeitplan weiter
+        result = {"metrics": {}, "source": "oauth" if pub["tracking"] == "oauth" else "public_api", "raw": None, "error": None}
+        error = f"Web-App nicht erreichbar: {exc.__class__.__name__}: {str(exc)[:200]}"
+    metrics = result.get("metrics") or {}
+    error = error or result.get("error")
+    has_numbers = any(metrics.get(k) is not None for k in SNAPSHOT_METRICS)
+
+    values: dict[str, Any] = {k: metrics.get(k) for k in SNAPSHOT_METRICS}
+    db.insert(
+        ctx.conn, "metric_snapshots",
+        workspace_id=pub["workspace_id"], publication_id=publication_id, fetched_at=now, age_s=age_s,
+        source=result.get("source") or "oauth", **values,
+        retention_curve=db.jsonb(metrics.get("retention_curve")) if metrics.get("retention_curve") is not None else None,
+        raw=db.jsonb(result.get("raw")) if result.get("raw") is not None else None,
+        error=(str(error)[:500] if error else None),
+    )  # fmt: skip
+
+    window = None
+    reward = None
+    if has_numbers:
+        window = due_window(age_s, _written_windows(ctx, publication_id))
+        if window:
+            bridge = {k: metrics.get(k) for k in internal_api.METRIC_KEYS}
+            reward = write_window_feedback(ctx, {**pub, "id": publication_id}, window, bridge)["reward"]
+
+    tracking_until = _as_dt(pub.get("tracking_until"))
+    nxt = next_snapshot_at(published_at, now, tracking_until)
+    _set(ctx, publication_id, next_snapshot_at=nxt, metrics_fetched_at=now)
+    log.info(
+        "snapshot publication=%s age_s=%s source=%s views=%s window=%s error=%s",
+        publication_id, age_s, result.get("source"), metrics.get("views"), window, bool(error),
+    )  # fmt: skip
+    return {
+        "publication_id": publication_id,
+        "status": "ok" if has_numbers and not error else ("error" if error else "empty"),
+        "age_s": age_s,
+        "window": window,
+        "reward": reward,
+        "error": error,
+        "next_snapshot_at": nxt.isoformat() if nxt else None,
+    }
+
+
+# TODO Temporal: PublishWorkflow (workflows/publish.py) holt weiterhin nur die festen Fenster 6h, 48h und 7d.
+# Link-Tracking (tracking = 'link') und die Messreihe laufen über local_worker.process_metrics; im Temporal-Betrieb
+# braucht es dafür später einen geplanten Workflow, der run_snapshot für fällige Publikationen aufruft.
 
 
 # -- Activities ----------------------------------------------------------------------------------
@@ -344,12 +509,18 @@ __all__ = [
     "cancel_publication",
     "check_gates",
     "compute_reward",
+    "due_window",
     "fetch_metrics",
     "load_publication",
     "load_publication_activity",
+    "load_snapshot_publication",
+    "next_snapshot_at",
     "per_1k",
     "publish_clip",
     "run_cancel_publication",
     "run_fetch_metrics",
     "run_publish_clip",
+    "run_snapshot",
+    "window_hint",
+    "write_window_feedback",
 ]

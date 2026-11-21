@@ -46,6 +46,9 @@ export HF_TOKEN="${HF_TOKEN:-}"                              # leer: Sprechertre
 # -- Web-App (Publishing über /api/internal/*) --------------------------------------------------
 export APP_INTERNAL_URL="${APP_INTERNAL_URL:-http://localhost:3000}"
 export INTERNAL_API_SECRET="${INTERNAL_API_SECRET:-}"
+# Messreihen für verfolgte Links (Migration 0019): der lokale Worker fragt fällige Publikationen ab.
+# 0 schaltet das ab. Ohne Migration 0019 meldet der Worker das einmal und macht weiter.
+export METRICS_POLLING="${METRICS_POLLING:-1}"
 
 # -- Render: schnelles Preset, ffmpeg mit libass und drawtext -----------------------------------
 export RENDER_X264_PRESET="${RENDER_X264_PRESET:-veryfast}"

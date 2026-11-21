@@ -95,6 +95,8 @@ export interface Publication {
   temporal_workflow_id: string | null;
   created_by: string | null;
   created_at: string;
+  /* Migration 0019: woher die Messwerte kommen; fehlt die Spalte, gilt oauth */
+  tracking?: "oauth" | "link" | "off";
 }
 
 export interface PublicationInput {

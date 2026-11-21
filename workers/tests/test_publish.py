@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -23,6 +23,10 @@ class FakeWeb:
         self.metrics_response: dict = {"metrics": {"views": 1000, "likes": 50, "comments": 5, "shares": 2, "saves": 20, "follows": 10, "avg_watch_time_s": 12.5, "retention_curve": [1.0, 0.5]}}
         self.status_code = 200
         self.mail_response: dict = {"ok": True}
+        self.snapshot_response: dict = {
+            "metrics": {"views": 1200, "likes": 60, "comments": 6, "shares": None, "saves": None, "follows": None, "avg_watch_time_s": None, "retention_curve": None, "engaged_views": None, "reach": None, "skip_rate": None},
+            "source": "public_api", "raw": {"id": "dQw4w9WgXcQ"}, "available": True, "error": None,
+        }  # fmt: skip
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content.decode("utf-8")) if request.content else {}
@@ -31,6 +35,8 @@ class FakeWeb:
             return httpx.Response(self.status_code, json={"error": {"code": "x", "message": "kaputt"}})
         if request.url.path.endswith("/publish"):
             return httpx.Response(200, json=self.publish_response)
+        if request.url.path.endswith("/metrics") and body.get("mode") == "snapshot":
+            return httpx.Response(200, json=self.snapshot_response)
         if request.url.path.endswith("/metrics"):
             return httpx.Response(200, json=self.metrics_response)
         if request.url.path.endswith("/mail"):
@@ -206,6 +212,129 @@ def test_fetch_metrics_requires_published_and_known_window(fake_context, pub):
         publish.run_fetch_metrics(fake_context, pub["pub"], "6h")
     with pytest.raises(ValueError):
         publish.run_fetch_metrics(fake_context, pub["pub"], "1h")
+
+
+# -- Messreihe (Migration 0019) ------------------------------------------------------------------
+H = 3600
+
+
+def test_next_snapshot_schedule():
+    t0 = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
+    until = t0 + timedelta(days=30)
+    nxt = publish.next_snapshot_at
+    assert nxt(t0, t0, until) == t0 + timedelta(hours=1)  # stündlich bis 6 h
+    assert nxt(t0, t0 + timedelta(hours=5, minutes=59), until) == t0 + timedelta(hours=6, minutes=59)
+    assert nxt(t0, t0 + timedelta(hours=6), until) == t0 + timedelta(hours=12)  # alle 6 h bis 48 h
+    assert nxt(t0, t0 + timedelta(hours=47), until) == t0 + timedelta(hours=53)
+    assert nxt(t0, t0 + timedelta(hours=48), until) == t0 + timedelta(hours=72)  # danach täglich
+    # Die letzte Messung fällt genau auf tracking_until, danach ist Schluss
+    assert nxt(t0, until - timedelta(hours=3), until) == until
+    assert nxt(t0, until, until) is None
+    # Ohne tracking_until gelten 30 Tage
+    assert nxt(t0, t0 + timedelta(days=31), None) is None
+
+
+def test_due_window_bridge_rules():
+    assert publish.due_window(5 * H, set()) is None
+    assert publish.due_window(6 * H + 1, set()) == "6h"
+    assert publish.due_window(6 * H + 1, {"6h"}) is None
+    assert publish.due_window(49 * H, {"6h"}) == "48h"
+    assert publish.due_window(7 * 24 * H + 60, {"6h", "48h"}) == "7d"
+    # Zu spät eingetragen: keine Fenster mit Zahlen aus einem ganz anderen Alter
+    assert publish.due_window(13 * H, set()) is None
+    assert publish.due_window(10 * 24 * H, set()) == "7d"
+    assert publish.due_window(15 * 24 * H, set()) is None
+    assert publish.due_window(None, set()) is None
+
+
+@pytest.fixture
+def tracked(fake_db, fake_context, web):
+    wid = fake_db.add_workspace()
+    pid = fake_db.add_brand_profile(wid)
+    sid = fake_db.add_source(wid, "uploads/in.mp4", brand_profile_id=pid, title="Talk")
+    cand = fake_db.add_candidate(sid, SEGS, human_verdict="accepted")
+    cid = fake_db.add_clip(sid, cand, "shorts", SEGS, status="rendered")
+    now = datetime.now(UTC)
+    pub_id = fake_db.add_publication(
+        wid, cid, "youtube", status="manual", tracking="link", external_id="dQw4w9WgXcQ",
+        published_at=now - timedelta(minutes=30), tracking_until=now + timedelta(days=30), next_snapshot_at=now,
+    )  # fmt: skip
+    fake_context.settings = config.settings()
+    return {"wid": wid, "cid": cid, "pub": pub_id}
+
+
+def test_snapshot_writes_row_and_schedules_next(fake_db, fake_context, tracked, web):
+    out = publish.run_snapshot(fake_context, tracked["pub"])
+    path, body, _h = web.calls[-1]
+    assert path == "/api/internal/metrics" and body == {"publication_id": tracked["pub"], "mode": "snapshot", "window": "6h"}
+    assert out["status"] == "ok" and out["window"] is None and out["error"] is None
+    snap = fake_db.metric_snapshots[-1]
+    assert snap["publication_id"] == tracked["pub"] and snap["workspace_id"] == tracked["wid"] and snap["source"] == "public_api"
+    assert snap["views"] == 1200 and snap["likes"] == 60 and snap["error"] is None and snap["raw"] == {"id": "dQw4w9WgXcQ"}
+    assert 1700 <= snap["age_s"] <= 1900
+    p = fake_db.publications[tracked["pub"]]
+    assert p["next_snapshot_at"] is not None and timedelta(minutes=59) < p["next_snapshot_at"] - datetime.now(UTC) <= timedelta(hours=1)
+    assert fake_db.performance_feedback == []  # 30 Minuten alt: noch kein Fenster
+
+
+def test_snapshot_bridges_to_window_once(fake_db, fake_context, tracked, web):
+    fake_db.publications[tracked["pub"]]["published_at"] = datetime.now(UTC) - timedelta(hours=6, minutes=5)
+    out = publish.run_snapshot(fake_context, tracked["pub"])
+    assert out["window"] == "6h"
+    rows = [f for f in fake_db.performance_feedback if f["publication_id"] == tracked["pub"]]
+    assert len(rows) == 1 and rows[0]["metric_window"] == "6h" and rows[0]["views"] == 1200 and rows[0]["platform"] == "youtube"
+    assert fake_db.publications[tracked["pub"]]["metrics"]["at_6h"]["views"] == 1200
+    # Die nächste Messung im selben Fenster schreibt kein zweites 6h-Fenster
+    again = publish.run_snapshot(fake_context, tracked["pub"])
+    assert again["window"] is None
+    assert len([f for f in fake_db.performance_feedback if f["publication_id"] == tracked["pub"]]) == 1
+    assert len(fake_db.metric_snapshots) == 2
+
+
+def test_snapshot_records_errors_and_keeps_schedule(fake_db, fake_context, tracked, web):
+    web.snapshot_response = {"metrics": {k: None for k in ("views", "likes")}, "source": "public_api", "raw": None, "error": "YouTube ist nicht konfiguriert: YOUTUBE_API_KEY fehlt."}
+    out = publish.run_snapshot(fake_context, tracked["pub"])
+    assert out["status"] == "error" and "nicht konfiguriert" in out["error"]
+    snap = fake_db.metric_snapshots[-1]
+    assert snap["views"] is None and "YOUTUBE_API_KEY" in snap["error"]
+    assert fake_db.publications[tracked["pub"]]["next_snapshot_at"] is not None
+
+
+def test_snapshot_never_raises_when_web_is_down(fake_db, fake_context, tracked, web):
+    web.status_code = 500
+    out = publish.run_snapshot(fake_context, tracked["pub"])
+    assert out["status"] == "error" and "Web-App nicht erreichbar" in out["error"]
+    assert "Web-App nicht erreichbar" in fake_db.metric_snapshots[-1]["error"]
+    assert fake_db.publications[tracked["pub"]]["next_snapshot_at"] is not None
+
+
+def test_snapshot_ends_after_tracking_until(fake_db, fake_context, tracked, web):
+    p = fake_db.publications[tracked["pub"]]
+    p["published_at"] = datetime.now(UTC) - timedelta(days=31)
+    p["tracking_until"] = datetime.now(UTC) - timedelta(days=1)
+    publish.run_snapshot(fake_context, tracked["pub"])
+    assert p["next_snapshot_at"] is None
+
+
+def test_snapshot_status_rules(fake_db, fake_context, tracked, web):
+    p = fake_db.publications[tracked["pub"]]
+    # tracking oauth braucht status published; manual wird nicht gemessen und fällt aus dem Plan
+    p["tracking"] = "oauth"
+    out = publish.run_snapshot(fake_context, tracked["pub"])
+    assert out["status"] == "skipped" and p["next_snapshot_at"] is None and web.calls == []
+    p["status"] = "published"
+    p["next_snapshot_at"] = datetime.now(UTC)
+    assert publish.run_snapshot(fake_context, tracked["pub"])["status"] == "ok"
+    assert publish.run_snapshot(fake_context, "fehlt")["status"] == "missing"
+
+
+def test_internal_api_snapshot_shape(web):
+    data = internal_api.snapshot("p1", "48h")
+    assert web.calls[-1][1] == {"publication_id": "p1", "mode": "snapshot", "window": "48h"}
+    assert set(data) == {"metrics", "source", "raw", "error"} and set(data["metrics"]) == set(internal_api.SNAPSHOT_KEYS)
+    web.snapshot_response = {**web.snapshot_response, "source": "irgendwas"}
+    assert internal_api.snapshot("p1", "1h")["source"] == "oauth"  # unbekannte Quelle fällt auf oauth zurück
+    assert web.calls[-1][1]["window"] == "7d"
 
 
 # -- Interner Client -----------------------------------------------------------------------------

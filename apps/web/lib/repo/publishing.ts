@@ -91,6 +91,7 @@ export function toPublication(r: Row): Publication {
     temporal_workflow_id: (r.temporal_workflow_id as string | null) ?? null,
     created_by: (r.created_by as string | null) ?? null,
     created_at: iso(r.created_at) ?? "",
+    tracking: (r.tracking as Publication["tracking"]) ?? "oauth",
   };
 }
 

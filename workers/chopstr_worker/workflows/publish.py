@@ -6,6 +6,11 @@ Signale: ``cancel`` (nur vor dem Publish wirksam, ruft ``cancel_publication``) u
 (neuer Zeitpunkt, Timer wird neu gesetzt). Ist die Publikation beim Start schon ``published``, werden nur
 die Metrik-Fenster nachgeholt. Fehler in ``fetch_metrics`` (nach drei Versuchen) beenden den Workflow
 nicht; das Fenster wird im Ergebnis als fehlgeschlagen vermerkt. Deterministisch: Zeit aus ``workflow.now()``.
+
+TODO Link-Tracking (Migration 0019): verfolgte Links (``tracking = 'link'``) und die Messreihe in
+``metric_snapshots`` laufen bisher nur über ``local_worker.process_metrics`` (``publish.run_snapshot``). Für den
+Temporal-Betrieb braucht es später einen geplanten Workflow, der fällige ``next_snapshot_at`` abarbeitet.
+Dieser Workflow bleibt bewusst unverändert.
 """
 
 from __future__ import annotations

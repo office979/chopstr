@@ -37,9 +37,11 @@ log = logging.getLogger("chopstr.copy")
 PLATFORMS = ("tiktok", "reels", "shorts", "linkedin")
 HOOK_PATTERNS = ("identity_call", "contrarian", "open_loop", "results_first", "mistake_warning")
 # hooks_v3 (A2.1): die fünf Schlüssel bleiben für die Lernschleife (hook_pattern_stats), dazu die Typen der
-# DACH-Hook-Taxonomie. Überschneidungen zählen als dieselbe Familie (PATTERN_FAMILY), damit die
-# Vielfaltsregel (mindestens drei Familien) und die Statistik nicht doppelt zählen:
+# DACH-Hook-Taxonomie. Überschneidungen zählen als dieselbe Familie (PATTERN_FAMILY):
 #   contrarian ≈ widerspruch, mistake_warning ≈ teurer_fehler, results_first ≈ konkrete_zahl
+# Die Lernschleife (learning.py) zählt und sortiert nach Familien, damit „widerspruch“ unter contrarian
+# gelernt wird und nichts doppelt zählt. Die Vielfaltsregel (mindestens drei Familien) steht nur im Prompt
+# hooks_v3.md, der Code prüft sie nicht.
 HOOK_PATTERNS_DACH = (
     "teurer_fehler", "konkrete_zahl", "selbstversuch", "widerspruch", "interner_blick", "kategorie_vergleich",
     "sachfrage", "vorher_nachher", "direkte_aufforderung",
@@ -51,6 +53,9 @@ PATTERN_FAMILY: dict[str, str] = {
     "teurer_fehler": "mistake_warning",
     "konkrete_zahl": "results_first",
 }
+# Lernbare Familien: die fünf alten Schlüssel (bestehende hook_pattern_stats-Zeilen bleiben gültig) und
+# die sechs DACH-Typen ohne Entsprechung, in dieser Reihenfolge
+HOOK_FAMILIES = tuple(dict.fromkeys(PATTERN_FAMILY[p] for p in HOOK_PATTERNS_V3))
 FUNNEL_STAGES = ("TOF", "MOF", "BOF")
 # Zusatzfelder je Variante ab hooks_v3; question_opened bleibt intern
 V3_VARIANT_FIELDS = ("payoff_ts", "question_opened", "first_frame_note")
@@ -64,6 +69,11 @@ def known_hook_patterns() -> tuple[str, ...]:
 def pattern_family(pattern: str) -> str:
     """Familie eines Hook-Musters (``PATTERN_FAMILY``); unbekannte Muster sind ihre eigene Familie."""
     return PATTERN_FAMILY.get(pattern, pattern)
+
+
+def known_hook_families() -> tuple[str, ...]:
+    """Familien der gültigen Muster (``known_hook_patterns``): ohne ``hook.sop_v3`` die fünf alten Schlüssel."""
+    return tuple(dict.fromkeys(pattern_family(p) for p in known_hook_patterns()))
 SPOKEN_MAX_WORDS = 12
 ONSCREEN_MAX_WORDS = 9
 VARIANT_COUNT = 5
@@ -720,12 +730,13 @@ def native_variant(
 
 
 def order_variants(variants: list[HookVariant], pattern_order: list[str] | None) -> list[HookVariant]:
-    """Varianten nach einer Muster-Reihenfolge (z. B. ``learning.thompson_order``) sortieren; unbekannte
+    """Varianten nach einer Reihenfolge von Familien (``learning.thompson_order``) sortieren; jede Variante
+    zählt mit der Familie ihres Musters (``widerspruch`` steht also, wo ``contrarian`` steht). Unbekannte
     Muster bleiben hinten in Originalreihenfolge. Ohne Reihenfolge unverändert."""
     if not pattern_order:
         return list(variants)
     rank = {p: i for i, p in enumerate(pattern_order)}
-    return sorted(variants, key=lambda v: (rank.get(v.pattern, len(rank)), variants.index(v)))
+    return sorted(variants, key=lambda v: (rank.get(pattern_family(v.pattern), len(rank)), variants.index(v)))
 
 
 def _variant_summary(v: HookVariant) -> dict[str, Any]:
@@ -990,12 +1001,14 @@ def _select_v2(
 __all__ = [
     "FUNNEL_STAGES",
     "HOOKS_SCHEMA",
+    "HOOK_FAMILIES",
     "HOOK_PATTERNS",
     "HOOK_PATTERNS_DACH",
     "HOOK_PATTERNS_V3",
     "PATTERN_FAMILY",
     "hooks_schema",
     "known_hook_patterns",
+    "known_hook_families",
     "pattern_family",
     "LT_LOCALES",
     "NATIVE_PATTERN",

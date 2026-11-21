@@ -139,3 +139,59 @@ def test_thompson_order_is_deterministic_and_prefers_strong_pattern():
     # ungezeigte Muster werden erkundet: über viele Läufe erscheint jedes Muster mindestens einmal vorn
     firsts = {learning.thompson_order([{"pattern": "contrarian", "shown": 3, "chosen": 1}], seed=s)[0] for s in range(200)}
     assert len(firsts) == 5
+
+
+def test_dach_patterns_are_learned_as_families_with_sop_v3(fake_db, policy_sop_v3):
+    """hooks_v3: ``widerspruch`` zählt unter contrarian, ``sachfrage`` ist eine eigene Familie. Beide laufen
+    durch Decision Log, Neuberechnung und Thompson-Reihenfolge und landen nicht automatisch hinten."""
+    from chopstr_worker.pipeline import copy_engine
+
+    assert policy_sop_v3.hook_sop_v3 is True
+    assert copy_engine.known_hook_families() == learning.HOOK_FAMILIES
+    assert len(learning.HOOK_FAMILIES) == 11 and "widerspruch" not in learning.HOOK_FAMILIES and "sachfrage" in learning.HOOK_FAMILIES
+
+    wid = fake_db.add_workspace()
+    pid = fake_db.add_brand_profile(wid)
+    sid = fake_db.add_source(wid, "uploads/in.mp4", brand_profile_id=pid)
+    cand = fake_db.add_candidate(sid, SEGS)
+    variants = [copy_engine.HookVariant(p, p, p) for p in ("widerspruch", "contrarian", "sachfrage", "open_loop", "selbstversuch")]
+    for chosen_pattern, n in (("widerspruch", 3), ("sachfrage", 2)):
+        chosen = next(v for v in variants if v.pattern == chosen_pattern)
+        for _ in range(n):
+            for d in copy_engine.copy_decisions(variants, chosen, "tiktok", explored=True):
+                fake_db.decision_log.append({"brand_profile_id": pid, **d})
+    cid = fake_db.add_clip(sid, cand, "tiktok", SEGS)
+    fake_db.add_hook_version(cid, pattern="widerspruch")
+    pub = fake_db.add_publication(wid, cid, status="published")
+    fake_db.add_feedback(wid, cid, pub, reward=2.5)
+
+    totals = learning.rebuild_hook_stats(fake_db, pid)
+    # fünf Auswahlen gezeigt; widerspruch und contrarian in derselben Auswahl zählen einmal
+    assert totals["contrarian"] == {"shown": 5, "chosen": 3, "reward_sum": 2.5, "reward_n": 1}
+    assert totals["sachfrage"] == {"shown": 5, "chosen": 2, "reward_sum": 0.0, "reward_n": 0}
+    assert totals["selbstversuch"]["shown"] == 5 and "widerspruch" not in totals
+    stats = learning.load_hook_stats(fake_db, pid)
+    assert {s["pattern"] for s in stats} >= {"contrarian", "sachfrage"}
+
+    # inkrementell ebenfalls unter der Familie
+    learning.update_hook_stats(fake_db, pid, "widerspruch", shown=1, chosen=1)
+    assert fake_db.hook_pattern_stats[(pid, "contrarian")]["chosen"] == 4
+    assert (pid, "widerspruch") not in fake_db.hook_pattern_stats
+
+    order = learning.thompson_order(learning.load_hook_stats(fake_db, pid), seed=1)
+    assert sorted(order) == sorted(learning.HOOK_FAMILIES)
+    ranked = copy_engine.order_variants(variants, order)
+    # jede Variante steht auf dem Platz ihrer Familie, keine DACH-Variante fällt pauschal nach hinten
+    rank = {f: i for i, f in enumerate(order)}
+    assert [rank[copy_engine.pattern_family(v.pattern)] for v in ranked] == sorted(rank[copy_engine.pattern_family(v.pattern)] for v in variants)
+    # über viele Seeds liegt jede DACH-Familie mal vorn (Exploration statt immer hinten)
+    firsts = {learning.thompson_order([], seed=s)[0] for s in range(400)}
+    assert {"sachfrage", "selbstversuch", "vorher_nachher"} <= firsts
+    # die gelernte Familie gewinnt: viel gewählt, hoher Reward
+    strong = [{"pattern": "sachfrage", "shown": 100, "chosen": 95, "reward_sum": 250.0, "reward_n": 95}]
+    strong += [{"pattern": f, "shown": 100, "chosen": 1, "reward_sum": 0.0, "reward_n": 0} for f in learning.HOOK_FAMILIES if f != "sachfrage"]
+    assert copy_engine.order_variants(variants, learning.thompson_order(strong, seed=7))[0].pattern == "sachfrage"
+
+
+def test_thompson_order_without_sop_v3_keeps_five_patterns():
+    assert sorted(learning.thompson_order([], seed=3)) == sorted(learning.HOOK_PATTERNS)

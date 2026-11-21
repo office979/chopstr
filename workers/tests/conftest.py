@@ -23,7 +23,7 @@ os.environ.setdefault("ASR_MODEL_CH", "")
 os.environ.setdefault("ASR_DEVICE", "cpu")
 os.environ.setdefault("EGRESS_ALLOWLIST", "")
 
-from chopstr_worker import config, storage  # noqa: E402
+from chopstr_worker import config, editorial, storage  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -1005,3 +1005,19 @@ def make_test_video(path: Path, seconds: float = 3.0, with_video: bool = True) -
     cmd += ["-c:a", "aac", "-shortest", str(path)]
     subprocess.run(cmd, check=True, capture_output=True)
     return path
+
+
+@pytest.fixture
+def policy_sop_v3(tmp_path, monkeypatch):
+    """Fassung 2 mit implementation.hook.sop_v3: true in einer Kopie der Grundlage."""
+    for f in editorial.policy_dir().glob("clip_policy_v*.yaml"):
+        shutil.copy(f, tmp_path / f.name)
+    path = tmp_path / "clip_policy_v2.yaml"
+    text = path.read_text(encoding="utf-8")
+    assert "    sop_v3: false\n" in text
+    path.write_text(text.replace("    sop_v3: false\n", "    sop_v3: true\n"), encoding="utf-8")
+    monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path))
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    editorial.clear_cache()
+    yield editorial.load(2)
+    editorial.clear_cache()

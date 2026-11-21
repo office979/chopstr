@@ -14,7 +14,10 @@ später erhalten bleiben.
 
 Hook-Muster: ``hook_pattern_stats`` (shown, chosen, reward_sum, reward_n) für Thompson Sampling.
 ``update_hook_stats`` zählt inkrementell, ``rebuild_hook_stats`` rechnet nächtlich alles aus ``decision_log``
-und ``performance_feedback`` neu (idempotent). ``thompson_order`` liefert die Reihenfolge der fünf Muster.
+und ``performance_feedback`` neu (idempotent). ``thompson_order`` liefert die Reihenfolge der Familien.
+Gezählt wird je Familie (``copy_engine.pattern_family``): ``widerspruch`` zählt unter ``contrarian``,
+``teurer_fehler`` unter ``mistake_warning``, ``konkrete_zahl`` unter ``results_first``; die übrigen DACH-Typen
+aus hooks_v3 sind eigene Familien. Bestehende Zeilen mit den fünf alten Schlüsseln bleiben gültig.
 Alle Entscheidungen kommen aus dem Decision Log (Grundsatz A3).
 """
 
@@ -27,7 +30,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from . import db
-from .pipeline.copy_engine import HOOK_PATTERNS
+from .pipeline.copy_engine import HOOK_FAMILIES, HOOK_PATTERNS, known_hook_families, pattern_family
 from .pipeline.story_engine import SCORE_KEYS
 
 log = logging.getLogger("chopstr.learning")
@@ -218,27 +221,30 @@ def _upsert_hook_stat(conn: db.Connection, brand_profile_id: str, pattern: str, 
 
 
 def update_hook_stats(conn: db.Connection, brand_profile_id: str, pattern: str, shown: int = 0, chosen: int = 0, reward: float | None = None) -> dict[str, Any]:
-    """Inkrementell: ``shown`` und ``chosen`` addieren, ``reward`` (falls vorhanden) in Summe und Zähler."""
-    if pattern not in HOOK_PATTERNS:
+    """Inkrementell: ``shown`` und ``chosen`` addieren, ``reward`` (falls vorhanden) in Summe und Zähler.
+    Gespeichert wird unter der Familie des Musters."""
+    family = pattern_family(pattern)
+    if family not in HOOK_FAMILIES:
         raise ValueError(f"Unbekanntes Hook-Muster {pattern!r}")
     r_sum = float(reward) if reward is not None else 0.0
     r_n = 1 if reward is not None else 0
-    return _upsert_hook_stat(conn, brand_profile_id, pattern, shown, chosen, r_sum, r_n, absolute=False)
+    return _upsert_hook_stat(conn, brand_profile_id, family, shown, chosen, r_sum, r_n, absolute=False)
 
 
 def rebuild_hook_stats(conn: db.Connection, brand_profile_id: str) -> dict[str, dict[str, Any]]:
     """Nächtliche Neuberechnung aus ``decision_log`` (shown, chosen) und ``performance_feedback`` (Reward über
-    ``clips`` zur höchsten ``hook_versions``-Version). Idempotent, schreibt absolute Werte."""
-    totals: dict[str, dict[str, Any]] = {p: {"shown": 0, "chosen": 0, "reward_sum": 0.0, "reward_n": 0} for p in HOOK_PATTERNS}
+    ``clips`` zur höchsten ``hook_versions``-Version). Idempotent, schreibt absolute Werte je Familie; zeigt eine
+    Auswahl zwei Muster derselben Familie, zählt die Familie dort einmal als gezeigt."""
+    totals: dict[str, dict[str, Any]] = {f: {"shown": 0, "chosen": 0, "reward_sum": 0.0, "reward_n": 0} for f in HOOK_FAMILIES}
     for dtype, features, chosen in db.fetch_all(conn, SQL_HOOK_DECISIONS, (brand_profile_id,)):
         feats = _json(features, {}) or {}
         ch = _json(chosen, {}) or {}
         if dtype == "hook_variant_shown":
-            for p in feats.get("patterns") or []:
-                if p in totals:
-                    totals[p]["shown"] += 1
+            for f in {pattern_family(str(p)) for p in feats.get("patterns") or []}:
+                if f in totals:
+                    totals[f]["shown"] += 1
         elif dtype == "hook_selected":
-            p = ch.get("pattern")
+            p = pattern_family(str(ch.get("pattern")))
             if p in totals:
                 totals[p]["chosen"] += 1
     pattern_cache: dict[str, str | None] = {}
@@ -246,7 +252,7 @@ def rebuild_hook_stats(conn: db.Connection, brand_profile_id: str) -> dict[str, 
         cid = str(clip_id)
         if cid not in pattern_cache:
             row = db.fetch_one(conn, SQL_HOOK_PATTERN_OF_CLIP, (cid,))
-            pattern_cache[cid] = str(row[0]) if row and row[0] else None
+            pattern_cache[cid] = pattern_family(str(row[0])) if row and row[0] else None
         p = pattern_cache[cid]
         if p in totals and reward is not None:
             totals[p]["reward_sum"] += float(reward)
@@ -264,14 +270,15 @@ def load_hook_stats(conn: db.Connection, brand_profile_id: str) -> list[dict[str
     ]
 
 
-def thompson_order(stats: list[dict[str, Any]], seed: int | None = None) -> list[str]:
-    """Reihenfolge der Hook-Muster per Thompson Sampling: Beta(chosen + 1, shown - chosen + 1) je Muster,
-    multipliziert mit dem Reward-Mittel (1,0 ohne Daten, auf 3 gedeckelt). Muster ohne Statistik zählen als
-    ungezeigt (reine Exploration). Mit ``seed`` deterministisch."""
+def thompson_order(stats: list[dict[str, Any]], seed: int | None = None, families: tuple[str, ...] | None = None) -> list[str]:
+    """Reihenfolge der Hook-Familien per Thompson Sampling: Beta(chosen + 1, shown - chosen + 1) je Familie,
+    multipliziert mit dem Reward-Mittel (1,0 ohne Daten, auf 3 gedeckelt). Familien ohne Statistik zählen als
+    ungezeigt (reine Exploration). ``families`` ohne Angabe: die der gültigen Muster
+    (``copy_engine.known_hook_families``, ohne ``hook.sop_v3`` die fünf alten). Mit ``seed`` deterministisch."""
     rng = random.Random(seed)
     by_pattern = {str(s.get("pattern")): s for s in stats}
     scored = []
-    for p in HOOK_PATTERNS:
+    for p in families if families is not None else known_hook_families():
         s = by_pattern.get(p, {})
         shown = max(0, int(s.get("shown", 0) or 0))
         chosen = max(0, min(shown, int(s.get("chosen", 0) or 0)))
@@ -289,6 +296,8 @@ def active_brand_profiles(conn: db.Connection) -> list[str]:
 
 
 __all__ = [
+    "HOOK_FAMILIES",
+    "HOOK_PATTERNS",
     "MIN_DECISIONS",
     "REWARD_CAP",
     "RIDGE_LAMBDA",

@@ -183,24 +183,6 @@ def test_lint_applies_sop_only_to_onscreen_and_only_with_switch():
     assert copy_de.lint(text, p, onscreen=True)[0] == text
 
 
-@pytest.fixture
-def policy_sop_v3(tmp_path, monkeypatch):
-    """Fassung 2 mit implementation.hook.sop_v3: true in einer Kopie der Grundlage."""
-    import shutil
-
-    for f in editorial.policy_dir().glob("clip_policy_v*.yaml"):
-        shutil.copy(f, tmp_path / f.name)
-    path = tmp_path / "clip_policy_v2.yaml"
-    text = path.read_text(encoding="utf-8")
-    assert "    sop_v3: false\n" in text
-    path.write_text(text.replace("    sop_v3: false\n", "    sop_v3: true\n"), encoding="utf-8")
-    monkeypatch.setenv("EDITORIAL_DIR", str(tmp_path))
-    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
-    editorial.clear_cache()
-    yield editorial.load(2)
-    editorial.clear_cache()
-
-
 def test_switch_pins_hooks_v3_and_turns_on_sop(policy_sop_v3):
     from chopstr_worker import prompts
 

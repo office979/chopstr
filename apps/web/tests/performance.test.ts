@@ -74,8 +74,17 @@ describe("engagementRate", () => {
 
 describe("detectAnomaly", () => {
   it("schlägt an bei mehr als fünffachem Sprung unter 0,2 % Interaktion", () => {
-    const series = [snap({ fetched_at: "2026-11-21T10:00:00Z", views: 1000, likes: 50 }), snap({ fetched_at: "2026-11-21T11:00:00Z", views: 10_000, likes: 10, comments: 0 })].map(serializeSnapshot);
+    const series = [snap({ fetched_at: "2026-11-21T10:00:00Z", age_s: 6 * 3600, views: 1000, likes: 50 }), snap({ fetched_at: "2026-11-21T11:00:00Z", age_s: 7 * 3600, views: 10_000, likes: 10, comments: 0 })].map(serializeSnapshot);
     expect(detectAnomaly(series)).toEqual({ flagged: true, rule: "sprung_ohne_interaktion", between: { from: "2026-11-21T10:00:00Z", to: "2026-11-21T11:00:00Z" } });
+  });
+  it("schweigt vor 6 h, unter 1.000 Aufrufen, ohne bekanntes Alter und bei X", () => {
+    const pair = (a: number | null, views: number) =>
+      [snap({ fetched_at: "2026-11-21T10:00:00Z", age_s: a == null ? null : a - 3600, views: views / 10, likes: 50 }), snap({ fetched_at: "2026-11-21T11:00:00Z", age_s: a, views, likes: 1, comments: 0 })].map(serializeSnapshot);
+    expect(detectAnomaly(pair(5 * 3600, 10_000)).flagged).toBe(false);
+    expect(detectAnomaly(pair(8 * 3600, 900)).flagged).toBe(false);
+    expect(detectAnomaly(pair(null, 10_000)).flagged).toBe(false);
+    expect(detectAnomaly(pair(8 * 3600, 10_000), { platform: "x" }).flagged).toBe(false);
+    expect(detectAnomaly(pair(8 * 3600, 10_000), { platform: "youtube" }).flagged).toBe(true);
   });
   it("schweigt bei starkem Wachstum mit normaler Interaktion", () => {
     const series = [snap({ views: 1000 }), snap({ fetched_at: "2026-11-21T11:00:00Z", views: 10_000, likes: 500 })].map(serializeSnapshot);

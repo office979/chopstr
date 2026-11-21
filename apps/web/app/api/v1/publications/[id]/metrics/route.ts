@@ -16,5 +16,5 @@ export const GET = apiRoute<{ id: string }>("read", async (request: NextRequest,
   const repo = getApiRepo();
   const publication = await loadPublication(params.id);
   const [snapshots, feedback] = await Promise.all([repo.listMetricSnapshots([publication.id]), repo.listWindowFeedback([publication.id])]);
-  return apiJson({ tracking: publication.tracking ?? "oauth", tracking_until: publication.tracking_until ?? null, ...buildPublicationMetrics(publication.id, snapshots, feedback, query) });
+  return apiJson({ tracking: publication.tracking ?? "oauth", tracking_until: publication.tracking_until ?? null, ...buildPublicationMetrics(publication.id, snapshots, feedback, query, publication.platform) });
 });

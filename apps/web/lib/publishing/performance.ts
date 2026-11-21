@@ -86,6 +86,12 @@ export function serializeSnapshot(s: MetricSnapshot): SnapshotOut {
  * { flagged, rule, between: { from, to } }, Regelname "sprung_ohne_interaktion". */
 export const ANOMALY_GROWTH_FACTOR = 5;
 export const ANOMALY_MAX_ENGAGEMENT = 0.002;
+/* Schutz vor Fehlalarmen (Review R1-14): frühe stündliche Messungen springen oft auf das Fünffache, und bei
+ * X sind views ersatzweise Impressionen (lib/publishing/public-metrics.ts), deren Interaktion pro Impression
+ * niedrig ist. Darum nur echte Videoaufrufe (nicht X), erst ab 1.000 Aufrufen und erst ab 6 h Alter. */
+export const ANOMALY_MIN_VIEWS = 1000;
+export const ANOMALY_MIN_AGE_S = 6 * 3600;
+const ANOMALY_SKIP_PLATFORMS = new Set(["x"]);
 
 export interface Anomaly {
   flagged: boolean;
@@ -93,11 +99,14 @@ export interface Anomaly {
   between: { from: string; to: string } | null;
 }
 
-export function detectAnomaly(series: SnapshotOut[]): Anomaly {
+export function detectAnomaly(series: SnapshotOut[], opts: { platform?: string } = {}): Anomaly {
+  if (opts.platform && ANOMALY_SKIP_PLATFORMS.has(opts.platform)) return { flagged: false, rule: null, between: null };
   const ok = series.filter((s) => s.views != null && !s.error).sort((a, b) => a.fetched_at.localeCompare(b.fetched_at));
   for (let i = 1; i < ok.length; i++) {
     const prev = ok[i - 1].views as number;
     const cur = ok[i].views as number;
+    const age = ok[i].age_s;
+    if (cur < ANOMALY_MIN_VIEWS || age == null || age < ANOMALY_MIN_AGE_S) continue;
     if (prev > 0 && cur > prev * ANOMALY_GROWTH_FACTOR) {
       const rate = ok[i].engagement_rate;
       if (rate != null && rate < ANOMALY_MAX_ENGAGEMENT) {
@@ -165,7 +174,7 @@ export function parseSeriesQuery(params: URLSearchParams): SeriesQuery | { error
 
 /* Je Publikation die neuesten Zahlen: letzte Messung, sonst das jüngste feste Fenster. Summe über alle
  * Publikationen nur für Felder, die mindestens eine Publikation hat. */
-export function buildClipPerformance<P extends { id: string }>(publications: P[], snapshots: MetricSnapshot[], feedback: WindowFeedback[]) {
+export function buildClipPerformance<P extends { id: string; platform?: string }>(publications: P[], snapshots: MetricSnapshot[], feedback: WindowFeedback[]) {
   const rows = publications.map((p) => {
     const own = snapshots.filter((s) => s.publication_id === p.id);
     const windows = feedback
@@ -179,7 +188,7 @@ export function buildClipPerformance<P extends { id: string }>(publications: P[]
       latest,
       windows,
       reward: lastWindow?.reward ?? null,
-      anomaly: detectAnomaly(own.map(serializeSnapshot)),
+      anomaly: detectAnomaly(own.map(serializeSnapshot), { platform: p.platform }),
     };
   });
   const views = rows.map((r) => r.latest?.views ?? r.windows.at(-1)?.views ?? null);
@@ -189,7 +198,13 @@ export function buildClipPerformance<P extends { id: string }>(publications: P[]
   };
 }
 
-export function buildPublicationMetrics(publicationId: string, snapshots: MetricSnapshot[], feedback: WindowFeedback[], query: SeriesQuery = { since: null, limit: SERIES_DEFAULT_LIMIT }) {
+export function buildPublicationMetrics(
+  publicationId: string,
+  snapshots: MetricSnapshot[],
+  feedback: WindowFeedback[],
+  query: SeriesQuery = { since: null, limit: SERIES_DEFAULT_LIMIT },
+  platform?: string,
+) {
   const sorted = [...snapshots].sort((a, b) => a.fetched_at.localeCompare(b.fetched_at));
   const inRange = query.since ? sorted.filter((s) => s.fetched_at >= (query.since as string)) : sorted;
   /* Die jüngsten limit Messungen, chronologisch */
@@ -204,6 +219,6 @@ export function buildPublicationMetrics(publicationId: string, snapshots: Metric
     windows,
     series,
     series_total: inRange.length,
-    anomaly: detectAnomaly(sorted.map(serializeSnapshot)),
+    anomaly: detectAnomaly(sorted.map(serializeSnapshot), { platform }),
   };
 }

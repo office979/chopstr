@@ -79,6 +79,9 @@ V2_PIN_CHANGES: dict[str, int] = {"hooks": 2}
 # freigibt; V2_SWITCHES verlangt „gebaut heißt an“. Ein fehlender Schalter gilt als false.
 SOP_V3_SWITCH = "hook.sop_v3"
 SOP_V3_PIN_CHANGES: dict[str, int] = {"hooks": 3}
+# Transkriptkorrektur als Vorschlag (A1), aus demselben Grund nicht in V2_SWITCHES: gebaut, aber aus.
+TRANSCRIPT_FIX_SWITCH = "transcript.llm_fix"
+TRANSCRIPT_AUTO_FIX_SWITCH = "transcript.auto_fix"
 # F Forschungsbefund, H Übertragungshypothese, R Produktregel, G gelernte Entscheidung
 # (docs/RESEARCH-CLIPPING-KERN.md, Statusschreibweise).
 ORIGIN_VALUES = ("F", "H", "R", "G")
@@ -399,6 +402,16 @@ class Policy:
         if self.version < 2:
             return False
         return _switch_value(self.roh.get("implementation") or {}, SOP_V3_SWITCH) is True
+
+    @property
+    def transcript_llm_fix(self) -> bool:
+        """Vorschläge zur Transkriptkorrektur nach der Transkription (``implementation.transcript.llm_fix``)."""
+        return self.version >= 2 and _switch_value(self.roh.get("implementation") or {}, TRANSCRIPT_FIX_SWITCH) is True
+
+    @property
+    def transcript_auto_fix(self) -> bool:
+        """Sichere Lexikon-Treffer selbst übernehmen; nur zusammen mit ``transcript_llm_fix``."""
+        return self.transcript_llm_fix and _switch_value(self.roh.get("implementation") or {}, TRANSCRIPT_AUTO_FIX_SWITCH) is True
 
     # -- Prompt-Pins ---------------------------------------------------------------------------
     @property

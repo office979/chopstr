@@ -1007,6 +1007,15 @@ def compare_clips(user: str) -> dict:
     }
 
 
+def transcript_fix(user: str) -> dict:
+    """Transkriptkorrektur ohne Sprachmodell (A1): nur Verwechslungen aus dem Markenprofil und unscharfe
+    Lexikon-Treffer (``transcript_fix.heuristic_edits``), deterministisch. Rät nie neue Wörter."""
+    from .pipeline import transcript_fix as tf
+
+    words, lexicon = tf.parse_user(user)
+    return {"edits": tf.heuristic_edits(words, lexicon)}
+
+
 HANDLERS = {
     "propose_moments": propose_moments,
     "episode_overview": episode_overview,
@@ -1016,6 +1025,7 @@ HANDLERS = {
     "compare_clips": compare_clips,
     "write_hooks": write_hooks,
     "write_post_caption": write_post_caption,
+    "transcript_fix": transcript_fix,
 }
 
 

@@ -116,6 +116,7 @@ def run(ctx: common.Context, source_id: str, asr_key: str | None = None, diar_ke
             stats=db.jsonb(stats),
         )
         tv_id = str(inserted[0]) if inserted else f"{source_id}:{version}"
+        fix = _transcript_fix(ctx, src, tv_id, version, words, stats)
         costlog.record(
             ctx.conn,
             costlog.Cost(
@@ -138,8 +139,28 @@ def run(ctx: common.Context, source_id: str, asr_key: str | None = None, diar_ke
             dialect=stats["dialect"],
             text_norm_count=stats["text_norm_count"],
             hint=hint,
+            **({"transcript_fix": fix} if fix is not None else {}),
         )
     return tv_id
+
+
+def _transcript_fix(ctx: common.Context, src: dict, tv_id: str, version: int, words: list[dict], stats: dict) -> dict | None:
+    """Korrekturvorschläge (A1) nur mit ``implementation.transcript.llm_fix``; ohne Schalter kein LLM, keine Zeile."""
+    if not editorial.load().transcript_llm_fix:
+        return None
+    from .. import usage
+    from ..pipeline import transcript_fix
+    from ..providers_llm import LLM
+    from ..residency import Tenant
+
+    # Auch der Aufbau des Modells darf den Schritt nicht scheitern lassen: die Transkriptversion ist schon
+    # geschrieben, ein Neuversuch legte sonst eine zweite an.
+    try:
+        tenant = Tenant(id=src["workspace_id"], tier=src["tier"], allow_us_subprocessors=bool(src.get("allow_us_subprocessors")))
+        llm = LLM(tenant, cost_sink=usage.llm_sink(ctx.conn, src["workspace_id"], []), s=ctx.settings)
+    except Exception as exc:
+        return {"suggestions": 0, "applied": 0, "new_version": None, "error": f"{exc.__class__.__name__}: {str(exc)[:200]}"}
+    return transcript_fix.run_after_transcription(ctx.conn, src, tv_id, version, words, llm, stats=stats)
 
 
 @activity.defn(name="fuse_and_nlp")

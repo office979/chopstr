@@ -921,6 +921,13 @@ implementation:
     # oben bleibt 2) und schaltet die SOP-Regeln im Linter ein (copy_de.lint_sop). Gebaut, aber aus, bis
     # die Copy-Eval (workers/eval) es freigibt. Rollback: nur diesen Schalter auf false setzen.
     sop_v3: false
+  # A1: Transkriptkorrektur als Vorschlag nach der Transkription (pipeline/transcript_fix.py). llm_fix
+  # schreibt Vorschläge nach transcript_suggestions; auto_fix übernimmt zusätzlich sichere Lexikon-Treffer
+  # (Sicherheit ab 0,9) als neue Version mit origin llm_correction. Beide gebaut, beide aus, bis die
+  # WER-Eval vorher und nachher vorliegt. Braucht Migration 0020. Rollback: Schalter auf false.
+  transcript:
+    llm_fix: false
+    auto_fix: false
   trim:
     enabled: true             # AP7: Remove- und Keep-Logik (gebaut); wirksam erst mit der Regel trim.enabled, die bis zum Blindvergleich false bleibt
   cut:

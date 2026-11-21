@@ -35,6 +35,8 @@ class FakeWeb:
             return httpx.Response(self.status_code, json={"error": {"code": "x", "message": "kaputt"}})
         if request.url.path.endswith("/publish"):
             return httpx.Response(200, json=self.publish_response)
+        if request.url.path.endswith("/metrics") and body.get("mode") == "replan":
+            return httpx.Response(200, json={"replanned": 2, "platforms": ["youtube"]})
         if request.url.path.endswith("/metrics") and body.get("mode") == "snapshot":
             return httpx.Response(200, json=self.snapshot_response)
         if request.url.path.endswith("/metrics"):
@@ -335,6 +337,11 @@ def test_internal_api_snapshot_shape(web):
     web.snapshot_response = {**web.snapshot_response, "source": "irgendwas"}
     assert internal_api.snapshot("p1", "1h")["source"] == "oauth"  # unbekannte Quelle fällt auf oauth zurück
     assert web.calls[-1][1]["window"] == "7d"
+
+
+def test_internal_api_replan_shape(web):
+    assert internal_api.replan() == {"replanned": 2, "platforms": ["youtube"]}
+    assert web.calls[-1][0] == "/api/internal/metrics" and web.calls[-1][1] == {"mode": "replan"}
 
 
 # -- Interner Client -----------------------------------------------------------------------------

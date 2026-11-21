@@ -2,7 +2,7 @@ import "server-only";
 import { getRepo } from "@/lib/repo";
 import { getApiRepo } from "@/lib/repo/api";
 import type { Publication } from "@/lib/repo/types-api";
-import { clipFormatHint, DEFAULT_TRACK_DAYS, DUPLICATE_MESSAGE, linkCheckSummary, planLinkPublication, probeUrl, publicationPlatformsFor, runLinkCheck, type LinkCheckDeps, type LinkCheckResult } from "./link-check";
+import { clipFormatHint, DEFAULT_TRACK_DAYS, DUPLICATE_MESSAGE, linkCheckSummary, planLinkPublication, probeOembed, publicationPlatformsFor, runLinkCheck, type LinkCheckDeps, type LinkCheckResult } from "./link-check";
 import { resolvePostUrl } from "./links";
 import { readPublicMetrics } from "./public-metrics";
 
@@ -27,7 +27,7 @@ export function linkCheckDeps(): LinkCheckDeps {
       const p = await repo.findPublicationByExternal(publicationPlatformsFor(platform), externalId);
       return p ? { id: p.id } : null;
     },
-    probe: (url) => probeUrl(url),
+    probe: (platform, url) => probeOembed(platform, url),
     now: Date.now,
   };
 }
@@ -37,7 +37,7 @@ export type RegisterLinkOutcome =
   | { ok: false; status: 400 | 409; code: string; message: string; check: LinkCheckResult; duplicate_publication_id?: string };
 
 /* Link am Clip eintragen: Linktest, dann Publikation mit status manual und tracking link. Der Worker misst
- * ab next_snapshot_at (local_worker.process_metrics). Gemeinsam für /api/v1/clips/{id}/links und die
+ * ab next_snapshot_at (local_worker.process_metrics), aber nur, wenn der Link messbar ist. Gemeinsam für /api/v1/clips/{id}/links und die
  * Sitzungsroute der Oberfläche; die Gates (Zweck „eintragen“) prüft der Aufrufer. */
 export async function registerLinkForClip(input: {
   clip: { id: string; platform: string; source_id: string };

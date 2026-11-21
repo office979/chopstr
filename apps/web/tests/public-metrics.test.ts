@@ -3,7 +3,7 @@
  * pro Stunde abgefragt (Abrechnung je gelesenem Beitrag). */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearPublicMetricsCache, readPublicMetrics, X_CACHE_TTL_MS } from "@/lib/publishing/public-metrics";
+import { clearPublicMetricsCache, configuredReaderPlatforms, publicReaderConfigured, readPublicMetrics, X_CACHE_TTL_MS } from "@/lib/publishing/public-metrics";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -20,7 +20,7 @@ describe("readPublicMetrics YouTube", () => {
     const fetchImpl = vi.fn();
     const r = await readPublicMetrics("youtube", "dQw4w9WgXcQ", { env: {}, fetchImpl: fetchImpl as unknown as typeof fetch });
     expect(r).toMatchObject({ ok: false, error: "nicht_konfiguriert" });
-    expect(!r.ok && r.message).toContain("YOUTUBE_API_KEY");
+    expect(!r.ok && r.message).toBe("Zahlen für YouTube sind noch nicht eingerichtet.");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -73,7 +73,7 @@ const X_BODY = {
 describe("readPublicMetrics X", () => {
   it("meldet nicht konfiguriert ohne X_BEARER_TOKEN", async () => {
     const r = await readPublicMetrics("x", "1856789012345678901", { env: {} });
-    expect(r).toMatchObject({ ok: false, error: "nicht_konfiguriert" });
+    expect(r).toMatchObject({ ok: false, error: "nicht_konfiguriert", message: "Zahlen für X sind noch nicht eingerichtet." });
   });
 
   it("nimmt Videoaufrufe vom Medium und Impressionen als Reichweite", async () => {
@@ -123,5 +123,16 @@ describe("readPublicMetrics ohne öffentliche Schnittstelle", () => {
     const r = await readPublicMetrics(platform, "abc", { env: {}, fetchImpl: fetchImpl as unknown as typeof fetch });
     expect(r).toMatchObject({ ok: false, error: "nicht_verbunden" });
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("publicReaderConfigured", () => {
+  it("kennt nur YouTube und X und verlangt einen nicht leeren Schlüssel", () => {
+    expect(publicReaderConfigured("youtube", { YOUTUBE_API_KEY: "k" })).toBe(true);
+    expect(publicReaderConfigured("youtube", { YOUTUBE_API_KEY: "  " })).toBe(false);
+    expect(publicReaderConfigured("x", {})).toBe(false);
+    expect(publicReaderConfigured("tiktok", { YOUTUBE_API_KEY: "k", X_BEARER_TOKEN: "t" })).toBe(false);
+    expect(configuredReaderPlatforms({ X_BEARER_TOKEN: "t" })).toEqual(["x"]);
+    expect(configuredReaderPlatforms({})).toEqual([]);
   });
 });

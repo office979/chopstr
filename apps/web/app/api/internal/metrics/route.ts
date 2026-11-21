@@ -2,6 +2,8 @@ import type { NextRequest } from "next/server";
 import { checkInternalSecret } from "@/lib/api/internal-auth";
 import { apiErrorResponse, apiJson } from "@/lib/api/errors";
 import { metricsViaRegistry, snapshotViaRegistry, type MetricWindow } from "@/lib/api/internal-publish";
+import { configuredReaderPlatforms } from "@/lib/publishing/public-metrics";
+import { replanLinkPublicationsInternal } from "@/lib/repo/publishing";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +15,11 @@ const WINDOWS: MetricWindow[] = ["6h", "48h", "7d"];
  * Messreihe (Migration 0019): { publication_id, mode: "snapshot", window? } → { metrics (plus engaged_views, reach,
  * skip_rate), source, raw, error }. tracking oauth geht über den Provider, tracking link über die öffentlichen
  * Leser (YouTube, X) und, falls der Beitrag einer Verbindung gehört, ersatzweise über diese. window ist nur ein
- * Hinweis für Provider mit Zeitraum (YouTube Analytics), Standard 7d. */
+ * Hinweis für Provider mit Zeitraum (YouTube Analytics), Standard 7d.
+ *
+ * Nachplanen: { mode: "replan" } → { replanned, platforms }. Verfolgte Links ohne Termin, deren öffentlicher
+ * Leser jetzt eingerichtet ist, bekommen einen Termin (replanLinkPublicationsInternal). Der lokale Worker ruft
+ * das höchstens stündlich auf (local_worker.process_metrics). */
 export async function POST(request: NextRequest) {
   const denied = checkInternalSecret(request);
   if (denied) return denied;
@@ -23,13 +29,17 @@ export async function POST(request: NextRequest) {
   } catch {
     return apiErrorResponse(400, "invalid_json", "Ungültiger JSON-Body.");
   }
+  if (body.mode === "replan") {
+    const platforms = configuredReaderPlatforms();
+    return apiJson({ replanned: await replanLinkPublicationsInternal(platforms), platforms });
+  }
   if (typeof body.publication_id !== "string" || !body.publication_id) return apiErrorResponse(400, "validation_failed", "publication_id fehlt.");
   if (body.mode === "snapshot") {
     const window = typeof body.window === "string" && WINDOWS.includes(body.window as MetricWindow) ? (body.window as MetricWindow) : "7d";
     const result = await snapshotViaRegistry(body.publication_id, window);
     return apiJson(result);
   }
-  if (body.mode !== undefined && body.mode !== "window") return apiErrorResponse(400, "validation_failed", "mode muss window oder snapshot sein.");
+  if (body.mode !== undefined && body.mode !== "window") return apiErrorResponse(400, "validation_failed", "mode muss window, snapshot oder replan sein.");
   if (typeof body.window !== "string" || !WINDOWS.includes(body.window as MetricWindow)) return apiErrorResponse(400, "validation_failed", "window muss 6h, 48h oder 7d sein.");
   const result = await metricsViaRegistry(body.publication_id, body.window as MetricWindow);
   return apiJson({ metrics: result.metrics, available: result.available, error: result.error });

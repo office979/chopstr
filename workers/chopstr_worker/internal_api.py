@@ -114,6 +114,15 @@ def snapshot(publication_id: str, window: str = "7d", s: config.Settings | None 
     }
 
 
+def replan(s: config.Settings | None = None, http=None) -> dict[str, Any]:
+    """Verfolgte Links ohne Termin nachplanen, deren öffentlicher Leser jetzt eingerichtet ist.
+
+    ``{replanned: int, platforms: [...]}``; die Web-App entscheidet, welche Leser eingerichtet sind."""
+    data = post("metrics", {"mode": "replan"}, s, http)
+    platforms = data.get("platforms")
+    return {"replanned": int(data.get("replanned") or 0), "platforms": [str(p) for p in platforms] if isinstance(platforms, list) else []}
+
+
 def mail(to: list[str], subject: str, text: str, html: str | None = None, s: config.Settings | None = None, http=None) -> bool:
     """Versand über die Web-App. Gibt ``ok`` zurück."""
     recipients = [t for t in (to or []) if t]
@@ -138,5 +147,6 @@ __all__ = [
     "metrics",
     "post",
     "publish",
+    "replan",
     "snapshot",
 ]

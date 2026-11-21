@@ -34,7 +34,7 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
-from . import config, db, editorial, events
+from . import config, db, editorial, events, internal_api
 from .activities import analyze, common, deletion, ingest, nlp, publish, transcribe, webhooks
 from .activities.render import run_render_pack
 from .pipeline import captions_de, reframe, story_engine
@@ -46,6 +46,8 @@ BATCH_LIMIT = 20
 APP_PROBE_TIMEOUT_S = 1.5
 HINT_APP_UNREACHABLE = "Web-App unter APP_INTERNAL_URL nicht erreichbar, Veröffentlichung wird übersprungen"
 HINT_APP_UNREACHABLE_METRICS = "Web-App unter APP_INTERNAL_URL nicht erreichbar, Messung wird übersprungen"
+# Nachplanen verfolgter Links, deren öffentlicher Leser erst später eingerichtet wurde (Review R1-02)
+REPLAN_EVERY_S = 3600.0
 
 # Reihenfolge der Quell-Pipeline, gleiche Funktionen wie im ClipProjectWorkflow (dort teils parallel)
 SOURCE_PIPELINE: tuple[tuple[str, Callable[[common.Context, str], Any]], ...] = (
@@ -108,6 +110,7 @@ class LocalWorker:
         self._last_outbox: float | None = None
         self._app_hint_logged = False
         self._metrics_schema_hint_logged = False
+        self._last_replan: float | None = None
 
     # -- Steuerung ------------------------------------------------------------------------------
     def request_stop(self, *_args: Any) -> None:
@@ -319,6 +322,8 @@ class LocalWorker:
     def process_metrics(self, ctx: common.Context) -> int:
         """Fällige Messungen (``next_snapshot_at <= jetzt``) über ``run_snapshot``. Hinter ``METRICS_POLLING``.
 
+        Höchstens stündlich (``REPLAN_EVERY_S``) fragt der Worker die Web-App, Links nachzuplanen, deren
+        öffentlicher Leser inzwischen eingerichtet ist; die kommen dann in diesem Durchlauf schon mit.
         Fehlt Migration 0019 noch, scheitert schon die Abfrage; das wird einmal gemeldet und der Durchlauf
         geht weiter, statt dass der ganze Worker an einer fehlenden Spalte hängen bleibt."""
         if not ctx.settings.metrics_polling:
@@ -331,13 +336,17 @@ class LocalWorker:
                 self._metrics_schema_hint_logged = True
             return 0
         pending = [str(r[0]) for r in rows if not self._skip("snapshot", str(r[0]))]
-        if not pending:
+        replan_due = self._last_replan is None or time.monotonic() - self._last_replan >= REPLAN_EVERY_S
+        if not pending and not replan_due:
             return 0
         if not app_reachable(ctx.settings):
             if not self._app_hint_logged:
                 log.warning("%s (%s fällig)", HINT_APP_UNREACHABLE_METRICS, len(pending))
                 self._app_hint_logged = True
             return 0
+        if replan_due and self._replan(ctx):
+            rows = db.fetch_all(ctx.conn, SQL_DUE_SNAPSHOTS, (_now(), self.limit))
+            pending = [str(r[0]) for r in rows if not self._skip("snapshot", str(r[0]))]
         done = 0
         for pub_id in pending:
             if self.stop_requested:
@@ -353,6 +362,18 @@ class LocalWorker:
                 self._note("snapshot", pub_id, "ok")
             done += 1
         return done
+
+    def _replan(self, ctx: common.Context) -> int:
+        """Einmal ``/api/internal/metrics`` mit mode replan; Fehler nur im Log, nächster Versuch in einer Stunde."""
+        self._last_replan = time.monotonic()
+        try:
+            result = internal_api.replan(ctx.settings)
+        except Exception as exc:
+            log.warning("replan failed error=%s", exc.__class__.__name__)
+            return 0
+        if result["replanned"]:
+            log.info("replan publications=%s platforms=%s", result["replanned"], ",".join(result["platforms"]))
+        return result["replanned"]
 
     # -- (f) Outbox und Webhooks -----------------------------------------------------------------
     def process_outbox(self, ctx: common.Context) -> int:

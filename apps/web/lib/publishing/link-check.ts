@@ -21,14 +21,16 @@ export interface LinkCheckDeps {
   readPublic: (platform: LinkPlatform, externalId: string) => Promise<PublicMetricsResult>;
   listConnections: () => Promise<LinkCheckConnection[]>;
   findDuplicate: (platform: LinkPlatform, externalId: string) => Promise<{ id: string } | null>;
-  /* HTTP 200 auf der bereinigten URL; nur gefragt, wenn kein öffentlicher Leser Zahlen liefert */
-  probe: (url: string) => Promise<boolean>;
+  /* Gibt es den Beitrag? true oder false nur mit Beleg (oEmbed bei YouTube und TikTok), sonst null.
+   * Nur gefragt, wenn kein öffentlicher Leser geantwortet hat. */
+  probe: (platform: LinkPlatform, url: string) => Promise<boolean | null>;
   now: () => number;
 }
 
 export interface LinkChecks {
   parsed: boolean;
-  reachable: boolean;
+  /* true oder false nur mit Beleg (öffentlicher Leser oder oEmbed), null heisst „nicht geprüft“ */
+  reachable: boolean | null;
   owned_by_connection: boolean;
   duplicate_publication_id: string | null;
   age_s: number | null;
@@ -48,6 +50,8 @@ export interface LinkCheckResult {
   author: { id: string | null; label: string | null } | null;
   /* Verbindung, der der Beitrag gehört (nur bei owned_by_connection) */
   connection_id: string | null;
+  /* Lässt sich der Beitrag jetzt messen? Eingerichteter öffentlicher Leser (YouTube, X) oder eigene Verbindung */
+  measurable: boolean;
   hinweise: string[];
 }
 
@@ -56,13 +60,13 @@ export const DUPLICATE_MESSAGE = "Dieser Beitrag ist schon eingetragen.";
 const PLATFORM_LABEL: Record<LinkPlatform, string> = { youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram", x: "X", linkedin: "LinkedIn" };
 
 function emptyChecks(): LinkChecks {
-  return { parsed: false, reachable: false, owned_by_connection: false, duplicate_publication_id: null, age_s: null, metrics_available: false };
+  return { parsed: false, reachable: null, owned_by_connection: false, duplicate_publication_id: null, age_s: null, metrics_available: false };
 }
 
 export async function runLinkCheck(url: string, deps: LinkCheckDeps): Promise<LinkCheckResult> {
   const parsed = await deps.resolve(url);
   if (isLinkError(parsed)) {
-    return { platform: null, external_id: null, normalized_url: null, kind: null, checks: emptyChecks(), metrics: null, published_at: null, author: null, connection_id: null, hinweise: [parsed.message] };
+    return { platform: null, external_id: null, normalized_url: null, kind: null, checks: emptyChecks(), metrics: null, published_at: null, author: null, connection_id: null, measurable: false, hinweise: [parsed.message] };
   }
   const checks: LinkChecks = { ...emptyChecks(), parsed: true };
   const hinweise: string[] = [];
@@ -71,7 +75,7 @@ export async function runLinkCheck(url: string, deps: LinkCheckDeps): Promise<Li
 
   if (parsed.kind === "short_link") {
     hinweise.push("Der Kurzlink ließ sich nicht auflösen. Bitte den vollständigen Link einfügen.");
-    return { ...base, checks, metrics: null, published_at: null, author: null, connection_id: null, hinweise };
+    return { ...base, checks, metrics: null, published_at: null, author: null, connection_id: null, measurable: false, hinweise };
   }
 
   const [publicResult, connections, duplicate] = await Promise.all([
@@ -110,17 +114,21 @@ export async function runLinkCheck(url: string, deps: LinkCheckDeps): Promise<Li
     if (publicResult.error === "nicht_gefunden") {
       checks.reachable = false;
     } else {
-      checks.reachable = await deps.probe(parsed.normalizedUrl).catch(() => false);
-      if (!checks.reachable) hinweise.push(`${label} hat den Link nicht bestätigt. Ist der Beitrag öffentlich?`);
+      /* Ohne Antwort des Lesers (kein Schlüssel, keine Schnittstelle, Störung) nur ein Beleg zählt: oEmbed.
+       * Wo es keinen gibt, bleibt reachable null und es kommt kein „nicht bestätigt“. */
+      checks.reachable = await deps.probe(parsed.platform, parsed.normalizedUrl).catch(() => null);
+      if (checks.reachable === false) hinweise.push(`${label} kennt diesen Beitrag nicht oder er ist nicht öffentlich.`);
     }
   }
+  const readerMissing = !publicResult.ok && publicResult.error === "nicht_konfiguriert";
+  const measurable = connectionId != null || (PUBLIC_READER_PLATFORMS.includes(parsed.platform) && !readerMissing);
 
   if (publishedAt) {
     const t = Date.parse(publishedAt);
     if (Number.isFinite(t)) checks.age_s = Math.max(0, Math.round((deps.now() - t) / 1000));
   }
 
-  return { ...base, checks, metrics, published_at: publishedAt, author, connection_id: connectionId, hinweise };
+  return { ...base, checks, metrics, published_at: publishedAt, author, connection_id: connectionId, measurable, hinweise };
 }
 
 export const DEFAULT_TRACK_DAYS = 30;
@@ -136,7 +144,8 @@ export interface LinkPublicationPlan {
   tracking_days: number;
   /* Gerundete Tage, die ab jetzt noch gemessen werden (0: Beitrag älter als die Messdauer, eine Messung) */
   remaining_days: number;
-  /* Lässt sich überhaupt messen? Öffentlicher Leser (YouTube, X) oder eigene Verbindung */
+  /* Lässt sich jetzt messen? Eingerichteter öffentlicher Leser (YouTube, X) oder eigene Verbindung.
+   * Fehlt nur der Schlüssel, plant der Worker den Link nach, sobald er da ist (Modus replan der internen Route). */
   measurable: boolean;
   /* null, wenn nichts zu messen ist: dann fragt der Worker gar nicht erst */
   next_snapshot_at: string | null;
@@ -146,12 +155,12 @@ export interface LinkPublicationPlan {
 export type LinkPlanOutcome = { ok: true; plan: LinkPublicationPlan } | { ok: false; status: 400 | 409; code: string; message: string; duplicate_publication_id?: string };
 
 /* Plattformen mit öffentlichem Leser (lib/publishing/public-metrics.ts) */
-const PUBLIC_READER_PLATFORMS: readonly LinkPlatform[] = ["youtube", "x"];
+export const PUBLIC_READER_PLATFORMS: readonly LinkPlatform[] = ["youtube", "x"];
 
 /* Aus dem Linktest wird eine Publikation zum Verfolgen: veröffentlicht laut Plattform (sonst jetzt), gemessen
- * bis published_at + trackDays, erste Messung sofort. Ohne öffentlichen Leser und ohne eigene Verbindung
- * (TikTok, Instagram, LinkedIn fremder Konten) gibt es nichts zu messen: dann kein Termin, statt 30 Tage lang
- * Fehlerzeilen zu schreiben. Dubletten werden abgelehnt (409). */
+ * bis published_at + trackDays, erste Messung sofort. Ohne eingerichteten öffentlichen Leser und ohne eigene
+ * Verbindung (TikTok, Instagram, LinkedIn fremder Konten, YouTube oder X ohne Schlüssel) gibt es nichts zu
+ * messen: dann kein Termin, statt 30 Tage lang Fehlerzeilen zu schreiben. Dubletten werden abgelehnt (409). */
 export function planLinkPublication(result: LinkCheckResult, opts: { now: number; trackDays?: number }): LinkPlanOutcome {
   if (!result.checks.parsed || !result.platform || !result.external_id || !result.normalized_url) {
     return { ok: false, status: 400, code: "link_invalid", message: result.hinweise[0] ?? "Der Link ist ungültig." };
@@ -167,7 +176,7 @@ export function planLinkPublication(result: LinkCheckResult, opts: { now: number
   /* Ein Zeitpunkt aus der Zukunft wäre ein Uhrenfehler; dann gilt jetzt */
   const publishedAt = Number.isFinite(platformTime) && platformTime <= opts.now ? platformTime : opts.now;
   const until = publishedAt + days * 86_400_000;
-  const measurable = PUBLIC_READER_PLATFORMS.includes(result.platform) || result.connection_id != null;
+  const measurable = result.measurable;
   return {
     ok: true,
     plan: {
@@ -187,17 +196,26 @@ export function planLinkPublication(result: LinkCheckResult, opts: { now: number
 }
 
 /* Kurze Sätze für die Oberfläche: was der Linktest ergeben hat. Mit plan sagt der letzte Satz, wie lange
- * wirklich gemessen wird; ohne plan gilt die Standarddauer. */
-export function linkCheckSummary(result: LinkCheckResult, plan?: Pick<LinkPublicationPlan, "tracking_days" | "remaining_days" | "measurable">): string[] {
+ * wirklich gemessen wird; ohne plan gilt die Standarddauer. Ob gemessen wird, folgt aus result.measurable,
+ * also aus derselben Regel wie der Messtermin. */
+export function linkCheckSummary(result: LinkCheckResult, plan?: Pick<LinkPublicationPlan, "tracking_days" | "remaining_days">): string[] {
   if (!result.checks.parsed || !result.platform) return result.hinweise.slice(0, 1);
-  const out = [`Link erkannt: ${PLATFORM_LABEL[result.platform]}`];
+  const label = PLATFORM_LABEL[result.platform];
+  const out = [`Link erkannt: ${label}`];
   out.push(result.checks.owned_by_connection ? "Verbundenes Konto erkannt" : "Kein verbundenes Konto");
   if (result.checks.duplicate_publication_id) out.push(DUPLICATE_MESSAGE.slice(0, -1));
-  else if (plan && !plan.measurable) out.push(`${PLATFORM_LABEL[result.platform]} gibt ohne verbundenes Konto keine Zahlen heraus, gemessen wird nicht`);
+  else if (!result.measurable) out.push(notMeasuredReason(result.platform));
   else if (plan && plan.remaining_days < plan.tracking_days) {
     out.push(plan.remaining_days > 0 ? `Wird noch ${plan.remaining_days} Tage lang gemessen` : `Wird einmal gemessen, der Beitrag ist älter als ${plan.tracking_days} Tage`);
   } else out.push(`Wird ${plan?.tracking_days ?? DEFAULT_TRACK_DAYS} Tage lang gemessen`);
   return out;
+}
+
+/* Warum ein Link nicht gemessen wird, in Klartext (Oberfläche und Zusammenfassung) */
+export function notMeasuredReason(platform: LinkPlatform): string {
+  return PUBLIC_READER_PLATFORMS.includes(platform)
+    ? `Zahlen für ${PLATFORM_LABEL[platform]} sind noch nicht eingerichtet, gemessen wird, sobald das erledigt ist`
+    : `Wird nicht gemessen: ${PLATFORM_LABEL[platform]} braucht ein verbundenes Konto`;
 }
 
 /* publications.platform mischt zwei Wertebereiche, bewusst nicht vereinheitlicht (bestehende Daten):
@@ -230,15 +248,28 @@ export function clipFormatHint(linkPlatform: LinkPlatform | null, clipPlatform: 
 
 const PROBE_TIMEOUT_MS = 5_000;
 
-/* Erreichbarkeit per GET auf die bereinigte URL (folgt Weiterleitungen), 5 s Timeout */
-export async function probeUrl(url: string, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+/* oEmbed-Endpunkte, die für unbekannte Beiträge 404 oder 400 liefern. TODO verify against current docs. */
+const OEMBED_URL: Partial<Record<LinkPlatform, string>> = {
+  youtube: "https://www.youtube.com/oembed",
+  tiktok: "https://www.tiktok.com/oembed",
+};
+
+/* Gibt es den Beitrag? oEmbed bei YouTube und TikTok (200: ja, 400 oder 404: nein), sonst und bei jeder
+ * anderen Antwort null („nicht geprüft“). Eine Plattformseite mit 200 ist kein Beleg: TikTok, Instagram und
+ * LinkedIn liefern 200 auch für Beiträge, die es nicht gibt. 5 s Timeout. */
+export async function probeOembed(platform: LinkPlatform, url: string, fetchImpl: typeof fetch = fetch): Promise<boolean | null> {
+  const endpoint = OEMBED_URL[platform];
+  if (!endpoint) return null;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
   try {
-    const res = await fetchImpl(url, { method: "GET", redirect: "follow", signal: ctrl.signal, headers: { "User-Agent": "chopstr-linktest/1.0" } });
-    return res.status === 200;
+    const q = new URLSearchParams({ url, format: "json" });
+    const res = await fetchImpl(`${endpoint}?${q.toString()}`, { method: "GET", redirect: "follow", signal: ctrl.signal, headers: { "User-Agent": "chopstr-linktest/1.0" } });
+    if (res.status === 200) return true;
+    if (res.status === 404 || res.status === 400) return false;
+    return null;
   } catch {
-    return false;
+    return null;
   } finally {
     clearTimeout(timer);
   }

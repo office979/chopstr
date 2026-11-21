@@ -741,3 +741,22 @@ export async function markConnectionStatusInternal(connectionId: string, status:
     await tx`update platform_connections set status = ${status} where id = ${connectionId}`;
   });
 }
+
+/* Einmaliges Nachplanen (Review R1-02): verfolgte Links, die beim Eintragen nicht messbar waren, weil der
+ * Schlüssel des öffentlichen Lesers fehlte, bekommen einen Messtermin, sobald der Leser eingerichtet ist.
+ * Nur Links ohne Termin, deren Messzeit noch läuft und die nicht endgültig gestoppt wurden (link_check.stopped,
+ * etwa nach dreimal „nicht gefunden“). Gibt die Zahl der nachgeplanten Publikationen zurück. Demo-Modus: 0. */
+export async function replanLinkPublicationsInternal(platforms: string[]): Promise<number> {
+  if (!platforms.length || isDemoMode()) return 0;
+  return withAuthContext(async (tx) => {
+    const rows = await tx`
+      update publications
+      set next_snapshot_at = now(),
+          link_check = coalesce(link_check, '{}'::jsonb) || jsonb_build_object('measurable', true, 'replanned_at', now())
+      where tracking = 'link' and next_snapshot_at is null and tracking_until > now()
+        and status in ('manual', 'published') and external_id is not null and platform in ${tx(platforms)}
+        and coalesce(link_check->'stopped', 'null'::jsonb) = 'null'::jsonb
+      returning id`;
+    return rows.length;
+  });
+}

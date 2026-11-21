@@ -44,6 +44,7 @@ def worker(monkeypatch, calls, fake_context):
     monkeypatch.setattr(local_worker.webhooks, "run_find_due_deliveries", lambda ctx, now, limit: ["d1"])
     monkeypatch.setattr(local_worker.webhooks, "run_deliver_webhook", lambda ctx, did: calls.append(("deliver", did)) or {"status": "delivered", "attempt": 1})
     monkeypatch.setattr(local_worker, "app_reachable", lambda s=None, timeout=0: True)
+    monkeypatch.setattr(local_worker.internal_api, "replan", lambda s=None, http=None: calls.append(("replan",)) or {"replanned": 0, "platforms": []})
     return local_worker.LocalWorker(interval_s=0.2, outbox_every_s=60.0)
 
 
@@ -306,3 +307,36 @@ def test_metrics_polling_remembers_database_failures(fake_db, worker, calls, mon
     assert worker.run_once()["metrics"] == 1
     assert ("snapshot", pid) in worker.failed
     assert worker.run_once()["metrics"] == 0
+
+
+def test_metrics_polling_replans_hourly_and_measures_replanned_links(fake_db, worker, calls, monkeypatch, polling):
+    seen = []
+    monkeypatch.setattr(local_worker.publish, "run_snapshot", lambda ctx, pid: seen.append(pid) or {"status": "ok", "window": None})
+    waiting = _tracked(fake_db, next_snapshot_at=None)
+
+    def replan(s=None, http=None):
+        calls.append(("replan",))
+        fake_db.publications[waiting]["next_snapshot_at"] = datetime.now(UTC) - timedelta(seconds=1)
+        return {"replanned": 1, "platforms": ["youtube"]}
+
+    monkeypatch.setattr(local_worker.internal_api, "replan", replan)
+    assert worker.run_once()["metrics"] == 1 and seen == [waiting]  # im selben Durchlauf gemessen
+    worker.run_once()
+    assert calls.count(("replan",)) == 1  # höchstens einmal je Stunde
+    worker._last_replan -= local_worker.REPLAN_EVERY_S
+    worker.run_once()
+    assert calls.count(("replan",)) == 2
+
+
+def test_metrics_polling_survives_failing_replan(fake_db, worker, calls, monkeypatch, polling, caplog):
+    seen = []
+    monkeypatch.setattr(local_worker.publish, "run_snapshot", lambda ctx, pid: seen.append(pid) or {"status": "ok", "window": None})
+
+    def boom(s=None, http=None):
+        raise RuntimeError("web weg")
+
+    monkeypatch.setattr(local_worker.internal_api, "replan", boom)
+    due = _tracked(fake_db)
+    with caplog.at_level("WARNING", logger="chopstr.local_worker"):
+        assert worker.run_once()["metrics"] == 1
+    assert seen == [due] and "replan failed" in caplog.text

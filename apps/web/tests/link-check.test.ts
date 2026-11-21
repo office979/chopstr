@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ENDPOINTS, requestSchema, resolveRef } from "@/lib/api/openapi";
 import { validate } from "@/lib/api/validate";
-import { clipFormatHint, linkCheckSummary, planLinkPublication, runLinkCheck, type LinkCheckDeps } from "@/lib/publishing/link-check";
+import { clipFormatHint, linkCheckSummary, planLinkPublication, probeOembed, runLinkCheck, type LinkCheckDeps } from "@/lib/publishing/link-check";
 import { parsePostUrl } from "@/lib/publishing/links";
 import { emptyPublicMetrics, type PublicMetricsResult } from "@/lib/publishing/public-metrics";
 
@@ -71,25 +71,49 @@ describe("runLinkCheck", () => {
     expect(r.hinweise).toContain("Dieser Beitrag ist schon eingetragen.");
   });
 
-  it("gibt ohne Schlüssel den Hinweis weiter und prüft die Erreichbarkeit per Aufruf", async () => {
+  it("gibt ohne Schlüssel den Hinweis weiter, prüft per oEmbed und plant keine Messung", async () => {
     const probe = vi.fn(async () => true);
     const r = await runLinkCheck(
       "https://youtu.be/dQw4w9WgXcQ",
-      deps({ readPublic: async () => ({ ok: false, platform: "youtube", error: "nicht_konfiguriert", message: "YouTube ist nicht konfiguriert: YOUTUBE_API_KEY fehlt." }), probe }),
+      deps({ readPublic: async () => ({ ok: false, platform: "youtube", error: "nicht_konfiguriert", message: "Zahlen für YouTube sind noch nicht eingerichtet." }), probe }),
     );
     expect(r.checks).toMatchObject({ parsed: true, reachable: true, metrics_available: false, age_s: null });
     expect(r.metrics).toBeNull();
-    expect(r.hinweise[0]).toContain("nicht konfiguriert");
-    expect(probe).toHaveBeenCalledWith("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    expect(r.measurable).toBe(false);
+    expect(r.hinweise).toEqual(["Zahlen für YouTube sind noch nicht eingerichtet."]);
+    expect(r.hinweise.join(" ")).not.toMatch(/YOUTUBE_API_KEY|nicht bestätigt/);
+    expect(probe).toHaveBeenCalledWith("youtube", "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    const out = planLinkPublication(r, { now: NOW });
+    expect(out.ok && out.plan).toMatchObject({ measurable: false, next_snapshot_at: null });
+    if (out.ok) expect(linkCheckSummary(r, out.plan).at(-1)).toBe("Zahlen für YouTube sind noch nicht eingerichtet, gemessen wird, sobald das erledigt ist");
+    expect(linkCheckSummary(r).join(" ")).not.toContain("Tage lang gemessen");
   });
 
-  it("meldet TikTok ohne Verbindung und fragt nach, ob der Beitrag öffentlich ist", async () => {
+  it("lässt reachable ohne Beleg auf null und meldet dann nichts Unbestätigtes", async () => {
+    const r = await runLinkCheck(
+      "https://www.instagram.com/reel/C1abcDEFghi/",
+      deps({ readPublic: async () => ({ ok: false, platform: "instagram", error: "nicht_verbunden", message: "Instagram gibt Messwerte nur über ein verbundenes Konto heraus." }), probe: async () => null }),
+    );
+    expect(r.checks.reachable).toBeNull();
+    expect(r.measurable).toBe(false);
+    expect(r.hinweise).toEqual(["Instagram gibt Messwerte nur über ein verbundenes Konto heraus."]);
+  });
+
+  it("meldet TikTok ohne Verbindung und sagt, wenn oEmbed den Beitrag nicht kennt", async () => {
     const r = await runLinkCheck(
       "https://www.tiktok.com/@placemedia/video/7301234567890123456",
       deps({ readPublic: async () => ({ ok: false, platform: "tiktok", error: "nicht_verbunden", message: "TikTok gibt Messwerte nur über ein verbundenes Konto heraus." }), probe: async () => false }),
     );
     expect(r.checks.reachable).toBe(false);
-    expect(r.hinweise).toEqual(["TikTok gibt Messwerte nur über ein verbundenes Konto heraus.", "TikTok hat den Link nicht bestätigt. Ist der Beitrag öffentlich?"]);
+    expect(r.hinweise).toEqual(["TikTok gibt Messwerte nur über ein verbundenes Konto heraus.", "TikTok kennt diesen Beitrag nicht oder er ist nicht öffentlich."]);
+  });
+
+  it("fragt oEmbed nicht, wenn der Leser geantwortet hat, und gilt dann als messbar", async () => {
+    const probe = vi.fn(async () => false);
+    const r = await runLinkCheck("https://youtu.be/dQw4w9WgXcQ", deps({ probe }));
+    expect(r.checks.reachable).toBe(true);
+    expect(r.measurable).toBe(true);
+    expect(probe).not.toHaveBeenCalled();
   });
 
   it("ruft bei nicht gefundenen Beiträgen keinen zweiten Aufruf ab", async () => {
@@ -218,7 +242,7 @@ describe("planLinkPublication Messbarkeit und Restdauer", () => {
     );
     const out = planLinkPublication(check, { now: NOW });
     expect(out.ok && out.plan).toMatchObject({ measurable: false, next_snapshot_at: null });
-    if (out.ok) expect(linkCheckSummary(check, out.plan).at(-1)).toBe("TikTok gibt ohne verbundenes Konto keine Zahlen heraus, gemessen wird nicht");
+    if (out.ok) expect(linkCheckSummary(check, out.plan).at(-1)).toBe("Wird nicht gemessen: TikTok braucht ein verbundenes Konto");
   });
 
   it("sagt bei alten Beiträgen, wie lange wirklich noch gemessen wird", async () => {
@@ -272,5 +296,25 @@ describe("clipFormatHint", () => {
   });
   it("lässt X zu jedem Format zu", () => {
     expect(clipFormatHint("x", "tiktok")).toBeNull();
+  });
+});
+
+describe("probeOembed", () => {
+  const answering = (status: number) => vi.fn(async () => new Response("{}", { status }));
+
+  it("belegt Existenz nur über oEmbed bei YouTube und TikTok", async () => {
+    const ok = answering(200);
+    expect(await probeOembed("youtube", "https://www.youtube.com/watch?v=dQw4w9WgXcQ", ok as unknown as typeof fetch)).toBe(true);
+    expect(String((ok.mock.calls[0] as unknown[])[0])).toMatch(/^https:\/\/www\.youtube\.com\/oembed\?url=/);
+    expect(await probeOembed("tiktok", "https://www.tiktok.com/@a/video/1", answering(404) as unknown as typeof fetch)).toBe(false);
+    expect(await probeOembed("tiktok", "https://www.tiktok.com/@a/video/1", answering(400) as unknown as typeof fetch)).toBe(false);
+  });
+
+  it("gibt null für andere Antworten, Netzfehler und Plattformen ohne oEmbed", async () => {
+    expect(await probeOembed("youtube", "https://www.youtube.com/watch?v=x", answering(401) as unknown as typeof fetch)).toBeNull();
+    expect(await probeOembed("youtube", "https://www.youtube.com/watch?v=x", (async () => { throw new Error("weg"); }) as unknown as typeof fetch)).toBeNull();
+    const never = vi.fn();
+    expect(await probeOembed("instagram", "https://www.instagram.com/reel/x/", never as unknown as typeof fetch)).toBeNull();
+    expect(never).not.toHaveBeenCalled();
   });
 });

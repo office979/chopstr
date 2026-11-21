@@ -59,10 +59,11 @@ vi.mock("@/lib/repo/api", () => ({
 vi.mock("@/lib/repo", () => ({ getRepo: () => ({ audit: async (entry: unknown) => void audits.push(entry) }) }));
 vi.mock("@/lib/publishing/public-metrics", () => ({
   readPublicMetrics: async () => ({ ok: false, platform: "youtube", error: "nicht_konfiguriert", message: "Zahlen für YouTube sind noch nicht eingerichtet." }),
+  configuredReaderPlatforms: () => [],
 }));
 vi.mock("@/lib/publishing/link-check", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/publishing/link-check")>()),
-  probeUrl: async () => true,
+  probeOembed: async () => true,
 }));
 
 const { registerLinkForClip } = await import("@/lib/publishing/link-check-server");

@@ -13,7 +13,8 @@ import type { LinkPlatform } from "./links";
  * (PUBLIC_METRICS_SCRAPER, US-Anbieter, im Sovereign-Tarif nicht zulässig).
  *
  * Fehlende Schlüssel werfen nie: das Ergebnis ist dann { ok: false, error: "nicht_konfiguriert" } mit
- * einer deutschen Meldung. Endpunkte: TODO verify against current docs (CON-007). */
+ * einer deutschen Meldung ohne Variablennamen (die stehen nur hier und in .env.example).
+ * Endpunkte: TODO verify against current docs (CON-007). */
 
 export const YOUTUBE_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"; // TODO verify against current docs
 export const X_TWEETS_URL = "https://api.x.com/2/tweets"; // TODO verify against current docs
@@ -76,6 +77,24 @@ export function emptyPublicMetrics(): PublicMetricSet {
 
 const PLATFORM_LABEL: Record<LinkPlatform, string> = { youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram", x: "X", linkedin: "LinkedIn" };
 
+/* Plattformen mit öffentlichem Leser und der Schlüssel, den er braucht (YOUTUBE_API_KEY, X_BEARER_TOKEN) */
+export const PUBLIC_READER_ENV: Partial<Record<LinkPlatform, string>> = { youtube: "YOUTUBE_API_KEY", x: "X_BEARER_TOKEN" };
+
+/* Ist der öffentliche Leser dieser Plattform eingerichtet? Ohne Leser (TikTok, Instagram, LinkedIn) false. */
+export function publicReaderConfigured(platform: LinkPlatform, env: Record<string, string | undefined> = process.env): boolean {
+  const name = PUBLIC_READER_ENV[platform];
+  return Boolean(name && env[name]?.trim());
+}
+
+/* Plattformen, deren öffentlicher Leser gerade eingerichtet ist */
+export function configuredReaderPlatforms(env: Record<string, string | undefined> = process.env): LinkPlatform[] {
+  return (Object.keys(PUBLIC_READER_ENV) as LinkPlatform[]).filter((p) => publicReaderConfigured(p, env));
+}
+
+export function notConfiguredMessage(platform: LinkPlatform): string {
+  return `Zahlen für ${PLATFORM_LABEL[platform]} sind noch nicht eingerichtet.`;
+}
+
 function fail(platform: LinkPlatform, error: PublicMetricsErrorCode, message: string): PublicMetricsFail {
   return { ok: false, platform, error, message };
 }
@@ -118,7 +137,7 @@ interface YoutubeVideosResponse {
 
 async function readYoutube(externalId: string, opts: Required<PublicMetricsOptions>): Promise<PublicMetricsResult> {
   const key = opts.env.YOUTUBE_API_KEY?.trim();
-  if (!key) return fail("youtube", "nicht_konfiguriert", "YouTube ist nicht konfiguriert: YOUTUBE_API_KEY fehlt.");
+  if (!key) return fail("youtube", "nicht_konfiguriert", notConfiguredMessage("youtube"));
   const q = new URLSearchParams({ part: "statistics,snippet,contentDetails", id: externalId, key });
   let res: Response;
   try {
@@ -173,7 +192,7 @@ export function clearPublicMetricsCache(): void {
 
 async function readX(externalId: string, opts: Required<PublicMetricsOptions>): Promise<PublicMetricsResult> {
   const token = opts.env.X_BEARER_TOKEN?.trim();
-  if (!token) return fail("x", "nicht_konfiguriert", "X ist nicht konfiguriert: X_BEARER_TOKEN fehlt.");
+  if (!token) return fail("x", "nicht_konfiguriert", notConfiguredMessage("x"));
   const hit = xCache.get(externalId);
   if (hit && opts.now() - hit.at < X_CACHE_TTL_MS) return { ...hit.result, cached: true };
   const q = new URLSearchParams({

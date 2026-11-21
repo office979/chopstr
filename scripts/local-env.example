@@ -37,6 +37,8 @@ CHOPSTR_MODEL_JUDGE=
 CHOPSTR_MODEL_JUDGE_ESCALATE=
 # Pfad zur Claude-CLI für LLM_PROVIDER=claude-cli (nur Entwicklung), leer = claude
 CHOPSTR_CLAUDE_CLI=
+# Zusätzliche Argumente für claude -p (vorher mit claude --help prüfen), leer = keine
+CHOPSTR_CLAUDE_CLI_ARGS=
 # Multimodaler Scan: gemini, mock oder none
 CHOPSTR_MM_PROVIDER=
 CHOPSTR_MODEL_MM=

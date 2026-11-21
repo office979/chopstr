@@ -431,3 +431,35 @@ def test_backfill_stops_when_budget_is_exhausted(monkeypatch):
     info = report.search["tiered"]
     assert info["editor"]["calls"] == 1 and info["backfill"]["added"] == 0
     assert info["backfill"]["stopped"] == "budget_exhausted"
+
+
+def test_rescoring_runs_on_score_tier_with_candidate_window_only(monkeypatch):
+    """Befund E2E: llm_score bekommt nur die Sätze des Kandidaten (plus Heilung), nie das ganze Transkript;
+    die Stufe ist konfigurierbar, Standard judge (Haiku)."""
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    words, sents = _thirty_sentences()
+
+    class NoEditor(FakeTiers):
+        def with_tier(self, tier):
+            return NoEditor(self.spans, tier, self.log, self.edit, self.repair)
+
+        def structured(self, *a, **k):
+            if a[3] == "edit_clip":
+                raise RuntimeError("Editor fällt aus")  # lokaler Editor ohne Werte: score_clip läuft beim Richter
+            return super().structured(*a, **k)
+
+    fake = NoEditor(spans=[(20, 23)])
+    tiered_engine.run(words, BRIEF, {}, None, fake, policy=editorial.load(2))
+    scores = fake.calls("score_clip")
+    assert scores and {c["tier"] for c in scores} == {"judge"}
+    for c in scores:
+        nums = {int(x) for x in re.findall(r"^\[(\d+)\]", c["user"], re.MULTILINE)}
+        assert nums and min(nums) >= 14 and max(nums) <= 29 and len(nums) <= 10, nums
+        assert c["cache_prefix"] is None  # kein Block, kein Transkript-Präfix
+
+    cfg = {**tiered_engine.engine_settings(editorial.load(2)), "score_tier": "editor"}
+    monkeypatch.setattr(tiered_engine, "engine_settings", lambda pol: cfg)
+    fake = NoEditor(spans=[(20, 23)])
+    report = tiered_engine.run(words, BRIEF, {}, None, fake, policy=editorial.load(2))
+    assert {c["tier"] for c in fake.calls("score_clip")} == {"editor"}
+    assert report.search["tiered"]["models"]["score_tier"] == "editor"

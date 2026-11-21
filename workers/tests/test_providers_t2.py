@@ -403,3 +403,34 @@ def test_gemini_rejects_too_large_inline(tmp_path, monkeypatch):
     mm = providers_mm.GeminiMM(settings(gemini_api_key="g"), transport=httpx.MockTransport(lambda r: httpx.Response(500)))
     with pytest.raises(ValueError, match="inline"):
         mm.scan_window(clip, 0, 10, "p")
+
+
+def test_cli_runs_carry_api_equivalent_and_token_note():
+    ledger = costlog.RunLedger(s=settings())
+    ledger({"stage": "editor", "model": "sonnet", "billing": "dev_subscription", "in": 1000, "cached_in": 10_000,
+            "cache_write": 40_000, "out": 2_000})  # fmt: skip
+    ledger({"stage": "prefilter", "model": "haiku", "billing": "dev_subscription", "in": 1000, "out": 1000})
+    ledger({"stage": "x", "model": "heuristic-v1", "billing": "local", "in": 1000})
+    s = ledger.summary(3600.0)
+    assert s["eur"] == 0.0
+    sonnet = (1000 * 3.0 + 10_000 * 0.30 + 40_000 * 3.75 + 2_000 * 15.0) / 1e6
+    haiku = (1000 * 1.0 + 1000 * 5.0) / 1e6
+    assert s["eur_api_equivalent"] == pytest.approx(sonnet + haiku)
+    assert s["by_stage"]["editor"]["eur_api_equivalent"] == pytest.approx(sonnet)
+    assert s["eur_api_equivalent_per_source_hour"] == pytest.approx(sonnet + haiku, abs=1e-4)
+    assert s["notes"] and "Systemprompt" in s["notes"][0]
+    api = costlog.RunLedger(s=settings())
+    api({"stage": "editor", "model": "claude-sonnet-5-5", "in": 1000, "out": 100})
+    assert api.summary()["eur_api_equivalent"] == api.summary()["eur"] and api.summary()["notes"] == []
+
+
+def test_claude_cli_extra_args_from_env_setting():
+    seen = {}
+
+    def runner(argv, prompt):
+        seen["argv"] = list(argv)
+        return json.dumps({"type": "result", "result": '{"ok": true}'})
+
+    s = settings(claude_cli_args="--flag-a 'wert mit leerzeichen'")
+    providers_llm.LLM(STD, provider="claude-cli", s=s, cli_runner=runner).structured("S", "U", SCHEMA, "answer", "p_v1")
+    assert seen["argv"][-2:] == ["--flag-a", "wert mit leerzeichen"]

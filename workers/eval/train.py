@@ -694,6 +694,9 @@ def scorecard(rdir: Path) -> dict[str, Any]:
     hours = (float(meta.get("duration_s") or 0) / 3600.0) or None
     eur = float(costs.get("eur") or 0.0) + float(jc.get("eur") or 0.0)
     tokens = int(costs.get("tokens") or 0) + int(jc.get("tokens") or 0)
+    # Abo-Läufe (claude-cli) kosten 0 €; das API-Äquivalent zeigt, was derselbe Lauf zum Listenpreis kosten würde
+    api_eq = float(costs.get("eur_api_equivalent", eur) or 0.0) + float(jc.get("eur_api_equivalent", jc.get("eur") or 0.0) or 0.0)
+    notes = list(dict.fromkeys([*(costs.get("notes") or []), *(jc.get("notes") or [])]))
     return {
         "version": "train_scorecard_v1", "run_id": meta["run_id"], "job_id": meta["job_id"], "created_at": meta["created_at"],
         "source_ref": meta["source"].get("cache_ref"), "duration_s": meta.get("duration_s"), "policy": meta.get("policy"),
@@ -701,6 +704,8 @@ def scorecard(rdir: Path) -> dict[str, Any]:
         "prompt_versions": meta.get("prompt_versions"), "clips": meta.get("clips"), "metrics": cmp_.get("metrics") or {},
         "eur": round(eur, 6), "tokens": tokens, "eur_per_source_hour": round(eur / hours, 4) if hours else None,
         "tokens_per_source_hour": round(tokens / hours, 1) if hours else None, "billing": costs.get("billing"),
+        "eur_api_equivalent": round(api_eq, 6), "eur_api_equivalent_per_source_hour": round(api_eq / hours, 4) if hours else None,
+        "cost_notes": notes,
         "skipped": costs.get("skipped"), "runtime_s": (meta.get("timings") or {}).get("total_s"),
     }  # fmt: skip
 
@@ -730,10 +735,14 @@ def scorecard_md(sc: dict[str, Any]) -> str:
             lines.append(f"| {key} | {f(m[key])} |")
     lines += [
         f"| EUR gesamt | {f(sc['eur'])} |", f"| EUR je Quellstunde | {f(sc['eur_per_source_hour'])} |",
+        f"| EUR API-Äquivalent | {f(sc.get('eur_api_equivalent'))} |",
+        f"| EUR API-Äquivalent je Quellstunde | {f(sc.get('eur_api_equivalent_per_source_hour'))} |",
         f"| Tokens je Quellstunde | {f(sc['tokens_per_source_hour'])} |", f"| Laufzeit s | {f(sc['runtime_s'])} |", "",
     ]  # fmt: skip
     if sc.get("skipped"):
         lines.append("Übersprungen wegen Budget: " + ", ".join(str(x.get("stage")) for x in sc["skipped"]))
+    for note in sc.get("cost_notes") or []:
+        lines.append(f"Hinweis Kosten: {note}")
     models = sc.get("models") or {}
     lines.append("Modelle: " + ", ".join(f"{k} {v}" for k, v in models.items()) + ".")
     return "\n".join(lines) + "\n"
@@ -749,7 +758,7 @@ def cmd_scorecard(args: argparse.Namespace) -> int:
     # Nur Kennzahlen: keine Texte, keine Transkripte, keine Medien
     line = {k: sc[k] for k in ("run_id", "job_id", "created_at", "source_ref", "duration_s", "policy", "engine", "provider", "models",
                                "prompt_versions", "clips", "metrics", "eur", "tokens", "eur_per_source_hour", "tokens_per_source_hour",
-                               "runtime_s")}  # fmt: skip
+                               "eur_api_equivalent", "runtime_s")}  # fmt: skip
     with hist.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(line, ensure_ascii=False) + "\n")
     print(str(rdir / "scorecard.md"))

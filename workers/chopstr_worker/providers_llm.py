@@ -577,6 +577,12 @@ class LLM:
             f"Codeblock. Es muss diesem JSON-Schema entsprechen:\n{json.dumps(schema, ensure_ascii=False)}"
         )
         argv = [self.s.claude_cli_bin or "claude", "-p", "--model", model, "--output-format", "json"]
+        # Zusatzflags aus CHOPSTR_CLAUDE_CLI_ARGS: die CLI schickt ihren eigenen Systemprompt und ihre Werkzeuge mit,
+        # deshalb sind ihre Tokens je Aufruf deutlich höher als über die API (siehe costlog, eur_api_equivalent).
+        if self.s.claude_cli_args:
+            import shlex
+
+            argv += shlex.split(self.s.claude_cli_args)
         raw = (self._cli_runner or run_cli)(argv, prompt)
         return parse_cli_output(raw, schema.get("required") or ())
 

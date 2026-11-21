@@ -169,6 +169,28 @@ def llm_call_eur(usage: dict[str, Any], s: config.Settings | None = None) -> flo
     return round(eur, 6)
 
 
+# Aliase der Claude-CLI auf die Präfixe der Preistabelle, für das API-Äquivalent eines Abo-Laufs.
+CLI_ALIAS_PRICE_PREFIX = {"haiku": "claude-haiku", "sonnet": "claude-sonnet", "opus": "claude-opus"}
+CLI_TOKEN_NOTE = (
+    "claude-cli: die Tokens enthalten den eigenen Systemprompt und die Werkzeugdefinitionen der CLI (meist zehntausende "
+    "Tokens je Aufruf, überwiegend Cache-Schreiben und -Lesen). eur_api_equivalent rechnet diese Tokens mit der "
+    "Preistabelle und liegt deshalb deutlich über dem, was derselbe Lauf über die Anthropic-API kosten würde."
+)
+
+
+def llm_call_eur_api_equivalent(usage: dict[str, Any], s: config.Settings | None = None) -> float:
+    """Was ein Aufruf zum Listenpreis der API kosten würde: bei ``api``/``batch`` gleich ``llm_call_eur``, bei
+    ``dev_subscription`` (claude-cli) mit dem Preis des Modells hinter dem Alias, lokal 0 €."""
+    s = s or config.settings()
+    billing = str(usage.get("billing") or BILLING_API)
+    if billing == BILLING_LOCAL:
+        return 0.0
+    if billing != BILLING_DEV:
+        return llm_call_eur(usage, s)
+    model = str(usage.get("model") or "")
+    return llm_call_eur({**usage, "model": CLI_ALIAS_PRICE_PREFIX.get(model, model), "billing": BILLING_API}, s)
+
+
 TOKEN_FIELDS = ("in", "cached_in", "cache_write", "out")
 
 
@@ -236,6 +258,9 @@ class RunLedger:
             **{k: 0 if cached else int(usage.get(k, 0) or 0) for k in TOKEN_FIELDS},
         }
         entry["eur"] = 0.0 if cached else llm_call_eur(entry, self.s)
+        entry["eur_api_equivalent"] = 0.0 if cached else llm_call_eur_api_equivalent(entry, self.s)
+        if usage.get("schema_retry"):
+            entry["schema_retry"] = True
         with self._lock:
             self.entries.append(entry)
 
@@ -245,12 +270,15 @@ class RunLedger:
         by_model: dict[str, dict[str, Any]] = {}
         for e in self.entries:
             for table, key in ((by_stage, e["stage"]), (by_model, str(e["model"] or ""))):
-                row = table.setdefault(key, {"calls": 0, **{k: 0 for k in TOKEN_FIELDS}, "eur": 0.0})
+                row = table.setdefault(key, {"calls": 0, **{k: 0 for k in TOKEN_FIELDS}, "eur": 0.0, "eur_api_equivalent": 0.0})
                 row["calls"] += 1
                 for k in TOKEN_FIELDS:
                     row[k] += e[k]
                 row["eur"] = round(row["eur"] + float(e["eur"]), 6)
+                row["eur_api_equivalent"] = round(row["eur_api_equivalent"] + float(e.get("eur_api_equivalent", 0.0)), 6)
         hours = (float(source_seconds) / 3600.0) if source_seconds else None
+        api_eq = round(sum(float(e.get("eur_api_equivalent", 0.0)) for e in self.entries), 6)
+        billing = sorted({e["billing"] for e in self.entries})
         return {
             "calls": len(self.entries),
             "cached_results": sum(1 for e in self.entries if e["cached_result"]),
@@ -265,7 +293,11 @@ class RunLedger:
             "source_hours": round(hours, 4) if hours else None,
             "eur_per_source_hour": round(self.eur / hours, 4) if hours else None,
             "tokens_per_source_hour": round(self.tokens / hours, 1) if hours else None,
-            "billing": sorted({e["billing"] for e in self.entries}),
+            "eur_api_equivalent": api_eq,
+            "eur_api_equivalent_per_source_hour": round(api_eq / hours, 4) if hours else None,
+            "schema_retries": sum(1 for e in self.entries if e.get("schema_retry")),
+            "billing": billing,
+            "notes": [CLI_TOKEN_NOTE] if BILLING_DEV in billing else [],
         }
 
 
@@ -282,6 +314,7 @@ __all__ = [
     "RunLedger",
     "estimate_eur",
     "llm_call_eur",
+    "llm_call_eur_api_equivalent",
     "make_sink",
     "price_for",
     "price_table",

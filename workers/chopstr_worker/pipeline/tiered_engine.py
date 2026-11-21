@@ -39,7 +39,7 @@ from typing import Any
 
 from .. import editorial, prompts
 from ..costlog import BudgetExceeded
-from ..providers_llm import SchemaError
+from ..providers_llm import TIERS, SchemaError
 from ..residency import ResidencyError
 from . import mm_scan, payoff_search, signals, story_engine, story_score
 from .segment import Sentence, chapterize, numbered, sentences_from_annotated, sentences_from_words
@@ -68,6 +68,8 @@ DEFAULTS: dict[str, Any] = {
     "min_target_clips": 0,
     "backfill": False,
     "max_backfill": 20,
+    # Modellstufe für Neubewertung (score_clip nach einer Heilung), Bestätigung und Kritiker: Standard judge (Haiku)
+    "score_tier": "judge",
 }
 # Ablehnung durch den Editor nur mit einem dieser Gründe (editor_v2); ohne gültigen Grund gilt die Ablehnung nicht.
 REJECT_REASONS: dict[str, str] = {
@@ -155,6 +157,9 @@ def engine_settings(policy: editorial.Policy | None) -> dict[str, Any]:
     for k in ("candidates_per_source_hour", "editor_oversample", "prefilter_block_s", "prefilter_overlap_s", "min_len_s", "max_len_s",
               "repair_context_s", "editor_per_source_hour", "target_clips_per_source_hour"):  # fmt: skip
         cfg[k] = float(cfg[k])
+    cfg["score_tier"] = str(cfg["score_tier"] or "judge")
+    if cfg["score_tier"] not in TIERS:
+        raise editorial.PolicyError(f"implementation.engine.score_tier: erlaubt sind {', '.join(TIERS)}")
     if min(cfg["editor_per_source_hour"], cfg["target_clips_per_source_hour"], cfg["min_target_clips"], cfg["max_backfill"]) < 0:
         raise editorial.PolicyError("implementation.engine: Ausbeute-Werte dürfen nicht negativ sein")
     if not 0 < cfg["min_len_s"] < cfg["max_len_s"]:
@@ -571,7 +576,7 @@ def run(
     n_out = max(output_count(dur, cfg), n_target)
     n_editor = editor_count(dur, n_out, cfg)
     ppol = _prompt_policy(pol)
-    pre_llm, ed_llm, judge_llm = _tier(llm, "prefilter"), _tier(llm, "editor"), _tier(llm, "judge")
+    pre_llm, ed_llm, judge_llm = _tier(llm, "prefilter"), _tier(llm, "editor"), _tier(llm, cfg["score_tier"])
     report = story_engine.DetectReport(
         prompt_versions=prompt_versions(pol), model_id=getattr(ed_llm, "model", lambda: "")(), provider=getattr(llm, "provider", ""),
         weights=weights, engine=ENGINE_VERSION,
@@ -583,7 +588,7 @@ def run(
         "blocks": 0, "prefilter": {"calls": 0, "candidates": 0, "local": heuristic}, "editor": {"calls": 0, "local": 0, "rejected": 0},
         "skipped": [], "models": {
             "prefilter": getattr(pre_llm, "model", lambda: "")(), "editor": getattr(ed_llm, "model", lambda: "")(),
-            "judge": getattr(judge_llm, "model", lambda: "")(),
+            "judge": getattr(judge_llm, "model", lambda: "")(), "score_tier": cfg["score_tier"],
         },
     }  # fmt: skip
     report.search["tiered"] = info

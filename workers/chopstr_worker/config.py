@@ -138,6 +138,7 @@ class Settings:
     model_judge: str = ""
     model_judge_escalate: str = ""
     claude_cli_bin: str = "claude"
+    claude_cli_args: str = ""
     mm_provider: str = "none"
     model_mm: str = ""
     gemini_api_key: str = ""
@@ -229,6 +230,7 @@ def load_settings() -> Settings:
         model_judge=_env("CHOPSTR_MODEL_JUDGE"),
         model_judge_escalate=_env("CHOPSTR_MODEL_JUDGE_ESCALATE"),
         claude_cli_bin=_env("CHOPSTR_CLAUDE_CLI", "claude"),
+        claude_cli_args=_env("CHOPSTR_CLAUDE_CLI_ARGS"),
         mm_provider=_env("CHOPSTR_MM_PROVIDER", "none"),
         model_mm=_env("CHOPSTR_MODEL_MM"),
         gemini_api_key=_env("GEMINI_API_KEY"),

@@ -237,3 +237,19 @@ def test_multi_segment_metrics():
     assert m["details"][(0, 0)]["iou_segments"] == pytest.approx(0.2) and m["details"][(0, 0)]["basis"] == "span"
     assert "aus 2 Quellstellen verdichtet" in train.judge_rubric({**gold[0], "breakdown": {"edits": {"compression": 5.0}}})
     assert "verdichtet" not in train.judge_rubric({**gold[1], "breakdown": {}})
+
+
+def test_scorecard_shows_api_equivalent_for_cli_runs(env, capsys):
+    from chopstr_worker import config, costlog
+
+    rdir = _run(env, capsys)
+    ledger = costlog.RunLedger(s=config.Settings())
+    ledger({"stage": "editor", "model": "sonnet", "billing": "dev_subscription", "in": 10, "cache_write": 50_000, "out": 2_000})
+    (rdir / "costs.json").write_text(json.dumps(ledger.summary(985.0)), encoding="utf-8")
+    hist = env["tmp"] / "history.jsonl"
+    assert train.main(["scorecard", "--run", str(rdir), "--history", str(hist)]) == 0
+    sc = json.loads((rdir / "scorecard.json").read_text())
+    assert sc["eur"] == 0.0 and sc["eur_api_equivalent"] > 0.2 and sc["cost_notes"]
+    md = (rdir / "scorecard.md").read_text()
+    assert "EUR API-Äquivalent" in md and "Systemprompt" in md
+    assert json.loads(hist.read_text().splitlines()[-1])["eur_api_equivalent"] == sc["eur_api_equivalent"]

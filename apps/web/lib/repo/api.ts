@@ -7,6 +7,7 @@ import type {
   ApiKey,
   ApiKeyCreateInput,
   ApiKeyLookup,
+  LinkPublicationCreateInput,
   OutboxEvent,
   PlatformConnectionSummary,
   Publication,
@@ -49,6 +50,7 @@ export interface ApiRepo {
   /* Linktest: gibt es diesen Beitrag im Workspace schon als Publikation? */
   findPublicationByExternal(platform: string, externalId: string): Promise<Publication | null>;
   createPublication(input: PublicationCreateInput): Promise<Publication>;
+  createLinkPublication(input: LinkPublicationCreateInput): Promise<Publication>;
   getPublication(id: string): Promise<Publication | null>;
   setPublicationWorkflow(id: string, workflowId: string | null): Promise<void>;
   /* Upload per API: Quelle war `uploading`, tusd-Hook ergänzt die Datei */
@@ -159,6 +161,10 @@ function toPublication(r: Row): Publication {
     temporal_workflow_id: (r.temporal_workflow_id as string | null) ?? null,
     created_by: (r.created_by as string | null) ?? null,
     created_at: isoOrNull(r.created_at) ?? "",
+    tracking: (r.tracking as Publication["tracking"]) ?? "oauth",
+    tracking_until: isoOrNull(r.tracking_until),
+    next_snapshot_at: isoOrNull(r.next_snapshot_at),
+    link_check: jsonValue<Record<string, unknown> | null>(r.link_check, null),
   };
 }
 
@@ -370,6 +376,19 @@ export const apiPostgresRepo: ApiRepo = {
       const rows = await tx`
         insert into publications (workspace_id, clip_id, connection_id, platform, status, scheduled_for, caption, title, created_by)
         values (${session.workspaceId}, ${input.clip_id}, ${input.connection_id}, ${input.platform}, 'scheduled', ${input.scheduled_for}, ${input.caption}, ${input.title}, ${session.userId})
+        returning *`;
+      return toPublication(rows[0] as Row);
+    });
+  },
+
+  async createLinkPublication(input) {
+    const session = await currentSession();
+    return withContext(session, async (tx) => {
+      const rows = await tx`
+        insert into publications (workspace_id, clip_id, connection_id, platform, status, external_id, external_url, published_at,
+                                  tracking, tracking_until, next_snapshot_at, link_check, created_by)
+        values (${session.workspaceId}, ${input.clip_id}, ${input.connection_id}, ${input.platform}, 'manual', ${input.external_id}, ${input.external_url},
+                ${input.published_at}, 'link', ${input.tracking_until}, ${input.next_snapshot_at}, ${tx.json(input.link_check as never)}, ${session.userId})
         returning *`;
       return toPublication(rows[0] as Row);
     });

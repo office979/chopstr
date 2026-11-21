@@ -118,6 +118,15 @@ export const SCHEMAS: Record<string, JsonSchema> = {
     },
     additionalProperties: false,
   },
+  LinkRegister: {
+    type: "object",
+    required: ["url"],
+    properties: {
+      url: { type: "string", minLength: 1, maxLength: 2000, description: "Link zum geposteten Beitrag" },
+      track_days: { type: "integer", minimum: 1, maximum: 90, default: 30, description: "Wie viele Tage ab Veröffentlichung gemessen wird" },
+    },
+    additionalProperties: false,
+  },
   CreateBrandProfile: {
     type: "object",
     required: ["name"],
@@ -297,6 +306,10 @@ export const SCHEMAS: Record<string, JsonSchema> = {
       error: { type: ["string", "null"] },
       published_at: { type: ["string", "null"] },
       metrics: { type: ["object", "null"], additionalProperties: true },
+      tracking: { type: "string", enum: ["oauth", "link", "off"], description: "Woher die Messwerte kommen" },
+      tracking_until: { type: ["string", "null"] },
+      next_snapshot_at: { type: ["string", "null"] },
+      link_check: { type: ["object", "null"], additionalProperties: true },
     },
   },
   LinkTestResult: {
@@ -429,6 +442,7 @@ export const ENDPOINTS: EndpointDef[] = [
   { method: "post", path: "/clips/{id}/guest-approval", operationId: "requestGuestApproval", summary: "Gast-Freigabe anfordern", description: "Link 14 Tage gültig; mit guest_email wird eine E-Mail versendet. Plan-Gate features.guest_approval.", scope: "write", tag: "Clips", params: [idParam("id", "Clip-ID")], requestBody: "GuestApprovalRequest", responses: { "201": { description: "Angefordert", schema: { type: "object", required: ["approval", "link"], properties: { approval: ref("GuestApproval"), link: { type: "string" } } } }, "403": ERR("Plan enthält keine Gast-Freigaben") } },
   { method: "post", path: "/clips/{id}/publish", operationId: "publishClip", summary: "Clip veröffentlichen oder planen", description: "Gates: Clip rendered, Kandidat accepted, Gast-Freigabe approved falls verlangt, AVV angenommen, Plan features.publishing (sonst 402). Legt eine Publikation an und startet PublishWorkflow publish-<id>; ohne Temporal bleibt sie scheduled.", scope: "publish", tag: "Publishing", params: [idParam("id", "Clip-ID")], requestBody: "Publish", responses: { "201": { description: "Publikation angelegt", schema: single("publication", "Publication", { workflow_started: { type: "boolean" }, hint: { type: ["string", "null"] } }) }, "402": ERR("Plan ohne Publishing"), "409": ERR("Gate nicht erfüllt") } },
   { method: "post", path: "/links/test", operationId: "testLink", summary: "Link prüfen", description: "Zerlegt einen Beitragslink, liest öffentliche Messwerte (YouTube mit YOUTUBE_API_KEY, X mit X_BEARER_TOKEN), prüft Besitz über die Verbindungen des Workspace, Dubletten und Alter. Schreibt nichts. Fehlen Schlüssel, stehen Hinweise statt Zahlen in der Antwort.", scope: "read", tag: "Publishing", requestBody: "LinkTest", responses: { "200": { description: "Ergebnis des Linktests", schema: ref("LinkTestResult") }, "404": ERR("Clip nicht gefunden") } },
+  { method: "post", path: "/clips/{id}/links", operationId: "registerClipLink", summary: "Link zu einem Clip verfolgen", description: "Führt den Linktest aus und legt eine Publikation an (status manual, tracking link, published_at laut Plattform oder jetzt, tracking_until = published_at + track_days). Der Worker misst ab sofort: stündlich bis 6 h, alle 6 h bis 48 h, danach täglich. Gleicher Beitrag schon vorhanden: 409.", scope: "publish", tag: "Publishing", params: [idParam("id", "Clip-ID")], requestBody: "LinkRegister", responses: { "201": { description: "Publikation angelegt", schema: single("publication", "Publication", { check: ref("LinkTestResult"), zusammenfassung: { type: "array", items: { type: "string" } } }) }, "400": ERR("Link ungültig"), "404": ERR("Clip nicht gefunden"), "409": ERR("Beitrag wird schon verfolgt oder Clip noch nicht fertig") } },
   { method: "get", path: "/publications/{id}", operationId: "getPublication", summary: "Publikation anzeigen", scope: "publish", tag: "Publishing", params: [idParam("id", "Publikations-ID")], responses: { "200": { description: "Publikation", schema: single("publication", "Publication") }, "404": ERR("Nicht gefunden") } },
   { method: "get", path: "/brand-profiles", operationId: "listBrandProfiles", summary: "Markenprofile auflisten", scope: "read", tag: "Markenprofile", responses: { "200": { description: "Liste", schema: list("brand_profiles", "BrandProfile") } } },
   { method: "post", path: "/brand-profiles", operationId: "createBrandProfile", summary: "Markenprofil anlegen", scope: "write", tag: "Markenprofile", requestBody: "CreateBrandProfile", responses: { "201": { description: "Angelegt", schema: single("brand_profile", "BrandProfile") } } },

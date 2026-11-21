@@ -181,6 +181,10 @@ export function serializePublication(p: Publication) {
     published_at: p.published_at,
     metrics: p.metrics,
     metrics_fetched_at: p.metrics_fetched_at,
+    tracking: p.tracking ?? "oauth",
+    tracking_until: p.tracking_until ?? null,
+    next_snapshot_at: p.next_snapshot_at ?? null,
+    link_check: p.link_check ?? null,
     created_at: p.created_at,
   };
 }

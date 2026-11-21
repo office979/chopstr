@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ENDPOINTS, requestSchema, resolveRef } from "@/lib/api/openapi";
 import { validate } from "@/lib/api/validate";
-import { clipFormatHint, runLinkCheck, type LinkCheckDeps } from "@/lib/publishing/link-check";
+import { clipFormatHint, linkCheckSummary, planLinkPublication, runLinkCheck, type LinkCheckDeps } from "@/lib/publishing/link-check";
 import { parsePostUrl } from "@/lib/publishing/links";
 import { emptyPublicMetrics, type PublicMetricsResult } from "@/lib/publishing/public-metrics";
 
@@ -155,6 +155,81 @@ describe("Body-Schema LinkTest", () => {
   });
   it("ist im OpenAPI-Dokument eingetragen", () => {
     expect(ENDPOINTS.some((e) => e.path === "/links/test" && e.method === "post" && e.requestBody === "LinkTest")).toBe(true);
+  });
+});
+
+describe("planLinkPublication", () => {
+  it("misst 30 Tage ab der Veröffentlichung laut Plattform, erste Messung sofort", async () => {
+    const check = await runLinkCheck("https://youtube.com/shorts/dQw4w9WgXcQ", deps());
+    const out = planLinkPublication(check, { now: NOW });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.plan).toMatchObject({
+      platform: "youtube",
+      external_id: "dQw4w9WgXcQ",
+      external_url: "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+      published_at: "2026-11-21T10:30:00.000Z",
+      tracking_until: "2026-12-21T10:30:00.000Z",
+      tracking_days: 30,
+      next_snapshot_at: "2026-11-21T12:00:00.000Z",
+      connection_id: null,
+    });
+    expect(out.plan.link_check.checks.parsed).toBe(true);
+  });
+
+  it("nimmt jetzt, wenn die Plattform keinen Zeitpunkt nennt", async () => {
+    const check = await runLinkCheck("https://youtu.be/dQw4w9WgXcQ", deps({ readPublic: async () => ({ ok: false, platform: "youtube", error: "nicht_konfiguriert", message: "x" }) }));
+    const out = planLinkPublication(check, { now: NOW, trackDays: 7 });
+    expect(out.ok && out.plan.published_at).toBe("2026-11-21T12:00:00.000Z");
+    expect(out.ok && out.plan.tracking_until).toBe("2026-11-28T12:00:00.000Z");
+  });
+
+  it("begrenzt track_days auf 1 bis 90", async () => {
+    const check = await runLinkCheck("https://youtu.be/dQw4w9WgXcQ", deps());
+    expect(planLinkPublication(check, { now: NOW, trackDays: 500 }).ok && (planLinkPublication(check, { now: NOW, trackDays: 500 }) as { plan: { tracking_days: number } }).plan.tracking_days).toBe(90);
+    expect((planLinkPublication(check, { now: NOW, trackDays: 0 }) as { plan: { tracking_days: number } }).plan.tracking_days).toBe(1);
+  });
+
+  it("lehnt Dubletten mit 409 ab", async () => {
+    const check = await runLinkCheck("https://youtu.be/dQw4w9WgXcQ", deps({ findDuplicate: async () => ({ id: "pub-1" }) }));
+    expect(planLinkPublication(check, { now: NOW })).toMatchObject({ ok: false, status: 409, code: "link_duplicate", duplicate_publication_id: "pub-1" });
+  });
+
+  it("lehnt ungültige Links und Kurzlinks mit 400 ab", async () => {
+    expect(planLinkPublication(await runLinkCheck("kein link", deps()), { now: NOW })).toMatchObject({ ok: false, status: 400, code: "link_invalid" });
+    expect(planLinkPublication(await runLinkCheck("https://vm.tiktok.com/ZMabc123/", deps()), { now: NOW })).toMatchObject({ ok: false, status: 400, code: "link_unresolved" });
+  });
+
+  it("übernimmt die Verbindung, wenn der Beitrag ihr gehört", async () => {
+    const check = await runLinkCheck(
+      "https://youtu.be/dQw4w9WgXcQ",
+      deps({ listConnections: async () => [{ id: "conn-1", platform: "youtube", account_label: "K", external_account_id: "UC123", status: "connected" }] }),
+    );
+    const out = planLinkPublication(check, { now: NOW });
+    expect(out.ok && out.plan.connection_id).toBe("conn-1");
+  });
+});
+
+describe("linkCheckSummary", () => {
+  it("fasst das Ergebnis in Sätzen ohne Gedankenstrich zusammen", async () => {
+    const lines = linkCheckSummary(await runLinkCheck("https://youtu.be/dQw4w9WgXcQ", deps()));
+    expect(lines).toEqual(["Link erkannt: YouTube", "Kein verbundenes Konto", "Wird 30 Tage lang gemessen"]);
+    for (const l of lines) expect(l).not.toMatch(DASHES);
+  });
+  it("nennt bei ungültigen Links nur den Grund", async () => {
+    expect(linkCheckSummary(await runLinkCheck("kein link", deps()))).toEqual(["Das ist kein gültiger Link."]);
+  });
+});
+
+describe("Body-Schema LinkRegister", () => {
+  const check = (body: unknown) => validate(body, requestSchema("LinkRegister"), "body", [], resolveRef);
+  it("lässt track_days zwischen 1 und 90 zu", () => {
+    expect(check({ url: "https://youtu.be/dQw4w9WgXcQ", track_days: 30 })).toEqual([]);
+    expect(check({ url: "https://youtu.be/dQw4w9WgXcQ", track_days: 91 })).not.toEqual([]);
+    expect(check({ url: "https://youtu.be/dQw4w9WgXcQ", track_days: 1.5 })).not.toEqual([]);
+  });
+  it("ist im OpenAPI-Dokument eingetragen", () => {
+    expect(ENDPOINTS.some((e) => e.path === "/clips/{id}/links" && e.scope === "publish")).toBe(true);
   });
 });
 

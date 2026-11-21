@@ -243,6 +243,36 @@ export const apiDemoRepo: ApiRepo = {
     return publication;
   },
 
+  async createLinkPublication(input) {
+    const session = await currentSession();
+    const publication: Publication = {
+      id: uuid(),
+      workspace_id: session.workspaceId,
+      clip_id: input.clip_id,
+      connection_id: input.connection_id,
+      platform: input.platform,
+      status: "manual",
+      scheduled_for: null,
+      caption: null,
+      title: null,
+      external_id: input.external_id,
+      external_url: input.external_url,
+      error: null,
+      published_at: input.published_at,
+      metrics: null,
+      metrics_fetched_at: null,
+      temporal_workflow_id: null,
+      created_by: session.userId,
+      created_at: now(),
+      tracking: "link",
+      tracking_until: input.tracking_until,
+      next_snapshot_at: input.next_snapshot_at,
+      link_check: input.link_check,
+    };
+    state().publications.unshift(publication);
+    return publication;
+  },
+
   async getPublication(id) {
     const session = await currentSession();
     return state().publications.find((p) => p.id === id && p.workspace_id === session.workspaceId) ?? null;

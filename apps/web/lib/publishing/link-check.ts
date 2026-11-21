@@ -121,6 +121,65 @@ export async function runLinkCheck(url: string, deps: LinkCheckDeps): Promise<Li
   return { ...base, checks, metrics, published_at: publishedAt, author, connection_id: connectionId, hinweise };
 }
 
+export const DEFAULT_TRACK_DAYS = 30;
+export const MAX_TRACK_DAYS = 90;
+
+export interface LinkPublicationPlan {
+  platform: LinkPlatform;
+  external_id: string;
+  external_url: string;
+  connection_id: string | null;
+  published_at: string;
+  tracking_until: string;
+  tracking_days: number;
+  next_snapshot_at: string;
+  link_check: { checks: LinkChecks; hinweise: string[]; metrics: LinkCheckMetrics | null; author: LinkCheckResult["author"]; checked_at: string };
+}
+
+export type LinkPlanOutcome = { ok: true; plan: LinkPublicationPlan } | { ok: false; status: 400 | 409; code: string; message: string; duplicate_publication_id?: string };
+
+/* Aus dem Linktest wird eine Publikation zum Verfolgen: veröffentlicht laut Plattform (sonst jetzt), gemessen
+ * bis published_at + trackDays, erste Messung sofort. Dubletten werden abgelehnt (409). */
+export function planLinkPublication(result: LinkCheckResult, opts: { now: number; trackDays?: number }): LinkPlanOutcome {
+  if (!result.checks.parsed || !result.platform || !result.external_id || !result.normalized_url) {
+    return { ok: false, status: 400, code: "link_invalid", message: result.hinweise[0] ?? "Der Link ist ungültig." };
+  }
+  if (result.kind === "short_link") {
+    return { ok: false, status: 400, code: "link_unresolved", message: "Der Kurzlink ließ sich nicht auflösen. Bitte den vollständigen Link einfügen." };
+  }
+  if (result.checks.duplicate_publication_id) {
+    return { ok: false, status: 409, code: "link_duplicate", message: "Dieser Beitrag wird schon verfolgt.", duplicate_publication_id: result.checks.duplicate_publication_id };
+  }
+  const days = Math.min(MAX_TRACK_DAYS, Math.max(1, Math.round(opts.trackDays ?? DEFAULT_TRACK_DAYS)));
+  const platformTime = result.published_at ? Date.parse(result.published_at) : NaN;
+  /* Ein Zeitpunkt aus der Zukunft wäre ein Uhrenfehler; dann gilt jetzt */
+  const publishedAt = Number.isFinite(platformTime) && platformTime <= opts.now ? platformTime : opts.now;
+  return {
+    ok: true,
+    plan: {
+      platform: result.platform,
+      external_id: result.external_id,
+      external_url: result.normalized_url,
+      connection_id: result.connection_id,
+      published_at: new Date(publishedAt).toISOString(),
+      tracking_until: new Date(publishedAt + days * 86_400_000).toISOString(),
+      tracking_days: days,
+      next_snapshot_at: new Date(opts.now).toISOString(),
+      link_check: { checks: result.checks, hinweise: result.hinweise, metrics: result.metrics, author: result.author, checked_at: new Date(opts.now).toISOString() },
+    },
+  };
+}
+
+/* Kurze Sätze für die Oberfläche: was der Linktest ergeben hat */
+export function linkCheckSummary(result: LinkCheckResult, trackDays: number = DEFAULT_TRACK_DAYS): string[] {
+  if (!result.checks.parsed || !result.platform) return result.hinweise.slice(0, 1);
+  const out = [`Link erkannt: ${PLATFORM_LABEL[result.platform]}`];
+  out.push(result.checks.owned_by_connection ? "Verbundenes Konto erkannt" : "Kein verbundenes Konto");
+  if (result.checks.duplicate_publication_id) out.push("Dieser Beitrag wird schon verfolgt");
+  else out.push(`Wird ${trackDays} Tage lang gemessen`);
+  return out;
+}
+
 /* Clip-Plattform (Schnittformat) ↔ Link-Plattform. X hat kein eigenes Format, jedes passt. */
 const CLIP_FORMAT_PLATFORM: Record<string, LinkPlatform> = { shorts: "youtube", reels: "instagram", tiktok: "tiktok", linkedin: "linkedin" };
 const CLIP_FORMAT_LABEL: Record<string, string> = { shorts: "YouTube Shorts", reels: "Instagram Reels", tiktok: "TikTok", linkedin: "LinkedIn" };

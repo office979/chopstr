@@ -30,6 +30,13 @@ interface Publikation {
   created_at: string;
 }
 
+/* Eingetragene Links speichern die Plattform des Links (youtube, x …), nicht das Schnittformat */
+const LINK_PLATTFORMEN: Record<string, string> = { youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram", x: "X", linkedin: "LinkedIn" };
+
+function plattformName(p: string): string {
+  return PLATFORM_LABELS[p as Platform] ?? LINK_PLATTFORMEN[p] ?? p;
+}
+
 interface Rueckmeldung {
   publication_id: string | null;
   views: number | null;
@@ -75,6 +82,11 @@ export function Gepostet({
   const [busy, setBusy] = useState(false);
   const [fehler, setFehler] = useState<string | null>(null);
   const [eingabe, setEingabe] = useState<Record<string, string>>({});
+  /* Link verfolgen: chopstr prüft den Link und misst danach von selbst (Worker, 30 Tage) */
+  const [linkOffen, setLinkOffen] = useState(false);
+  const [verfolgLink, setVerfolgLink] = useState("");
+  const [ergebnis, setErgebnis] = useState<string[] | null>(null);
+  const [linkHinweise, setLinkHinweise] = useState<string[]>([]);
 
   const laden = useCallback(async () => {
     try {
@@ -136,6 +148,30 @@ export function Gepostet({
     }
   };
 
+  const linkVerfolgen = async () => {
+    setBusy(true);
+    setFehler(null);
+    setErgebnis(null);
+    setLinkHinweise([]);
+    try {
+      const res = await fetch(`/api/projects/${sourceId}/clips/${clipId}/links`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: verfolgLink.trim() }),
+      });
+      const d = (await res.json()) as { error?: string; zusammenfassung?: string[]; check?: { hinweise?: string[] } };
+      setLinkHinweise(d.check?.hinweise ?? []);
+      if (!res.ok) throw new Error(d.error ?? "Das hat nicht geklappt");
+      setErgebnis(d.zusammenfassung ?? []);
+      setVerfolgLink("");
+      await laden();
+    } catch (err) {
+      setFehler(err instanceof Error ? err.message : "Das hat nicht geklappt");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const zahlenSpeichern = async () => {
     if (!zahlenFuer) return;
     setBusy(true);
@@ -179,7 +215,7 @@ export function Gepostet({
             return (
               <span key={p.id} className="flex items-center gap-2">
                 <span className="text-text-2">
-                  Gepostet auf {PLATFORM_LABELS[p.platform as Platform] ?? p.platform}
+                  Gepostet auf {plattformName(p.platform)}
                   {p.published_at ? ` am ${formatDate(p.published_at)}` : ""}
                 </span>
                 {z && z.views != null ? (
@@ -206,6 +242,65 @@ export function Gepostet({
           })}
         </div>
       )}
+
+      {canPublish && (
+        <button
+          type="button"
+          onClick={() => {
+            setLinkOffen(true);
+            setErgebnis(null);
+            setLinkHinweise([]);
+            setFehler(null);
+          }}
+          className="text-xs text-text-2 underline underline-offset-4 hover:text-text"
+        >
+          Link verfolgen
+        </button>
+      )}
+
+      <Modal
+        open={linkOffen}
+        onClose={() => !busy && setLinkOffen(false)}
+        title="Link verfolgen"
+        description="Füg den Link zum geposteten Beitrag ein. chopstr prüft ihn und holt danach die Zahlen von selbst."
+      >
+        <div className="flex flex-col gap-4">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-sm text-text">Link einfügen</span>
+            <span className="text-xs text-text-3">YouTube, TikTok, Instagram, X oder LinkedIn</span>
+            <input
+              type="url"
+              value={verfolgLink}
+              onChange={(e) => setVerfolgLink(e.target.value)}
+              placeholder="https://"
+              className="transition-soft rounded-inner border border-line bg-black/40 px-4 py-2.5 text-[15px] text-text placeholder:text-text-3 hover:border-line-strong focus:border-white/50 focus:outline-none"
+            />
+          </label>
+          {ergebnis && (
+            <ul className="flex flex-col gap-1 text-sm text-text">
+              {ergebnis.map((z) => (
+                <li key={z}>{z}</li>
+              ))}
+            </ul>
+          )}
+          {linkHinweise.length > 0 && (
+            <ul className="flex flex-col gap-1 text-xs text-text-3">
+              {linkHinweise.map((h) => (
+                <li key={h}>{h}</li>
+              ))}
+            </ul>
+          )}
+          {fehler && <p className="text-sm text-attention">{fehler}</p>}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="ghost" onClick={() => setLinkOffen(false)} disabled={busy}>
+              {ergebnis ? "Schließen" : "Abbrechen"}
+            </Button>
+            <Button onClick={() => void linkVerfolgen()} disabled={busy || !verfolgLink.trim()}>
+              {busy ? "Wird geprüft" : "Link prüfen und verfolgen"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={offen}

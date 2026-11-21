@@ -151,6 +151,24 @@ export interface Publication {
   temporal_workflow_id: string | null;
   created_by: string | null;
   created_at: string;
+  /* Link-Tracking (Migration 0019); fehlt bei Zeilen aus der Zeit davor */
+  tracking?: "oauth" | "link" | "off";
+  tracking_until?: string | null;
+  next_snapshot_at?: string | null;
+  link_check?: Record<string, unknown> | null;
+}
+
+/* Publikation aus einem eingefügten Link (status manual, tracking link) */
+export interface LinkPublicationCreateInput {
+  clip_id: string;
+  connection_id: string | null;
+  platform: string;
+  external_id: string;
+  external_url: string;
+  published_at: string;
+  tracking_until: string;
+  next_snapshot_at: string;
+  link_check: Record<string, unknown>;
 }
 
 export interface PublicationCreateInput {

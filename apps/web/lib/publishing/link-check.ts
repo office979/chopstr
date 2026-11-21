@@ -52,7 +52,7 @@ export interface LinkCheckResult {
   connection_id: string | null;
   /* Lässt sich der Beitrag jetzt messen? Eingerichteter öffentlicher Leser (YouTube, X) oder eigene Verbindung */
   measurable: boolean;
-  hinweise: string[];
+  notes: string[];
 }
 
 export const DUPLICATE_MESSAGE = "Dieser Beitrag ist schon eingetragen.";
@@ -66,16 +66,16 @@ function emptyChecks(): LinkChecks {
 export async function runLinkCheck(url: string, deps: LinkCheckDeps): Promise<LinkCheckResult> {
   const parsed = await deps.resolve(url);
   if (isLinkError(parsed)) {
-    return { platform: null, external_id: null, normalized_url: null, kind: null, checks: emptyChecks(), metrics: null, published_at: null, author: null, connection_id: null, measurable: false, hinweise: [parsed.message] };
+    return { platform: null, external_id: null, normalized_url: null, kind: null, checks: emptyChecks(), metrics: null, published_at: null, author: null, connection_id: null, measurable: false, notes: [parsed.message] };
   }
   const checks: LinkChecks = { ...emptyChecks(), parsed: true };
-  const hinweise: string[] = [];
+  const notes: string[] = [];
   const label = PLATFORM_LABEL[parsed.platform];
   const base = { platform: parsed.platform, external_id: parsed.externalId, normalized_url: parsed.normalizedUrl, kind: parsed.kind };
 
   if (parsed.kind === "short_link") {
-    hinweise.push("Der Kurzlink ließ sich nicht auflösen. Bitte den vollständigen Link einfügen.");
-    return { ...base, checks, metrics: null, published_at: null, author: null, connection_id: null, measurable: false, hinweise };
+    notes.push("Der Kurzlink ließ sich nicht auflösen. Bitte den vollständigen Link einfügen.");
+    return { ...base, checks, metrics: null, published_at: null, author: null, connection_id: null, measurable: false, notes };
   }
 
   const [publicResult, connections, duplicate] = await Promise.all([
@@ -85,7 +85,7 @@ export async function runLinkCheck(url: string, deps: LinkCheckDeps): Promise<Li
   ]);
 
   checks.duplicate_publication_id = duplicate?.id ?? null;
-  if (duplicate) hinweise.push(DUPLICATE_MESSAGE);
+  if (duplicate) notes.push(DUPLICATE_MESSAGE);
 
   let metrics: LinkCheckMetrics | null = null;
   let publishedAt: string | null = null;
@@ -105,19 +105,19 @@ export async function runLinkCheck(url: string, deps: LinkCheckDeps): Promise<Li
     if (owner) {
       checks.owned_by_connection = true;
       connectionId = owner.id;
-      hinweise.push(`Gehört zum verbundenen Konto ${owner.account_label}.`);
+      notes.push(`Gehört zum verbundenen Konto ${owner.account_label}.`);
     } else {
-      hinweise.push("Kein verbundenes Konto, Messwerte kommen aus öffentlichen Daten.");
+      notes.push("Kein verbundenes Konto, Messwerte kommen aus öffentlichen Daten.");
     }
   } else {
-    hinweise.push(publicResult.message);
+    notes.push(publicResult.message);
     if (publicResult.error === "nicht_gefunden") {
       checks.reachable = false;
     } else {
       /* Ohne Antwort des Lesers (kein Schlüssel, keine Schnittstelle, Störung) nur ein Beleg zählt: oEmbed.
        * Wo es keinen gibt, bleibt reachable null und es kommt kein „nicht bestätigt“. */
       checks.reachable = await deps.probe(parsed.platform, parsed.normalizedUrl).catch(() => null);
-      if (checks.reachable === false) hinweise.push(`${label} kennt diesen Beitrag nicht oder er ist nicht öffentlich.`);
+      if (checks.reachable === false) notes.push(`${label} kennt diesen Beitrag nicht oder er ist nicht öffentlich.`);
     }
   }
   const readerMissing = !publicResult.ok && publicResult.error === "nicht_konfiguriert";
@@ -128,7 +128,7 @@ export async function runLinkCheck(url: string, deps: LinkCheckDeps): Promise<Li
     if (Number.isFinite(t)) checks.age_s = Math.max(0, Math.round((deps.now() - t) / 1000));
   }
 
-  return { ...base, checks, metrics, published_at: publishedAt, author, connection_id: connectionId, measurable, hinweise };
+  return { ...base, checks, metrics, published_at: publishedAt, author, connection_id: connectionId, measurable, notes };
 }
 
 export const DEFAULT_TRACK_DAYS = 30;
@@ -151,7 +151,7 @@ export interface LinkPublicationPlan {
   measurable: boolean;
   /* null, wenn nichts zu messen ist: dann fragt der Worker gar nicht erst */
   next_snapshot_at: string | null;
-  link_check: { checks: LinkChecks; hinweise: string[]; metrics: LinkCheckMetrics | null; author: LinkCheckResult["author"]; checked_at: string; tracking_days: number };
+  link_check: { checks: LinkChecks; notes: string[]; metrics: LinkCheckMetrics | null; author: LinkCheckResult["author"]; checked_at: string; tracking_days: number };
 }
 
 export type LinkPlanOutcome = { ok: true; plan: LinkPublicationPlan } | { ok: false; status: 400 | 409; code: string; message: string; duplicate_publication_id?: string };
@@ -165,7 +165,7 @@ export const PUBLIC_READER_PLATFORMS: readonly LinkPlatform[] = ["youtube", "x"]
  * messen: dann kein Termin, statt 30 Tage lang Fehlerzeilen zu schreiben. Dubletten werden abgelehnt (409). */
 export function planLinkPublication(result: LinkCheckResult, opts: { now: number; trackDays?: number }): LinkPlanOutcome {
   if (!result.checks.parsed || !result.platform || !result.external_id || !result.normalized_url) {
-    return { ok: false, status: 400, code: "link_invalid", message: result.hinweise[0] ?? "Der Link ist ungültig." };
+    return { ok: false, status: 400, code: "link_invalid", message: result.notes[0] ?? "Der Link ist ungültig." };
   }
   if (result.kind === "short_link") {
     return { ok: false, status: 400, code: "link_unresolved", message: "Der Kurzlink ließ sich nicht auflösen. Bitte den vollständigen Link einfügen." };
@@ -194,7 +194,7 @@ export function planLinkPublication(result: LinkCheckResult, opts: { now: number
       remaining_days: Math.max(0, Math.round((until - opts.now) / 86_400_000)),
       measurable,
       next_snapshot_at: measurable ? new Date(opts.now).toISOString() : null,
-      link_check: { checks: result.checks, hinweise: result.hinweise, metrics: result.metrics, author: result.author, checked_at: new Date(opts.now).toISOString(), tracking_days: days },
+      link_check: { checks: result.checks, notes: result.notes, metrics: result.metrics, author: result.author, checked_at: new Date(opts.now).toISOString(), tracking_days: days },
     },
   };
 }
@@ -203,7 +203,7 @@ export function planLinkPublication(result: LinkCheckResult, opts: { now: number
  * wirklich gemessen wird; ohne plan gilt die Standarddauer. Ob gemessen wird, folgt aus result.measurable,
  * also aus derselben Regel wie der Messtermin. */
 export function linkCheckSummary(result: LinkCheckResult, plan?: Pick<LinkPublicationPlan, "tracking_days" | "remaining_days">): string[] {
-  if (!result.checks.parsed || !result.platform) return result.hinweise.slice(0, 1);
+  if (!result.checks.parsed || !result.platform) return result.notes.slice(0, 1);
   const label = PLATFORM_LABEL[result.platform];
   const out = [`Link erkannt: ${label}`];
   out.push(result.checks.owned_by_connection ? "Verbundenes Konto erkannt" : "Kein verbundenes Konto");

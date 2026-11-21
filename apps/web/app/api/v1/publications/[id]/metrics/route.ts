@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 /* Messwerte einer Publikation: letzte Messung, feste Fenster (performance_feedback mit follows_per_1k,
  * saves_per_1k, outlier_score, reward) und die Messreihe (metric_snapshots, ?since=, ?limit=). Dazu
- * engagement_rate je Messung und der Plausibilitätshinweis auffaellig (lib/publishing/performance.ts). */
+ * engagement_rate je Messung und der Plausibilitätshinweis anomaly (lib/publishing/performance.ts). */
 export const GET = apiRoute<{ id: string }>("read", async (request: NextRequest, { params }) => {
   const query = parseSeriesQuery(request.nextUrl.searchParams);
   if ("error" in query) throw badRequest(query.error, "validation_failed");

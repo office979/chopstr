@@ -75,15 +75,15 @@ describe("engagementRate", () => {
 describe("detectAnomaly", () => {
   it("schlägt an bei mehr als fünffachem Sprung unter 0,2 % Interaktion", () => {
     const series = [snap({ fetched_at: "2026-11-21T10:00:00Z", views: 1000, likes: 50 }), snap({ fetched_at: "2026-11-21T11:00:00Z", views: 10_000, likes: 10, comments: 0 })].map(serializeSnapshot);
-    expect(detectAnomaly(series)).toEqual({ auffaellig: true, regel: "sprung_ohne_interaktion", zwischen: { von: "2026-11-21T10:00:00Z", bis: "2026-11-21T11:00:00Z" } });
+    expect(detectAnomaly(series)).toEqual({ flagged: true, rule: "sprung_ohne_interaktion", between: { from: "2026-11-21T10:00:00Z", to: "2026-11-21T11:00:00Z" } });
   });
   it("schweigt bei starkem Wachstum mit normaler Interaktion", () => {
     const series = [snap({ views: 1000 }), snap({ fetched_at: "2026-11-21T11:00:00Z", views: 10_000, likes: 500 })].map(serializeSnapshot);
-    expect(detectAnomaly(series).auffaellig).toBe(false);
+    expect(detectAnomaly(series).flagged).toBe(false);
   });
   it("übergeht fehlgeschlagene Messungen", () => {
     const series = [snap({ views: 1000 }), snap({ fetched_at: "2026-11-21T10:30:00Z", views: null, likes: null, comments: null, error: "x" }), snap({ fetched_at: "2026-11-21T11:00:00Z", views: 4000, likes: 200 })].map(serializeSnapshot);
-    expect(detectAnomaly(series).auffaellig).toBe(false);
+    expect(detectAnomaly(series).flagged).toBe(false);
   });
 });
 
@@ -130,7 +130,7 @@ describe("buildPublicationMetrics", () => {
     expect(out.windows[0]).toMatchObject({ follows_per_1k: 6, saves_per_1k: 8, outlier_score: 1.2, reward: 0.9, engagement_rate: 0.06 });
     expect(out.latest?.views).toBe(300);
     expect(out.series_total).toBe(3);
-    expect(out.auffaellig).toBe(false);
+    expect(out.anomaly.flagged).toBe(false);
   });
 
   it("filtert mit since und behält bei limit die jüngsten", () => {

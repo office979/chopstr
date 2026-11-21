@@ -21,6 +21,6 @@ export const POST = apiRoute("read", async (request: NextRequest) => {
   const clip = body.clip_id ? (await loadClip(body.clip_id)).clip : null;
   const result = await runLinkCheck(body.url, linkCheckDeps());
   const formatHint = clipFormatHint(result.platform, clip?.platform);
-  if (formatHint) result.hinweise.push(formatHint);
+  if (formatHint) result.notes.push(formatHint);
   return apiJson({ ...result, clip_id: clip?.id ?? null });
 });

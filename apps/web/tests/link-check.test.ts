@@ -44,7 +44,7 @@ describe("runLinkCheck", () => {
     expect(r).toMatchObject({ platform: "youtube", external_id: "dQw4w9WgXcQ", normalized_url: "https://www.youtube.com/shorts/dQw4w9WgXcQ" });
     expect(r.checks).toEqual({ parsed: true, reachable: true, owned_by_connection: false, duplicate_publication_id: null, age_s: 5400, metrics_available: true });
     expect(r.metrics).toMatchObject({ views: 1234, likes: 56, comments: 7, shares: null, source: "public_api" });
-    expect(r.hinweise).toContain("Kein verbundenes Konto, Messwerte kommen aus öffentlichen Daten.");
+    expect(r.notes).toContain("Kein verbundenes Konto, Messwerte kommen aus öffentlichen Daten.");
   });
 
   it("erkennt den Besitz über die Kanal-ID einer verbundenen Verbindung", async () => {
@@ -54,7 +54,7 @@ describe("runLinkCheck", () => {
     );
     expect(r.checks.owned_by_connection).toBe(true);
     expect(r.connection_id).toBe("conn-1");
-    expect(r.hinweise[0]).toContain("PLACEMedia Kanal");
+    expect(r.notes[0]).toContain("PLACEMedia Kanal");
   });
 
   it("zählt getrennte Verbindungen nicht als Besitz", async () => {
@@ -68,7 +68,7 @@ describe("runLinkCheck", () => {
   it("meldet Dubletten mit der vorhandenen Publikation", async () => {
     const r = await runLinkCheck("https://youtu.be/dQw4w9WgXcQ", deps({ findDuplicate: async () => ({ id: "pub-9" }) }));
     expect(r.checks.duplicate_publication_id).toBe("pub-9");
-    expect(r.hinweise).toContain("Dieser Beitrag ist schon eingetragen.");
+    expect(r.notes).toContain("Dieser Beitrag ist schon eingetragen.");
   });
 
   it("gibt ohne Schlüssel den Hinweis weiter, prüft per oEmbed und plant keine Messung", async () => {
@@ -80,8 +80,8 @@ describe("runLinkCheck", () => {
     expect(r.checks).toMatchObject({ parsed: true, reachable: true, metrics_available: false, age_s: null });
     expect(r.metrics).toBeNull();
     expect(r.measurable).toBe(false);
-    expect(r.hinweise).toEqual(["Zahlen für YouTube sind noch nicht eingerichtet."]);
-    expect(r.hinweise.join(" ")).not.toMatch(/YOUTUBE_API_KEY|nicht bestätigt/);
+    expect(r.notes).toEqual(["Zahlen für YouTube sind noch nicht eingerichtet."]);
+    expect(r.notes.join(" ")).not.toMatch(/YOUTUBE_API_KEY|nicht bestätigt/);
     expect(probe).toHaveBeenCalledWith("youtube", "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
     const out = planLinkPublication(r, { now: NOW });
     expect(out.ok && out.plan).toMatchObject({ measurable: false, next_snapshot_at: null });
@@ -96,7 +96,7 @@ describe("runLinkCheck", () => {
     );
     expect(r.checks.reachable).toBeNull();
     expect(r.measurable).toBe(false);
-    expect(r.hinweise).toEqual(["Instagram gibt Messwerte nur über ein verbundenes Konto heraus."]);
+    expect(r.notes).toEqual(["Instagram gibt Messwerte nur über ein verbundenes Konto heraus."]);
   });
 
   it("meldet TikTok ohne Verbindung und sagt, wenn oEmbed den Beitrag nicht kennt", async () => {
@@ -105,7 +105,7 @@ describe("runLinkCheck", () => {
       deps({ readPublic: async () => ({ ok: false, platform: "tiktok", error: "nicht_verbunden", message: "TikTok gibt Messwerte nur über ein verbundenes Konto heraus." }), probe: async () => false }),
     );
     expect(r.checks.reachable).toBe(false);
-    expect(r.hinweise).toEqual(["TikTok gibt Messwerte nur über ein verbundenes Konto heraus.", "TikTok kennt diesen Beitrag nicht oder er ist nicht öffentlich."]);
+    expect(r.notes).toEqual(["TikTok gibt Messwerte nur über ein verbundenes Konto heraus.", "TikTok kennt diesen Beitrag nicht oder er ist nicht öffentlich."]);
   });
 
   it("fragt oEmbed nicht, wenn der Leser geantwortet hat, und gilt dann als messbar", async () => {
@@ -128,14 +128,14 @@ describe("runLinkCheck", () => {
     const r = await runLinkCheck("https://vimeo.com/1", deps({ readPublic }));
     expect(r.checks.parsed).toBe(false);
     expect(r.platform).toBeNull();
-    expect(r.hinweise[0]).toContain("nicht unterstützt");
+    expect(r.notes[0]).toContain("nicht unterstützt");
     expect(readPublic).not.toHaveBeenCalled();
   });
 
   it("bittet bei nicht aufgelösten Kurzlinks um den vollständigen Link", async () => {
     const r = await runLinkCheck("https://vm.tiktok.com/ZMabc123/", deps());
     expect(r.kind).toBe("short_link");
-    expect(r.hinweise[0]).toContain("vollständigen Link");
+    expect(r.notes[0]).toContain("vollständigen Link");
   });
 
   it("übersteht ausfallende Datenbankabfragen", async () => {
@@ -161,7 +161,7 @@ describe("runLinkCheck", () => {
       runLinkCheck("https://vm.tiktok.com/ZMabc123/", deps()),
       runLinkCheck("kein link", deps()),
     ]);
-    for (const r of results) for (const h of r.hinweise) expect(h).not.toMatch(DASHES);
+    for (const r of results) for (const h of r.notes) expect(h).not.toMatch(DASHES);
   });
 });
 

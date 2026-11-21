@@ -82,14 +82,15 @@ export function serializeSnapshot(s: MetricSnapshot): SnapshotOut {
 
 /* Plausibilitätsprüfung nach dem Vorbild der Aufrufkurven-Prüfung bei Content Rewards: springen die Aufrufe
  * zwischen zwei Messungen auf mehr als das Fünffache, während die Interaktionsrate unter 0,2 % bleibt, ist das
- * auffällig (gekaufte oder Bot-Aufrufe sehen so aus). Nur ein Hinweis, keine Sperre. Regelname: "sprung_ohne_interaktion". */
+ * auffällig (gekaufte oder Bot-Aufrufe sehen so aus). Nur ein Hinweis, keine Sperre. Ergebnis als anomaly
+ * { flagged, rule, between: { from, to } }, Regelname "sprung_ohne_interaktion". */
 export const ANOMALY_GROWTH_FACTOR = 5;
 export const ANOMALY_MAX_ENGAGEMENT = 0.002;
 
 export interface Anomaly {
-  auffaellig: boolean;
-  regel: "sprung_ohne_interaktion" | null;
-  zwischen: { von: string; bis: string } | null;
+  flagged: boolean;
+  rule: "sprung_ohne_interaktion" | null;
+  between: { from: string; to: string } | null;
 }
 
 export function detectAnomaly(series: SnapshotOut[]): Anomaly {
@@ -100,11 +101,11 @@ export function detectAnomaly(series: SnapshotOut[]): Anomaly {
     if (prev > 0 && cur > prev * ANOMALY_GROWTH_FACTOR) {
       const rate = ok[i].engagement_rate;
       if (rate != null && rate < ANOMALY_MAX_ENGAGEMENT) {
-        return { auffaellig: true, regel: "sprung_ohne_interaktion", zwischen: { von: ok[i - 1].fetched_at, bis: ok[i].fetched_at } };
+        return { flagged: true, rule: "sprung_ohne_interaktion", between: { from: ok[i - 1].fetched_at, to: ok[i].fetched_at } };
       }
     }
   }
-  return { auffaellig: false, regel: null, zwischen: null };
+  return { flagged: false, rule: null, between: null };
 }
 
 /* Letzte Messung mit Zahlen; fehlgeschlagene Abrufe zählen nicht als „neuester Stand“ */
@@ -178,7 +179,7 @@ export function buildClipPerformance<P extends { id: string }>(publications: P[]
       latest,
       windows,
       reward: lastWindow?.reward ?? null,
-      ...detectAnomaly(own.map(serializeSnapshot)),
+      anomaly: detectAnomaly(own.map(serializeSnapshot)),
     };
   });
   const views = rows.map((r) => r.latest?.views ?? r.windows.at(-1)?.views ?? null);
@@ -203,6 +204,6 @@ export function buildPublicationMetrics(publicationId: string, snapshots: Metric
     windows,
     series,
     series_total: inRange.length,
-    ...detectAnomaly(sorted.map(serializeSnapshot)),
+    anomaly: detectAnomaly(sorted.map(serializeSnapshot)),
   };
 }

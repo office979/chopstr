@@ -33,5 +33,5 @@ export const POST = apiRoute<{ id: string }>("publish", async (request: NextRequ
     }
     throw new ApiError(400, result.code, result.message);
   }
-  return apiJson({ publication: serializePublication(result.publication), check: result.check, zusammenfassung: result.zusammenfassung }, 201);
+  return apiJson({ publication: serializePublication(result.publication), check: result.check, summary: result.summary }, 201);
 });

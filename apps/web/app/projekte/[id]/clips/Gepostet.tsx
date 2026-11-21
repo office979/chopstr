@@ -159,10 +159,10 @@ export function Gepostet({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: verfolgLink.trim() }),
       });
-      const d = (await res.json()) as { error?: string; zusammenfassung?: string[]; check?: { hinweise?: string[] } };
-      setLinkHinweise(d.check?.hinweise ?? []);
+      const d = (await res.json()) as { error?: string; summary?: string[]; check?: { notes?: string[] } };
+      setLinkHinweise(d.check?.notes ?? []);
       if (!res.ok) throw new Error(d.error ?? "Das hat nicht geklappt");
-      setErgebnis(d.zusammenfassung ?? []);
+      setErgebnis(d.summary ?? []);
       setVerfolgLink("");
       await laden();
     } catch (err) {

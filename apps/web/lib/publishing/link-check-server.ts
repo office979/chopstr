@@ -33,7 +33,7 @@ export function linkCheckDeps(): LinkCheckDeps {
 }
 
 export type RegisterLinkOutcome =
-  | { ok: true; publication: Publication; check: LinkCheckResult; zusammenfassung: string[] }
+  | { ok: true; publication: Publication; check: LinkCheckResult; summary: string[] }
   | { ok: false; status: 400 | 409; code: string; message: string; check: LinkCheckResult; duplicate_publication_id?: string };
 
 /* Link am Clip eintragen: Linktest, dann Publikation mit status manual und tracking link. Der Worker misst
@@ -48,7 +48,7 @@ export async function registerLinkForClip(input: {
 }): Promise<RegisterLinkOutcome> {
   const check = await runLinkCheck(input.url, linkCheckDeps());
   const formatHint = clipFormatHint(check.platform, input.clip.platform);
-  if (formatHint) check.hinweise.push(formatHint);
+  if (formatHint) check.notes.push(formatHint);
   const trackDays = input.trackDays ?? DEFAULT_TRACK_DAYS;
   const outcome = planLinkPublication(check, { now: Date.now(), trackDays });
   if (!outcome.ok) return { ...outcome, check };
@@ -67,7 +67,7 @@ export async function registerLinkForClip(input: {
   if (!created.created) {
     /* Gleichzeitige Anfrage war schneller: gleiche Antwort wie bei der lesenden Prüfung */
     check.checks.duplicate_publication_id = created.existing_id;
-    if (!check.hinweise.includes(DUPLICATE_MESSAGE)) check.hinweise.push(DUPLICATE_MESSAGE);
+    if (!check.notes.includes(DUPLICATE_MESSAGE)) check.notes.push(DUPLICATE_MESSAGE);
     return { ok: false, status: 409, code: "link_duplicate", message: DUPLICATE_MESSAGE, check, ...(created.existing_id ? { duplicate_publication_id: created.existing_id } : {}) };
   }
   const { publication } = created;
@@ -86,5 +86,5 @@ export async function registerLinkForClip(input: {
       ...(input.apiKeyId ? { api_key_id: input.apiKeyId } : {}),
     },
   });
-  return { ok: true, publication, check, zusammenfassung: linkCheckSummary(check, plan) };
+  return { ok: true, publication, check, summary: linkCheckSummary(check, plan) };
 }

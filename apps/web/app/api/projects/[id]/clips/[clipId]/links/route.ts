@@ -28,5 +28,5 @@ export async function POST(request: NextRequest, { params }: Params) {
   const trackDays = typeof body.track_days === "number" && Number.isFinite(body.track_days) ? body.track_days : undefined;
   const result = await registerLinkForClip({ clip: ctx.clip, url: body.url.slice(0, 2000), trackDays, via: "ui" });
   if (!result.ok) return Response.json({ error: result.message, code: result.code, check: result.check }, { status: result.status });
-  return Response.json({ ok: true, publication: result.publication, check: result.check, zusammenfassung: result.zusammenfassung });
+  return Response.json({ ok: true, publication: result.publication, check: result.check, summary: result.summary });
 }

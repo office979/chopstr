@@ -17,6 +17,8 @@ APP_BASE_URL=http://localhost:3000
 YOUTUBE_API_KEY=
 # X API v2 (App-Bearer-Token, kostet je gelesenem Beitrag)
 X_BEARER_TOKEN=
+# Tagesdeckel für X-Abrufe, leer = 500
+X_DAILY_READ_CAP=
 # Drittanbieter für TikTok und Instagram, noch nicht angebunden. US-Anbieter, im Sovereign-Tarif nicht zulässig.
 PUBLIC_METRICS_SCRAPER=
 SCRAPECREATORS_API_KEY=

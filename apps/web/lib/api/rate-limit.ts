@@ -4,6 +4,9 @@ import "server-only";
  * Festes Minutenfenster, In-Memory je Prozess. TODO: Redis (REDIS_URL) für mehrere Instanzen. */
 
 export const RATE_LIMIT_DEFAULT = 600;
+/* Linktest und Link eintragen lösen Abrufe bei YouTube, X und oEmbed aus (Quota, bei X Kosten je Beitrag):
+ * eigenes, engeres Limit je Schlüssel (API) oder Workspace (Oberfläche), zusätzlich zum allgemeinen */
+export const LINK_RATE_LIMIT_PER_MIN = 30;
 const WINDOW_MS = 60 * 1000;
 
 interface Bucket {
@@ -33,8 +36,8 @@ export interface RateLimitResult {
   retryAfterS: number;
 }
 
-export function consumeRateLimit(keyId: string): RateLimitResult {
-  const limit = rateLimitPerMinute();
+export function consumeRateLimit(keyId: string, limitPerMinute?: number): RateLimitResult {
+  const limit = limitPerMinute ?? rateLimitPerMinute();
   const s = store();
   const now = Date.now();
   let b = s.get(keyId);
@@ -57,4 +60,13 @@ export function rateLimitHeaders(r: RateLimitResult): Record<string, string> {
     "X-RateLimit-Remaining": String(r.remaining),
     ...(r.allowed ? {} : { "Retry-After": String(r.retryAfterS) }),
   };
+}
+
+/* Eigener Topf für Linkprüfungen: "links:<key oder ws>", 30 je Minute */
+export function consumeLinkRateLimit(bucket: string): RateLimitResult {
+  return consumeRateLimit(`links:${bucket}`, LINK_RATE_LIMIT_PER_MIN);
+}
+
+export function linkRateLimitMessage(r: RateLimitResult): string {
+  return `Zu viele Linkprüfungen: höchstens ${r.limit} pro Minute. Bitte in ${r.retryAfterS} s erneut versuchen.`;
 }

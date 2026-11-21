@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { apiRoute } from "@/lib/api/handler";
 import { ApiError, apiJson, conflict, notFound } from "@/lib/api/errors";
+import { consumeLinkRateLimit, linkRateLimitMessage, rateLimitHeaders } from "@/lib/api/rate-limit";
 import { loadClip } from "@/lib/api/lookup";
 import { readJsonBody } from "@/lib/api/validate";
 import { requestSchema, resolveRef } from "@/lib/api/openapi";
@@ -20,6 +21,8 @@ interface LinkRegisterBody {
  * Das ist Buchhaltung wie „Als gepostet eintragen“ und prüft deshalb nur die Gates für den Zweck „eintragen“.
  * Dubletten (gleiche Plattform und ID im Workspace) gibt es mit 409. */
 export const POST = apiRoute<{ id: string }>("publish", async (request: NextRequest, { params, auth }) => {
+  const limit = consumeLinkRateLimit(auth.key.id);
+  if (!limit.allowed) throw new ApiError(429, "rate_limited", linkRateLimitMessage(limit), rateLimitHeaders(limit));
   const body = await readJsonBody<LinkRegisterBody>(request, requestSchema("LinkRegister"), resolveRef);
   const { clip, source } = await loadClip(params.id);
   const ctx = await loadClipContext(source.id, clip.id);

@@ -194,8 +194,32 @@ interface XTweetResponse {
 export const X_CACHE_TTL_MS = 55 * 60 * 1000;
 const xCache = new Map<string, { at: number; result: PublicMetricsOk }>();
 
+/* Tagesdeckel für bezahlte X-Abrufe: X_DAILY_READ_CAP (leer oder ungültig: 500) echte Abrufe je UTC-Tag,
+ * Cache-Treffer zählen nicht. Gezählt wird im Speicher dieses Prozesses; das reicht für den lokalen Betrieb
+ * mit einer Instanz. Mit mehreren Instanzen braucht es einen gemeinsamen Zähler (Redis). */
+export const X_DAILY_READ_CAP_DEFAULT = 500;
+const xReads = { day: "", count: 0 };
+
+export function xDailyReadCap(env: Record<string, string | undefined> = process.env): number {
+  const n = Number(env.X_DAILY_READ_CAP);
+  return env.X_DAILY_READ_CAP?.trim() && Number.isInteger(n) && n > 0 ? n : X_DAILY_READ_CAP_DEFAULT;
+}
+
+function takeXRead(now: number, cap: number): boolean {
+  const day = new Date(now).toISOString().slice(0, 10);
+  if (xReads.day !== day) {
+    xReads.day = day;
+    xReads.count = 0;
+  }
+  if (xReads.count >= cap) return false;
+  xReads.count += 1;
+  return true;
+}
+
 export function clearPublicMetricsCache(): void {
   xCache.clear();
+  xReads.day = "";
+  xReads.count = 0;
 }
 
 async function readX(externalId: string, opts: Required<PublicMetricsOptions>): Promise<PublicMetricsResult> {
@@ -203,6 +227,9 @@ async function readX(externalId: string, opts: Required<PublicMetricsOptions>): 
   if (!token) return fail("x", "nicht_konfiguriert", notConfiguredMessage("x"));
   const hit = xCache.get(externalId);
   if (hit && opts.now() - hit.at < X_CACHE_TTL_MS) return { ...hit.result, cached: true };
+  if (!takeXRead(opts.now(), xDailyReadCap(opts.env))) {
+    return fail("x", "fehler", "Für heute sind keine Abrufe bei X mehr frei, morgen geht es weiter.", "X_DAILY_READ_CAP erreicht");
+  }
   const q = new URLSearchParams({
     "tweet.fields": "public_metrics,created_at,author_id",
     expansions: "attachments.media_keys,author_id",

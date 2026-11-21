@@ -3,6 +3,7 @@ import { requirePublishingApi } from "@/lib/publishing/auth";
 import { loadClipContext } from "@/lib/publishing/clip-context";
 import { gateReasons } from "@/lib/publishing/gates";
 import { registerLinkForClip } from "@/lib/publishing/link-check-server";
+import { consumeLinkRateLimit, linkRateLimitMessage, rateLimitHeaders } from "@/lib/api/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,8 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (typeof body.url !== "string" || !body.url.trim()) return Response.json({ error: "Bitte einen Link einfügen." }, { status: 400 });
   const sperre = gateReasons(ctx.eintragen);
   if (sperre.length) return Response.json({ error: sperre[0].message, gates: sperre }, { status: 409 });
+  const limit = consumeLinkRateLimit(`ws:${auth.workspaceId}`);
+  if (!limit.allowed) return Response.json({ error: linkRateLimitMessage(limit) }, { status: 429, headers: rateLimitHeaders(limit) });
   const trackDays = typeof body.track_days === "number" && Number.isFinite(body.track_days) ? body.track_days : undefined;
   const result = await registerLinkForClip({ clip: ctx.clip, url: body.url.slice(0, 2000), trackDays, via: "ui" });
   if (!result.ok) return Response.json({ error: result.message, code: result.code, check: result.check }, { status: result.status });

@@ -10,6 +10,7 @@ import type { PublicationInput } from "@/lib/repo/types-publishing";
 import { connectionPlatformFor } from "@/lib/publishing/platforms";
 import { gateReasons } from "@/lib/publishing/gates";
 import { registerLinkForClip } from "@/lib/publishing/link-check-server";
+import { consumeLinkRateLimit, linkRateLimitMessage, rateLimitHeaders } from "@/lib/api/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +90,8 @@ export async function POST(request: NextRequest, { params }: Params) {
    * wie bei „Link verfolgen“ (Linktest, external_id, Dublettenprüfung auch gegen OAuth-Publikationen,
    * Messtermin, falls messbar). Ohne Link bleibt es ein Eintrag ohne Messung. */
   if (linkInput) {
+    const limit = consumeLinkRateLimit(`ws:${auth.workspaceId}`);
+    if (!limit.allowed) return Response.json({ error: linkRateLimitMessage(limit) }, { status: 429, headers: rateLimitHeaders(limit) });
     const result = await registerLinkForClip({ clip: ctx.clip, url: linkInput.slice(0, 2000), via: "ui" });
     if (!result.ok) return Response.json({ error: result.message, code: result.code, check: result.check }, { status: result.status });
     await recordDecision({

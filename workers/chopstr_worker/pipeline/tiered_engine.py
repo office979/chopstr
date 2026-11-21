@@ -60,7 +60,23 @@ DEFAULTS: dict[str, Any] = {
     "min_len_s": 8.0,
     "max_len_s": 75.0,
     "editor_context_sents": 4,
+    "repair": False,
+    "repair_context_s": 60.0,
 }
+# Ablehnung durch den Editor nur mit einem dieser Gründe (editor_v2); ohne gültigen Grund gilt die Ablehnung nicht.
+REJECT_REASONS: dict[str, str] = {
+    "no_payoff": "keine Auflösung, Pointe oder Erkenntnis im Kandidaten",
+    "needs_context": "braucht Kontext vor dem Kandidaten (geht in die Reparatur)",
+    "incomplete_thought": "der Gedanke bricht ab, das Ende fehlt",
+    "weak_hook": "kein tragfähiger Einstieg in den ersten Sekunden",
+    "too_short": "zu kurz für einen eigenständigen Clip",
+    "too_long": "nicht auf die Länge kürzbar, ohne den Sinn zu verlieren",
+    "off_brief": "passt nicht zu Zielgruppe oder Wunsch",
+    "sensitive": "heikles Thema oder Persönlichkeitsrecht",
+    "unintelligible": "Transkript an der Stelle unverständlich",
+}
+CONTEXT_REJECT_REASONS = frozenset({"needs_context"})
+SEGMENTS_RULE_OFF = "ein zusammenhängender Ausschnitt von start_word bis end_word, ohne Umstellung und ohne Cold Open aus mehreren Stellen."
 PREFILTER_TYPES = ("hot_take", "story", "punchline", "reaction", "conflict", "insight", "number", "emotional", "other")
 PLATFORMS = ("tiktok", "reels", "shorts")
 PREFILTER_MAX_PER_BLOCK = 8
@@ -107,6 +123,7 @@ EDITOR_SCHEMA: dict[str, Any] = {
             "required": list(story_engine.SCORE_KEYS),
         },
         "evidence": {"type": "object", "properties": {k: {"type": "string"} for k in story_engine.SCORE_KEYS}},
+        "reject_reason": {"type": "string", "enum": list(REJECT_REASONS)},
         "needs_earlier_context": {"type": "boolean"},
         "ends_before_answer": {"type": "boolean"},
         "unresolved_references": {"type": "array", "items": {"type": "string"}},
@@ -125,10 +142,12 @@ def engine_settings(policy: editorial.Policy | None) -> dict[str, Any]:
     raw = (policy.roh.get("implementation") or {}).get(SWITCH) if policy is not None and policy.version >= 2 else None
     if isinstance(raw, dict):
         cfg.update({k: raw[k] for k in DEFAULTS if k in raw})
-    cfg["tiered"] = cfg["tiered"] is True
+    for k in ("tiered", "repair"):
+        cfg[k] = cfg[k] is True
     for k in ("min_candidates", "max_candidates", "editor_context_sents"):
         cfg[k] = int(cfg[k])
-    for k in ("candidates_per_source_hour", "editor_oversample", "prefilter_block_s", "prefilter_overlap_s", "min_len_s", "max_len_s"):
+    for k in ("candidates_per_source_hour", "editor_oversample", "prefilter_block_s", "prefilter_overlap_s", "min_len_s", "max_len_s",
+              "repair_context_s"):  # fmt: skip
         cfg[k] = float(cfg[k])
     if not 0 < cfg["min_len_s"] < cfg["max_len_s"]:
         raise editorial.PolicyError("implementation.engine: 0 < min_len_s < max_len_s")
@@ -155,7 +174,8 @@ def output_count(duration_s: float, cfg: Mapping[str, Any]) -> int:
 
 def prompt_versions(policy: editorial.Policy | None = None) -> list[str]:
     pol = _prompt_policy(policy)
-    return [prompts.load_pinned(n, pol).prompt_version for n in ("prefilter", "editor", "mm_scan")]
+    names = ("prefilter", "editor", "mm_scan", "editor_repair")
+    return [prompts.load_pinned(n, pol).prompt_version for n in names if n in pol.prompt_pins]
 
 
 def _prompt_policy(policy: editorial.Policy | None) -> editorial.Policy:
@@ -287,8 +307,12 @@ def apply_editor(out: Mapping[str, Any], sents: Sequence[Sentence], win_first: i
     Wortnummern müssen im Kandidatenfenster liegen (echte Wörter, nie Pseudo-Sätze). Die Spanne wird auf
     Satzgrenzen gelegt, weil die Gates an Satzgrenzen prüfen; ein Schnitt mitten im Satz steht in
     ``cut_inside_sentence``."""
-    if not isinstance(out, Mapping) or not out.get("keep", True):
+    if not isinstance(out, Mapping):
         return None
+    unjustified = not out.get("keep", True) and str(out.get("reject_reason") or "") not in REJECT_REASONS
+    if not out.get("keep", True) and not unjustified:
+        return None
+    # Ablehnung ohne Grund aus REJECT_REASONS gilt nicht: der Kandidat geht mit den Grenzen des Editors in die Gates.
     lo, hi = sents[win_first].word_range[0], sents[win_last].word_range[1]
     try:
         sw, ew = int(out["start_word"]), int(out["end_word"])
@@ -326,7 +350,31 @@ def apply_editor(out: Mapping[str, Any], sents: Sequence[Sentence], win_first: i
             "is_humor": bool(out.get("is_humor")), "sensitive_topic": bool(out.get("sensitive_topic")),
         },
         "why": mm_scan.strip_pseudo(str(out.get("why") or ""))[:240],
+        **({"unjustified_reject": True} if unjustified else {}),
     }  # fmt: skip
+
+
+def format_note(brief: Mapping[str, Any]) -> str:
+    """Formathinweis für den Editor: aus dem Brief (``format``), sonst die Bitte, Interview und Q&A selbst zu erkennen."""
+    fmt = str(brief.get("format") or brief.get("format_name") or "").strip()
+    hint = "Fragen einer anderen Person sind der bevorzugte Einstieg."
+    return f"{fmt[:120]}. {hint}" if fmt else f"nicht angegeben; Sprecherwechsel mit Frage heißt Interview oder Q&A, dann gilt: {hint}"
+
+
+def repair_finding(res: Any) -> str | None:
+    """Gate-Befund, den eine Reparatur beheben kann: Eigenständigkeit (Vorwissen, offene Verweise, Ende vor der
+    Antwort) oder ein Start mitten im Satz. ``None``, wenn diese Tore halten oder ``res`` kein Kandidat ist."""
+    if not isinstance(res, story_engine.CandidateResult) or res.gate_passed:
+        return None
+    gates = res.gates or {}
+    parts = []
+    st = gates.get("standalone") or {}
+    if isinstance(st, dict) and st.get("passed") is False:
+        parts.append(str(st.get("detail") or "Einstieg braucht Vorwissen"))
+    sb = gates.get("sentence_boundaries") or {}
+    if isinstance(sb, dict) and sb.get("passed") is False and "faengt mitten" in str(sb.get("detail") or ""):
+        parts.append(str(sb.get("detail")))
+    return "; ".join(parts) or None
 
 
 def editor_reject_detail(out: Any, sents: Sequence[Sentence], win_first: int, win_last: int) -> tuple[str, str]:
@@ -334,8 +382,10 @@ def editor_reject_detail(out: Any, sents: Sequence[Sentence], win_first: int, wi
     if not isinstance(out, Mapping):
         return "not_an_object", "Antwort ist kein Objekt"
     if not out.get("keep", True):
-        why = mm_scan.strip_pseudo(str(out.get("reject_reason") or out.get("why") or "")).strip()
-        return "keep_false", why[:240] or "keep false ohne Begründung"
+        reason = str(out.get("reject_reason") or "").strip()
+        why = mm_scan.strip_pseudo(str(out.get("why") or "")).strip()
+        text = ": ".join(x for x in (reason, why) if x)
+        return "keep_false", text[:240] or "keep false ohne Begründung"
     lo, hi = sents[win_first].word_range[0], sents[win_last].word_range[1]
     try:
         sw, ew = int(out["start_word"]), int(out["end_word"])
@@ -570,89 +620,158 @@ def run(
 
     # Stufe C: Editor nur für die Top-K, gruppiert nach Block (gemeinsamer Cache-Präfix)
     ed_prompt = prompts.load_pinned("editor", ppol)
+    rep_prompt = prompts.load_pinned("editor_repair", ppol) if cfg["repair"] and "editor_repair" in ppol.prompt_pins else None
     adapter = EditorScoreLLM(judge_llm, ledger)
     ctx_n = int(cfg["editor_context_sents"])
     raw_cands: list[story_engine.CandidateResult] = []
     gate_rejected: list[story_engine.CandidateResult] = []
     seen: set[tuple[int, int]] = set()
-    editor_stop = heuristic
+    state = {"editor_stop": heuristic}
+    info["editor"].update(repair_calls=0, repaired=0, unjustified_rejects=0)
+    common = {
+        "audience": brief.get("audience"), "platforms": "TikTok, Reels, Shorts", "address": brand.get("address") or "du",
+        "country": brand.get("country") or "AT", "min_len_s": int(cfg["min_len_s"]), "max_len_s": int(cfg["max_len_s"]),
+        "format_note": format_note(brief), "reject_reasons": ", ".join(REJECT_REASONS), "segments_rule": SEGMENTS_RULE_OFF,
+    }  # fmt: skip
+
+    def ask(prompt: prompts.Prompt, stage: str, bno: int, user: str, c: Mapping[str, Any]) -> tuple[bool, Any]:
+        """Ein Editor-Aufruf; ``(False, None)``, wenn das Budget erreicht ist oder der Anbieter scheitert (steht in ``info``)."""
+        if state["editor_stop"]:
+            return False, None
+        try:
+            if ledger is not None:
+                ledger.check(stage)
+            return True, ed_llm.structured(
+                system, user, EDITOR_SCHEMA, prompt.tool or "edit_clip", prompt.prompt_version, job_type="llm_copy",
+                policy_block=policy_text, cache_prefix=block_text(blocks[bno], evs, min_int), stage=stage,
+            )  # fmt: skip
+        except BudgetExceeded as exc:
+            state["editor_stop"] = True
+            info["skipped"].append({"stage": stage, "reason": "budget_exhausted", "detail": exc.detail})
+        except ResidencyError:
+            raise
+        except (SchemaError, RuntimeError, ValueError, TypeError, KeyError) as exc:
+            info["editor"].setdefault("errors", []).append({
+                "stage": stage, "first_sent": c["first_sent"], "last_sent": c["last_sent"], "error": exc.__class__.__name__,
+                "detail": str(exc)[:160], **span_info(sents, c["first_sent"], c["last_sent"]),
+            })  # fmt: skip
+        return False, None
+
+    def checked(out: Any, wf: int, wl: int) -> dict | None:
+        ed = apply_editor(out, sents, wf, wl)
+        if ed is not None and ed.get("unjustified_reject"):
+            info["editor"]["unjustified_rejects"] += 1
+        return ed
+
+    def repair(c: Mapping[str, Any], bno: int, win: tuple[int, int], finding: str, previous: Mapping[str, Any], trigger: str) -> tuple[dict | None, dict]:
+        """Genau ein Reparaturversuch mit Befund und erweitertem Fenster (``repair_context_s`` vor dem Start)."""
+        t0 = sents[c["first_sent"]].start - float(cfg["repair_context_s"])
+        wf = min(win[0], next((s.idx for s in sents if s.end >= t0), win[0]))
+        wl = min(len(sents) - 1, max(win[1], int(previous.get("last_sent") or 0) + ctx_n))
+        entry: dict[str, Any] = {"first_sent": c["first_sent"], "last_sent": c["last_sent"], "trigger": trigger, "finding": finding[:240],
+                                 "window": [wf, wl], "result": "no_answer"}  # fmt: skip
+        info["editor"].setdefault("repairs", []).append(entry)
+        prev = (f"Wort {previous.get('start_word')} bis {previous.get('end_word')}, Titel: {previous.get('title') or '-'}; "
+                f"offene Bezüge: {', '.join(map(str, previous.get('unresolved_references') or [])) or '-'}")  # fmt: skip
+        user = rep_prompt.render(**common, finding=finding, previous=prev, candidate_words=candidate_words_text(words, sents, wf, wl, evs, min_int))
+        answered, out = ask(rep_prompt, "editor_repair", bno, user, c)
+        if not answered:
+            return None, entry
+        info["editor"]["repair_calls"] += 1
+        ed2 = checked(out, wf, wl)
+        if ed2 is None:
+            entry["result"], entry["reason_detail"] = "rejected", editor_reject_detail(out, sents, wf, wl)[1]
+            return None, entry
+        ed2["repaired"] = {"trigger": trigger, "finding": finding[:240]}
+        entry.update(result="proposed", new_first_sent=ed2["first_sent"], new_last_sent=ed2["last_sent"])
+        return ed2, entry
+
+    def evaluate(ed: dict, c: Mapping[str, Any]) -> story_engine.CandidateResult | dict:
+        if ed.get("scores") is not None:
+            adapter.precomputed[(ed["first_sent"], ed["last_sent"])] = score_response(ed)
+        proposal = {
+            "first_sent": ed["first_sent"], "last_sent": ed["last_sent"], "structure": "hook_build_payoff",
+            "why": ed.get("why") or c.get("why") or "", "prompt_version": (rep_prompt if ed.get("repaired") else ed_prompt).prompt_version,
+        }  # fmt: skip
+        try:
+            return story_engine.evaluate_span(words, sents, proposal, brief, adapter, weights, heat)
+        except story_engine.LLMBudgetExceeded:
+            return {"reason": "llm_budget", "first_sent": ed["first_sent"], "last_sent": ed["last_sent"]}
+
+    def handle(c: dict) -> None:
+        bno = block_of.get((c["first_sent"], c["last_sent"]), 0)
+        win = (max(0, c["first_sent"] - ctx_n), min(len(sents) - 1, c["last_sent"] + ctx_n))
+        ed: dict | None = None
+        user = ed_prompt.render(
+            **common, prefilter_note=f"Satz {c['first_sent']} bis {c['last_sent']}, Typ {c['type']}: {c.get('why') or '-'}",
+            candidate_words=candidate_words_text(words, sents, win[0], win[1], evs, min_int),
+        )  # fmt: skip
+        answered, out = ask(ed_prompt, "editor", bno, user, c)
+        if answered:
+            info["editor"]["calls"] += 1
+            ed = checked(out, *win)
+            if ed is None:
+                code, detail = editor_reject_detail(out, sents, *win)
+                entry = None
+                if rep_prompt is not None and str(_obj(out).get("reject_reason") or "") in CONTEXT_REJECT_REASONS:
+                    ed, entry = repair(c, bno, win, f"Editor: {detail}", {**editor_suggestion(out), "last_sent": c["last_sent"]}, "editor")
+                if ed is None:
+                    info["editor"]["rejected"] += 1
+                    report.discarded.append({
+                        "reason": "editor_rejected", "stage": "editor", "first_sent": c["first_sent"], "last_sent": c["last_sent"],
+                        "reject_code": code, "reject_reason": _obj(out).get("reject_reason"), "reason_detail": detail,
+                        "scores": {k: _score(v) for k, v in _obj(_obj(out).get("scores")).items() if k in story_engine.SCORE_KEYS},
+                        "suggestion": editor_suggestion(out), "prefilter": {k: c.get(k) for k in ("type", "why", "score", "rank_score")},
+                        **({"repair": entry} if entry else {}),
+                    })  # fmt: skip
+                    return
+        if ed is None:
+            ed = _local_editor(c, sents)
+            info["editor"]["local"] += 1
+        res = evaluate(ed, c)
+        finding = repair_finding(res)
+        if finding and rep_prompt is not None and not ed.get("local") and not ed.get("repaired"):
+            prev = {**ed, "unresolved_references": (ed.get("flags") or {}).get("unresolved_references")}
+            ed2, entry = repair(c, bno, win, f"Gate: {finding}", prev, "gate")
+            if ed2 is not None:
+                res2 = evaluate(ed2, c)
+                if isinstance(res2, story_engine.CandidateResult) and repair_finding(res2) is None:
+                    res, ed = res2, ed2
+                else:
+                    entry["result"] = "failed"
+                    entry["detail"] = repair_finding(res2) if isinstance(res2, story_engine.CandidateResult) else str(_obj(res2).get("reason"))
+        if ed.get("repaired"):
+            ok = isinstance(res, story_engine.CandidateResult) and repair_finding(res) is None
+            info["editor"]["repaired"] += int(ok)
+            for e in info["editor"].get("repairs") or []:
+                if (e["first_sent"], e["last_sent"], e["result"]) == (c["first_sent"], c["last_sent"], "proposed"):
+                    e["result"] = "repaired" if ok else "failed"
+        if isinstance(res, dict):
+            report.discarded.append({**res, "stage": "gates"})
+            return
+        key = (res.first_sent, res.last_sent)
+        if key in seen:
+            report.discarded.append({"reason": "same_result", "stage": "gates", "first_sent": key[0], "last_sent": key[1]})
+            return
+        seen.add(key)
+        res.rubric["tiered"] = {
+            "prefilter": {k: c.get(k) for k in ("first_sent", "last_sent", "type", "why", "score", "rank_score", "source")},
+            "editor": {k: ed.get(k) for k in ("start_word", "end_word", "cut_inside_sentence", "hook", "title", "onscreen_text",
+                                              "post_text", "scores", "local", "repaired")},
+            "events": [e for e in evs if sents[res.first_sent].start <= float(e["t_start"]) <= sents[res.last_sent].end + 3.0][:20],
+        }  # fmt: skip
+        decision = res.rubric.get("quality_gate_decision") or {}
+        if story_engine.gates_wired(pol) is not None and decision.get("decision") == "rejected":
+            report.discarded.append({"reason": str(decision.get("reason")), "stage": "gates", "first_sent": res.first_sent,
+                                     "last_sent": res.last_sent, "detail": str(decision.get("detail") or "")})  # fmt: skip
+            gate_rejected.append(res)
+            return
+        raw_cands.append(res)
+
     top.sort(key=lambda c: (block_of.get((c["first_sent"], c["last_sent"]), 0), c["first_sent"]))
     with story_engine.tiered_limits(cfg["min_len_s"], cfg["max_len_s"], n_out):
         for c in top:
-            bno = block_of.get((c["first_sent"], c["last_sent"]), 0)
-            win_first, win_last = max(0, c["first_sent"] - ctx_n), min(len(sents) - 1, c["last_sent"] + ctx_n)
-            ed: dict | None = None
-            if not editor_stop:
-                try:
-                    if ledger is not None:
-                        ledger.check("editor")
-                    user = ed_prompt.render(
-                        audience=brief.get("audience"), platforms="TikTok, Reels, Shorts", address=brand.get("address") or "du",
-                        country=brand.get("country") or "AT", min_len_s=int(cfg["min_len_s"]), max_len_s=int(cfg["max_len_s"]),
-                        prefilter_note=f"Satz {c['first_sent']} bis {c['last_sent']}, Typ {c['type']}: {c.get('why') or '-'}",
-                        candidate_words=candidate_words_text(words, sents, win_first, win_last, evs, min_int),
-                    )  # fmt: skip
-                    out = ed_llm.structured(
-                        system, user, EDITOR_SCHEMA, ed_prompt.tool or "edit_clip", ed_prompt.prompt_version, job_type="llm_copy",
-                        policy_block=policy_text, cache_prefix=block_text(blocks[bno], evs, min_int), stage="editor",
-                    )  # fmt: skip
-                    info["editor"]["calls"] += 1
-                    ed = apply_editor(out, sents, win_first, win_last)
-                    if ed is None:
-                        info["editor"]["rejected"] += 1
-                        code, detail = editor_reject_detail(out, sents, win_first, win_last)
-                        report.discarded.append({
-                            "reason": "editor_rejected", "stage": "editor", "first_sent": c["first_sent"], "last_sent": c["last_sent"],
-                            "reject_code": code, "reason_detail": detail,
-                            "scores": {k: _score(v) for k, v in _obj(_obj(out).get("scores")).items() if k in story_engine.SCORE_KEYS},
-                            "suggestion": editor_suggestion(out), "prefilter": {k: c.get(k) for k in ("type", "why", "score", "rank_score")},
-                        })  # fmt: skip
-                        continue
-                except BudgetExceeded as exc:
-                    editor_stop = True
-                    info["skipped"].append({"stage": "editor", "reason": "budget_exhausted", "detail": exc.detail})
-                except ResidencyError:
-                    raise
-                except (SchemaError, RuntimeError, ValueError, TypeError, KeyError) as exc:
-                    info["editor"].setdefault("errors", []).append({
-                        "first_sent": c["first_sent"], "last_sent": c["last_sent"], "error": exc.__class__.__name__, "detail": str(exc)[:160],
-                        **span_info(sents, c["first_sent"], c["last_sent"]),
-                    })  # fmt: skip
-            if ed is None:
-                ed = _local_editor(c, sents)
-                info["editor"]["local"] += 1
-            if ed.get("scores") is not None:
-                adapter.precomputed[(ed["first_sent"], ed["last_sent"])] = score_response(ed)
-            proposal = {
-                "first_sent": ed["first_sent"], "last_sent": ed["last_sent"], "structure": "hook_build_payoff",
-                "why": ed.get("why") or c.get("why") or "", "prompt_version": ed_prompt.prompt_version,
-            }  # fmt: skip
-            try:
-                res = story_engine.evaluate_span(words, sents, proposal, brief, adapter, weights, heat)
-            except story_engine.LLMBudgetExceeded:
-                report.discarded.append({"reason": "llm_budget", "stage": "gates", "first_sent": ed["first_sent"], "last_sent": ed["last_sent"]})
-                continue
-            if isinstance(res, dict):
-                report.discarded.append({**res, "stage": "gates"})
-                continue
-            key = (res.first_sent, res.last_sent)
-            if key in seen:
-                report.discarded.append({"reason": "same_result", "stage": "gates", "first_sent": key[0], "last_sent": key[1]})
-                continue
-            seen.add(key)
-            res.rubric["tiered"] = {
-                "prefilter": {k: c.get(k) for k in ("first_sent", "last_sent", "type", "why", "score", "rank_score", "source")},
-                "editor": {k: ed.get(k) for k in ("start_word", "end_word", "cut_inside_sentence", "hook", "title", "onscreen_text",
-                                                  "post_text", "scores", "local")},
-                "events": [e for e in evs if sents[res.first_sent].start <= float(e["t_start"]) <= sents[res.last_sent].end + 3.0][:20],
-            }  # fmt: skip
-            decision = res.rubric.get("quality_gate_decision") or {}
-            if story_engine.gates_wired(pol) is not None and decision.get("decision") == "rejected":
-                report.discarded.append({"reason": str(decision.get("reason")), "stage": "gates", "first_sent": res.first_sent,
-                                         "last_sent": res.last_sent, "detail": str(decision.get("detail") or "")})  # fmt: skip
-                gate_rejected.append(res)
-                continue
-            raw_cands.append(res)
+            handle(c)
         critic_on = pol is not None and editorial.critic_enabled(pol)
         report.candidates, dropped, reserve = story_engine.select_with_reserve(
             raw_cands, n_out, pol=pol, heuristic=heuristic, reserve_size=story_engine.RESERVE_SIZE if critic_on else 0

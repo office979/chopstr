@@ -294,3 +294,23 @@ def test_critic_prompt_from_the_engine_fills_every_input(monkeypatch):
     assert not re.search(r"\{(opening|text_hook|clip_text|context_before|context_after)\}", user)
     assert f"Gesprochener Einstieg (wörtlich der erste Satz des Clips): {sents[1].text}" in user
     editorial.clear_cache()
+
+
+# -- T2c: jede erklärte Eingabe steht als Platzhalter im Text --------------------------------------------------
+# editor_v1 erklärt candidate_words, der Text enthält den Platzhalter aber nicht: der Editor sah im ersten E2E-Lauf
+# keine Wortnummern. v1 bleibt unverändert (Prompts werden nie geändert), editor_v2 behebt es.
+KNOWN_MISSING_INPUTS = {"editor_v1": ["candidate_words"]}
+
+
+def test_declared_inputs_are_placeholders_in_body():
+    for path in sorted(prompts.prompts_dir().glob("*_v*.md")):
+        p = prompts.parse(path.read_text(encoding="utf-8"), path)
+        missing = [k for k in p.inputs if "{" + k + "}" not in p.body]
+        assert missing == KNOWN_MISSING_INPUTS.get(p.prompt_version, []), p.prompt_version
+
+
+def test_editor_v2_and_repair_carry_candidate_words():
+    for name, version in (("editor", 2), ("editor_repair", 1)):
+        p = prompts.load(name, version)
+        kw = {k: f"<<{k}>>" for k in p.inputs}
+        assert "<<candidate_words>>" in p.render(**kw)

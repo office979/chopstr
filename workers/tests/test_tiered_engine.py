@@ -22,13 +22,13 @@ class FakeTiers:
     provider = "fake"
     is_heuristic = False
 
-    def __init__(self, spans=((0, 3),), tier="base", log=None, edit=None):
+    def __init__(self, spans=((0, 3),), tier="base", log=None, edit=None, repair=None):
         self.tier, self.spans = tier, list(spans)
         self.log = log if log is not None else []
-        self.edit = edit
+        self.edit, self.repair = edit, repair
 
     def with_tier(self, tier):
-        return FakeTiers(self.spans, tier, self.log, self.edit)
+        return FakeTiers(self.spans, tier, self.log, self.edit, self.repair)
 
     def model(self):
         return f"fake-{self.tier}"
@@ -42,6 +42,12 @@ class FakeTiers:
                 {"first_sent": a, "last_sent": b, "type": "story", "why": "Fehler [LACHT] mit Zahl", "score": 8}
                 for a, b in self.spans if a in nums and b in nums
             ]}  # fmt: skip
+        if tool_name == "edit_clip" and "Befund der Prüfung" in user:
+            words = {int(i): w for i, w in re.findall(r"(\d+):(\S+)", user)}
+            if self.repair is not None:
+                return self.repair(user, words)
+            return {"keep": False, "reject_reason": "needs_context", "start_word": min(words), "end_word": max(words),
+                    "hook": {"start_word": 0, "end_word": 0, "text": ""}, "title": "", "post_text": {}, "scores": {}}  # fmt: skip
         if tool_name == "edit_clip":
             words = {int(i): w for i, w in re.findall(r"(\d+):(\S+)", user)}
             note = re.search(r"Satz (\d+) bis (\d+)", user)
@@ -128,7 +134,7 @@ def test_tiered_run_uses_tiers_cache_blocks_and_editor_scores():
     info = report.search["tiered"]
     assert info["version"] == "tiered_engine_v1" and info["output_count"] == 3
     assert report.engine == "tiered_engine_v1"
-    assert report.prompt_versions[:2] == ["prefilter_v1", "editor_v1"]
+    assert report.prompt_versions[:2] == ["prefilter_v1", "editor_v2"] and "editor_repair_v1" in report.prompt_versions
 
 
 def test_editor_word_outside_window_is_rejected():
@@ -175,7 +181,10 @@ def test_apply_editor_marks_cut_inside_sentence_and_snaps():
     ed = tiered_engine.apply_editor(out, sents, 0, 4)
     assert (ed["first_sent"], ed["last_sent"]) == (0, 2) and ed["cut_inside_sentence"] == ["start"]
     assert ed["hook"]["start_word"] == sents[0].word_range[0]  # ungültiger Hook fällt auf den ersten Satz
-    assert tiered_engine.apply_editor({**out, "keep": False}, sents, 0, 4) is None
+    assert tiered_engine.apply_editor({**out, "keep": False, "reject_reason": "no_payoff"}, sents, 0, 4) is None
+    # Ablehnung ohne Grund aus der festen Liste gilt nicht: der Kandidat geht mit den Grenzen weiter
+    unjust = tiered_engine.apply_editor({**out, "keep": False, "reject_reason": "gefällt mir nicht"}, sents, 0, 4)
+    assert unjust is not None and unjust["unjustified_reject"] is True
 
 
 def test_budget_exhausted_skips_model_stages_and_reports():
@@ -235,7 +244,7 @@ def test_detect_activity_switches_to_tiered_by_env(fake_db, fake_context, monkey
     monkeypatch.setenv("CHOPSTR_ENGINE", "tiered")
     analyze.run_detect_candidates(fake_context, sid)
     fin = fake_db.events_for("detect_candidates")[-1]["payload"]
-    assert fin["prompt_versions"][:3] == ["tiered_engine_v1", "prefilter_v1", "editor_v1"]
+    assert fin["prompt_versions"][:3] == ["tiered_engine_v1", "prefilter_v1", "editor_v2"]
     assert fin["key"] != classic["key"] and fin["cached"] is False
     report = story_engine.DetectReport.from_json(fake_context.store.get_json("derived", fin["key"]))
     costs = report.search["tiered"]["costs"]
@@ -293,3 +302,79 @@ def test_gate_rejection_carries_span_and_failed_gates():
     assert gate, report.discarded
     assert "standalone" in gate[0]["failed_gates"] and "Vorwissen" in gate[0]["reason_detail"]
     assert {"source_in", "source_out", "word_range", "scores"} <= set(gate[0])
+
+
+def _clean_repair(sents, a, b):
+    def rep(user, words):
+        return _edit_answer(sents, a, b, title="Repariert")
+
+    return rep
+
+
+def test_gate_failure_on_context_gets_exactly_one_repair(monkeypatch):
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    sents = segment.sentences_from_words(demo_words())
+
+    def needs_ctx(a, b, words):
+        return _edit_answer(sents, a, b, needs_earlier_context=True, unresolved_references=["so Custom Prompts"])
+
+    fake = FakeTiers(spans=[(0, 3)], edit=needs_ctx, repair=_clean_repair(sents, 0, 3))
+    report = tiered_engine.run(demo_words(), BRIEF, {}, None, fake, policy=editorial.load(2))
+    repairs = [c for c in fake.calls("edit_clip") if "Befund der Prüfung" in c["user"]]
+    assert len(repairs) == 1 and repairs[0]["stage"] == "editor_repair" and repairs[0]["prompt"] == "editor_repair_v1"
+    assert "Gate:" in repairs[0]["user"] and "Vorwissen" in repairs[0]["user"] and "so Custom Prompts" in repairs[0]["user"]
+    info = report.search["tiered"]["editor"]
+    assert info["repair_calls"] == 1 and info["repaired"] == 1 and info["repairs"][0]["result"] == "repaired"
+    c = next(c for c in report.candidates if (c.first_sent, c.last_sent) == (0, 3))
+    assert c.gate_passed and c.rubric["tiered"]["editor"]["repaired"]["trigger"] == "gate"
+
+
+def test_failed_repair_keeps_gate_rejection_and_no_second_try(monkeypatch):
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    sents = segment.sentences_from_words(demo_words())
+
+    def needs_ctx(a, b, words):
+        return _edit_answer(sents, a, b, needs_earlier_context=True)
+
+    def still_bad(user, words):
+        return _edit_answer(sents, 0, 3, needs_earlier_context=True)
+
+    fake = FakeTiers(spans=[(0, 3)], edit=needs_ctx, repair=still_bad)
+    report = tiered_engine.run(demo_words(), BRIEF, {}, None, fake, policy=editorial.load(2))
+    assert len([c for c in fake.calls("edit_clip") if "Befund der Prüfung" in c["user"]]) == 1
+    assert report.search["tiered"]["editor"]["repairs"][0]["result"] == "failed"
+    assert all((c.first_sent, c.last_sent) != (0, 3) for c in report.candidates)
+    assert any(d.get("failed_gates") for d in report.discarded)
+
+
+def test_editor_needs_context_rejection_goes_to_repair_with_wider_window(monkeypatch):
+    monkeypatch.setenv("CHOPSTR_POLICY_VERSION", "2")
+    words = make_words(long_script(1, sentences_per_chapter=30, sentence_s=6.0))
+    sents = segment.sentences_from_words(words)
+
+    def reject(a, b, w):
+        return _edit_answer(sents, a, b, keep=False, reject_reason="needs_context", why="Frage fehlt davor")
+
+    fake = FakeTiers(spans=[(20, 23)], edit=reject, repair=_clean_repair(sents, 15, 23))
+    report = tiered_engine.run(words, BRIEF, {}, None, fake, policy=editorial.load(2))
+    ed_call = next(c for c in fake.calls("edit_clip") if "Befund der Prüfung" not in c["user"])
+    rep_call = next(c for c in fake.calls("edit_clip") if "Befund der Prüfung" in c["user"])
+    assert "[S16]" in ed_call["user"] and "[S15]" not in ed_call["user"]
+    # 60 s davor bei gut 6 s je Satz: rund zehn Sätze mehr als das normale Fenster
+    assert "[S11]" in rep_call["user"] and "Editor:" in rep_call["user"] and "Frage fehlt davor" in rep_call["user"]
+    info = report.search["tiered"]["editor"]
+    assert info["rejected"] == 0 and info["repaired"] == 1
+    assert any((c.first_sent, c.last_sent) == (15, 23) for c in report.candidates)
+
+
+def test_repair_off_under_policy_v1_defaults():
+    sents = segment.sentences_from_words(demo_words())
+
+    def needs_ctx(a, b, words):
+        return _edit_answer(sents, a, b, needs_earlier_context=True)
+
+    fake = FakeTiers(spans=[(0, 3)], edit=needs_ctx, repair=_clean_repair(sents, 0, 3))
+    tiered_engine.run(demo_words(), BRIEF, {}, None, fake, policy=editorial.load(1))
+    assert not [c for c in fake.calls("edit_clip") if "Befund der Prüfung" in c["user"]]
+    assert tiered_engine.engine_settings(editorial.load(2))["repair"] is True
+    assert tiered_engine.engine_settings(editorial.load(1))["repair"] is False

@@ -903,7 +903,8 @@ prompts:
   counter_reader: 1           # Lane P3: Gegenleser, sieht nur Clip und Hook; wirksam nur mit context.counter_reader.model und roles.critic
   mm_scan: 1                  # T2: multimodaler Szenen-Scan je Fenster (Stufe 0), wirksam nur mit einem MM-Provider
   prefilter: 1                # T2: Vorfilter (Stufe B, Haiku) über Transkriptblöcke, wirksam nur mit der mehrstufigen Engine
-  editor: 1                   # T2: Editor (Stufe C, Sonnet): Grenzen, Hook, Copy je Plattform, wirksam nur mit der mehrstufigen Engine
+  editor: 2                   # T2c: editor_v2 (Start auf Frage bzw. Gedankenanfang, Ablehnung nur mit Grund aus fester Liste); v1 bleibt als Datei
+  editor_repair: 1            # T2c: ein Reparaturversuch nach Gate- oder Editor-Befund zu Kontext und Einstieg, mit erweitertem Fenster
   judge_clip: 1               # T2: Richter der Trainings-Eval (Haiku, Eskalation Sonnet), nur in workers/eval/train.py
 
 # ------------------------------------------------------------------------------------------------
@@ -1183,7 +1184,11 @@ implementation:
     prefilter_overlap_s: 30
     min_len_s: 8                     # Mindestlänge für Short-Form
     max_len_s: 75
-    editor_context_sents: 4          # Sätze Kontext vor und nach dem Kandidaten im Editor-Prompt--------------------------------------------------------------------------------------------
+    editor_context_sents: 4          # Sätze Kontext vor und nach dem Kandidaten im Editor-Prompt
+    repair: true                     # T2c: ein Reparaturversuch bei Befund zu Kontext oder Einstieg (Gate oder Editor)
+    repair_context_s: 60             # so viele Sekunden vor dem Start sieht der Reparaturversuch zusätzlich
+
+# ------------------------------------------------------------------------------------------------
 # Herkunft je Regel (neu in Fassung 2)
 # ------------------------------------------------------------------------------------------------
 # Schlüssel ist der Punktpfad der Regel (editorial.rule_paths): Blattwerte wie laenge.ziel_s,

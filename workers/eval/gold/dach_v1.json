@@ -1,0 +1,1805 @@
+[
+ {
+  "id": "yt_83tlc0q-ls8",
+  "tier": "podcast",
+  "creator": "Jay & Arya - Podcast",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/83tlC0Q-Ls8",
+   "platform": "shorts",
+   "published_at": "2023-04-30",
+   "duration_s": 53,
+   "title": "Das Problem mit der Unendlichkeit.. | Jay & Arya Podcast",
+   "caption": null,
+   "hashtags": [],
+   "metrics": {
+    "views": 960967,
+    "likes": 58290,
+    "comments": 370,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": "https://www.youtube.com/watch?v=888T6W5b1x0",
+   "title": null,
+   "duration_s": null,
+   "start_s": 1264.8,
+   "end_s": 1458.4,
+   "segments": [
+    [
+     1264.8,
+     1270.3
+    ],
+    [
+     1282.2,
+     1284.3
+    ],
+    [
+     1438.1,
+     1457.7
+    ]
+   ],
+   "alignment": "transcript_match",
+   "confidence": 0.39
+  },
+  "breakdown": {
+   "hook_type": "frage",
+   "hook_text_first_3s": "Auf einer Skala von eins bis Pi: wie fruchtig ist das Konzept Unendlichkeit?",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "question",
+    "note": "Startet direkt mit der absurden Skalenfrage, kein Vorlauf"
+   },
+   "cut_out": {
+    "kind": "mid_sentence",
+    "note": "Endet unmittelbar nach der Pointe von der unendlich dicken Wand, letztes Wort angeschnitten"
+   },
+   "length_s": 53,
+   "context_setup": "Skalenfrage zur Unendlichkeit, dann Gedankenspiel zu Pi und allen Zahlenkombinationen",
+   "payoff": "Kindheitserinnerung: hinter jeder Wand im All müsste etwas kommen, außer die Wand ist unendlich dick",
+   "payoff_type": "lacher",
+   "structure": "Frage > Gedankenspiel > persönliche Kindheitsanekdote > absurde Zuspitzung",
+   "edits": {
+    "cold_open": false,
+    "jump_cuts": true,
+    "reordered": false,
+    "n_source_segments": 3,
+    "compression": 4.62
+   },
+   "captions_style": null,
+   "copy_pattern": "Thema als 'Das Problem mit X' benannt, zwei Punkte als Auslassung, Formatname angehängt",
+   "language_notes": "Locker, viel Füllsprache, Gedankenspiel statt Fakten; Auto Untertitel verhören Wörter (z. B. 'fruchtig')"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_2vlqsay9y6g",
+  "tier": "podcast",
+  "creator": "Jay & Arya - Podcast",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/2vlQSay9Y6g",
+   "platform": "shorts",
+   "published_at": "2023-05-01",
+   "duration_s": 58,
+   "title": "Rapper in der Klokabine erwischt..",
+   "caption": null,
+   "hashtags": [],
+   "metrics": {
+    "views": 890641,
+    "likes": 55119,
+    "comments": 359,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": "https://www.youtube.com/watch?v=sNYpgcYc0-Y",
+   "title": null,
+   "duration_s": null,
+   "start_s": 1060.7,
+   "end_s": 1196.7,
+   "segments": [
+    [
+     1060.7,
+     1066.3
+    ],
+    [
+     880.0,
+     880.2
+    ],
+    [
+     1111.5,
+     1114.9
+    ],
+    [
+     1126.7,
+     1127.8
+    ],
+    [
+     1133.3,
+     1134.5
+    ],
+    [
+     1186.6,
+     1189.5
+    ]
+   ],
+   "alignment": "transcript_match",
+   "confidence": 0.28
+  },
+  "breakdown": {
+   "hook_type": "story_einstieg",
+   "hook_text_first_3s": "Während ich auf dem Klo war, sind ein paar Sachen passiert.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "sentence_start",
+    "note": "Beginnt mit dem ersten Satz der Anekdote"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet kurz nach der Auflösung mit dem Satz 'egal wer petzt', kurzer Ausklang"
+   },
+   "length_s": 58,
+   "context_setup": "Erzähler sitzt in einer Klokabine, ein bekannter Rapper kommt mit einem Kumpel rein, Name wird bewusst verschwiegen",
+   "payoff": "Situation in der Nachbarkabine eskaliert hörbar, am Ende fällt eine Drohung gegen Petzer",
+   "payoff_type": "ueberraschung",
+   "structure": "Story > Spannungsaufbau mit verschwiegenem Namen > Sprechpause > Pointe",
+   "edits": {
+    "cold_open": false,
+    "jump_cuts": true,
+    "reordered": true,
+    "n_source_segments": 6,
+    "compression": 2.55
+   },
+   "captions_style": null,
+   "copy_pattern": "Promi Andeutung ohne Namen plus Ort, zwei Punkte als Auslassung",
+   "language_notes": "Erzählton mit direkter Ansprache ('du kennst den, alle Zuschauer kennen den'); verschwiegener Name erzeugt Neugier; einziger Clip mit umgestellter Reihenfolge laut Ausrichtung"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_yy_vey1lb5k",
+  "tier": "podcast",
+  "creator": "Jay & Arya - Podcast",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/YY_vEy1Lb5k",
+   "platform": "shorts",
+   "published_at": "2022-02-07",
+   "duration_s": 45,
+   "title": "Wenn du nur noch einen Satz sagen könntest... #shorts",
+   "caption": null,
+   "hashtags": [
+    "shorts"
+   ],
+   "metrics": {
+    "views": 814466,
+    "likes": 54523,
+    "comments": 289,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": "https://www.youtube.com/watch?v=YLEoT2gCGyE",
+   "title": null,
+   "duration_s": null,
+   "start_s": 1769.0,
+   "end_s": 1922.1,
+   "segments": [
+    [
+     1769.0,
+     1773.4
+    ],
+    [
+     1793.6,
+     1795.9
+    ],
+    [
+     1811.2,
+     1813.8
+    ],
+    [
+     1818.8,
+     1819.6
+    ],
+    [
+     1853.5,
+     1858.1
+    ],
+    [
+     1879.1,
+     1888.1
+    ]
+   ],
+   "alignment": "transcript_match",
+   "confidence": 0.45
+  },
+  "breakdown": {
+   "hook_type": "frage",
+   "hook_text_first_3s": "Wenn du nur noch einen Satz sagen könntest, welchen würdest du wählen?",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "question",
+    "note": "Hypothetische Frage als erster Satz"
+   },
+   "cut_out": {
+    "kind": "after_laugh",
+    "note": "Endet in einer durchgespielten Alltagsszene, genaues Ende im Transkript unklar"
+   },
+   "length_s": 45,
+   "context_setup": "Regel des Gedankenspiels: immer nur dieser eine Satz, am Stück",
+   "payoff": "Gewählter Satz 'Ich will das nicht' wird in Alltagssituationen durchgespielt",
+   "payoff_type": "lacher",
+   "structure": "Frage > Regel > Antwort > Durchspielen in Szenen",
+   "edits": {
+    "cold_open": false,
+    "jump_cuts": true,
+    "reordered": false,
+    "n_source_segments": 6,
+    "compression": 3.97
+   },
+   "captions_style": null,
+   "copy_pattern": "Titel wiederholt die Hookfrage wörtlich, Auslassungspunkte, #shorts",
+   "language_notes": "Spielerisches Gedankenexperiment, Betonung und Wiederholung tragen den Witz; aus sechs Stellen verdichtet"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_o7vegucauka",
+  "tier": "podcast",
+  "creator": "EDELTALK",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/o7VeGuCAUKA",
+   "platform": "shorts",
+   "published_at": "2026-04-22",
+   "duration_s": 25,
+   "title": "Papaplatte auf Google Maps? #edeltalk #397",
+   "caption": null,
+   "hashtags": [
+    "edeltalk",
+    "397"
+   ],
+   "metrics": {
+    "views": 417652,
+    "likes": 7626,
+    "comments": 19,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": "https://www.youtube.com/watch?v=oP2Fjkd5iOk",
+   "title": null,
+   "duration_s": null,
+   "start_s": 291.4,
+   "end_s": 317.0,
+   "segments": [
+    [
+     291.4,
+     301.3
+    ]
+   ],
+   "alignment": "transcript_match",
+   "confidence": 0.49
+  },
+  "breakdown": {
+   "hook_type": "frage",
+   "hook_text_first_3s": "Was war das für ein komisches Google Maps Ding, das du geschickt hast?",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "question",
+    "note": "Direkt mit der Frage an den Gesprächspartner"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet nach der Pointe zum Ort namens Papaplatte"
+   },
+   "length_s": 25,
+   "context_setup": "Jemand hat einen Google Maps Link geschickt, die Jungs wären fast Richtung Nürnberg gefahren",
+   "payoff": "Bei der Suche nach Papaplatte auf Google Maps erscheint ein Ort mit diesem Namen",
+   "payoff_type": "lacher",
+   "structure": "Frage > kurzer Kontext > Auflösung > Nachsatz",
+   "edits": {
+    "cold_open": false,
+    "jump_cuts": false,
+    "reordered": false,
+    "n_source_segments": 1,
+    "compression": 1.09
+   },
+   "captions_style": null,
+   "copy_pattern": "Name des Hosts plus Ort als Frage, Kanalhashtag, Folgennummer",
+   "language_notes": "Sehr kurz, ein zusammenhängendes Stück; Jugendsprache ('bro')"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_x9pdl2sv4ie",
+  "tier": "podcast",
+  "creator": "EDELTALK",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/x9pDL2sV4IE",
+   "platform": "shorts",
+   "published_at": "2026-04-20",
+   "duration_s": 40,
+   "title": "Die Deutsche Sprache #edeltalk #395",
+   "caption": null,
+   "hashtags": [
+    "edeltalk",
+    "395"
+   ],
+   "metrics": {
+    "views": 389962,
+    "likes": 10912,
+    "comments": 88,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": "https://www.youtube.com/watch?v=cq2BrLXElng",
+   "title": null,
+   "duration_s": null,
+   "start_s": 2214.4,
+   "end_s": 2335.8,
+   "segments": [
+    [
+     2214.4,
+     2233.9
+    ],
+    [
+     2286.5,
+     2286.6
+    ],
+    [
+     2286.9,
+     2293.1
+    ],
+    [
+     2315.8,
+     2331.0
+    ]
+   ],
+   "alignment": "transcript_match",
+   "confidence": 0.53
+  },
+  "breakdown": {
+   "hook_type": "neugier_luecke",
+   "hook_text_first_3s": "Ich finde, die deutsche Sprache hat so geile Wörter.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "sentence_start",
+    "note": "Startet mit der These, Beispiel folgt"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet mit anerkennendem Spruch nach der Wortherleitung"
+   },
+   "length_s": 40,
+   "context_setup": "Beispielwort 'stibitzen' im Unterschied zu 'klauen'",
+   "payoff": "Herleitung: stibitzen passt zwischen Daumen und Zeigefinger, Wort kommt von zwicken oder kneifen",
+   "payoff_type": "erkenntnis",
+   "structure": "These > Beispiel > Erklärung > Herleitung > Anerkennung",
+   "edits": {
+    "cold_open": false,
+    "jump_cuts": true,
+    "reordered": false,
+    "n_source_segments": 4,
+    "compression": 3.24
+   },
+   "captions_style": null,
+   "copy_pattern": "Kurzes Thema als Titel, Kanalhashtag, Folgennummer",
+   "language_notes": "Wissenshappen im Plauderton; aus vier Stellen verdichtet"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_shhlkqbg8ae",
+  "tier": "podcast",
+  "creator": "EDELTALK",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/shhlkQbG8AE",
+   "platform": "shorts",
+   "published_at": "2026-04-18",
+   "duration_s": 29,
+   "title": "Er hat eine Scherbe im Fuß!? #edeltalk #397",
+   "caption": null,
+   "hashtags": [
+    "edeltalk",
+    "397"
+   ],
+   "metrics": {
+    "views": 198754,
+    "likes": 5260,
+    "comments": 51,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": "https://www.youtube.com/watch?v=oP2Fjkd5iOk",
+   "title": null,
+   "duration_s": null,
+   "start_s": 1296.7,
+   "end_s": 1363.3,
+   "segments": [
+    [
+     1296.7,
+     1312.2
+    ],
+    [
+     1347.1,
+     1362.2
+    ]
+   ],
+   "alignment": "transcript_match",
+   "confidence": 0.61
+  },
+  "breakdown": {
+   "hook_type": "neugier_luecke",
+   "hook_text_first_3s": "Ich habe eventuell zwei Scherben in meinem Körper, nie darüber gesprochen.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "sentence_start",
+    "note": "Startet mit dem Geständnis"
+   },
+   "cut_out": {
+    "kind": "mid_sentence",
+    "note": "Bricht mitten im Satz ab, nachdem der Gegenpart widerspricht"
+   },
+   "length_s": 29,
+   "context_setup": "Barfuß im Megapark getanzt, nachdem jemand die Sandalen geklaut hat",
+   "payoff": "Scherbe ist nach Wochen eingewachsen, er will warten, bis sie von selbst rauskommt",
+   "payoff_type": "lacher",
+   "structure": "Geständnis > Vorgeschichte > Einwurf des Gegenparts > absurde Haltung",
+   "edits": {
+    "cold_open": false,
+    "jump_cuts": true,
+    "reordered": false,
+    "n_source_segments": 2,
+    "compression": 2.49
+   },
+   "captions_style": null,
+   "copy_pattern": "Kernaussage als Frage mit '!?', Kanalhashtag, Folgennummer",
+   "language_notes": "Zwei Sprecher ergänzen sich; der Gegenpart liefert die Zuspitzung"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_iu3bd0c-mnw",
+  "tier": "podcast",
+  "creator": "Hotel Matze",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/iu3BD0c-mnw",
+   "platform": "shorts",
+   "published_at": "2026-10-21",
+   "duration_s": 30,
+   "title": "Du schaffst das: Familientherapeutin über Selbstwirksamkeit bei Kindern | #hotelmatze #podcast",
+   "caption": null,
+   "hashtags": [
+    "hotelmatze",
+    "podcast"
+   ],
+   "metrics": {
+    "views": 209729,
+    "likes": 3713,
+    "comments": 95,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": "https://www.youtube.com/watch?v=3-rgX1hGTAk",
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "description",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "story_einstieg",
+   "hook_text_first_3s": "Ich mochte es nicht, wenn meine Mutter sagte: Ich mache mir Sorgen.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "sentence_start",
+    "note": "Beginnt mit persönlicher Erinnerung"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet auf dem Schlusssatz 'ich bin deine Mama'"
+   },
+   "length_s": 30,
+   "context_setup": "Sorge der Mutter hat Panik ausgelöst",
+   "payoff": "Haltung für Eltern: dem Kind Kraft zusprechen und Begleitung zusagen",
+   "payoff_type": "erkenntnis",
+   "structure": "Erinnerung > Gegenmodell > Leitsatz für Eltern > emotionaler Schluss",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Zitat als Titelanfang, Doppelpunkt, Gastrolle plus Thema, Kanalhashtag",
+   "language_notes": "Ruhig, ratgebend, keine Lacher; klarer Merksatz"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_-rgvc_bpdao",
+  "tier": "podcast",
+  "creator": "Hotel Matze",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/-rgVC_BpdAo",
+   "platform": "shorts",
+   "published_at": "2026-10-28",
+   "duration_s": 68,
+   "title": "Sängerin Stefanie Kloß über die letzten Worte an ihren Stiefvater | #hotelmatze #podcast",
+   "caption": null,
+   "hashtags": [
+    "hotelmatze",
+    "podcast"
+   ],
+   "metrics": {
+    "views": 194290,
+    "likes": 3502,
+    "comments": 56,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": "https://www.youtube.com/watch?v=d2gJ4O9Aly4",
+   "title": null,
+   "duration_s": null,
+   "start_s": 5551.4,
+   "end_s": 5614.0,
+   "segments": [
+    [
+     5551.4,
+     5610.6
+    ]
+   ],
+   "alignment": "transcript_match",
+   "confidence": 0.54
+  },
+  "breakdown": {
+   "hook_type": "story_einstieg",
+   "hook_text_first_3s": "Bevor wir in unsere Pause gegangen sind, ist mein Stiefvater gestorben.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "sentence_start",
+    "note": "Beginnt mit dem einschneidenden Satz"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet auf der Kernaussage, dass sie durch ihn Sängerin wurde"
+   },
+   "length_s": 68,
+   "context_setup": "Am Sterbebett gemeinsam Joe Cocker gehört, Stiefvater war lange an ihrer Seite, erstes Konzert mit ihm",
+   "payoff": "Letzte Worte: sie hofft, er weiß, dass sie durch ihn Sängerin geworden ist",
+   "payoff_type": "emotion",
+   "structure": "Einschneidender Einstieg > Rückblende > Bogen zurück ans Sterbebett > Schlusssatz",
+   "edits": {
+    "cold_open": false,
+    "jump_cuts": true,
+    "reordered": false,
+    "n_source_segments": 1,
+    "compression": 1.64
+   },
+   "captions_style": null,
+   "copy_pattern": "Gastname mit Beruf plus Thema 'über die letzten Worte an', Kanalhashtag",
+   "language_notes": "Leise, emotional, Pausen bleiben drin; ein langes zusammenhängendes Segment"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_gliw9wbkhvq",
+  "tier": "podcast",
+  "creator": "Hotel Matze",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/gliw9WbkhVQ",
+   "platform": "shorts",
+   "published_at": "2026-10-24",
+   "duration_s": 66,
+   "title": "Familientherapeutin Cordula Stratmann über das Würdigen von Schmerzen | #hotelmatze #podcast",
+   "caption": null,
+   "hashtags": [
+    "hotelmatze",
+    "podcast"
+   ],
+   "metrics": {
+    "views": 139961,
+    "likes": 1895,
+    "comments": 31,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": "https://www.youtube.com/watch?v=3-rgX1hGTAk",
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "description",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "story_einstieg",
+   "hook_text_first_3s": "Das hat mir eine Klientin extrem beigebracht.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "sentence_start",
+    "note": "Startet mit Ankündigung einer Lernerfahrung"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet auf einer Frage an sich selbst als Merksatz"
+   },
+   "length_s": 66,
+   "context_setup": "Klientin hadert mit einer Entscheidung von vor 15 Jahren, Therapeutin ist selbst längst weiter",
+   "payoff": "Einsicht: erst den Schmerz des Gegenübers würdigen, bevor man weiterführt",
+   "payoff_type": "erkenntnis",
+   "structure": "Ankündigung > Fallgeschichte > innerer Dialog > Merksatz als Frage",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Gastname mit Beruf plus Thema 'über das Würdigen von', Kanalhashtag",
+   "language_notes": "Nachdenklich, therapeutisches Vokabular; Untertitel verhören Wörter; Quelle per Hand gepaart, Abgleich ohne Treffer"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_mjcqtotvpbe",
+  "tier": "format",
+  "creator": "Baywatch Berlin",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/mjcQTOTVPbE",
+   "platform": "shorts",
+   "published_at": "2026-09-07",
+   "duration_s": 37,
+   "title": "Seiten auf null?!",
+   "caption": null,
+   "hashtags": [],
+   "metrics": {
+    "views": 96333,
+    "likes": 517,
+    "comments": 20,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": null,
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "unknown",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "story_einstieg",
+   "hook_text_first_3s": "Der hat zu mir gesagt: Seiten auf null? Als Frage und Aussage gleichzeitig.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "sentence_start",
+    "note": "Steigt mitten in die Friseuranekdote ein, 'der' ohne Einführung"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet mit trockenem Fazit zum Preis"
+   },
+   "length_s": 37,
+   "context_setup": "Friseurbesuch, Frage 'Seiten auf null' missverstanden",
+   "payoff": "Seiten werden bis auf die Haut geschnitten, er sitzt schwitzend da, am Ende trockenes Fazit",
+   "payoff_type": "lacher",
+   "structure": "Zitat > Missverständnis > Schilderung > trockenes Fazit",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Titel ist das Zitat aus der Hook mit '?!'; Beschreibung wiederholt den Titel",
+   "language_notes": "Trockener Erzählhumor, Selbstironie"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_tcaz7g_sclu",
+  "tier": "format",
+  "creator": "Baywatch Berlin",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/tCaZ7G_SCLU",
+   "platform": "shorts",
+   "published_at": "2026-07-14",
+   "duration_s": 88,
+   "title": "Klaas hat doch noch WM-Spaß 😆",
+   "caption": null,
+   "hashtags": [],
+   "metrics": {
+    "views": 78702,
+    "likes": 636,
+    "comments": 12,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": null,
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "unknown",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "story_einstieg",
+   "hook_text_first_3s": "Klaas schreibt: Ich habe einen Weg gefunden, wie mir die WM Spaß macht.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "sentence_start",
+    "note": "Beginnt mit Datum und Nachricht von Klaas"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet mit 'da wusste ich, jetzt ist Schluss'"
+   },
+   "length_s": 88,
+   "context_setup": "Selbstversuch mit Sportwetten zur Fußball WM mit festem Budget",
+   "payoff": "Kritik am Aufbau der Wett App, Rest des Geldes in wenigen Runden Formel 1 verspielt",
+   "payoff_type": "erkenntnis",
+   "structure": "Nachricht > Selbstversuch > Kritik > Absturz > Schluss",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Name plus ironische Aussage plus Emoji; Beschreibung mit Hinweis auf Hilfsangebot",
+   "language_notes": "Erzählung mit Gesellschaftskritik; mit 88 s einer der längsten Clips"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_phlvku41r64",
+  "tier": "podcast",
+  "creator": "Trymacs Clips",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/phlvKu41R64",
+   "platform": "shorts",
+   "published_at": "2022-08-08",
+   "duration_s": 40,
+   "title": "Trymacs und das Paino-Foto 😂 | Zu lustig! | #offlineundehrlich",
+   "caption": null,
+   "hashtags": [
+    "offlineundehrlich"
+   ],
+   "metrics": {
+    "views": 864508,
+    "likes": 26147,
+    "comments": 127,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": null,
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "unknown",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "konflikt",
+   "hook_text_first_3s": "Da musst du die Pano Funktion benutzen. Welche Funktion?",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "mid_sentence",
+    "note": "Setzt mitten in der Diskussion ein"
+   },
+   "cut_out": {
+    "kind": "after_laugh",
+    "note": "Endet mit Spruch über ältere Menschen"
+   },
+   "length_s": 40,
+   "context_setup": "Streit, ob man 'Pano' oder 'Panoramafoto' sagt",
+   "payoff": "Gegenseitiges Aufziehen, bis klar ist, was auf dem iPhone steht",
+   "payoff_type": "lacher",
+   "structure": "Behauptung > Unverständnis > Streit um ein Wort > Spruch",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Name plus Schlagwort mit Tippfehler, Emoji, Zusatz 'Zu lustig!', Formathashtag",
+   "language_notes": "Schnelles Durcheinanderreden; Transkript stark fehlerhaft"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_hguvpbhnfoc",
+  "tier": "podcast",
+  "creator": "Trymacs Clips",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/hGuvpBHNfOc",
+   "platform": "shorts",
+   "published_at": "2023-10-29",
+   "duration_s": 50,
+   "title": "Lässt du leute in deinem bett schlafen❓ 🛌🏼 | offline & ehrlich auf Spotify",
+   "caption": null,
+   "hashtags": [],
+   "metrics": {
+    "views": 832405,
+    "likes": 28848,
+    "comments": 337,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": null,
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "unknown",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "provokante_aussage",
+   "hook_text_first_3s": "Was ich easy teile: Handtuch, Bettwäsche, kein Problem.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "mid_sentence",
+    "note": "Startet mitten in einer Aufzählung"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet mit dem Bild vom Biotop in Straßenkleidung"
+   },
+   "length_s": 50,
+   "context_setup": "Frage, was man mit anderen teilt",
+   "payoff": "Gegenposition: Bettwäsche wöchentlich waschen, mit Straßenkleidung nie aufs Bett",
+   "payoff_type": "lacher",
+   "structure": "These > Gegenfrage > Gegenposition > drastisches Bild",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Titel als Frage an den Zuschauer mit Emoji, Hinweis auf Spotify",
+   "language_notes": "Meinungsstreit über eine Alltagsmacke; lädt zum Kommentieren ein"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_du5wlvzqr7o",
+  "tier": "podcast",
+  "creator": "Trymacs Clips",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/Du5WLVzqR7o",
+   "platform": "shorts",
+   "published_at": "2023-12-03",
+   "duration_s": 60,
+   "title": "Damit hat er nicht gerechnet 😂 | Offline & Ehrlich #offlineundehrlich",
+   "caption": null,
+   "hashtags": [
+    "offlineundehrlich"
+   ],
+   "metrics": {
+    "views": 573009,
+    "likes": 21218,
+    "comments": 56,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": null,
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "unknown",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "cold_open_payoff",
+   "hook_text_first_3s": "Setz dich hin und halt dein Maul, du bist schlecht.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "cold_open",
+    "note": "Eröffnet mit einem Satz, der später im Clip wieder fällt"
+   },
+   "cut_out": {
+    "kind": "after_laugh",
+    "note": "Endet nach der Auflösung mit Gelächter"
+   },
+   "length_s": 60,
+   "context_setup": "Spielrunde: welcher Wikipedia Artikel am längsten nicht bearbeitet wurde",
+   "payoff": "Satz des Pythagoras wurde am Vortag doch bearbeitet, der vermeintlich sichere Tipp verliert",
+   "payoff_type": "ueberraschung",
+   "structure": "Cold Open > Auflösungsrunde > Begründung > Überraschung > Wiederholung des Cold Open",
+   "edits": {
+    "cold_open": true,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Neugiertitel 'Damit hat er nicht gerechnet' plus Emoji und Formatname",
+   "language_notes": "Spielformat mit Wettbewerb; Cold Open aus Wiederholung im Transkript abgeleitet, nicht per Quelle belegt"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_izipttb8pxo",
+  "tier": "podcast",
+  "creator": "Trymacs Clips",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/IziPTTb8Pxo",
+   "platform": "shorts",
+   "published_at": "2023-11-05",
+   "duration_s": 51,
+   "title": "Sascha ist einer der abgehobensten Youtuber 😂😂 | Offline & Ehrlich auf Spotify",
+   "caption": null,
+   "hashtags": [],
+   "metrics": {
+    "views": 436153,
+    "likes": 10703,
+    "comments": 14,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": null,
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "unknown",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "neugier_luecke",
+   "hook_text_first_3s": "Max, du machst mich nervös. Was willst du unbedingt sagen?",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "sentence_start",
+    "note": "Startet mit Anrede an den Mitspieler"
+   },
+   "cut_out": {
+    "kind": "cliffhanger",
+    "note": "Endet, bevor die angekündigte Top 3 aufgelöst wird"
+   },
+   "length_s": 51,
+   "context_setup": "Formatrunde 'Top 3 Dinge, die wir zu viel haben'",
+   "payoff": "Selbsteinsicht: typisches Youtuberleben, von allem zu viel",
+   "payoff_type": "erkenntnis",
+   "structure": "Anrede > Ankündigung > Selbsteinsicht > offenes Ende",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Personenaussage mit Superlativ, doppeltes Emoji, Spotify Hinweis",
+   "language_notes": "Selbstironie; Ende ohne Auflösung"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_jgkf3qxoxqq",
+  "tier": "streamer",
+  "creator": "Papaplatte",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/JGkF3qxOxqQ",
+   "platform": "shorts",
+   "published_at": "2024-06-13",
+   "duration_s": 35,
+   "title": "Hugos Start in den Summer Trip 😂#papaplatte #papaplatteclips",
+   "caption": null,
+   "hashtags": [
+    "papaplatte",
+    "papaplatteclips"
+   ],
+   "metrics": {
+    "views": 935984,
+    "likes": 36344,
+    "comments": 99,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": null,
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "unknown",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "sonstiges",
+   "hook_text_first_3s": "(kein Sprechtext in den ersten 3 s, erste Untertitel ab 9,6 s)",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "reaction",
+    "note": "Einstieg ohne Sprache, vermutlich visuelle Situation; nicht prüfbar"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet mit dem Spruch vom Opfern und in den Abgrund reißen"
+   },
+   "length_s": 35,
+   "context_setup": "Start eines Sommertrips, Situation im Transkript kaum erkennbar",
+   "payoff": "Ausrufe und Kommentar zu einem Missgeschick",
+   "payoff_type": "lacher",
+   "structure": "Visueller Einstieg > Reaktionen > Spruch",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Name plus Anlass plus Emoji, Kanalhashtags",
+   "language_notes": "Fast nur Ausrufe; Transkript trägt kaum, Bild vermutlich entscheidend"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_4jnpjzgwuq4",
+  "tier": "streamer",
+  "creator": "Papaplatte",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/4JNpJzGWUq4",
+   "platform": "shorts",
+   "published_at": "2024-05-28",
+   "duration_s": 33,
+   "title": "Sehr beeindruckendes Talent 🤯 #papaplatte #papaplatteclips",
+   "caption": null,
+   "hashtags": [
+    "papaplatte",
+    "papaplatteclips"
+   ],
+   "metrics": {
+    "views": 883939,
+    "likes": 42721,
+    "comments": 132,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": null,
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "unknown",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "neugier_luecke",
+   "hook_text_first_3s": "Es ist mal wieder so weit: Ich habe eure Talente ausgecheckt.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "sentence_start",
+    "note": "Formatansage als erster Satz"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet auf der staunenden Reaktion"
+   },
+   "length_s": 33,
+   "context_setup": "Zuschauer im Rollstuhl stellt sein Talent vor, Selbstironie zum Einstieg",
+   "payoff": "Spielszenen als Nationalspieler in einer Fußballvariante für Rollstuhlfahrer, Streamer staunt",
+   "payoff_type": "skill_moment",
+   "structure": "Formatansage > Einsendung > Szenen > Reaktion",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Wertung plus Emoji 'Sehr beeindruckendes Talent', Kanalhashtags",
+   "language_notes": "Reaktionsformat auf Zuschauereinsendungen; Sportart im Untertitel unklar"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt__wle9f08eeg",
+  "tier": "streamer",
+  "creator": "Papaplatte",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/_wLe9f08EEg",
+   "platform": "shorts",
+   "published_at": "2024-04-23",
+   "duration_s": 30,
+   "title": "Es hätte so cool sein können 😪",
+   "caption": null,
+   "hashtags": [],
+   "metrics": {
+    "views": 609285,
+    "likes": 29132,
+    "comments": 63,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": null,
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "unknown",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "frage",
+   "hook_text_first_3s": "Okay, das Produkt ist ein Wandauto. Wie soll das an der Wand halten?",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "sentence_start",
+    "note": "Produkt wird direkt benannt"
+   },
+   "cut_out": {
+    "kind": "after_laugh",
+    "note": "Endet mit derbem Vergleich zur Lautstärke"
+   },
+   "length_s": 30,
+   "context_setup": "Test eines Spielzeugautos, das an Wand und Decke fahren soll",
+   "payoff": "Fährt nur im Kreis und ist extrem laut",
+   "payoff_type": "lacher",
+   "structure": "Produkt > Test > Enttäuschung > derber Vergleich",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Vorweggenommene Enttäuschung 'Es hätte so cool sein können' plus Emoji",
+   "language_notes": "Produkttest als Comedy; Produktname im Untertitel unklar"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_-nrpwjpzqe0",
+  "tier": "streamer",
+  "creator": "Knossi",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/-nRpWJpzqe0",
+   "platform": "shorts",
+   "published_at": "2026-10-25",
+   "duration_s": 57,
+   "title": "Omid verarscht Knossi 😂",
+   "caption": null,
+   "hashtags": [],
+   "metrics": {
+    "views": 893506,
+    "likes": 20546,
+    "comments": 371,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": null,
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "unknown",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "sonstiges",
+   "hook_text_first_3s": "Und da sage ich einfach: Das Auto passt, das ist ein Rolls Royce.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "mid_sentence",
+    "note": "Beginnt mit 'und', mitten im Gespräch"
+   },
+   "cut_out": {
+    "kind": "after_laugh",
+    "note": "Endet, nachdem Knossi zugibt, reingefallen zu sein"
+   },
+   "length_s": 57,
+   "context_setup": "Autovorführung, Teppich aus Lammfell",
+   "payoff": "Fangfrage, wie viele Lämmer für den Teppich sterben; Antwort keins, man kann sie scheren",
+   "payoff_type": "ueberraschung",
+   "structure": "Vorführung > Fangfrage > Auflösung > Eingeständnis",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Person verarscht Person plus Emoji",
+   "language_notes": "Streich im Gespräch; Gelächter markiert die Pointe"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_8m58l0enxbg",
+  "tier": "streamer",
+  "creator": "Knossi",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/8m58l0enxbg",
+   "platform": "shorts",
+   "published_at": "2026-10-25",
+   "duration_s": 49,
+   "title": "So viel verdient Omid mit Social Media 🫣",
+   "caption": null,
+   "hashtags": [],
+   "metrics": {
+    "views": 571780,
+    "likes": 5344,
+    "comments": 181,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": null,
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "unknown",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "zahl_geld",
+   "hook_text_first_3s": "Was macht ihr Umsatz im Monat mit Social Media?",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "question",
+    "note": "Direkt mit der Geldfrage"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet auf der höchsten genannten Aufrufzahl"
+   },
+   "length_s": 49,
+   "context_setup": "Frage nach Monatsumsatz, Antwort siebenstellig",
+   "payoff": "Aufschlüsselung nach Werbepartnern und YouTube, Uploadrhythmus und Aufrufzahlen",
+   "payoff_type": "zahl",
+   "structure": "Geldfrage > Zahl > Aufschlüsselung > Rekordzahl",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Versprechen 'So viel verdient X' plus Emoji",
+   "language_notes": "Interviewcharakter; Titel verspricht Verdienst, Clip nennt Umsatz"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_zbek0rmcssq",
+  "tier": "streamer",
+  "creator": "Knossi",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/ZBeK0RMcSSQ",
+   "platform": "shorts",
+   "published_at": "2026-11-02",
+   "duration_s": 135,
+   "title": "Knossi spricht zum ersten Mal mit Exsl 😂",
+   "caption": null,
+   "hashtags": [],
+   "metrics": {
+    "views": 389911,
+    "likes": 9170,
+    "comments": 213,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": null,
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "unknown",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "sonstiges",
+   "hook_text_first_3s": "Hey, hallo. Kennen wir uns? Der Chat schreibt, du warst da.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "sentence_start",
+    "note": "Begrüßung beim ersten Kontakt"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet mit Komplimenten nach dem Hin und Her"
+   },
+   "length_s": 135,
+   "context_setup": "Erstes Gespräch, Stimme und Rauchstopp als Einstieg",
+   "payoff": "Gespräch kippt ins Thema Gewicht, Knossi widerspricht und beschwichtigt",
+   "payoff_type": "konflikt",
+   "structure": "Begrüßung > Smalltalk > heikles Thema > Beschwichtigung",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Erstes Mal plus Name plus Emoji",
+   "language_notes": "Mit 135 s der längste Clip; laut Zeitmarken rund 20 s ohne Untertitel am Anfang"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_v2f6jzaa5pc",
+  "tier": "streamer",
+  "creator": "ClipsbyEligella",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/V2f6jzAa5pc",
+   "platform": "shorts",
+   "published_at": "2025-04-15",
+   "duration_s": 66,
+   "title": "Elis Top 5 Spieler fürKleinfeld 😂#eligella #eliasn97 #ronaldo #messi #musiala #shorts #fyp #fy",
+   "caption": null,
+   "hashtags": [
+    "eligella",
+    "eliasn97",
+    "ronaldo",
+    "messi",
+    "musiala",
+    "shorts",
+    "fyp",
+    "fy"
+   ],
+   "metrics": {
+    "views": 421454,
+    "likes": 6675,
+    "comments": 185,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": "https://www.youtube.com/watch?v=HDYTV_gzgJs",
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "description",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "sonstiges",
+   "hook_text_first_3s": "Der Call ist super, auch im Tor sehr stark.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "mid_sentence",
+    "note": "Setzt mitten in der Torwartwahl ein"
+   },
+   "cut_out": {
+    "kind": "cliffhanger",
+    "note": "Endet unentschieden zwischen zwei Kandidaten"
+   },
+   "length_s": 66,
+   "context_setup": "Aufgabe: Top 5 für Kleinfeld wählen",
+   "payoff": "Wahl mit Ronaldo, Messi, Musiala, offene Position im Mittelfeld",
+   "payoff_type": "sonstiges",
+   "structure": "Laufende Auswahl > Begründungen > Frage an den Chat > offenes Ende",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Ranking im Titel plus Emoji plus viele Hashtags mit Spielernamen und #fyp",
+   "language_notes": "Spielernamen im Untertitel verhört (Torwart vermutlich ter Stegen); Chat wird einbezogen"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_ogr2un5sw8e",
+  "tier": "streamer",
+  "creator": "ClipsbyEligella",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/oGr2Un5Sw8E",
+   "platform": "shorts",
+   "published_at": "2025-04-08",
+   "duration_s": 40,
+   "title": "Ediz kennt Felix Kroos nicht? 😂 #eligella #eliasn97 #ediz #kroos #lustig #shorts #fyp #fy",
+   "caption": null,
+   "hashtags": [
+    "eligella",
+    "eliasn97",
+    "ediz",
+    "kroos",
+    "lustig",
+    "shorts",
+    "fyp",
+    "fy"
+   ],
+   "metrics": {
+    "views": 206046,
+    "likes": 3131,
+    "comments": 50,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": "https://www.youtube.com/watch?v=HDYTV_gzgJs",
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "description",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "story_einstieg",
+   "hook_text_first_3s": "Weißt du, was passiert ist? Es war so peinlich.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "sentence_start",
+    "note": "Beginnt mit Erzählankündigung"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet mit 'das war mir so unangenehm'"
+   },
+   "length_s": 40,
+   "context_setup": "Begegnung im Aufzug bei der Icon League",
+   "payoff": "Er hält Felix Kroos für einen Doppelgänger von Toni Kroos und glaubt ihm nicht, dass er der Bruder ist",
+   "payoff_type": "lacher",
+   "structure": "Ankündigung > Situation > Missverständnis > Aufklärung durch Dritten",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Frage 'X kennt Y nicht?' plus Emoji plus Hashtags mit Namen",
+   "language_notes": "Peinliche Anekdote; Name im Untertitel verhört"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_v1ofy-fq1yc",
+  "tier": "streamer",
+  "creator": "Richtiger Kevin",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/V1oFy-Fq1yc",
+   "platform": "shorts",
+   "published_at": "2026-10-26",
+   "duration_s": 83,
+   "title": "Crashout wegen Fahrradstraße in Buxtehude! 😡",
+   "caption": null,
+   "hashtags": [
+    "montanablack",
+    "shorts"
+   ],
+   "metrics": {
+    "views": 653912,
+    "likes": 10302,
+    "comments": 395,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": null,
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "unknown",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "frage",
+   "hook_text_first_3s": "Wohnst du immer noch in Buxtehude oder woanders?",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "mid_sentence",
+    "note": "Setzt mitten in der Frage ein"
+   },
+   "cut_out": {
+    "kind": "punchline",
+    "note": "Endet auf dem Ausbruch 'das macht einfach sauer'"
+   },
+   "length_s": 83,
+   "context_setup": "Frage nach dem Wohnort, Klarstellung zum Umzug",
+   "payoff": "Rant über den Umbau einer Straße zur Fahrradstraße",
+   "payoff_type": "konflikt",
+   "structure": "Frage > Klarstellung > Beschreibung > Rant",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Anglizismus 'Crashout' plus Anlass plus Ort plus wütendes Emoji",
+   "language_notes": "Monolog mit vielen Füllwörtern; politisch aufgeladen; Inhalt von MontanaBlack laut Tags"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ },
+ {
+  "id": "yt_9tszlo8zci0",
+  "tier": "streamer",
+  "creator": "Richtiger Kevin",
+  "clip": {
+   "url": "https://www.youtube.com/shorts/9tSZlO8ZCi0",
+   "platform": "shorts",
+   "published_at": "2026-11-17",
+   "duration_s": 53,
+   "title": "Monte leakt Preis von Danny's HAUS! 😱",
+   "caption": null,
+   "hashtags": [
+    "montanablack",
+    "shorts"
+   ],
+   "metrics": {
+    "views": 394201,
+    "likes": 5912,
+    "comments": 107,
+    "shares": null,
+    "saves": null,
+    "measured_at": "2026-11-21"
+   }
+  },
+  "source": {
+   "url": null,
+   "title": null,
+   "duration_s": null,
+   "start_s": null,
+   "end_s": null,
+   "segments": null,
+   "alignment": "unknown",
+   "confidence": null
+  },
+  "breakdown": {
+   "hook_type": "zahl_geld",
+   "hook_text_first_3s": "Der Freund regt sich auf, dass er keine 10.000 Euro Toilette hat.",
+   "onscreen_text": null,
+   "cut_in": {
+    "kind": "sentence_start",
+    "note": "Beginnt mitten in der Toilettenstory"
+   },
+   "cut_out": {
+    "kind": "after_laugh",
+    "note": "Endet mit Spruch zum Abbezahlen"
+   },
+   "length_s": 53,
+   "context_setup": "Gespräch über eine teure Toilette, Kaufpreis eines Hauses fällt nebenbei",
+   "payoff": "Merkt, dass der Preis nicht öffentlich war; gespielte Entschuldigung",
+   "payoff_type": "konflikt",
+   "structure": "Geldstory > versehentliches Leak > Reaktion > Spruch",
+   "edits": {
+    "cold_open": null,
+    "jump_cuts": null,
+    "reordered": null,
+    "n_source_segments": null,
+    "compression": null
+   },
+   "captions_style": null,
+   "copy_pattern": "Name plus 'leakt Preis' plus Großschreibung plus Emoji",
+   "language_notes": "Geldzahl fällt schon in den ersten 10 s; Großschreibung im Titel als Betonung"
+  },
+  "provenance": {
+   "collected_by": "jarvis",
+   "collected_at": "2026-11-21",
+   "method": "yt-dlp Metadaten + Auto-Untertitel, Ausrichtung per 4-Gramm-Abgleich"
+  },
+  "rights": "metadata_only"
+ }
+]

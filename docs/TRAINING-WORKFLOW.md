@@ -41,15 +41,22 @@ gold validate ─► job create ─► run ─► compare ─► scorecard ─�
 ```
 {id, tier: format|podcast|streamer|own, creator,
  clip:{url, platform, published_at, duration_s, title, caption, hashtags[], metrics:{views, likes, comments, shares, saves, measured_at}},
- source:{url, title, duration_s, start_s, end_s, alignment: manual|transcript_match|description|unknown, confidence},
+ source:{url, title, duration_s, start_s, end_s, segments: [[start_s, end_s], ...],
+         alignment: manual|transcript_match|description|unknown, confidence},
  breakdown:{hook_type, hook_text_first_3s, onscreen_text, cut_in:{kind, note}, cut_out:{kind, note}, length_s,
-            context_setup, payoff, payoff_type, structure, edits:{cold_open, jump_cuts, reordered},
+            context_setup, payoff, payoff_type, structure,
+            edits:{cold_open, jump_cuts, reordered, n_source_segments, compression},
             captions_style, copy_pattern, language_notes},
  provenance:{collected_by, collected_at, method}, rights: "metadata_only"}
 ```
 
 Unbekanntes ist `null`. Der Validator meldet je Clip Fehler, Vollständigkeit und fehlende Kernfelder. Für den
 Vergleich zählt ein Clip nur mit `source.url`, `source.start_s` und `source.end_s`. Nie Medien ins Repo: nur URLs.
+
+Verdichtete Clips: `source.segments` listet die Quellstellen in Clip-Reihenfolge (je Stelle Start vor Ende, Zahlen
+ab 0), `edits.n_source_segments` ihre Zahl und `edits.compression` die Quellspanne geteilt durch die Cliplänge. Alle
+drei sind optional. Wichtigster Befund aus `dach_v1.json` (25 Clips, 7 mit Fundstelle): 5 der 7 sind aus 2 bis 6
+Quellstellen verdichtet, Kompression 2,5 bis 4,6. Top-Clips sind also oft kein zusammenhängender Ausschnitt.
 
 ### Job (`workers/eval/jobs/<id>.json`, `train_job_v1`)
 
@@ -92,11 +99,13 @@ Lauf mit gleichen Eingaben schickt keine Anfrage an ein Modell.
 
 | Metrik | Bedeutung |
 |---|---|
-| Treffer | Vorschlag und Gold-Clip überlappen mit IoU ab 0,5 oder ihre Mitten liegen höchstens 10 s auseinander (einstellbar); jeder Gold-Clip und jeder Vorschlag zählt höchstens einmal |
+| Treffer | Vorschlag und Gesamtspanne des Gold-Clips überlappen mit IoU ab 0,5 oder ihre Mitten liegen höchstens 10 s auseinander (einstellbar), oder der Vorschlag erreicht IoU ab 0,5 gegen die Vereinigung der Quellstellen (`source.segments`); jeder Gold-Clip und jeder Vorschlag zählt höchstens einmal. `compare.json` nennt je Paar die Grundlage (`basis`: `span` oder `segments`) |
+| `multi_segment_gold` | Anteil der Gold-Clips dieser Quelle mit mehr als einer Quellstelle. Unsere Engine schneidet bisher nur zusammenhängende Spannen, diese Clips kann sie nur über die Spanne treffen, nicht nachbauen |
+| `segment_coverage_mean` | Bei Treffern auf verdichtete Gold-Clips: Anteil der Quellstellen-Sekunden, die der Vorschlag enthält (dazu `multi_segment_hits`, `hits_by_segments_only`) |
 | Recall@K | Anteil der Gold-Clips, die unter den ersten K Vorschlägen (Rang nach Gesamtwert) getroffen werden; K = 3, 5, 10, alle |
 | Precision@K | Anteil der ersten K Vorschläge, die einen Gold-Clip treffen |
-| Grenzfehler | Start und Ende je Treffer in Sekunden (Vorschlag minus Gold): mittlerer Betrag und Median mit Vorzeichen |
-| Längenabweichung | Länge Vorschlag minus Länge Gold |
+| Grenzfehler | Start und Ende je Treffer in Sekunden (Vorschlag minus Gesamtspanne Gold): mittlerer Betrag und Median mit Vorzeichen |
+| Längenabweichung | Länge Vorschlag minus Länge der Gesamtspanne Gold (bei verdichteten Clips länger als der fertige Clip) |
 | Richter | hook, context, payoff, copy je 0 bis 10 mit einer Rubrik aus dem Gold-Breakdown; ohne Gold zur selben Stelle referenzfrei |
 | Kosten | EUR und Tokens gesamt und je Quellstunde, getrennt nach Stufe und Modell; Laufzeit |
 
@@ -152,4 +161,8 @@ schon vor dem Verbindungsaufbau.
 - `--render` ist ein Sichtungsrender ohne Captions. `feed --db` ist gegen keine echte Datenbank getestet.
 - Gelernte Rubrik-Gewichte sind erst ab 20 Zeilen belastbar (`weights_reliable`); die Engine nutzt sie nicht für die
   Rangfolge (Entscheidung P29).
-- Ohne echtes Gold-Set (`eval/gold/dach_v1.json`) ist keine Kennzahl aussagekräftig.
+- `eval/gold/dach_v1.json` hat 25 Clips, aber nur 7 mit Fundstelle (`ready_for_compare`); die übrigen 18 zählen erst
+  nach Ausrichtung. Die Fundstellen stammen aus einem 4-Gramm-Abgleich mit Auto-Untertiteln (Konfidenz teils unter
+  0,5), kurze Quellstellen können Fehltreffer sein (`gold validate` meldet Stellen außerhalb der Spanne als Hinweis).
+- Die Engine baut keine Clips aus mehreren Quellstellen. Bei verdichteten Gold-Clips misst `compare` nur, ob die
+  Spanne getroffen ist und wie viel der Quellstellen der Vorschlag enthält.

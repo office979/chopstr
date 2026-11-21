@@ -11,3 +11,12 @@ INTERNAL_API_SECRET=local-dev-internal
 SESSION_SECRET=local-dev-session-secret-mindestens-32-zeichen
 APP_ENV=development
 APP_BASE_URL=http://localhost:3000
+# Öffentliche Messwerte für Linktest und Link-Tracking. Leer lassen geht: dann meldet der Linktest
+# „nicht konfiguriert“ statt Zahlen.
+# YouTube Data API v3 (API-Schlüssel)
+YOUTUBE_API_KEY=
+# X API v2 (App-Bearer-Token, kostet je gelesenem Beitrag)
+X_BEARER_TOKEN=
+# Drittanbieter für TikTok und Instagram, noch nicht angebunden. US-Anbieter, im Sovereign-Tarif nicht zulässig.
+PUBLIC_METRICS_SCRAPER=
+SCRAPECREATORS_API_KEY=

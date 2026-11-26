@@ -1,3 +1,4 @@
+import { AuswertungTabs } from "@/components/layout/AuswertungTabs";
 import { PageShell } from "@/components/layout/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { GlassCard } from "@/components/ui/GlassCard";
@@ -66,6 +67,7 @@ export default async function ReportsPage() {
         title="Berichte"
         description="Jeden Montag eine Rückschau auf die Woche: welche Clips am besten liefen, welche am schwächsten, und ein Vorschlag, was du beim nächsten Mal anders machen kannst."
       />
+      <AuswertungTabs aktiv="berichte" role={session.role} />
       <GlassCard padding="md" className="mb-5">
         <ReportSettings enabled={enabled} canManage={canManage} versandMoeglich={versandMoeglich} empfaenger={empfaenger} />
       </GlassCard>

@@ -8,6 +8,10 @@ import { can, type Action } from "@/lib/auth/permissions";
 
 export type SettingsTab = "allgemein" | "mitglieder" | "abrechnung" | "sicherheit" | "loeschung" | "audit" | "entwickler" | "api" | "webhooks" | "verbindungen";
 
+/* Vorne nur, was ein Team wirklich pflegt. Alles Weitere liegt unter „Für Profis": aufgeklappt,
+ * sobald man auf einer dieser Seiten ist, damit der aktive Reiter nie versteckt ist. */
+const HAUPT: SettingsTab[] = ["allgemein", "mitglieder", "abrechnung"];
+
 const TABS: { key: SettingsTab; href: string; label: string; action?: Action }[] = [
   { key: "allgemein", href: "/einstellungen", label: "Allgemein" },
   { key: "mitglieder", href: "/einstellungen/mitglieder", label: "Mitglieder" },
@@ -43,23 +47,35 @@ interface Props {
  * Verbindungen "default", der Rest blieb auf "narrow"; beim Reiterwechsel sprang das Layout. */
 export function SettingsShell({ session, tab, title, description, actions, backgroundWord = "EU", lightTone, children }: Props) {
   const tabs = TABS.filter((t) => !t.action || can(session.role, t.action));
+  const haupt = tabs.filter((t) => HAUPT.includes(t.key));
+  const profi = tabs.filter((t) => !HAUPT.includes(t.key));
+  const profiAktiv = profi.some((t) => t.key === tab);
+  const reiter = (t: (typeof TABS)[number]) => (
+    <Link
+      key={t.key}
+      href={t.href}
+      aria-current={t.key === tab ? "page" : undefined}
+      className={cn(
+        "transition-soft rounded-pill border px-4 py-2 text-sm font-medium",
+        t.key === tab ? "border-white/40 bg-white/10 text-text" : "border-line text-text-2 hover:border-line-strong hover:text-text",
+      )}
+    >
+      {t.label}
+    </Link>
+  );
   return (
     <PageShell width="default" backgroundWord={backgroundWord} lightTone={lightTone}>
       <PageHeader eyebrow={`Team · ${session.workspaceName}`} title={title} description={description} actions={actions} />
-      <nav aria-label="Einstellungen" className="mb-6 flex flex-wrap gap-1">
-        {tabs.map((t) => (
-          <Link
-            key={t.key}
-            href={t.href}
-            aria-current={t.key === tab ? "page" : undefined}
-            className={cn(
-              "transition-soft rounded-pill border px-4 py-2 text-sm font-medium",
-              t.key === tab ? "border-white/40 bg-white/10 text-text" : "border-line text-text-2 hover:border-line-strong hover:text-text",
-            )}
-          >
-            {t.label}
-          </Link>
-        ))}
+      <nav aria-label="Einstellungen" className="mb-6 flex flex-col gap-2">
+        <div className="flex flex-wrap gap-1">{haupt.map((t) => reiter(t))}</div>
+        {profi.length > 0 && (
+          <details open={profiAktiv} className="group">
+            <summary className="transition-soft cursor-pointer py-1 text-sm text-text-2 underline underline-offset-4 hover:text-text">
+              Für Profis
+            </summary>
+            <div className="mt-2 flex flex-wrap gap-1">{profi.map((t) => reiter(t))}</div>
+          </details>
+        )}
       </nav>
       {children}
     </PageShell>

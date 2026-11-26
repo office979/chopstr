@@ -44,8 +44,8 @@ describe("projektZustand", () => {
     expect(projektZustand(quelle("ready"), zaehler({ total: 3, rendering: 1 }))).toBe("verarbeitung");
   });
 
-  it("verlangt eine Prüfung, solange Clips offen sind", () => {
-    expect(projektZustand(quelle("ready"), zaehler({ total: 3, rendered: 3, offen: 2, bereit: 1 }))).toBe("pruefen");
+  it("ist bereit, sobald die Clips fertig sind, ohne Prüfschritt", () => {
+    expect(projektZustand(quelle("ready"), zaehler({ total: 3, rendered: 3, offen: 2, bereit: 1 }))).toBe("bereit");
   });
 
   it("ist bereit, wenn über alle Clips entschieden wurde", () => {

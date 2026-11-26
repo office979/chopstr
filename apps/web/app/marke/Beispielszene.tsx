@@ -77,7 +77,7 @@ export function Beispielszene({ plattform, preset, hookText, bauchbinde, highlig
         )}
       </div>
       <p className="text-center text-xs text-text-3">
-        Nachgestellt mit denselben Maßen wie im fertigen Clip. Kein echter Export.
+        Vorschau mit denselben Maßen wie im fertigen Clip.
       </p>
     </div>
   );

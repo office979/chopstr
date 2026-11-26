@@ -17,6 +17,7 @@ import type {
   Platform,
 } from "@/lib/repo/types";
 import type { CaptionStyleExt, CaptionTextField } from "@/lib/repo/types-api";
+import { LOOKS, stilPruefen } from "@/lib/clips/caption-style";
 
 export interface BrandFormState {
   ok: boolean;
@@ -121,8 +122,13 @@ export async function saveBrandProfileAction(_prev: BrandFormState, formData: Fo
     },
     hook_overlay: hookOverlay,
   };
+  /* Der gewählte Look wird Hausstil der Marke. Geprüft wie ein Clipstil, damit nichts ankommt, was
+   * der Renderer zurechtstutzt. Eine eigene Farbe des betonten Worts sticht die des Looks. */
+  const look = LOOKS.find((l) => l.id === String(formData.get("caption_look") ?? ""));
+  const eigeneFarbe = color(formData, "caption_highlight", errors);
   const captionStyle: CaptionStyleExt = {
-    highlight_color: color(formData, "caption_highlight", errors),
+    ...(look ? { ...stilPruefen(look.stil), look: look.id } : {}),
+    highlight_color: eigeneFarbe ?? look?.stil.highlight_color,
     hook_overlay: hookOverlay,
     /* 5c: Captions aus Original (text) oder Standardform (text_norm, Schweizerdeutsch-Beta) */
     caption_text_field: pick(formData.get("caption_text_field"), CAPTION_TEXT, "text"),

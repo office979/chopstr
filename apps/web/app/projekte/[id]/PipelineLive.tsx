@@ -156,13 +156,26 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
   /* Weiter zu den Clips, sobald feststeht, dass es welche gibt. Der Auswahlschritt entfällt, die
    * Clips entstehen von selbst. Nur beim Übergang, nicht beim Öffnen eines längst fertigen Videos,
    * sonst käme man auf der Projektseite nie zur Ruhe. */
+  /* Diese Seite IST die Clip-Seite, solange es keine Clips gibt. Ein push auf dieselbe Adresse
+   * lud die Daten nicht neu, man blieb bei „Deine Clips gehen gleich auf" stehen. Jetzt fragt die
+   * Seite den Server neu, bis die Clips da sind und die Galerie erscheint: erst nach kurzer Pause,
+   * dann alle zwei Sekunden, höchstens eine Minute lang. Gilt auch, wenn jemand die Seite erst
+   * nach dem Ende öffnet und die Clips noch angelegt werden. */
   useEffect(() => {
-    if (!startedUnfinished.current || handedOff.current) return;
     if (status !== "ready" || counts.total === 0) return;
     handedOff.current = true;
-    const t = window.setTimeout(() => router.push(`/projekte/${sourceId}/clips`), DONE_HANDOFF_MS);
-    return () => window.clearTimeout(t);
-  }, [status, counts.total, router, sourceId]);
+    let n = 0;
+    const t0 = window.setTimeout(() => router.refresh(), DONE_HANDOFF_MS);
+    const iv = window.setInterval(() => {
+      n += 1;
+      if (n > 30) window.clearInterval(iv);
+      else router.refresh();
+    }, 2000);
+    return () => {
+      window.clearTimeout(t0);
+      window.clearInterval(iv);
+    };
+  }, [status, counts.total, router]);
 
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -219,7 +232,7 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
     <GlassCard padding="lg" selected={connection === "live"}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-medium">
-          {failed ? "Der Computer kam nicht durch" : running ? "Der Computer arbeitet" : "Der Computer ist fertig"}
+          {failed ? "Verarbeitung fehlgeschlagen" : running ? "Wird verarbeitet" : "Fertig"}
         </h2>
         <div className="flex items-center gap-2">
           {remaining && <span className="text-sm text-text-2">{remaining}</span>}
@@ -326,7 +339,7 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
         <div className="mt-6 border-t border-line pt-5">
           <p className="text-sm text-text-2">
             {hasCandidates
-              ? `${counts.total === 1 ? "Eine gute Stelle" : `${counts.total} gute Stellen`} gefunden. Deine Clips gehen gleich auf.`
+              ? `${counts.total === 1 ? "Eine gute Stelle" : `${counts.total} gute Stellen`} gefunden. Gleich siehst du deine Clips.`
               : "In diesem Video hat der Computer keine gute Stelle gefunden. Das passiert bei sehr kurzen Videos und wenn wenig gesprochen wird. Versuch es mit einem anderen Video."}
           </p>
         </div>

@@ -62,7 +62,8 @@ export function projektZustand(source: Source, clips: ClipCount | null): Projekt
   /* Fertig analysiert, aber die Clips entstehen noch. */
   if (clips && clips.rendering > 0) return "verarbeitung";
   if (!clips || clips.total === 0) return "leer";
-  if (clips.offen > 0) return "pruefen";
+  /* Kein Prüfschritt mehr: Clips entstehen fertig. „pruefen" bleibt als Zustand im Typ, damit alte
+   * Aufrufer nicht brechen, wird aber nicht mehr vergeben. */
   return "bereit";
 }
 
@@ -75,13 +76,13 @@ export function projektSatz(zustand: ProjektZustand, clips: ClipCount | null): s
     case "verarbeitung":
       return c && c.rendering > 0
         ? `${c.rendering === 1 ? "Ein Clip wird" : `${c.rendering} Clips werden`} gerade geclippt.`
-        : "Der Computer arbeitet daran.";
+        : "Wird verarbeitet.";
     case "pruefen":
       return `${c!.offen === 1 ? "Ein Clip wartet" : `${c!.offen} Clips warten`} auf deine Entscheidung.`;
     case "bereit":
-      return c && c.bereit > 0
-        ? `${c.bereit === 1 ? "Ein Clip ist" : `${c.bereit} Clips sind`} bereit.`
-        : "Alles durchgesehen.";
+      return c && c.total > 0
+        ? `${c.total === 1 ? "Ein Clip ist" : `${c.total} Clips sind`} fertig.`
+        : "Fertig.";
     case "leer":
       return "Hier hat der Computer keine gute Stelle gefunden.";
     case "fehler":

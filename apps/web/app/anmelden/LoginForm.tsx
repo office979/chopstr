@@ -25,7 +25,7 @@ export function LoginForm({ next, demo }: { next: string; demo: boolean }) {
           {pending ? "Wird geprüft" : "Anmelden"}
         </Button>
         <Button type="submit" name="intent" value="magic" variant="ghost" disabled={pending || demo}>
-          Magic-Link senden
+          Link per E-Mail senden
         </Button>
       </div>
       <p className="text-sm text-text-2">

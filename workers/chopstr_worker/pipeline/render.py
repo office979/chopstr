@@ -350,6 +350,36 @@ def zoom_filter(out_w: int, out_h: int, fps: float, duration: float, zoom_to: fl
     )
 
 
+def zoom_rhythm_filter(
+    out_w: int, out_h: int, fps: float, steps: list[float], period_s: float, settle_s: float, anchor_y: float = 0.37
+) -> str:
+    """Zoom-Rhythmus je Einstellung: Stufen aus ``steps`` im Takt ``period_s``, jeder Wechsel mit
+    Ease-out über ``settle_s``. Beginnt mit jeder Einstellung bei der ersten Stufe, ein Schnitt setzt
+    den Takt also zurück. Verankert horizontal mittig und vertikal auf der Augenlinie, damit das
+    Gesicht beim Zoomen an seiner Stelle bleibt."""
+    per = max(1, int(round(period_s * fps)))
+    settle = max(1, int(round(settle_s * fps)))
+    n = len(steps)
+
+    def stufe(k: str) -> str:
+        expr = f"{steps[-1]:.4f}"
+        for i in range(n - 2, -1, -1):
+            expr = f"if(eq({k},{i}),{steps[i]:.4f},{expr})"
+        return expr
+
+    k = f"mod(floor(on/{per}),{n})"
+    k_prev = f"mod(floor(on/{per})+{n - 1},{n})"
+    p = f"min(1,mod(on,{per})/{settle})"
+    ease = f"(1-pow(1-{p},3))"
+    first = f"lt(on,{per})"
+    z = f"if({first},{steps[0]:.4f},{stufe(k_prev)}+({stufe(k)}-{stufe(k_prev)})*{ease})"
+    return (
+        f"scale={out_w * 2}:{out_h * 2}:flags=lanczos,"
+        f"zoompan=z='{z}':d=1:x='iw/2-(iw/zoom/2)':y='ih*{anchor_y:.3f}-(ih/zoom*{anchor_y:.3f})':s={out_w}x{out_h}:fps={fps:g},"
+        f"setsar=1"
+    )
+
+
 def video_chain(
     plan: dict,
     ass_path: str | None,
@@ -380,7 +410,13 @@ def video_chain(
         else:
             crop = f"crop={int(s['crop_w'])}:{int(s['crop_h'])}:{int(s['crop_x'])}:{int(s['crop_y'])}"
             duration = float(s.get("end", 0.0)) - float(s.get("start", 0.0))
-            if can_zoom and duration >= zoom_min_s:
+            if can_zoom and duration >= zoom_min_s and motion.get("mode") == "rhythmus" and motion.get("steps"):
+                z = zoom_rhythm_filter(
+                    out_w, out_h, fps, [float(x) for x in motion["steps"]],
+                    float(motion.get("period_s") or 4.2), float(motion.get("settle_s") or 0.3),
+                )  # fmt: skip
+                parts.append(f"[{i}:v]setpts=PTS-STARTPTS,{crop},{z}[v{i}];")
+            elif can_zoom and duration >= zoom_min_s:
                 parts.append(f"[{i}:v]setpts=PTS-STARTPTS,{crop},{zoom_filter(out_w, out_h, fps, duration, zoom_to)}[v{i}];")
             else:
                 parts.append(f"[{i}:v]setpts=PTS-STARTPTS,{crop},scale={out_w}:{out_h}:flags=lanczos,setsar=1[v{i}];")

@@ -34,6 +34,8 @@ const META_FIELDS = [
   "brief_wanted",
   "brief_exclude",
   "platform",
+  /* Bildformat der Clips (lib/uploads/brief.ts). Fehlte hier, dann kam „Beide" nie beim Worker an. */
+  "format",
   "source_owner",
   "source_title",
   "source_url",

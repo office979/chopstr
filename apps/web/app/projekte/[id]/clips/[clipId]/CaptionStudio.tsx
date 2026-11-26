@@ -317,9 +317,9 @@ export function CaptionStudio({
       </div>
 
       <div className="mt-5 flex flex-col gap-6">
-        {/* 1. Wie soll es aussehen? Vier Karten, eine Berührung. Die Probe zeigt einen echten
+        {/* 1. Wie soll es aussehen? Zehn Karten, eine Berührung. Die Probe zeigt einen echten
           * Satz aus diesem Clip: „Wort Wort" sagt nichts darüber, wie der eigene Text wirkt. */}
-        <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <section className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           {LOOKS.map((l) => {
             /* Ein Stil, dessen Schrift nicht vorliegt, ist nicht wählbar. Ihn anzubieten hiesse,
              * eine Wahl zu ermöglichen, die im Export anders aussieht - und der Austausch fände

@@ -46,7 +46,7 @@ export function fassungSatz(f: Fassung): string | null {
 
 /* Dasselbe kurz, für eine Plakette an einer Liste. */
 export function fassungKurz(f: Fassung): string {
-  if (f.stand === "nicht_geclippt") return "Noch nicht geclippt";
+  if (f.stand === "nicht_geclippt") return "Noch keine Clips";
   if (f.stand === "unbekannt") return "Fassung nicht vermerkt";
   if (f.stand === "aktuell") return `Fassung ${f.geclipptMit}`;
   return `Fassung ${f.geclipptMit} von ${f.jetzt}`;

@@ -50,6 +50,12 @@ MICRO_FADE_MS = 20
 # Clip das Format der Quelle (Hochformat-Schalter aus), bleibt das Bild unangetastet.
 ZOOM_TO = 1.08
 ZOOM_MIN_SHOT_S = 1.2
+# Zoom-Rhythmus (Standard seit dem Clean-Edit-Stil aus dem Clipping-Skill): etwa alle 4,2 s zwischen
+# 1,0 / 1,12 / 1,0 / 1,18 wechseln, schneller Einstieg, rund 300 ms Auslaufen. Verankert auf dem schon
+# nachgeführten Gesicht (reframe.EYE_LINE). Der lineare Push-in bleibt als Modus ``push`` erhalten.
+ZOOM_RHYTHM_STEPS = (1.0, 1.12, 1.0, 1.18)
+ZOOM_RHYTHM_PERIOD_S = 4.2
+ZOOM_RHYTHM_SETTLE_S = 0.3
 HOOK_OVERLAY_DEFAULT = {"tiktok": True, "reels": True, "shorts": True, "linkedin": False}
 AUDIO_PRESETS: dict[str, dict[str, float]] = {
     "master": {"lufs": -16.0, "true_peak": -1.5},
@@ -167,6 +173,10 @@ def motion_block(reframe_result: reframe.ReframeResult, out_w: int, out_h: int) 
     return {
         "zoom_to": 1.0 if same_format else ZOOM_TO,
         "min_shot_s": ZOOM_MIN_SHOT_S,
+        "mode": "rhythmus",
+        "steps": list(ZOOM_RHYTHM_STEPS),
+        "period_s": ZOOM_RHYTHM_PERIOD_S,
+        "settle_s": ZOOM_RHYTHM_SETTLE_S,
     }
 
 

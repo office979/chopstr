@@ -137,11 +137,18 @@ export type BrandProfileInput = Omit<
   "id" | "workspace_id" | "version" | "created_at" | "updated_at"
 > & { id?: string };
 
+/* Bildformat der automatisch erzeugten Clips, gewählt beim Upload. ``both`` heisst: je Moment ein
+ * Clip im Hochformat und einer im Querformat. Spiegel von CLIP_FORMATS in
+ * workers/chopstr_worker/activities/analyze.py. */
+export type ClipFormat = "9:16" | "16:9" | "both";
+
 export interface Brief {
   audience?: string;
   wanted?: string;
   exclude?: string;
   platform?: Platform;
+  /* Fehlt das Feld (ältere Uploads), gilt Hochformat wie bisher. */
+  format?: ClipFormat;
   /* Bezahlte Partnerschaft oder Markennennung: Clips bekommen ein Werbelabel (DE „Anzeige“, AT/CH „Werbung“) */
   is_ad?: boolean;
 }

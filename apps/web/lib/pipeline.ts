@@ -17,26 +17,26 @@ export const PIPELINE_STEPS: PipelineStepDef[] = [
   },
   {
     key: "transcribe_de",
-    label: "Der Computer hört zu",
+    label: "Sprache wird erkannt",
     description: "Alles Gesprochene wird mitgeschrieben",
     phase: 1,
   },
   {
     key: "diarize",
-    label: "Wer spricht wann",
+    label: "Sprecher werden erkannt",
     description: "Die Stimmen werden auseinandergehalten",
     phase: 1,
   },
   {
     key: "fuse_and_nlp",
-    label: "Sätze werden sortiert",
-    description: "Satzgrenzen, Füllwörter und Verneinungen erkennen",
+    label: "Text wird analysiert",
+    description: "Satzgrenzen, Füllwörter und Verneinungen",
     phase: 1,
   },
   {
     key: "detect_candidates",
-    label: "Gute Stellen werden gesucht",
-    description: "Die stärksten Clips finden und bewerten",
+    label: "Clips werden gesucht",
+    description: "Die stärksten Momente finden und bewerten",
     phase: 2,
   },
 ];

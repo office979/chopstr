@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { PageShell } from "@/components/layout/PageShell";
 import { ButtonLink } from "@/components/ui/Button";
 import { getRepo } from "@/lib/repo";
@@ -6,15 +5,6 @@ import { requireSession } from "@/lib/session";
 import { can } from "@/lib/auth/permissions";
 import { mediaUrl } from "@/lib/clips/labels";
 import { Bibliothek, type ProjektZeile } from "./Bibliothek";
-import {
-  FREIGABE_HINWEIS,
-  FREIGABE_LABEL,
-  freigabeAusZeile,
-  standAusZeile,
-  zaehlen,
-  zaehlerFuer,
-  type FreigabeStand,
-} from "@/lib/clips/pruefstand";
 
 export const dynamic = "force-dynamic";
 
@@ -26,18 +16,6 @@ export default async function ProjectsPage() {
   const canUpload = can(session.role, "source.upload");
   const repo = getRepo();
   const sources = await repo.listSources();
-  /* Der Freigabestand aller Clips in einer Abfrage, gerechnet mit demselben Modell wie an der
-   * Clip-Karte. Gezählt werden CLIPS, nicht Videos: jeder Clip wird einzeln freigegeben. */
-  const zeilenStand = await repo.listClipStands();
-  const staendeJeQuelle = new Map<string, FreigabeStand[]>();
-  for (const r of zeilenStand) {
-    const liste = staendeJeQuelle.get(r.source_id) ?? [];
-    liste.push(freigabeAusZeile(r, standAusZeile(r)));
-    staendeJeQuelle.set(r.source_id, liste);
-  }
-  const videoStaende = new Map(
-    sources.map((s) => [s.id, zaehlen(staendeJeQuelle.get(s.id) ?? [])] as const),
-  );
   const clipCounts = new Map(
     await Promise.all(sources.filter((s) => s.status === "ready").map(async (s) => [s.id, await repo.countClips(s.id)] as const)),
   );
@@ -73,28 +51,9 @@ export default async function ProjectsPage() {
     clips: clipCounts.get(s.id) ?? null,
     marke: s.brand_profile_id ? (marken.get(s.brand_profile_id) ?? null) : null,
     bildSrc: bilder.get(s.id) ?? null,
-    stand: videoStaende.get(s.id) ?? null,
+    /* Kein Freigabestand mehr in der Liste: Clips entstehen fertig. */
+    stand: null,
   }));
-
-  /* Vertragshinweis nur hier und am Clip, nicht mehr über jeder Seite (Bedienkonzept, Abschnitt 7) */
-  let dpaMissing = false;
-  if (can(session.role, "dpa.accept")) {
-    try {
-      dpaMissing = !(await repo.getWorkspace()).dpa_signed_at;
-    } catch {
-      /* ohne Workspace kein Hinweis */
-    }
-  }
-
-  /* Dieselben Zahlen über alle Videos zusammen: wie viele CLIPS in welchem Freigabestand stehen.
-   * Nicht wie viele Videos - freigegeben wird je Clip. */
-  const alle = zaehlen([...staendeJeQuelle.values()].flat());
-  /* Wohin eine Kachel führt: zum ersten Video, das Clips in diesem Zustand hat. Ohne Ziel wäre
-   * die Zahl nur zum Anschauen da. */
-  const zielFuer = (f: FreigabeStand) => {
-    const treffer = [...videoStaende.entries()].find(([, z]) => zaehlerFuer(z, f) > 0);
-    return treffer ? `/projekte/${treffer[0]}/clips` : null;
-  };
 
   return (
     <PageShell width="wide">
@@ -108,39 +67,7 @@ export default async function ProjectsPage() {
            * Handy hinter dem Menü und ist damit unsichtbar. */}
           {canUpload && <ButtonLink href="/upload">Neues Video</ButtonLink>}
         </div>
-        {/* Zahlen erst, wenn es etwas zu zählen gibt. Fünf Nullen sind für jemanden, der gerade
-         * anfängt, das grösste Element der Seite und sagen nichts.
-         *
-         * Gezählt werden CLIPS in ihrem Freigabestand - dieselben fünf Zustände wie an der
-         * Clip-Karte. Vorher standen hier drei verschiedene Fragen nebeneinander („Fehler
-         * beheben", „Wird geclippt", „Bereit zum Posten"), und keine davon war die, um die es
-         * geht: darf das raus, und wer muss dafür noch etwas tun? */}
-        {sources.length > 0 && alle.gesamt > 0 && (
-          <dl className="relative mt-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
-            {(["nicht_gesendet", "ausstehend", "fehlerhaft", "abgelehnt", "freigegeben"] as FreigabeStand[]).map((f) => (
-              <Stat
-                key={f}
-                label={FREIGABE_LABEL[f]}
-                value={zaehlerFuer(alle, f)}
-                hint={FREIGABE_HINWEIS[f]}
-                href={zielFuer(f)}
-              />
-            ))}
-          </dl>
-        )}
       </section>
-
-      {dpaMissing && (
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-inner border border-attention/40 px-4 py-3 text-sm">
-          <span className="text-text-2">
-            <span className="text-attention">Ein Vertrag fehlt noch.</span> Hochladen und Clips bauen geht schon. Zum Posten
-            brauchst du ihn.
-          </span>
-          <Link href="/rechtliches/avv" className="text-text underline-offset-4 hover:underline">
-            Vertrag lesen und annehmen
-          </Link>
-        </div>
-      )}
 
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-medium">Alle Videos</h2>
@@ -157,27 +84,3 @@ export default async function ProjectsPage() {
 
 /* Eine Zahl mit dem Weg zu der Liste, die sie zählt. Ohne Ziel bleibt sie eine Zahl zum
  * Anschauen, und dann kann man sie auch weglassen. */
-function Stat({ label, value, hint, href }: { label: string; value: number; hint: string; href?: string | null }) {
-  const inhalt = (
-    <>
-      <dt className="text-sm text-text-2">{label}</dt>
-      <dd className="mt-2 font-mono text-3xl font-medium tabular-nums text-text">{String(value).padStart(2, "0")}</dd>
-      <dd className="mt-1 text-xs text-text-3">{hint}</dd>
-    </>
-  );
-  if (href && value > 0) {
-    return (
-      <Link
-        href={href}
-        className="transition-soft block rounded-inner bg-black/45 p-4 backdrop-blur-sm hover:bg-black/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 sm:p-5"
-      >
-        {inhalt}
-      </Link>
-    );
-  }
-  return (
-    <div className="rounded-inner bg-black/45 p-4 backdrop-blur-sm sm:p-5">
-      {inhalt}
-    </div>
-  );
-}

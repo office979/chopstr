@@ -6,7 +6,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Mark } from "@/components/brand/Mark";
 import { Wordmark } from "@/components/brand/Wordmark";
 import { ROLE_LABELS, type Role } from "@/lib/auth/permissions";
-import { canExt } from "@/lib/auth/permissions-publishing";
 import { cn } from "@/components/ui/cn";
 
 export interface NavUser {
@@ -90,20 +89,27 @@ export function Sidebar({ user }: { user: NavUser | null }) {
   /* „Marken" und nicht „Aussehen": die Seite verwaltet Kundenprofile, die Adresse heisst
    * /marke, der Pfad auf den Clipseiten sagt „Marke", und drei Namen für eine Sache zwingen zum
    * Raten. */
-  if (user?.canBrand) main.push({ href: "/marke", label: "Branding", icon: <IconBrand />, match: (p) => p.startsWith("/marke") });
+  if (user?.canBrand) main.push({ href: "/marke", label: "Stile", icon: <IconBrand />, match: (p) => p.startsWith("/marke") });
   /* „Freigaben": hier stehen die verschickten Links.
    *
    * Der Link zu einer Freigabe steht beim Verschicken im Fenster - und wer ihn dort nicht kopiert
    * oder später verliert, hatte bisher keinen Weg zurück. Es gab keine Stelle, an der ein
    * verschickter Link noch einmal auftaucht. Diese ist es. */
-  if (canExt(user?.role, "guest_approval.request")) {
-    main.push({ href: "/freigaben", label: "Freigaben", icon: <IconFreigabe />, match: (p) => p.startsWith("/freigaben") });
-  }
+  /* Seit der Galerie gibt es keinen Weg mehr, eine Freigabe zu verschicken. Ein Punkt, der nur
+   * „Noch nichts verschickt" zeigen kann, ist eine Sackgasse; die Seite bleibt unter /freigaben
+   * erreichbar für alte Links. */
 
-  const publishing: NavItem[] = [];
-  if (canExt(user?.role, "series.manage")) publishing.push({ href: "/serien", label: "Serien", icon: <IconStack />, match: (p) => p.startsWith("/serien") });
-  if (canExt(user?.role, "experiments.manage")) publishing.push({ href: "/experimente", label: "Tests", icon: <IconFlask />, match: (p) => p.startsWith("/experimente") });
-  if (user) publishing.push({ href: "/berichte", label: "Berichte", icon: <IconChart />, match: (p) => p.startsWith("/berichte") });
+  /* Ein Punkt „Auswertung" statt drei. Serien, Tests und Berichte liegen als Reiter auf der Seite
+   * (components/layout/AuswertungTabs.tsx); in der Leiste nahmen sie so viel Platz ein wie die
+   * Arbeit selbst, obwohl man sie selten braucht. */
+  if (user) {
+    main.push({
+      href: "/berichte",
+      label: "Auswertung",
+      icon: <IconChart />,
+      match: (p) => p.startsWith("/berichte") || p.startsWith("/serien") || p.startsWith("/experimente"),
+    });
+  }
 
   /* „Für Entwickler" stand als gleichrangiger Punkt in der Hauptnavigation. Für einen Creator ist
    * das eine Tür, hinter der nichts für ihn liegt, und sie nimmt so viel Platz ein wie „Meine
@@ -153,9 +159,6 @@ export function Sidebar({ user }: { user: NavUser | null }) {
         className={cn("flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto", kompakt && "w-full items-center")}
       >
         <NavGroup items={main} pathname={pathname} kompakt={kompakt} />
-        {/* „Auswertung“ statt „Publishing“: so heißt die Gruppe im Bedienkonzept (Abschnitt 4) und
-            sie enthält genau das, was dort steht — Serien, Tests, Berichte. */}
-        {publishing.length > 0 && <NavGroup title="Auswertung" items={publishing} pathname={pathname} kompakt={kompakt} />}
         {tools.length > 0 && <NavGroup title="Werkzeuge" items={tools} pathname={pathname} kompakt={kompakt} />}
 
       </nav>
@@ -406,27 +409,6 @@ const IconBrand = () => (
   </Svg>
 );
 /* Eine Person mit einem Haken: jemanden um eine Zusage bitten. */
-const IconFreigabe = () => (
-  <Svg>
-    <path d="M15 20v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1" />
-    <circle cx="8.5" cy="7" r="3.5" />
-    <path d="m16 11.5 2 2 4-4" />
-  </Svg>
-);
-const IconStack = () => (
-  <Svg>
-    <path d="m12 2 10 5-10 5L2 7l10-5Z" />
-    <path d="m2 17 10 5 10-5" />
-    <path d="m2 12 10 5 10-5" />
-  </Svg>
-);
-const IconFlask = () => (
-  <Svg>
-    <path d="M9 3h6" />
-    <path d="M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3" />
-    <path d="M7 15h10" />
-  </Svg>
-);
 const IconChart = () => (
   <Svg>
     <path d="M3 3v18h18" />

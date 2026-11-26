@@ -1,4 +1,6 @@
 import type {
+  Aspect,
+  Platform,
   AuditEntry,
   AuditRow,
   BrandAsset,
@@ -238,6 +240,9 @@ function createState(): DemoState {
 function state(): DemoState {
   if (!globalThis.__chopstrDemoState) {
     globalThis.__chopstrDemoState = createState();
+    /* Die fertigen Beispielvideos bekommen ihre Clips wie ein echter Lauf. */
+    const s = globalThis.__chopstrDemoState;
+    for (const src of s.sources) if (src.status === "ready") autoCreateDemoClips(s, src);
   }
   return globalThis.__chopstrDemoState;
 }
@@ -254,12 +259,13 @@ interface SimPhase {
   endMessage: string;
 }
 
+/* Kurz gehalten: im Testmodus soll man den ganzen Weg in einer halben Minute sehen, nicht in drei. */
 const SIM_PHASES: SimPhase[] = [
-  { step: "probe_and_extract", status: "ingesting", duration: 12, startMessage: "Datei wird geprüft", endMessage: "Prüfung abgeschlossen" },
-  { step: "transcribe_de", status: "transcribing", duration: 70, startMessage: "whisper-large-v3-turbo-german", endMessage: "Transkription abgeschlossen" },
-  { step: "diarize", status: "analyzing", duration: 25, startMessage: "Sprecher werden getrennt", endMessage: "Sprecher erkannt" },
-  { step: "fuse_and_nlp", status: "analyzing", duration: 18, startMessage: "dach_nlp", endMessage: "Sätze, Füllwörter und Verneinungen markiert" },
-  { step: "detect_candidates", status: "scoring", duration: 20, startMessage: "Gute Stellen werden gesucht", endMessage: "Clips gefunden" },
+  { step: "probe_and_extract", status: "ingesting", duration: 3, startMessage: "Datei wird geprüft", endMessage: "Prüfung abgeschlossen" },
+  { step: "transcribe_de", status: "transcribing", duration: 9, startMessage: "whisper-large-v3-turbo-german", endMessage: "Transkription abgeschlossen" },
+  { step: "diarize", status: "analyzing", duration: 4, startMessage: "Sprecher werden getrennt", endMessage: "Sprecher erkannt" },
+  { step: "fuse_and_nlp", status: "analyzing", duration: 3, startMessage: "dach_nlp", endMessage: "Sätze, Füllwörter und Verneinungen markiert" },
+  { step: "detect_candidates", status: "scoring", duration: 4, startMessage: "Gute Stellen werden gesucht", endMessage: "Clips gefunden" },
 ];
 
 /* Demo: am Ende der Simulation bekommt ein hochgeladenes Video dieselbe Textgrundlage wie das
@@ -281,6 +287,69 @@ function attachDemoAnalysis(s: DemoState, source: Source) {
   /* Dauer an den Text angleichen, sonst zeigt der Player eine Länge, zu der es keine Wörter gibt */
   const end = words.at(-1)?.end;
   if (end) source.duration_s = Math.ceil(end);
+}
+
+/* Wie der Worker (activities/analyze.auto_create_clips): je Kandidat und gewähltem Format ein
+ * Clip, ohne Auswahlschritt, und der Render startet sofort. Vorher legte der Testmodus nur
+ * Kandidaten an; die Seite blieb bei „Deine Clips gehen gleich auf" stehen, weil nie welche kamen. */
+function autoCreateDemoClips(s: DemoState, source: Source) {
+  if (s.clips.some((c) => c.source_id === source.id)) return;
+  const brand = source.brand_profile_id ? s.brandProfiles.find((b) => b.id === source.brand_profile_id) ?? null : null;
+  const platform: Platform = brand?.default_platform ?? source.brief?.platform ?? "reels";
+  const format = source.brief?.format ?? "9:16";
+  const aspects: Aspect[] = format === "both" ? ["9:16", "16:9"] : [format];
+  const cands = s.candidates.filter((c) => c.source_id === source.id);
+  let i = 0;
+  for (const candidate of cands) {
+    for (const aspect of aspects) {
+      const now = nowIso();
+      const clip: Clip = {
+        id: uuid(),
+        source_id: source.id,
+        candidate_id: candidate.id,
+        version: 1,
+        platform,
+        destination: platform,
+        aspect,
+        composition: candidate.segments.map((seg) => ({ ...seg })),
+        kept_ranges: null,
+        fidelity_warnings: [],
+        speaker_positions: null,
+        render_plan: null,
+        title_card: candidate.rubric.suggested_title_card?.trim() || null,
+        ad_label: adLabelFor(source, brand),
+        ai_features: [],
+        guest_approval_required: false,
+        status: "draft",
+        review: "offen",
+        file_key: null,
+        srt_key: null,
+        vtt_key: null,
+        poster_key: null,
+        filmstrip_key: null,
+        filmstrip_meta: null,
+        zeitmarken: [],
+        cps_warnings: [],
+        duration_s: null,
+        width: null,
+        height: null,
+        fps: null,
+        loudness: null,
+        provenance: {},
+        render_error: null,
+        export_checks: null,
+        rendered_at: null,
+        delete_after: new Date(Date.now() + s.workspace.render_retention_days * 86_400_000).toISOString(),
+        deleted_at: null,
+        created_by: null,
+        created_at: now,
+        updated_at: now,
+      };
+      s.clips.push(clip);
+      startRenderSimulation(clip, 400 + i * 350);
+      i++;
+    }
+  }
 }
 
 function pushEvent(s: DemoState, e: Omit<PipelineEvent, "id" | "at">, at = nowIso()) {
@@ -341,6 +410,7 @@ function advanceSimulation(sourceId: string) {
   }
   if (source.status !== "ready") {
     attachDemoAnalysis(s, source);
+    autoCreateDemoClips(s, source);
     const found = s.candidates.filter((c) => c.source_id === sourceId).length;
     source.status = "ready";
     source.status_message = found === 1 ? "Ein Clip gefunden" : `${found} Clips gefunden`;

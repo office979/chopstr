@@ -258,7 +258,7 @@ export function SilentPreview({ aspect, preset: presetName, durationS, cards, ho
         </span>
       </div>
       <p className="text-center text-xs text-text-3">
-        Stumme Vorschau ersetzt keinen Render.{font ? ` Font: ${font.family}.` : ""}
+        Vorschau ohne Ton.{font ? ` Schrift: ${font.family}.` : ""}
       </p>
     </div>
   );

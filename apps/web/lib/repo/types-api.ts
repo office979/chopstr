@@ -1,3 +1,4 @@
+import type { CaptionStyle as ClipCaptionStyle } from "@/lib/clips/caption-style";
 import type { CaptionStyle, Platform, TranscriptStats, TranscriptWord } from "@/lib/repo/types";
 
 /* Datentypen für Phase 5a (API-Schlüssel, Webhooks, Outbox, Publikationen): Spiegel von
@@ -253,8 +254,11 @@ export interface UploadCompletionPatch {
 
 /* 5c: Caption-Textfeld im Markenprofil (caption_style.caption_text_field), Erweiterung ohne Änderung an types.ts */
 export type CaptionTextField = "text" | "text_norm";
-export interface CaptionStyleExt extends CaptionStyle {
+/* Ein Look aus lib/clips/caption-style.ts als Hausstil der Marke: seine Felder liegen im Markenstil,
+ * der Worker legt ihn unter den Clipstil (render.caption_style_zusammen). ``look`` merkt sich, welcher. */
+export interface CaptionStyleExt extends CaptionStyle, Omit<ClipCaptionStyle, "highlight_color"> {
   caption_text_field?: CaptionTextField;
+  look?: string;
 }
 
 /* 5c: Dialekterkennung aus transcript_versions.stats.dialect (Worker: activities/nlp.py) */

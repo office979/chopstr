@@ -5,11 +5,10 @@ import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "rea
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Field, Input, Select, Checkbox } from "@/components/ui/Field";
 import { Button } from "@/components/ui/Button";
-import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/components/ui/cn";
 import { formatBytes } from "@/lib/format";
 import { PLATFORMS, PLATFORM_LABELS } from "@/lib/clips/labels";
-import { BRIEF_MAX_CHARS, briefDefaults, briefMetadata, type BriefInput } from "@/lib/uploads/brief";
+import { BRIEF_MAX_CHARS, CLIP_FORMATS, briefDefaults, briefMetadata, parseClipFormat, type BriefInput } from "@/lib/uploads/brief";
 import type { Platform, RightsStatus } from "@/lib/repo/types";
 import { createDemoProject } from "./actions";
 
@@ -56,7 +55,6 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
   const [sourceOwner, setSourceOwner] = useState("");
   const [sourceTitle, setSourceTitle] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   /* Das Briefing: drei Felder und die Plattform, alle freiwillig und eingeklappt. Die Plattform
    * kommt aus dem gewählten Markenprofil, bis jemand sie selbst ändert. */
@@ -156,6 +154,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
       brief_wanted: briefMeta.brief_wanted,
       brief_exclude: briefMeta.brief_exclude,
       platform: (briefMeta.platform as BriefInput["platform"] | undefined) ?? "",
+      format: parseClipFormat(briefMeta.format),
       filename: file.name,
       filetype: file.type || "application/octet-stream",
       size_bytes: file.size,
@@ -322,7 +321,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
     setErrors(errs);
     /* Fehlt die Quellenangabe, steht sie hinter „Mehr anzeigen“ — dann geht das Fenster auf, sonst
      * sucht jemand einen Fehler, den er gar nicht sehen kann. */
-    if (errs.source_owner) setDetailsOpen(true);
+    if (errs.source_owner) setBriefOpen(true);
     if (Object.keys(errs).length > 0 || !file) return;
 
     const data = collect(fd);
@@ -385,7 +384,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
           </Field>
           {/* Die Marke bestimmt Anrede, Farben, Schrift und Untertitel. Wer für mehrere Kunden
             * arbeitet, wählt hier den Kunden, bevor es losgeht. */}
-          <Field label="Marke" htmlFor="brand_profile_id" hint="Bestimmt Anrede, Aussehen und Schreibweisen.">
+          <Field label="Stil" htmlFor="brand_profile_id" hint="Untertitel, Logo und Ansprache der Clips.">
             <Select
               id="brand_profile_id"
               name="brand_profile_id"
@@ -447,8 +446,37 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
           </div>
         </Field>
 
-        {/* Das Briefing, eingeklappt: wer nichts angibt, lädt hoch wie bisher. Drei Fragen, die die
-          * Auswahl der Momente wirklich ändern, und die Plattform aus dem Markenprofil. */}
+        {/* Das Format steht offen und nicht im Briefing: es ändert jeden Clip, und wer Querformat
+          * braucht, soll es nicht erst suchen müssen. Hochformat ist vorausgewählt. */}
+        <Field label="Format der Clips" htmlFor="clip_format">
+          <div id="clip_format" role="radiogroup" aria-label="Format der Clips" className="grid grid-cols-3 gap-2">
+            {CLIP_FORMATS.map((f) => {
+              const aktiv = brief.format === f.id;
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={aktiv}
+                  disabled={busy}
+                  onClick={() => setBrief((b) => ({ ...b, format: f.id }))}
+                  className={cn(
+                    "transition-soft flex flex-col items-center gap-1.5 rounded-inner border px-3 py-3 text-center disabled:opacity-60",
+                    aktiv ? "border-white/60 bg-white/10" : "border-line hover:border-line-strong",
+                  )}
+                >
+                  <FormatSymbol format={f.id} aktiv={aktiv} />
+                  <span className={cn("text-sm font-medium", aktiv ? "text-text" : "text-text-2")}>{f.name}</span>
+                  <span className="hidden text-xs text-text-3 sm:block">{f.hinweis}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+
+        {/* Alles Freiwillige hinter einem Knopf: das Briefing (drei Fragen, die die Auswahl der
+          * Momente ändern, und die Plattform) und wem das Video gehört. Vorher waren das zwei
+          * Stellen, „Briefing angeben" und „Fein einstellen" mit eigenem Fenster. */}
         <div className="flex flex-col gap-3">
           <button
             type="button"
@@ -457,7 +485,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
             disabled={busy}
             className="transition-soft self-start text-sm text-text-2 underline-offset-4 hover:text-text hover:underline disabled:opacity-60"
           >
-            {briefOpen ? "Briefing ausblenden" : "Briefing angeben (freiwillig)"}
+            {briefOpen ? "Weniger Optionen" : "Mehr Optionen"}
           </button>
           {briefOpen && (
             <div className="grid gap-4 sm:grid-cols-2">
@@ -471,7 +499,7 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
                   disabled={busy}
                 />
               </Field>
-              <Field label="Plattform" htmlFor="brief_platform" hint="Vorbelegt aus der Marke.">
+              <Field label="Plattform" htmlFor="brief_platform" hint="Vorbelegt aus dem Stil.">
                 <Select
                   id="brief_platform"
                   value={brief.platform}
@@ -509,6 +537,26 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
                   disabled={busy}
                 />
               </Field>
+              <Field label="Wem gehört das Video?" htmlFor="rights_status" hint="Nur wenn du daraus zitierst, brauchen wir eine Quelle.">
+                <Select id="rights_status" value={rights} onChange={(e) => setRights(e.target.value as RightsStatus)} disabled={busy}>
+                  <option value="own">Mir selbst</option>
+                  <option value="licensed">Jemand anderem, ich habe die Erlaubnis</option>
+                  <option value="third_party">Jemand anderem, ich zitiere nur daraus</option>
+                </Select>
+              </Field>
+              {rights === "third_party" && (
+                <>
+                  <Field label="Urheber oder Quelle" htmlFor="source_owner" required error={errors.source_owner}>
+                    <Input id="source_owner" value={sourceOwner} onChange={(e) => setSourceOwner(e.target.value)} disabled={busy} />
+                  </Field>
+                  <Field label="Titel des Originals" htmlFor="source_title">
+                    <Input id="source_title" value={sourceTitle} onChange={(e) => setSourceTitle(e.target.value)} disabled={busy} />
+                  </Field>
+                  <Field label="URL" htmlFor="source_url">
+                    <Input id="source_url" type="url" placeholder="https://" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} disabled={busy} />
+                  </Field>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -534,14 +582,6 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
               />
               <span className="text-sm text-text">{RIGHTS_TEXT}</span>
             </label>
-            <button
-              type="button"
-              onClick={() => setDetailsOpen(true)}
-              disabled={busy}
-              className="transition-soft text-sm text-text-2 underline-offset-4 hover:text-text hover:underline disabled:opacity-60"
-            >
-              Fein einstellen
-            </button>
           </div>
           {errors.rights_confirmed && (
             <p className="text-sm text-attention" role="alert">
@@ -627,40 +667,19 @@ export function UploadForm({ profiles, maxBytes, tusEndpoint, demoUpload, upload
         </div>
       </div>
 
-      <Modal
-        open={detailsOpen}
-        onClose={() => setDetailsOpen(false)}
-        title="Wem gehört das Video?"
-        description="Voreingestellt ist: es ist deins. Nur wenn du daraus zitierst, brauchen wir eine Quelle."
-      >
-        <div className="flex flex-col gap-5">
-          <Field label="Wem gehört das Video?" htmlFor="rights_status">
-            <Select id="rights_status" value={rights} onChange={(e) => setRights(e.target.value as RightsStatus)} disabled={busy}>
-              <option value="own">Mir selbst</option>
-              <option value="licensed">Jemand anderem, ich habe die Erlaubnis</option>
-              <option value="third_party">Jemand anderem, ich zitiere nur daraus</option>
-            </Select>
-          </Field>
-          {rights === "third_party" && (
-            <>
-              <Field label="Urheber oder Quelle" htmlFor="source_owner" required error={errors.source_owner}>
-                <Input id="source_owner" value={sourceOwner} onChange={(e) => setSourceOwner(e.target.value)} disabled={busy} />
-              </Field>
-              <Field label="Titel des Originals" htmlFor="source_title">
-                <Input id="source_title" value={sourceTitle} onChange={(e) => setSourceTitle(e.target.value)} disabled={busy} />
-              </Field>
-              <Field label="URL" htmlFor="source_url">
-                <Input id="source_url" type="url" placeholder="https://" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} disabled={busy} />
-              </Field>
-            </>
-          )}
-          <div className="flex justify-end">
-            <Button type="button" onClick={() => setDetailsOpen(false)}>
-              Übernehmen
-            </Button>
-          </div>
-        </div>
-      </Modal>
     </form>
+  );
+}
+
+/* Kleine Rahmen statt Zahlen: „9:16" muss man lesen, ein hohes Rechteck sieht man. */
+function FormatSymbol({ format, aktiv }: { format: string; aktiv: boolean }) {
+  const rahmen = cn("rounded-[3px] border-2", aktiv ? "border-text" : "border-text-3");
+  const hoch = <span className={cn(rahmen, "h-7 w-4")} />;
+  const quer = <span className={cn(rahmen, "h-4 w-7")} />;
+  return (
+    <span aria-hidden className="flex h-7 items-center gap-1.5">
+      {format !== "16:9" && hoch}
+      {format !== "9:16" && quer}
+    </span>
   );
 }

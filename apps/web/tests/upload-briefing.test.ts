@@ -26,7 +26,7 @@ vi.mock("@/lib/session", () => ({
 }));
 vi.mock("@/lib/env", () => ({ isDemoMode: () => true }));
 
-import { BRIEF_MAX_CHARS, briefDefaults, briefMetadata } from "@/lib/uploads/brief";
+import { BRIEF_MAX_CHARS, briefDefaults, briefMetadata, parseClipFormat } from "@/lib/uploads/brief";
 import { finalizeUpload } from "@/lib/uploads/finalize";
 import { createDemoProject } from "@/app/upload/actions";
 
@@ -36,24 +36,48 @@ beforeEach(() => {
 
 describe("lib/uploads/brief", () => {
   it("belegt die Plattform aus dem Markenprofil vor, die Texte bleiben leer", () => {
-    expect(briefDefaults({ platform: "linkedin" })).toEqual({ audience: "", wanted: "", exclude: "", platform: "linkedin" });
+    expect(briefDefaults({ platform: "linkedin" })).toEqual({ audience: "", wanted: "", exclude: "", platform: "linkedin", format: "9:16" });
     expect(briefDefaults(null).platform).toBe("");
   });
 
   it("schickt nur Ausgefülltes, getrimmt und gekürzt", () => {
-    expect(briefMetadata({ audience: "  Gründerinnen   in Wien ", wanted: "", exclude: " ", platform: "" })).toEqual({
+    expect(briefMetadata({ audience: "  Gründerinnen   in Wien ", wanted: "", exclude: " ", platform: "", format: "9:16" })).toEqual({
       brief_audience: "Gründerinnen in Wien",
+      format: "9:16",
     });
     const lang = "x".repeat(BRIEF_MAX_CHARS + 50);
-    expect(briefMetadata({ audience: "", wanted: lang, exclude: "Werbeblock", platform: "tiktok" })).toEqual({
+    expect(briefMetadata({ audience: "", wanted: lang, exclude: "Werbeblock", platform: "tiktok", format: "9:16" })).toEqual({
       brief_wanted: "x".repeat(BRIEF_MAX_CHARS),
       brief_exclude: "Werbeblock",
       platform: "tiktok",
+      format: "9:16",
     });
   });
 
   it("verwirft eine unbekannte Plattform", () => {
-    expect(briefMetadata({ audience: "", wanted: "", exclude: "", platform: "myspace" as never })).toEqual({});
+    expect(briefMetadata({ audience: "", wanted: "", exclude: "", platform: "myspace" as never, format: "9:16" })).toEqual({ format: "9:16" });
+  });
+});
+
+describe("Formatwahl", () => {
+  it("geht immer mit, unbekannt heisst Hochformat", () => {
+    expect(briefMetadata({ audience: "", wanted: "", exclude: "", platform: "", format: "both" })).toEqual({ format: "both" });
+    expect(parseClipFormat("16:9")).toBe("16:9");
+    expect(parseClipFormat("4:3")).toBe("9:16");
+    expect(parseClipFormat(undefined)).toBe("9:16");
+  });
+
+  it("landet als Querformat in sources.brief", async () => {
+    await finalizeUpload({
+      session: { workspaceId: "ws-1", userId: "user-1", role: "editor" } as never,
+      brandProfileId: null,
+      meta: { title: "Quer", filename: "q.mp4", ...briefMetadata({ ...briefDefaults(null), format: "16:9" }) },
+      storageKey: "k",
+      storageBucket: null,
+      sizeBytes: 1,
+      via: "direct",
+    });
+    expect(h.created[0]?.brief?.format).toBe("16:9");
   });
 });
 
@@ -63,7 +87,7 @@ describe("Briefing landet in sources.brief", () => {
       title: "Folge 13",
       filename: "folge13.mp4",
       rights_status: "own",
-      ...briefMetadata({ audience: "Steuerberater", wanted: "konkrete Fristen", exclude: "Sponsoring", platform: "linkedin" }),
+      ...briefMetadata({ audience: "Steuerberater", wanted: "konkrete Fristen", exclude: "Sponsoring", platform: "linkedin", format: "9:16" }),
     };
     await finalizeUpload({
       session: { workspaceId: "ws-1", userId: "user-1", role: "editor" } as never,
@@ -74,7 +98,7 @@ describe("Briefing landet in sources.brief", () => {
       sizeBytes: 10,
       via: "direct",
     });
-    expect(h.created[0]?.brief).toEqual({ audience: "Steuerberater", wanted: "konkrete Fristen", exclude: "Sponsoring", platform: "linkedin" });
+    expect(h.created[0]?.brief).toEqual({ audience: "Steuerberater", wanted: "konkrete Fristen", exclude: "Sponsoring", platform: "linkedin", format: "9:16" });
   });
 
   it("ohne Angaben bleibt das Briefing leer", async () => {
@@ -87,11 +111,11 @@ describe("Briefing landet in sources.brief", () => {
       sizeBytes: 1,
       via: "direct",
     });
-    expect(h.created[0]?.brief).toEqual({ audience: undefined, wanted: undefined, exclude: undefined, platform: undefined });
+    expect(h.created[0]?.brief).toEqual({ audience: undefined, wanted: undefined, exclude: undefined, platform: undefined, format: "9:16" });
   });
 
   it("über den Testmodus (upload/actions)", async () => {
-    const meta = briefMetadata({ audience: "Lehrkräfte", wanted: "", exclude: "Namen von Schülern", platform: "reels" });
+    const meta = briefMetadata({ audience: "Lehrkräfte", wanted: "", exclude: "Namen von Schülern", platform: "reels", format: "9:16" });
     const result = await createDemoProject({
       title: "Vortrag",
       brand_profile_id: null,
@@ -106,6 +130,6 @@ describe("Briefing landet in sources.brief", () => {
       platform: "reels",
     });
     expect("id" in result).toBe(true);
-    expect(h.created[0]?.brief).toEqual({ audience: "Lehrkräfte", wanted: undefined, exclude: "Namen von Schülern", platform: "reels" });
+    expect(h.created[0]?.brief).toEqual({ audience: "Lehrkräfte", wanted: undefined, exclude: "Namen von Schülern", platform: "reels", format: "9:16" });
   });
 });

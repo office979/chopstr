@@ -11,7 +11,7 @@ import { BrandList } from "./BrandList";
 import { HistoryCard } from "./HistoryCard";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Branding" };
+export const metadata = { title: "Stile" };
 
 type Props = { searchParams: Promise<{ p?: string }> };
 
@@ -60,9 +60,8 @@ export default async function BrandPage({ searchParams }: Props) {
           Clipseiten, und so heisst die Sache auch beim Kunden. „Aussehen" war ein vierter Name
           für dasselbe. */}
       <PageHeader
-        eyebrow="Ein Profil je Kunde"
-        title="Branding"
-        description="Farben, Logo, Schrift und Schreibweisen. Sie bestimmen, wie die Clips einer Marke aussehen und klingen. Alles bleibt in deinem Team."
+        title="Stile"
+        description="Ein Stil je Kunde: wie seine Clips aussehen und klingen. Logo, Schrift und Wörter bleiben je Stil getrennt."
       />
       <BrandList profiles={profiles} activeId={profile?.id ?? null} isNew={isNew} />
       {/* key erzwingt ein frisches Formular beim Wechsel; sonst blieben die Eingaben des vorigen stehen */}
@@ -75,9 +74,15 @@ export default async function BrandPage({ searchParams }: Props) {
         betroffeneVideos={betroffen}
       />
       {profile && !isNew && (
-        <div className="mt-5">
-          <HistoryCard profileId={profile.id} entries={history} canRestore={can(session.role, "brand.edit")} />
-        </div>
+        /* Die Historie braucht man selten, und dann gezielt: eingeklappt statt als letzte Karte. */
+        <details className="group mt-5">
+          <summary className="transition-soft cursor-pointer text-sm text-text-2 underline underline-offset-4 hover:text-text">
+            Frühere Fassungen dieses Stils
+          </summary>
+          <div className="mt-3">
+            <HistoryCard profileId={profile.id} entries={history} canRestore={can(session.role, "brand.edit")} />
+          </div>
+        </details>
       )}
     </PageShell>
   );

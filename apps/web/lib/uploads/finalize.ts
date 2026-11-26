@@ -4,6 +4,7 @@ import { getApiRepo } from "@/lib/repo/api";
 import { startClipProjectWorkflow } from "@/lib/temporal";
 import { withSessionContext, type Session } from "@/lib/session";
 import type { Brief, Platform, RightsStatus } from "@/lib/repo/types";
+import { parseClipFormat } from "@/lib/uploads/brief";
 
 /* Gemeinsame Anlage einer Quelle nach abgeschlossenem Upload. Genutzt vom tusd-Hook (post-finish) und vom
  * direkten Upload (POST /api/uploads/direct, lokaler Testmodus): Quelle mit storage_key, Audit `upload.created`
@@ -59,6 +60,7 @@ export async function finalizeUpload(input: FinalizeUploadInput): Promise<Finali
       wanted: meta.brief_wanted || undefined,
       exclude: meta.brief_exclude || undefined,
       platform: parsePlatform(meta.platform),
+      format: parseClipFormat(meta.format),
     };
     const expected = Number(meta.expected_speakers);
     const clientRef = isUuid(meta.client_ref) ? meta.client_ref : undefined;

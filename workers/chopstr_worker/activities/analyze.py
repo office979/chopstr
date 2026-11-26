@@ -46,8 +46,10 @@ STEP_CANDIDATES = "detect_candidates"
 SIGNALS_VERSION = "signals_v2"
 
 # -- Automatische Clips (ohne Auswahlschritt) ---------------------------------------------------
-# Gründerentscheidung: alle Kandidaten bekommen einen Clip, immer Hochformat, je Kandidat genau einer.
+# Gründerentscheidung: alle Kandidaten bekommen einen Clip, je Kandidat und Format genau einer.
+# Das Format wählt der Upload (``brief.format``, apps/web/lib/uploads/brief.ts); ohne Wahl Hochformat.
 AUTO_CLIP_ASPECT = "9:16"
+CLIP_FORMATS: dict[str, tuple[str, ...]] = {"9:16": ("9:16",), "16:9": ("16:9",), "both": ("9:16", "16:9")}
 # Rückfall, wenn weder das Markenprofil noch das Briefing eine Plattform nennt. Dieselbe Reihenfolge
 # (Markenprofil, Briefing, ``reels``) gilt in der Web-App (``apps/web/lib/clips/acceptance.ts``) und
 # im Render (``render.default_clip_platform``, dort steht der Wert).
@@ -70,9 +72,9 @@ _WINDOW_DIGITS = 1
 SQL_DEFAULT_PLATFORM = (
     "select p.default_platform from sources s left join brand_profiles p on p.id = s.brand_profile_id where s.id = %s"
 )
-SQL_CLIP_FOR_CANDIDATE = "select id from clips where candidate_id = %s limit 1"
+SQL_CLIP_FOR_CANDIDATE = "select id from clips where candidate_id = %s and aspect = %s limit 1"
 SQL_CLIP_WINDOWS = (
-    "select k.start_s, k.end_s from clips c join candidates k on k.id = c.candidate_id where c.source_id = %s"
+    "select k.start_s, k.end_s, c.aspect from clips c join candidates k on k.id = c.candidate_id where c.source_id = %s"
 )
 # Re-Run: die noch nicht gerenderten Automatik-Clips und ihre Kandidaten weichen dem neuen Ergebnis,
 # auch die zurückgehaltenen (Begründung beginnt mit ``AUTO_HOLD_REASON_PREFIX``); deren Kandidaten
@@ -454,6 +456,11 @@ def auto_accept_blockers(risk_flags: Any, text: str, title_card: str = "", revie
     return blockers
 
 
+def clip_aspects(brief: dict | None) -> tuple[str, ...]:
+    """Bildformate der Automatik-Clips aus dem Briefing. Unbekannt oder leer heißt Hochformat."""
+    return CLIP_FORMATS.get(str((brief or {}).get("format") or ""), (AUTO_CLIP_ASPECT,))
+
+
 def auto_hold_reason(blockers: list[str]) -> str:
     """Begründung für einen zurückgehaltenen Kandidaten, lesbar in der Oberfläche."""
     return f"{AUTO_HOLD_REASON_PREFIX}{', '.join(blockers)}, menschliche Prüfung nötig"
@@ -466,8 +473,9 @@ def auto_create_clips(
 
     Felder wie in ``createClips`` der Web-App (``apps/web/lib/repo/postgres.ts``): ``composition`` aus
     den Segmenten des Kandidaten, ``title_card`` aus der Rubrik, ``ad_label`` nach Land, ``destination``
-    gleich der Plattform, ``status = 'draft'``. Abweichend davon ist ``aspect`` fest ``9:16`` und
-    ``created_by`` leer (kein Mensch beteiligt). ``delete_after`` setzt der Trigger aus Migration 0006.
+    gleich der Plattform, ``status = 'draft'``. Abweichend davon kommt ``aspect`` aus dem Briefing
+    (``clip_aspects``: Hochformat, Querformat oder beide, dann zwei Clips je Kandidat) und
+    ``created_by`` ist leer (kein Mensch beteiligt). ``delete_after`` setzt der Trigger aus Migration 0006.
 
     Idempotent auf zwei Ebenen: ein Kandidat mit vorhandenem Clip wird übersprungen, und ein Fenster,
     zu dem an dieser Quelle schon ein Clip existiert, bekommt keinen zweiten (zweiter Lauf, gelöschte
@@ -476,36 +484,46 @@ def auto_create_clips(
     Angenommen wird nur ein Kandidat ohne Blocker aus ``auto_accept_blockers``. Sonst bleibt
     ``human_verdict`` leer und ``verdict_reason`` nennt die Blocker; der Clip bleibt ``draft`` und
     wird erst nach menschlicher Annahme gerendert."""
-    platform = clip_platform(ctx, source_id, dict(src.get("brief") or {}))
-    ad_label = ad_label_for(dict(src.get("brief") or {}), src.get("country") or "AT")
-    taken = {_window(r[0], r[1]) for r in db.fetch_all(ctx.conn, SQL_CLIP_WINDOWS, (source_id,))}
+    brief = dict(src.get("brief") or {})
+    platform = clip_platform(ctx, source_id, brief)
+    ad_label = ad_label_for(brief, src.get("country") or "AT")
+    aspects = clip_aspects(brief)
+    taken = {(_window(r[0], r[1]), r[2]) for r in db.fetch_all(ctx.conn, SQL_CLIP_WINDOWS, (source_id,))}
     created: list[str] = []
     held = 0
     for candidate_id, cand in zip(candidate_ids, cands):
         if not candidate_id:
             continue
-        if db.fetch_one(ctx.conn, SQL_CLIP_FOR_CANDIDATE, (candidate_id,)) is not None:
-            continue
         row = cand.to_row()
         key = _window(row["start_s"], row["end_s"])
-        if key in taken:
-            continue
         title_card = str((row.get("rubric") or {}).get("suggested_title_card") or "").strip() or None
-        inserted = db.insert(
-            ctx.conn,
-            "clips",
-            returning="id",
-            source_id=source_id,
-            candidate_id=candidate_id,
-            platform=platform,
-            destination=platform,
-            aspect=AUTO_CLIP_ASPECT,
-            composition=db.jsonb(row["segments"]),
-            title_card=title_card,
-            ad_label=ad_label,
-            status="draft",
-            created_by=None,
-        )
+        made = False
+        for aspect in aspects:
+            if db.fetch_one(ctx.conn, SQL_CLIP_FOR_CANDIDATE, (candidate_id, aspect)) is not None:
+                continue
+            if (key, aspect) in taken:
+                continue
+            inserted = db.insert(
+                ctx.conn,
+                "clips",
+                returning="id",
+                source_id=source_id,
+                candidate_id=candidate_id,
+                platform=platform,
+                destination=platform,
+                aspect=aspect,
+                composition=db.jsonb(row["segments"]),
+                title_card=title_card,
+                ad_label=ad_label,
+                status="draft",
+                created_by=None,
+            )
+            taken.add((key, aspect))
+            created.append(str(inserted[0]) if inserted else "")
+            made = True
+        if not made:
+            continue
+        # Das Urteil gilt dem Kandidaten, nicht dem Format: einmal setzen, auch bei zwei Clips.
         blockers = auto_accept_blockers(
             row.get("risk_flags"), str((row.get("rubric") or {}).get("text") or ""), title_card or "",
             (row.get("rubric") or {}).get("review_state"),
@@ -522,11 +540,9 @@ def auto_create_clips(
                 verdict_reason=AUTO_VERDICT_REASON,
                 verdict_at=datetime.now(UTC),
             )
-        taken.add(key)
-        created.append(str(inserted[0]) if inserted else "")
     log.info(
-        "auto clips source=%s platform=%s aspect=%s created=%s held=%s",
-        source_id, platform, AUTO_CLIP_ASPECT, len(created), held,
+        "auto clips source=%s platform=%s aspects=%s created=%s held=%s",
+        source_id, platform, ",".join(aspects), len(created), held,
     )  # fmt: skip
     return created
 
@@ -734,6 +750,8 @@ def notify(source_id: str, event: str) -> None:
 __all__ = [
     "AUTO_ACCEPT_HARD_FLAGS",
     "AUTO_CLIP_ASPECT",
+    "CLIP_FORMATS",
+    "clip_aspects",
     "AUTO_CLIP_PLATFORM",
     "AUTO_HOLD_REASON_PREFIX",
     "AUTO_VERDICT_REASON",

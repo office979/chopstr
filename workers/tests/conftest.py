@@ -430,14 +430,16 @@ class FakeDB:
             return FakeCursor([(p.get("default_platform"),)])
         if q.startswith("select id from clips where candidate_id = %s"):
             rows = [c for c in self.clips.values() if c.get("candidate_id") == params[0]]
+            if "and aspect = %s" in q:
+                rows = [c for c in rows if (c.get("aspect") or "9:16") == params[1]]
             return FakeCursor([(c["id"],) for c in rows[:1]])
-        if q.startswith("select k.start_s, k.end_s from clips c join candidates k"):
+        if q.startswith("select k.start_s, k.end_s"):
             by_id = {c["id"]: c for c in self.candidates}
             rows = []
             for c in self.clips.values():
                 k = by_id.get(c.get("candidate_id"))
                 if c["source_id"] == params[0] and k is not None:
-                    rows.append((k.get("start_s"), k.get("end_s")))
+                    rows.append((k.get("start_s"), k.get("end_s"), c.get("aspect") or "9:16"))
             return FakeCursor(rows)
         if q.startswith("update sources set"):
             set_part = sql.split("set", 1)[1].split("where", 1)[0]

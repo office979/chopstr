@@ -1,3 +1,4 @@
+import { AuswertungTabs } from "@/components/layout/AuswertungTabs";
 import Link from "next/link";
 import { PageShell } from "@/components/layout/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -40,6 +41,7 @@ export default async function ExperimentsPage() {
         title="Tests"
         description="Derselbe Clip, zwei verschiedene Einstiege. Du postest beide und siehst nach ein paar Tagen, welcher besser ankommt. Entschieden wird erst, wenn genug Zahlen da sind."
       />
+      <AuswertungTabs aktiv="experimente" role={session.role} />
       {experiments.length === 0 ? (
         /* Eine Leerseite, die den Weg nennt UND ihn anbietet. Vorher stand hier ein Satz über das
            „Hook-Studio eines gerenderten Clips" - ohne Link, ohne Erklärung, was ein Hook-Studio

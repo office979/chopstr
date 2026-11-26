@@ -262,6 +262,53 @@ def test_clip_takes_title_card_and_ad_label_from_candidate_and_brief(fake_db, fa
     assert clip["platform"] == "linkedin" and clip["aspect"] == "9:16"  # Plattform aus dem Profil, Format fest
 
 
+def _formatted_source(fake_db, fake_context, monkeypatch, fmt):
+    _use_provider(monkeypatch, fake_context, "local-heuristic")
+    wid = fake_db.add_workspace()
+    pid = fake_db.add_brand_profile(wid, default_platform="tiktok")
+    sid = fake_db.add_source(wid, "uploads/in.mp4", brand_profile_id=pid, brief={**BRIEF, "format": fmt}, status="analyzing")
+    fake_db.add_transcript_version(sid, demo_words())
+    _fixed_report(monkeypatch, [_result(1.0, 20.0, gate_passed=True, risk_flags=[]), _result(30.0, 50.0, gate_passed=True, risk_flags=[])])
+    return sid
+
+
+def test_clip_aspects_follow_the_upload_format():
+    assert analyze.clip_aspects({}) == ("9:16",)
+    assert analyze.clip_aspects(None) == ("9:16",)
+    assert analyze.clip_aspects({"format": "16:9"}) == ("16:9",)
+    assert analyze.clip_aspects({"format": "both"}) == ("9:16", "16:9")
+    assert analyze.clip_aspects({"format": "4:3"}) == ("9:16",)  # Unbekanntes fällt auf Hochformat
+
+
+def test_landscape_upload_creates_landscape_clips(fake_db, fake_context, monkeypatch):
+    sid = _formatted_source(fake_db, fake_context, monkeypatch, "16:9")
+    ids = analyze.run_detect_candidates(fake_context, sid)
+    clips = list(fake_db.clips.values())
+    assert len(clips) == len(ids) == 2
+    assert {c["aspect"] for c in clips} == {"16:9"}
+
+
+def test_both_formats_create_two_clips_per_candidate_and_one_verdict(fake_db, fake_context, monkeypatch):
+    sid = _formatted_source(fake_db, fake_context, monkeypatch, "both")
+    ids = analyze.run_detect_candidates(fake_context, sid)
+    clips = list(fake_db.clips.values())
+    assert len(clips) == 2 * len(ids) == 4
+    for cid in ids:
+        assert sorted(c["aspect"] for c in clips if c["candidate_id"] == cid) == ["16:9", "9:16"]
+        cand = next(c for c in fake_db.candidates if c["id"] == cid)
+        assert cand["human_verdict"] == "accepted"
+    assert fake_db.events_for("detect_candidates")[-1]["payload"]["clips"] == 4
+
+
+def test_both_formats_second_run_creates_no_duplicates(fake_db, fake_context, monkeypatch):
+    sid = _formatted_source(fake_db, fake_context, monkeypatch, "both")
+    analyze.run_detect_candidates(fake_context, sid)
+    analyze.run_detect_candidates(fake_context, sid)
+    clips = list(fake_db.clips.values())
+    assert len(clips) == 4
+    assert len({(c["candidate_id"], c["aspect"]) for c in clips}) == 4
+
+
 def test_second_run_creates_no_duplicate_clips(fake_db, fake_context, branded_source):
     first = analyze.run_detect_candidates(fake_context, branded_source)
     clips_after_first = {c["id"] for c in fake_db.clips.values()}

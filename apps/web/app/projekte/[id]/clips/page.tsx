@@ -6,15 +6,9 @@ import { getRepo } from "@/lib/repo";
 import { isTerminalStatus } from "@/lib/pipeline";
 import { isDemoMode, temporalConfigured } from "@/lib/env";
 import { PipelineLive } from "../PipelineLive";
-import { aspectForSource } from "@/lib/clips/presets";
 import { requireSession } from "@/lib/session";
-import { can } from "@/lib/auth/permissions";
-import { getQuota } from "@/lib/billing/quota";
-import { previewFontFor } from "@/lib/brand/preview-font";
-import { getPublishingRepo } from "@/lib/repo/publishing";
-import { canExt } from "@/lib/auth/permissions-publishing";
 import { mediaUrl } from "@/lib/clips/labels";
-import { ClipBoard } from "./ClipBoard";
+import { ClipGallery } from "./ClipGallery";
 
 export const dynamic = "force-dynamic";
 
@@ -28,22 +22,15 @@ export async function generateMetadata({ params }: Props) {
 
 export default async function ClipsPage({ params }: Props) {
   const { id } = await params;
-  const session = await requireSession();
+  await requireSession();
   const repo = getRepo();
   const source = await repo.getSource(id);
   if (!source) notFound();
-  const [clips, candidates, events, brand, approvals, quota] = await Promise.all([
+  const [clips, candidates, brand] = await Promise.all([
     repo.listClips(id),
     repo.listCandidates(id),
-    repo.listPipelineEvents(id),
     source.brand_profile_id ? repo.getBrandProfile(source.brand_profile_id) : Promise.resolve(null),
-    repo.listGuestApprovals(id),
-    getQuota(repo),
   ]);
-  const previewFont = await previewFontFor(repo, brand);
-  const pub = getPublishingRepo();
-  const clipIds = clips.map((c) => c.id);
-  const [seriesList, extrasList] = await Promise.all([pub.listSeries(), pub.getClipExtras(clipIds)]);
 
   /* Noch keine Clips? Dann zeigt diese Seite, wie weit der Computer ist.
    *
@@ -71,52 +58,20 @@ export default async function ClipsPage({ params }: Props) {
   }
 
   const candidateIds = new Set(clips.map((c) => c.candidate_id));
+  const base = process.env.NEXT_PUBLIC_MEDIA_BASE_URL ?? null;
 
   return (
     <PageShell width="wide" backgroundWord="Clips">
       <Brotkrume titel={source.title} />
-
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Clips prüfen</h1>
-        {/* Marke und Video stehen einmal hier und nicht auf jeder Karte: auf dieser Seite sind sie
-            für alle Clips gleich, und vierzehnmal dasselbe ist keine Information. */}
-        <p className="mt-1 text-sm text-text-2">
-          {brand ? (
-            <>
-              Marke{" "}
-              <Link href={`/marke?p=${brand.id}`} className="text-text hover:underline">
-                {brand.name}
-              </Link>
-              {" · "}
-            </>
-          ) : null}
-          Video {source.title}
-        </p>
-      </div>
-      <ClipBoard
+      <ClipGallery
         sourceId={source.id}
-        initialClips={clips}
-        quellAspekt={aspectForSource(source.width, source.height)}
+        clips={clips}
         candidates={candidates.filter((c) => candidateIds.has(c.id))}
-        initialEvents={events.filter((e) => e.step === "render")}
-        mediaBase={process.env.NEXT_PUBLIC_MEDIA_BASE_URL ?? null}
-        quelleSrc={mediaUrl(process.env.NEXT_PUBLIC_MEDIA_BASE_URL ?? null, source.proxy_key)}
-        demo={repo.kind === "demo"}
-        highlightColor={brand?.caption_style?.highlight_color}
-        lowerThird={brand?.ci?.lower_third?.enabled ? { name: brand.ci.lower_third.name ?? "", role: brand.ci.lower_third.role ?? "" } : null}
-        guestApprovals={approvals}
-        canRequestGuest={can(session.role, "guest_approval.request")}
-        planAllowsGuest={Boolean(quota.plan?.features?.guest_approval)}
-        planName={quota.plan?.name ?? "Starter"}
-        canDelete={can(session.role, "source.delete")}
-        canVerdict={can(session.role, "candidate.verdict")}
-        canPublish={canExt(session.role, "publishing.publish")}
-        previewFont={previewFont}
-        publishing={{
-          series: seriesList.filter((s) => s.active),
-          extras: Object.fromEntries(extrasList.map((e) => [e.id, e])),
-          canSeries: canExt(session.role, "series.manage"),
-        }}
+        mediaBase={base}
+        demoSrc={repo.kind === "demo" ? mediaUrl(base, source.proxy_key) ?? "/demo/video.mp4" : null}
+        stilName={brand?.name ?? null}
+        stilHref={brand ? `/marke?p=${brand.id}` : null}
+        aktuellerLook={(brand?.caption_style as { look?: string } | undefined)?.look ?? null}
       />
     </PageShell>
   );

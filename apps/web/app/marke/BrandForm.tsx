@@ -5,7 +5,6 @@ import { GlassCard } from "@/components/ui/GlassCard";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { TagInput } from "@/components/ui/TagInput";
 import { Button } from "@/components/ui/Button";
-import { Badge } from "@/components/ui/Badge";
 import { ColorField } from "@/components/ui/ColorField";
 import { Toggle } from "@/components/ui/Toggle";
 import type { BrandAsset, BrandProfile, CaptionPreset, Platform } from "@/lib/repo/types";
@@ -21,6 +20,7 @@ import { PLATFORMS, PLATFORM_LABELS } from "@/lib/clips/labels";
 import { useMemo, useState } from "react";
 import { befundSatz, pruefen as regelnPruefen } from "@/lib/brand/wortregeln";
 import { saveBrandProfileAction, type BrandFormState } from "./actions";
+import { aktiverLook, LOOKS, mitVorgabe } from "@/lib/clips/caption-style";
 
 const initialState: BrandFormState = { ok: false, message: "", errors: {} };
 
@@ -75,7 +75,11 @@ export function BrandForm({
    * Zustand und nicht nur im Formular. Alles andere bleibt bei defaultValue: es zeigt sich
    * ohnehin erst im fertigen Clip. */
   const [plattform, setPlattform] = useState<Platform>(profile?.default_platform ?? "tiktok");
-  const [preset, setPreset] = useState<string>(profile?.caption_preset ?? "");
+  /* Der Look der Marke. Ältere Profile haben nur ein Preset und keinen Look: dann „Automatisch",
+   * es sei denn, der gespeicherte Stil passt genau auf einen Look. */
+  const [look, setLook] = useState<string>(() => style.look ?? (style.font ? aktiverLook(style) ?? "" : ""));
+  const lookStil = LOOKS.find((l) => l.id === look)?.stil;
+  const preset = lookStil?.preset ?? (look === "" ? "" : profile?.caption_preset ?? "");
   const [highlight, setHighlight] = useState(style.highlight_color ?? "");
   const [bbName, setBbName] = useState(ci.lower_third?.name ?? "");
   const [bbRolle, setBbRolle] = useState(ci.lower_third?.role ?? "");
@@ -116,9 +120,8 @@ export function BrandForm({
                 man ist, ohne eine Reihenfolge zu behaupten, die es nicht gibt. */}
             <h2 className="text-lg font-medium">Sprache und Ansprache</h2>
           </div>
-          {profile && <Badge>Fassung {profile.version}</Badge>}
         </div>
-        <Field label="Name der Marke" htmlFor="name" required error={state.errors.name}>
+        <Field label="Name des Stils" htmlFor="name" required error={state.errors.name}>
           <Input id="name" name="name" defaultValue={profile?.name ?? ""} placeholder="z. B. PLACEMedia Podcast" required />
         </Field>
         <div className="grid gap-5 sm:grid-cols-2">
@@ -135,48 +138,7 @@ export function BrandForm({
               <option value="CH">Schweiz</option>
             </Select>
           </Field>
-          <Field
-            label="Geschlechterformen"
-            htmlFor="gender_mode"
-            hint="Wie im Text über Gruppen von Menschen geschrieben wird."
-          >
-            <Select id="gender_mode" name="gender_mode" defaultValue={profile?.gender_mode ?? "neutral"}>
-              <option value="neutral">neutral (Mitarbeitende)</option>
-              <option value="paarform">Paarform (Mitarbeiterinnen und Mitarbeiter)</option>
-              <option value="doppelpunkt">Doppelpunkt (Mitarbeiter:innen)</option>
-              <option value="stern">Stern (Mitarbeiter*innen)</option>
-              <option value="keine">keine Anpassung</option>
-            </Select>
-          </Field>
-          <Field
-            label="Gesprochene Sprache"
-            htmlFor="asr_variant"
-            hint="Was in deinen Videos gesprochen wird. Danach richtet sich, wie der Computer zuhört."
-          >
-            <Select id="asr_variant" name="asr_variant" defaultValue={profile?.asr_variant ?? "de"}>
-              <option value="de">Deutsch</option>
-              <option value="de-CH">Schweizerdeutsch</option>
-            </Select>
-          </Field>
-          {/* Gesprochene Sprache und geschriebene Form sind zwei Fragen. Wer Schweizerdeutsch
-            * spricht, will die Untertitel vielleicht trotzdem auf Hochdeutsch. Vorher stand das
-            * als „Caption-Text: Original (text) / Standard (text_norm)" unter „Ausgabe", also
-            * weit weg von der Sprache und in der Sprache der Datenbank. */}
-          <Field
-            label="Schreibweise der Untertitel"
-            htmlFor="caption_text_field"
-            hint={'Wortlaut heißt: es steht da, wie es gesagt wurde. Hochdeutsch heißt: Mundart wird in die Schriftform gebracht, wo das sicher geht. Wörter aus „Nicht verändern“ bleiben immer, wie sie sind.'}
-          >
-            <Select id="caption_text_field" name="caption_text_field" defaultValue={style.caption_text_field ?? "text"}>
-              <option value="text">So, wie es gesagt wurde</option>
-              <option value="text_norm">In Hochdeutsch</option>
-            </Select>
-          </Field>
         </div>
-        <p className="text-sm text-text-2">
-          Schweizerdeutsch erkennt der Computer weniger sicher als Deutsch. Im Text eines Clips
-          steht dann ein Hinweis an den Stellen, an denen er sich nicht sicher war.
-        </p>
       </GlassCard>
 
       {/* Schritt 3: wie der Clip aussieht. Links die Entscheidungen, rechts das Bild dazu.
@@ -210,21 +172,46 @@ export function BrandForm({
               </Select>
             </Field>
 
-            <Field
-              label="Untertitel"
-              htmlFor="caption_preset"
-              hint="Automatisch heißt: hochkant kommt ein Wort nach dem anderen, quer bleiben die Untertitel ruhig mit zwei Zeilen."
-            >
-              <Select id="caption_preset" name="caption_preset" value={preset} onChange={(e) => setPreset(e.target.value)}>
-                <option value="">Automatisch, passend zum Format</option>
-                <option value="tiktok_words">Ein Wort nach dem anderen, sehr groß</option>
-                <option value="reels_words">Ein Wort nach dem anderen, groß</option>
-                <option value="tiktok_bold">Zwei Zeilen, fett mit Rand</option>
-                <option value="reels_clean">Zwei Zeilen, schlicht</option>
-                <option value="linkedin_static">Zwei Zeilen, ruhig auf Fläche</option>
-                <option value="corporate_third">Bauchbinde unten, ruhig und klein</option>
-              </Select>
-            </Field>
+            {/* Untertitel als Looks, dieselben zehn wie im Clip. Vorher stand hier eine Liste von
+              * Presets mit eigenen Namen; im Clip hiess dasselbe anders. Jetzt gibt es ein System. */}
+            <fieldset className="flex flex-col gap-2">
+              <legend className="mb-1 text-sm font-medium text-text">Untertitel</legend>
+              <input type="hidden" name="caption_look" value={look} />
+              <input type="hidden" name="caption_preset" value={preset} />
+              <div role="radiogroup" aria-label="Untertitel" className="grid grid-cols-2 gap-2 xl:grid-cols-3">
+                {[{ id: "", name: "Automatisch", hinweis: "Passend zum Format", stil: null }, ...LOOKS].map((l) => {
+                  const aktiv = look === l.id;
+                  const v = l.stil ? mitVorgabe(l.stil) : null;
+                  return (
+                    <button
+                      key={l.id || "auto"}
+                      type="button"
+                      role="radio"
+                      aria-checked={aktiv}
+                      onClick={() => {
+                        setLook(l.id);
+                        setGeaendert(true);
+                      }}
+                      className={cn(
+                        "transition-soft flex min-w-0 flex-col items-start gap-1 rounded-inner border px-3 py-2.5 text-left",
+                        aktiv ? "border-white/60 bg-white/10" : "border-line hover:border-line-strong",
+                      )}
+                    >
+                      <span
+                        aria-hidden
+                        className="text-lg leading-none text-text"
+                        style={v ? { fontFamily: `"${v.font}", Inter, sans-serif`, textTransform: v.all_caps ? "uppercase" : "none" } : undefined}
+                      >
+                        Aa
+                      </span>
+                      <span className={cn("text-sm font-medium", aktiv ? "text-text" : "text-text-2")}>{l.name}</span>
+                      <span className="w-full truncate text-xs text-text-3" title={l.hinweis}>{l.hinweis}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-text-3">Gilt für alle neuen Clips mit diesem Stil. Bei einem Video nachträglich änderbar.</p>
+            </fieldset>
 
             <ColorField
               id="caption_highlight"
@@ -276,7 +263,7 @@ export function BrandForm({
               preset={(preset || undefined) as CaptionPreset | undefined ?? "tiktok_words"}
               hookText={style.hook_overlay?.[plattform] ?? plattform !== "linkedin" ? "Der teuerste Fehler" : null}
               bauchbinde={lowerThird ? { name: bbName, role: bbRolle } : null}
-              highlightColor={highlight || undefined}
+              highlightColor={highlight || lookStil?.highlight_color || undefined}
               font={vorschauSchrift}
               logoUrl={logoUrl}
               logoAn={ci.watermark?.enabled ?? false}
@@ -372,6 +359,53 @@ export function BrandForm({
           {fein ? "Fein einstellen schließen" : "Fein einstellen"}
         </button>
 
+        {/* Ausgeblendete Felder bleiben im Formular, sonst fielen ihre Werte beim Speichern weg. */}
+        <div className={cn("flex flex-col gap-5", !fein && "hidden")}>
+          <div className="grid gap-5 sm:grid-cols-2">
+            <Field
+              label="Geschlechterformen"
+              htmlFor="gender_mode"
+              hint="Wie im Text über Gruppen von Menschen geschrieben wird."
+            >
+              <Select id="gender_mode" name="gender_mode" defaultValue={profile?.gender_mode ?? "neutral"}>
+                <option value="neutral">neutral (Mitarbeitende)</option>
+                <option value="paarform">Paarform (Mitarbeiterinnen und Mitarbeiter)</option>
+                <option value="doppelpunkt">Doppelpunkt (Mitarbeiter:innen)</option>
+                <option value="stern">Stern (Mitarbeiter*innen)</option>
+                <option value="keine">keine Anpassung</option>
+              </Select>
+            </Field>
+            <Field
+              label="Gesprochene Sprache"
+              htmlFor="asr_variant"
+              hint="Was in deinen Videos gesprochen wird. Danach richtet sich, wie der Computer zuhört."
+            >
+              <Select id="asr_variant" name="asr_variant" defaultValue={profile?.asr_variant ?? "de"}>
+                <option value="de">Deutsch</option>
+                <option value="de-CH">Schweizerdeutsch</option>
+              </Select>
+            </Field>
+            {/* Gesprochene Sprache und geschriebene Form sind zwei Fragen. Wer Schweizerdeutsch
+              * spricht, will die Untertitel vielleicht trotzdem auf Hochdeutsch. Vorher stand das
+              * als „Caption-Text: Original (text) / Standard (text_norm)" unter „Ausgabe", also
+              * weit weg von der Sprache und in der Sprache der Datenbank. */}
+            <Field
+              label="Schreibweise der Untertitel"
+              htmlFor="caption_text_field"
+              hint={'Wortlaut heißt: es steht da, wie es gesagt wurde. Hochdeutsch heißt: Mundart wird in die Schriftform gebracht, wo das sicher geht. Wörter aus „Nicht verändern“ bleiben immer, wie sie sind.'}
+            >
+              <Select id="caption_text_field" name="caption_text_field" defaultValue={style.caption_text_field ?? "text"}>
+                <option value="text">So, wie es gesagt wurde</option>
+                <option value="text_norm">In Hochdeutsch</option>
+              </Select>
+            </Field>
+          </div>
+          <p className="text-sm text-text-2">
+          Schweizerdeutsch erkennt der Computer weniger sicher als Deutsch. Im Text eines Clips
+          steht dann ein Hinweis an den Stellen, an denen er sich nicht sicher war.
+        </p>
+        </div>
+
         {fein && (
           <div className="flex flex-col gap-5">
             <Field label="Tonfall" htmlFor="tone_adjectives" hint="Höchstens drei Wörter, zum Beispiel ruhig, konkret, belegt." error={state.errors.tone_adjectives}>
@@ -432,7 +466,7 @@ export function BrandForm({
         {betroffeneVideos.length > 0 && (
           <>
             <p className="mt-1 text-sm text-text-2">
-              {betroffeneVideos.length === 1 ? "Dieses Video nutzt die Marke:" : `Diese ${betroffeneVideos.length} Videos nutzen die Marke:`}
+              {betroffeneVideos.length === 1 ? "Dieses Video nutzt den Stil:" : `Diese ${betroffeneVideos.length} Videos nutzen den Stil:`}
             </p>
             {/* Je Video die Fassung, mit der es geclippt wurde. Damit ist vor dem Speichern zu
                 sehen, welche Videos die Änderung betrifft und welche noch auf einem älteren
@@ -470,7 +504,7 @@ export function BrandForm({
         <div className="mx-auto flex max-w-[var(--shell-max,1200px)] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="flex min-w-0 flex-col">
             <span className="truncate text-sm font-medium text-text">
-              {profile?.name ?? "Neue Marke"}
+              {profile?.name ?? "Neuer Stil"}
             </span>
             <span
               className={cn("text-xs", state.ok || !state.message ? "text-text-3" : "text-attention")}
@@ -486,7 +520,7 @@ export function BrandForm({
               onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
               className="text-sm text-text-2 underline underline-offset-4 hover:text-text"
             >
-              Zur Markenübersicht
+              Nach oben
             </button>
             <Button type="submit" disabled={pending || befunde.some((b) => b.art === "widerspruch")}>
               {pending ? "Wird gespeichert" : offen ? "Änderungen speichern" : "Speichern"}

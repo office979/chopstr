@@ -114,6 +114,45 @@ export const LOOKS: Look[] = [
     hinweis: "Kräftig, farbige Hervorhebung",
     stil: { preset: "tiktok_words", font: "Archivo Black", bold: true, all_caps: true, outline_px: 7, box: false, base_color: "#ffffff", highlight_color: "#ff3b6b" },
   },
+  /* Die zweiten sechs: je ein Look für eine Art von Kanal, die im DACH-Clipping oft vorkommt.
+   * Jeder unterscheidet sich in mindestens einem der LOOK_FELDER von allen anderen, sonst
+   * erkennt aktiverLook ihn nicht wieder. */
+  {
+    id: "podcast",
+    name: "Podcast",
+    hinweis: "Drei Wörter, rund und fett",
+    stil: { preset: "tiktok_bold", font: "Montserrat", bold: true, all_caps: false, outline_px: 6, box: false, base_color: "#ffffff", highlight_color: "#ffd700", words_per_card: 3, max_lines: 2 },
+  },
+  {
+    id: "kino",
+    name: "Kino",
+    hinweis: "Schmal, filmisch, ohne Farbe",
+    stil: { preset: "tiktok_words", font: "Bebas Neue", bold: false, all_caps: true, outline_px: 4, box: false, base_color: "#ffffff", highlight_words: false, words_per_card: 2, max_lines: 1 },
+  },
+  {
+    id: "edel",
+    name: "Edel",
+    hinweis: "Serifen, für Premium und Immobilien",
+    stil: { preset: "reels_clean", font: "Playfair Display", bold: true, all_caps: false, outline_px: 3, box: false, base_color: "#ffffff", highlight_color: "#e8c07d", words_per_card: 3, max_lines: 2 },
+  },
+  {
+    id: "tech",
+    name: "Tech",
+    hinweis: "Dunkler Kasten, blaue Hervorhebung",
+    stil: { preset: "tiktok_bold", font: "Space Grotesk", bold: true, all_caps: false, outline_px: 0, box: true, box_color: "#0b0f1a", base_color: "#ffffff", highlight_color: "#5b8cff", words_per_card: 2, max_lines: 2 },
+  },
+  {
+    id: "coach",
+    name: "Coach",
+    hinweis: "Freundlich, orange Hervorhebung",
+    stil: { preset: "tiktok_words", font: "Poppins", bold: true, all_caps: false, outline_px: 8, box: false, base_color: "#ffffff", highlight_color: "#ff8a00" },
+  },
+  {
+    id: "news",
+    name: "News",
+    hinweis: "Roter Balken, Großbuchstaben",
+    stil: { preset: "linkedin_static", font: "Oswald", bold: true, all_caps: true, outline_px: 0, box: true, box_color: "#d7263d", base_color: "#ffffff", highlight_words: false, words_per_card: 3, max_lines: 1 },
+  },
 ];
 
 /* Fuenf Farben fuer die Hervorhebung. Eine Reihe Punkte statt eines Farbwaehlers: die Wahl ist in

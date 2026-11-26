@@ -5,7 +5,8 @@ import { isDemoMode } from "@/lib/env";
 import { startClipProjectWorkflow } from "@/lib/temporal";
 import { requireRole } from "@/lib/session";
 import { isForbiddenError } from "@/lib/auth/permissions";
-import type { Platform, RightsStatus } from "@/lib/repo/types";
+import type { ClipFormat, Platform, RightsStatus } from "@/lib/repo/types";
+import { parseClipFormat } from "@/lib/uploads/brief";
 
 export interface DemoUploadInput {
   title: string;
@@ -23,6 +24,8 @@ export interface DemoUploadInput {
   brief_wanted?: string;
   brief_exclude?: string;
   platform?: Platform | "";
+  /* Bildformat der Clips: Hochformat, Querformat oder beide (lib/uploads/brief.ts) */
+  format?: ClipFormat;
   source_owner?: string;
   source_title?: string;
   source_url?: string;
@@ -65,6 +68,7 @@ export async function createDemoProject(input: DemoUploadInput): Promise<{ id: s
       wanted: input.brief_wanted || undefined,
       exclude: input.brief_exclude || undefined,
       platform: input.platform || undefined,
+      format: parseClipFormat(input.format),
     },
     status: "uploaded",
   });

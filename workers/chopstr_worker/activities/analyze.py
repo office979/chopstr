@@ -28,7 +28,18 @@ from typing import Any
 
 from temporalio import activity
 
-from .. import costlog, db, decision_log, editorial, events, outbox, providers_mm, result_cache, storage, usage
+from .. import (
+    costlog,
+    db,
+    decision_log,
+    editorial,
+    events,
+    outbox,
+    providers_mm,
+    result_cache,
+    storage,
+    usage,
+)
 from ..pipeline import mm_scan, release_gate, segment, signals, story_engine, tiered_engine
 from ..pipeline import silence as silence_mod
 from ..providers_llm import LLM

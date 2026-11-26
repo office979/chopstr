@@ -76,7 +76,7 @@ export function projektSatz(zustand: ProjektZustand, clips: ClipCount | null): s
     case "verarbeitung":
       return c && c.rendering > 0
         ? `${c.rendering === 1 ? "Ein Clip wird" : `${c.rendering} Clips werden`} gerade geclippt.`
-        : "Der Computer arbeitet daran.";
+        : "Wird verarbeitet.";
     case "pruefen":
       return `${c!.offen === 1 ? "Ein Clip wartet" : `${c!.offen} Clips warten`} auf deine Entscheidung.`;
     case "bereit":

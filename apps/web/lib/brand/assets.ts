@@ -5,9 +5,9 @@ import type { BrandAssetKind, BrandCI } from "@/lib/repo/types";
 export const ASSET_KINDS: BrandAssetKind[] = ["font", "logo", "lower_third_bg", "watermark"];
 
 export const ASSET_KIND_LABELS: Record<BrandAssetKind, string> = {
-  font: "Font",
+  font: "Schrift",
   logo: "Logo",
-  lower_third_bg: "Bauchbinden-Hintergrund",
+  lower_third_bg: "Hintergrund der Namenseinblendung",
   watermark: "Wasserzeichen",
 };
 
@@ -17,7 +17,7 @@ export const IMAGE_MAX_BYTES = 2 * 1024 * 1024;
 export const FONT_EXTENSIONS = ["ttf", "otf", "woff2"] as const;
 export const IMAGE_EXTENSIONS = ["svg", "png"] as const;
 
-export const LICENSE_TEXT = "Ich bestätige, dass ich die Lizenz für diese Datei besitze und sie für Renderings in diesem Team nutzen darf.";
+export const LICENSE_TEXT = "Ich bestätige, dass ich die Lizenz für diese Datei besitze und sie für Clips in diesem Team nutzen darf.";
 
 export function isAssetKind(v: unknown): v is BrandAssetKind {
   return typeof v === "string" && (ASSET_KINDS as string[]).includes(v);

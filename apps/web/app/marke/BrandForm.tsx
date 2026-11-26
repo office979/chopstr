@@ -146,7 +146,7 @@ export function BrandForm({
           sah man erst am fertigen Clip. */}
       <GlassCard padding="lg" className="flex flex-col gap-5">
         <div>
-          <h2 className="text-lg font-medium">Clip-Stil</h2>
+          <h2 className="text-lg font-medium">Aussehen</h2>
           <p className="mt-1 text-sm text-text-2">
             So sehen deine Clips aus. Das Aussehen der App bleibt davon unberührt.
           </p>
@@ -155,7 +155,7 @@ export function BrandForm({
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
           <div className="flex flex-col gap-5">
             <Field
-              label="Wofür vor allem"
+              label="Hauptplattform"
               htmlFor="default_platform"
               hint="Danach richtet sich das Format der Vorschau und was voreingestellt ist."
             >
@@ -460,8 +460,8 @@ export function BrandForm({
       <GlassCard padding="md" className="flex flex-col gap-2">
         <p className="text-sm font-medium text-text">Was ändert sich damit?</p>
         <p className="text-sm text-text-2">
-          Neue Clips bekommen dieses Aussehen sofort. Schon geclippte Videos behalten ihres, bis
-          du sie einzeln neu clippen lässt.
+          Neue Clips bekommen dieses Aussehen sofort. Fertige Videos behalten ihres; dort lässt es sich
+          mit „Stil ändern“ anpassen.
         </p>
         {betroffeneVideos.length > 0 && (
           <>

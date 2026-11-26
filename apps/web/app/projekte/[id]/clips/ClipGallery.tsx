@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { LOOKS, mitVorgabe, type CaptionStyle } from "@/lib/clips/caption-style";
 import { mediaUrl } from "@/lib/clips/labels";
+import { AUTO_HOLD_REASON_PREFIX, isHeldCandidate } from "@/lib/clips/acceptance";
 import type { Candidate, Clip } from "@/lib/repo/types";
 
 /* Die Ergebnisseite: alle Clips eines Videos, fertig zum Herunterladen.
@@ -23,6 +24,8 @@ interface Props {
   mediaBase: string | null;
   /* Im Testmodus gibt es keine gerenderten Dateien; die Vorschau zeigt dann den Ausschnitt aus dem Beispielvideo. */
   demoSrc: string | null;
+  /* Das Ausgangsvideo, damit ein zurückgehaltener Moment vor dem Bauen angesehen werden kann. */
+  quelleSrc: string | null;
   stilName: string | null;
   stilHref: string | null;
   aktuellerLook: string | null;
@@ -40,13 +43,28 @@ function ersterSatz(text: string | undefined): string | null {
   return satz.length > 70 ? `${satz.slice(0, 68).trimEnd()}…` : satz;
 }
 
+/* Warum die Automatik einen Clip nicht selbst gebaut hat, in einem Satz. Die Codes kommen aus
+ * workers/chopstr_worker/activities/analyze.auto_accept_blockers. */
+const HALTEGRUND: Record<string, string> = {
+  claim: "Enthält eine Zahl oder Behauptung",
+  claim_unchecked: "Enthält eine Behauptung",
+  humor: "Enthält Humor oder Ironie",
+  sensitive_topic: "Heikles Thema",
+  review_uncertain: "Schnitt nicht ganz sicher",
+  review_blocked: "Schnitt mit Fehler",
+};
+function haltegrund(c: Candidate | null): string {
+  const roh = (c?.verdict_reason ?? "").replace(AUTO_HOLD_REASON_PREFIX, "").split(",")[0]?.trim() ?? "";
+  return HALTEGRUND[roh] ?? "Bitte kurz ansehen";
+}
+
 function dauer(s: number): string {
   const m = Math.floor(s / 60);
   const r = Math.round(s % 60);
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
-export function ClipGallery({ sourceId, clips, candidates, mediaBase, demoSrc, stilName, stilHref, aktuellerLook }: Props) {
+export function ClipGallery({ sourceId, clips, candidates, mediaBase, demoSrc, quelleSrc, stilName, stilHref, aktuellerLook }: Props) {
   const router = useRouter();
   const byCand = useMemo(() => new Map(candidates.map((c) => [c.id, c])), [candidates]);
   const formate = new Set(clips.map((c) => c.aspect));
@@ -63,7 +81,14 @@ export function ClipGallery({ sourceId, clips, candidates, mediaBase, demoSrc, s
   }, [clips, byCand, filter]);
 
   const fertig = clips.filter((c) => c.status === "rendered" || c.status === "exported");
-  const laufend = clips.filter((c) => LAEUFT.has(c.status)).length;
+  /* Zurückgehaltene Clips laufen nicht: sie warten auf einen Klick und dürfen die Seite nicht
+   * ewig nachfragen lassen. */
+  const gehalten = (c: Clip) => {
+    const k = c.candidate_id ? byCand.get(c.candidate_id) : null;
+    return c.status === "draft" && k != null && isHeldCandidate(k);
+  };
+  const laufend = clips.filter((c) => LAEUFT.has(c.status) && !gehalten(c)).length;
+  const wartend = clips.filter(gehalten).length;
 
   /* Solange Clips gebaut werden, fragt die Seite alle drei Sekunden nach. Danach ist Ruhe. */
   useEffect(() => {
@@ -92,7 +117,9 @@ export function ClipGallery({ sourceId, clips, candidates, mediaBase, demoSrc, s
           <h1 className="text-2xl font-semibold tracking-[var(--tracking-display)] sm:text-3xl">Deine Clips</h1>
           <p className="mt-1 text-sm text-text-2">
             {clips.length === 1 ? "1 Clip" : `${clips.length} Clips`}
-            {laufend > 0 ? ` · ${laufend} ${laufend === 1 ? "wird" : "werden"} noch gebaut` : " · alle fertig"}
+            {laufend > 0 ? ` · ${laufend} ${laufend === 1 ? "wird" : "werden"} noch gebaut` : ""}
+            {wartend > 0 ? ` · ${wartend} ${wartend === 1 ? "wartet" : "warten"} auf dich` : ""}
+            {laufend === 0 && wartend === 0 ? " · alle fertig" : ""}
             {stilName ? (
               <>
                 {" · Stil "}
@@ -112,7 +139,7 @@ export function ClipGallery({ sourceId, clips, candidates, mediaBase, demoSrc, s
             Stil ändern
           </Button>
           <Button type="button" onClick={alleLaden} disabled={fertig.length === 0}>
-            {fertig.length === clips.length ? "Alle herunterladen" : `${fertig.length} fertige herunterladen`}
+            {fertig.length === 0 || fertig.length === clips.length ? "Alle herunterladen" : `${fertig.length} fertige herunterladen`}
           </Button>
         </div>
       </div>
@@ -165,6 +192,8 @@ export function ClipGallery({ sourceId, clips, candidates, mediaBase, demoSrc, s
             sourceId={sourceId}
             mediaBase={mediaBase}
             demoSrc={demoSrc}
+            quelleSrc={quelleSrc}
+            gehalten={gehalten(clip)}
           />
         ))}
       </div>
@@ -179,6 +208,8 @@ function ClipKarte({
   sourceId,
   mediaBase,
   demoSrc,
+  quelleSrc,
+  gehalten,
 }: {
   nr: number;
   clip: Clip;
@@ -186,14 +217,38 @@ function ClipKarte({
   sourceId: string;
   mediaBase: string | null;
   demoSrc: string | null;
+  quelleSrc: string | null;
+  gehalten: boolean;
 }) {
+  const router = useRouter();
+  const [baut, setBaut] = useState(false);
+  const [bauFehler, setBauFehler] = useState<string | null>(null);
+  /* Ein Klick: der Mensch gibt den Moment frei (die Render-Route setzt das Urteil) und der Clip
+   * wird gebaut. Gilt auch für einen fehlgeschlagenen Clip. */
+  const bauen = async () => {
+    setBaut(true);
+    setBauFehler(null);
+    try {
+      const res = await fetch(`/api/projects/${sourceId}/clips/${clip.id}/render`, { method: "POST" });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setBauFehler(body?.error ?? "Bauen hat nicht geklappt.");
+      } else router.refresh();
+    } catch {
+      setBauFehler("Keine Verbindung. Bitte nochmal versuchen.");
+    } finally {
+      setBaut(false);
+    }
+  };
   const fertig = clip.status === "rendered" || clip.status === "exported";
   const fehler = clip.status === "failed";
   const titel = clip.title_card || cand?.rubric?.suggested_title_card?.trim() || ersterSatz(cand?.rubric?.text) || `Clip ${nr}`;
   const laenge = clip.duration_s ?? (cand ? cand.end_s - cand.start_s : null);
   const eigene = mediaUrl(mediaBase, clip.file_key);
   /* Ohne eigene Datei (Testmodus) zeigt die Vorschau die Stelle im Beispielvideo. */
-  const src = eigene ?? (demoSrc && cand ? `${demoSrc}#t=${cand.start_s.toFixed(1)},${cand.end_s.toFixed(1)}` : null);
+  const stelle = cand ? `#t=${cand.start_s.toFixed(1)},${cand.end_s.toFixed(1)}` : "";
+  const src = eigene ?? (demoSrc && cand ? `${demoSrc}${stelle}` : null);
+  const quelleStelle = quelleSrc && cand ? `${quelleSrc}${stelle}` : null;
   const poster = mediaUrl(mediaBase, clip.poster_key) ?? undefined;
   const hoch = clip.aspect === "9:16" || clip.aspect === "4:5";
 
@@ -202,15 +257,21 @@ function ClipKarte({
       <div className={cn("relative overflow-hidden rounded-inner bg-black", hoch ? "aspect-[9/16]" : "aspect-video")}>
         {fertig && src ? (
           <video src={src} poster={poster} controls playsInline preload="metadata" className="h-full w-full object-cover" />
+        ) : gehalten && quelleStelle ? (
+          <video src={quelleStelle} controls playsInline preload="metadata" className="h-full w-full object-contain" />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center">
             {fehler ? (
               <p className="text-sm text-attention">Dieser Clip ließ sich nicht bauen.</p>
             ) : (
-              <>
-                <span aria-hidden className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-                <p className="text-sm text-text-2">Wird gebaut</p>
-              </>
+              gehalten ? (
+                <p className="text-sm text-text-2">Wartet auf dich</p>
+              ) : (
+                <>
+                  <span aria-hidden className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+                  <p className="text-sm text-text-2">Wird gebaut</p>
+                </>
+              )
             )}
           </div>
         )}
@@ -251,8 +312,18 @@ function ClipKarte({
               </a>
             )}
           </>
+        ) : gehalten || fehler ? (
+          <div className="flex w-full flex-col gap-2">
+            <p className="text-sm text-attention">{fehler ? "Bauen fehlgeschlagen" : `${haltegrund(cand)}. Kurz ansehen, dann bauen.`}</p>
+            <div>
+              <Button type="button" size="sm" onClick={bauen} disabled={baut}>
+                {baut ? "Wird gestartet" : fehler ? "Nochmal bauen" : "Clip bauen"}
+              </Button>
+            </div>
+            {bauFehler && <p className="text-sm text-attention">{bauFehler}</p>}
+          </div>
         ) : (
-          <span className="inline-flex h-9 items-center text-sm text-text-3">{fehler ? "Wird neu versucht, wenn du den Stil änderst" : "Gleich fertig"}</span>
+          <span className="inline-flex h-9 items-center text-sm text-text-3">Gleich fertig</span>
         )}
       </div>
     </GlassCard>

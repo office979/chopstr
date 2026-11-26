@@ -6,7 +6,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Mark } from "@/components/brand/Mark";
 import { Wordmark } from "@/components/brand/Wordmark";
 import { ROLE_LABELS, type Role } from "@/lib/auth/permissions";
-import { canExt } from "@/lib/auth/permissions-publishing";
 import { cn } from "@/components/ui/cn";
 
 export interface NavUser {
@@ -96,9 +95,9 @@ export function Sidebar({ user }: { user: NavUser | null }) {
    * Der Link zu einer Freigabe steht beim Verschicken im Fenster - und wer ihn dort nicht kopiert
    * oder später verliert, hatte bisher keinen Weg zurück. Es gab keine Stelle, an der ein
    * verschickter Link noch einmal auftaucht. Diese ist es. */
-  if (canExt(user?.role, "guest_approval.request")) {
-    main.push({ href: "/freigaben", label: "Freigaben", icon: <IconFreigabe />, match: (p) => p.startsWith("/freigaben") });
-  }
+  /* Seit der Galerie gibt es keinen Weg mehr, eine Freigabe zu verschicken. Ein Punkt, der nur
+   * „Noch nichts verschickt" zeigen kann, ist eine Sackgasse; die Seite bleibt unter /freigaben
+   * erreichbar für alte Links. */
 
   /* Ein Punkt „Auswertung" statt drei. Serien, Tests und Berichte liegen als Reiter auf der Seite
    * (components/layout/AuswertungTabs.tsx); in der Leiste nahmen sie so viel Platz ein wie die
@@ -410,13 +409,6 @@ const IconBrand = () => (
   </Svg>
 );
 /* Eine Person mit einem Haken: jemanden um eine Zusage bitten. */
-const IconFreigabe = () => (
-  <Svg>
-    <path d="M15 20v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1" />
-    <circle cx="8.5" cy="7" r="3.5" />
-    <path d="m16 11.5 2 2 4-4" />
-  </Svg>
-);
 const IconChart = () => (
   <Svg>
     <path d="M3 3v18h18" />

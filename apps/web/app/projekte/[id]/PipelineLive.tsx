@@ -232,7 +232,7 @@ export function PipelineLive({ sourceId, initialStatus, initialStatusMessage, in
     <GlassCard padding="lg" selected={connection === "live"}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-medium">
-          {failed ? "Der Computer kam nicht durch" : running ? "Der Computer arbeitet" : "Der Computer ist fertig"}
+          {failed ? "Verarbeitung fehlgeschlagen" : running ? "Wird verarbeitet" : "Fertig"}
         </h2>
         <div className="flex items-center gap-2">
           {remaining && <span className="text-sm text-text-2">{remaining}</span>}

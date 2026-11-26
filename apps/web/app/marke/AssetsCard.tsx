@@ -234,7 +234,7 @@ export function AssetsCard({ profileId, assets: initialAssets, ci, canUpload }: 
       </Modal>
 
       <div className="grid gap-5 border-t border-line pt-5 sm:grid-cols-2">
-        <Field label="Primärfont" htmlFor={primaryId} hint="Captions und Hook-Overlay. Ohne Auswahl: Inter.">
+        <Field label="Schrift für Untertitel" htmlFor={primaryId} hint="Auch für den Einstieg im Bild. Ohne Auswahl: Inter.">
           <Select id={primaryId} name="ci_primary_font" value={primary} onChange={(e) => setPrimary(e.target.value)} disabled={fonts.length === 0}>
             <option value="">Inter (Standard)</option>
             {fonts.map((f) => (
@@ -245,9 +245,9 @@ export function AssetsCard({ profileId, assets: initialAssets, ci, canUpload }: 
             ))}
           </Select>
         </Field>
-        <Field label="Sekundärfont" htmlFor={secondaryId} hint="Bauchbinde und Titelkarte.">
+        <Field label="Schrift für Namen" htmlFor={secondaryId} hint="Namenseinblendung und Titel.">
           <Select id={secondaryId} name="ci_secondary_font" value={secondary} onChange={(e) => setSecondary(e.target.value)} disabled={fonts.length === 0}>
-            <option value="">Wie Primärfont</option>
+            <option value="">Wie Untertitel</option>
             {fonts.map((f) => (
               <option key={f.id} value={f.id}>
                 {f.font_family ?? f.name}

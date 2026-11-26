@@ -83,12 +83,12 @@ describe("fassungFuerVideo", () => {
 });
 
 describe("ohne geclippte Clips", () => {
-  it("sagt „noch nicht geclippt“ statt „nicht vermerkt“", () => {
+  it("sagt „Noch keine Clips“ statt „nicht vermerkt“", () => {
     /* Ein Video, an dem noch nie gearbeitet wurde, hat keine alte Fassung, sondern gar keine.
      * „Fassung nicht vermerkt“ klänge nach einem Versäumnis, wo nichts versäumt wurde. */
     const f = fassungFuerVideo([], 3);
     expect(f.stand).toBe("nicht_geclippt");
-    expect(fassungKurz(f)).toBe("Noch nicht geclippt");
+    expect(fassungKurz(f)).toBe("Noch keine Clips");
     expect(fassungSatz(f)).toBeNull();
   });
 });

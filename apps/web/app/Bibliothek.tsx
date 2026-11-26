@@ -117,7 +117,7 @@ export function Bibliothek({ zeilen, canDelete, canUpload }: Props) {
       <GlassCard padding="lg" className="text-center">
         <p className="text-lg font-medium">chopstr macht aus langen Videos kurze Clips</p>
         <p className="mx-auto mt-2 max-w-md text-text-2">
-          Du lädst ein Video hoch, der Computer sucht die besten Stellen, du wählst aus. Dauert etwa fünf Minuten.
+          Video hochladen, ein paar Minuten warten, fertige Clips herunterladen.
         </p>
         {canUpload && (
           <div className="mt-6 flex justify-center">

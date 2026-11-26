@@ -69,6 +69,7 @@ export default async function ClipsPage({ params }: Props) {
         candidates={candidates.filter((c) => candidateIds.has(c.id))}
         mediaBase={base}
         demoSrc={repo.kind === "demo" ? mediaUrl(base, source.proxy_key) ?? "/demo/video.mp4" : null}
+        quelleSrc={mediaUrl(base, source.proxy_key) ?? (repo.kind === "demo" ? "/demo/video.mp4" : null)}
         stilName={brand?.name ?? null}
         stilHref={brand ? `/marke?p=${brand.id}` : null}
         aktuellerLook={(brand?.caption_style as { look?: string } | undefined)?.look ?? null}
